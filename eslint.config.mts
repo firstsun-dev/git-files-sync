@@ -13,10 +13,14 @@ export default tseslint.config(
 				projectService: {
 					allowDefaultProject: [
 						'eslint.config.js',
-						'manifest.json'
+						'manifest.json',
+						'vitest.config.ts',
+						'tests/setup.ts',
+						'tests/main.test.ts',
+						'tests/services/pdf-export-service.test.ts'
 					]
 				},
-				tsconfigRootDir: import.meta.dirname,
+				ttsconfigRootDir: import.meta.dirname,
 				extraFileExtensions: ['.json']
 			},
 		},

@@ -1,99 +1,93 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { Plugin, TFile, MarkdownView, Notice } from 'obsidian';
+import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab } from "./settings";
+import { GitLabService } from './services/gitlab-service';
+import { SyncManager } from './logic/sync-manager';
 
-// Remember to rename these classes and interfaces!
-
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class GitLabFilesPush extends Plugin {
+	settings: GitLabFilesPushSettings;
+	gitlab: GitLabService;
+	sync: SyncManager;
 
 	async onload() {
 		await this.loadSettings();
+		this.addSettingTab(new GitLabSyncSettingTab(this.app, this));
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
+		this.gitlab = new GitLabService(
+			this.settings.gitlabBaseUrl,
+			this.settings.gitlabToken,
+			this.settings.projectId
+		);
+
+		this.sync = new SyncManager(this.app, this.gitlab, this.settings);
+
+		this.addRibbonIcon('upload-cloud', 'Push to GitLab', (evt: MouseEvent) => {
+			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (activeView && activeView.file instanceof TFile) {
+				void this.sync.pushFile(activeView.file);
+			} else {
+				new Notice('No active note to push.');
+			}
 		});
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
+			id: 'push-current-file',
+			name: 'Push current file to GitLab',
 			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
+				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (activeView && activeView.file instanceof TFile) {
+					void this.sync.pushFile(activeView.file);
 				}
-				return false;
 			}
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
+		this.addCommand({
+			id: 'pull-current-file',
+			name: 'Pull current file from GitLab',
+			callback: () => {
+				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (activeView && activeView.file instanceof TFile) {
+					void this.sync.pullFile(activeView.file);
+				}
+			}
 		});
 
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		this.registerEvent(
+			this.app.workspace.on('file-menu', (menu, file) => {
+				if (file instanceof TFile) {
+					menu.addItem((item) => {
+						item.setTitle('Push to GitLab')
+							.setIcon('upload-cloud')
+							.onClick(() => { void this.sync.pushFile(file); });
+					});
+					menu.addItem((item) => {
+						item.setTitle('Pull from GitLab')
+							.setIcon('download-cloud')
+							.onClick(() => { void this.sync.pullFile(file); });
+					});
+				}
+			})
+		);
 
+		// Phase 4: Pull-on-open logic (Trigger on file-open)
+		this.registerEvent(
+			this.app.workspace.on('file-open', (file) => {
+				if (file instanceof TFile && this.settings.gitlabToken) {
+					// Optional: Check for updates automatically
+					// this.sync.pullFile(file);
+				}
+			})
+		);
 	}
 
 	onunload() {
+		// Clean up resources if needed
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<GitLabFilesPushSettings>);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
 	}
 }

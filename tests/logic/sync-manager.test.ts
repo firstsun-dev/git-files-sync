@@ -1,9 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/unbound-method */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SyncManager } from '../../src/logic/sync-manager';
 
 // Mock dependencies
-import { App, TFile, Notice } from 'obsidian';
+import { App, TFile } from 'obsidian';
+import { SyncConflictModal } from '../../src/ui/SyncConflictModal';
+
+vi.mock('../../src/ui/SyncConflictModal');
 import { GitLabService } from '../../src/services/gitlab-service';
 import { GitLabFilesPushSettings } from '../../src/settings';
 
@@ -66,11 +69,92 @@ describe('SyncManager', () => {
         // Mock GitLab returning a different remote SHA
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'remote content', sha: 'new-remote-sha' });
 
-        const noticeSpy = vi.mocked(Notice);
+        const modalMock = vi.mocked(SyncConflictModal);
 
         await manager.pushFile(mockFile);
 
-        expect(noticeSpy).toHaveBeenCalledWith(expect.stringContaining('Conflict detected'));
+        expect(modalMock).toHaveBeenCalled();
+    });
+
+    it('should handle conflict by choosing local', async () => {
+        const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
+        mockSettings.syncMetadata['test.md'] = { lastSyncedSha: 'old', lastSyncedAt: 0 };
+
+        vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: 'remote content', sha: 'remote-sha' });
+        vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue('test.md');
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'local content', sha: 'new-sha' });
+
+        const modalMock = vi.mocked(SyncConflictModal);
+
+        // Capture the callback passed to the modal
+        let callback: (choice: 'local' | 'remote') => void = () => {};
+        modalMock.mockImplementation((app, file, local, remote, onChoose) => {
+            callback = onChoose;
+            return {
+                open: vi.fn(),
+                close: vi.fn(),
+                app,
+                scope: {} as unknown,
+                containerEl: {} as HTMLElement,
+                contentEl: {} as HTMLElement,
+                titleEl: {} as HTMLElement,
+                onOpen: vi.fn(),
+                onClose: vi.fn(),
+                setTitle: vi.fn().mockReturnThis(),
+            } as SyncConflictModal;
+        });
+
+        await manager.pushFile(mockFile);
+
+        // Simulate user choosing 'local'
+        callback('local');
+
+        // Wait for async operations in callback
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const pushSpy = mockGitLab.pushFile as any;
+        expect(pushSpy).toHaveBeenCalledWith('test.md', 'local content', 'main', expect.any(String));
+        expect(mockSettings.syncMetadata['test.md'].lastSyncedSha).toBe('new-sha');
+    });
+
+    it('should handle conflict by choosing remote', async () => {
+        const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
+        mockSettings.syncMetadata['test.md'] = { lastSyncedSha: 'old', lastSyncedAt: 0 };
+
+        vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+        const modifySpy = vi.spyOn(mockApp.vault, 'modify').mockResolvedValue();
+
+        const modalMock = vi.mocked(SyncConflictModal);
+
+        let callback: (choice: 'local' | 'remote') => void = () => {};
+        modalMock.mockImplementation((app, file, local, remote, onChoose) => {
+            callback = onChoose;
+            return {
+                open: vi.fn(),
+                close: vi.fn(),
+                app,
+                scope: {} as unknown,
+                containerEl: {} as HTMLElement,
+                contentEl: {} as HTMLElement,
+                titleEl: {} as HTMLElement,
+                onOpen: vi.fn(),
+                onClose: vi.fn(),
+                setTitle: vi.fn().mockReturnThis(),
+            } as SyncConflictModal;
+        });
+
+        await manager.pushFile(mockFile);
+
+        // Simulate user choosing 'remote'
+        callback('remote');
+
+        // Wait for async operations in callback
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(modifySpy).toHaveBeenCalledWith(mockFile, 'remote content');
+        expect(mockSettings.syncMetadata['test.md'].lastSyncedSha).toBe('remote-sha');
     });
 
     it('should update metadata after successful push', async () => {
@@ -103,6 +187,6 @@ describe('SyncManager', () => {
 
         expect(modifySpy).toHaveBeenCalledWith(mockFile, 'new content');
         expect(getSpy).toHaveBeenCalled();
-        expect(mockSettings.syncMetadata['test.md'].lastSyncedSha).toBe('sha');
+        expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('sha');
     });
 });

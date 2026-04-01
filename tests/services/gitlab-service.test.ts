@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitLabService } from '../../src/services/gitlab-service';
 import { requestUrl, RequestUrlResponse } from 'obsidian';
@@ -19,10 +20,10 @@ describe('GitLabService', () => {
 
     describe('getFile', () => {
         it('should fetch and decode file content correctly', async () => {
-            const mockResponse = {
+                        const mockResponse = {
                 status: 200,
                 json: {
-                    content: btoa(encodeURIComponent('hello world').replace(/%([0-9A-F]{2})/g, (match, p1: string) => {
+                    content: btoa(encodeURIComponent('hello world').replace(/%([0-9A-F]{2})/g, (_match, p1: string) => {
                         return String.fromCharCode(parseInt(p1, 16));
                     })),
                     blob_id: 'test-sha'
@@ -48,7 +49,7 @@ describe('GitLabService', () => {
         });
 
         it('should return blob_id as sha', async () => {
-            const mockResponse = {
+            const mockResponse: any = {
                 status: 200,
                 json: {
                     content: btoa('test content'),
@@ -68,7 +69,7 @@ describe('GitLabService', () => {
                 .mockResolvedValueOnce({ status: 404 } as unknown as RequestUrlResponse) // getFile check
                 .mockResolvedValueOnce({ status: 201, json: { file_path: 'test.md' } } as unknown as RequestUrlResponse); // push
 
-            const result = await service.pushFile('test.md', 'new content', 'main', 'initial commit') as string;
+            const result = await service.pushFile('test.md', 'new content', 'main', 'initial commit');
 
             expect(result).toBe('test.md');
             expect(requestUrl).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -86,7 +87,7 @@ describe('GitLabService', () => {
                 } as unknown as RequestUrlResponse) // getFile check
                 .mockResolvedValueOnce({ status: 200, json: { file_path: 'test.md' } } as unknown as RequestUrlResponse); // push
 
-            const result = await service.pushFile('test.md', 'updated content', 'main', 'update') as string;
+            const result = await service.pushFile('test.md', 'updated content', 'main', 'update');
 
             expect(result).toBe('test.md');
             expect(requestUrl).toHaveBeenLastCalledWith(expect.objectContaining({

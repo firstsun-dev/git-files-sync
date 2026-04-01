@@ -1,0 +1,17 @@
+{
+  "skill_name": "obsidian-development",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add a new command to the plugin that allows users to manually check for GitLab updates for the current file. Make sure it follows the project's testing and API conventions.",
+      "expected_output": "The model should first create a test case for the new logic, then implement the command in src/main.ts using this.addCommand(), and ensure any events are registered correctly.",
+      "files": ["src/main.ts", "src/logic/sync-manager.ts"]
+    },
+    {
+      "id": 2,
+      "prompt": "I need a way to see the current sync status in the status bar. How should I implement this?",
+      "expected_output": "The model should recommend using this.addStatusBarItem() and registering any update events with this.registerEvent() to ensure cleanup.",
+      "files": ["src/main.ts"]
+    }
+  ]
+}

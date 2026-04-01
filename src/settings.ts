@@ -37,7 +37,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('GitLab personal access token')
-			.setDesc('Create a token in GitLab user settings > access tokens with "api" scope')
+			.setDesc('Create a token in GitLab user settings > access tokens with "API" scope')
 			.addText(text => text
 				.setPlaceholder('Enter your token')
 				.setValue(this.plugin.settings.gitlabToken)
@@ -47,7 +47,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName('Gitlab base URL')
+			.setName('GitLab base URL')
 			.setDesc('Defaults to https://gitlab.com')
 			.addText(text => text
 				.setPlaceholder('https://gitlab.com')
@@ -58,7 +58,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName('Project id')
+			.setName('Project ID')
 			.setDesc('Found in GitLab project overview')
 			.addText(text => text
 				.setPlaceholder('Enter numeric project ID')
@@ -72,7 +72,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 			.setName('Branch')
 			.setDesc('Branch to push or pull from')
 			.addText(text => text
-				.setPlaceholder('main')
+				.setPlaceholder('Main')
 				.setValue(this.plugin.settings.branch)
 				.onChange(async (value) => {
 					this.plugin.settings.branch = value || 'main';

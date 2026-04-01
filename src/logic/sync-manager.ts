@@ -1,6 +1,7 @@
 import { TFile, App, Notice } from 'obsidian';
 import { GitLabService } from '../services/gitlab-service';
 import { GitLabFilesPushSettings, SyncMetadata } from '../settings';
+import { SyncConflictModal } from '../ui/SyncConflictModal';
 
 export class SyncManager {
     private app: App;
@@ -22,43 +23,49 @@ export class SyncManager {
             const lastSynced = this.settings.syncMetadata[file.path];
 
             if (remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
-                new Notice(`Conflict detected for ${file.name}. Remote has changes. Please pull first.`);
+                new SyncConflictModal(this.app, file, content, remote.content, (choice) => {
+                    void (async () => {
+                        if (choice === 'local') {
+                            await this.performPush(file, content);
+                        } else {
+                            await this.performPull(file, remote.content, remote.sha);
+                        }
+                    })();
+                }).open();
                 return;
             }
 
-            await this.gitlab.pushFile(
-                file.path,
-                content,
-                this.settings.branch,
-                `Update ${file.name} from Obsidian`
-            );
-
-            // Update metadata
-            const newRemote = await this.gitlab.getFile(file.path, this.settings.branch);
-            this.settings.syncMetadata[file.path] = {
-                lastSyncedSha: newRemote.sha,
-                lastSyncedAt: Date.now()
-            };
-
-            /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any */
-            // @ts-ignore - access private method to save settings
-            const plugin = (this.app as any).plugins?.plugins?.['gitlab-files-push'];
-            if (plugin) {
-                await plugin.saveSettings();
-            }
-            /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any */
-
-            new Notice(`Pushed ${file.name} to GitLab`);
+            await this.performPush(file, content);
         } catch (e) {
             console.error(e);
             new Notice(`Failed to push ${file.name}`);
         }
     }
 
+    private async performPush(file: TFile, content: string) {
+        await this.gitlab.pushFile(
+            file.path,
+            content,
+            this.settings.branch,
+            `Update ${file.name} from Obsidian`
+        );
+
+        // Update metadata
+        const newRemote = await this.gitlab.getFile(file.path, this.settings.branch);
+        this.settings.syncMetadata[file.path] = {
+            lastSyncedSha: newRemote.sha,
+            lastSyncedAt: Date.now()
+        };
+
+        await this.saveSettings();
+        new Notice(`Pushed ${file.name} to GitLab`);
+    }
+
     async pullFile(file: TFile) {
         try {
             const remote = await this.gitlab.getFile(file.path, this.settings.branch);
             const localContent = await this.app.vault.read(file);
+            const lastSynced = this.settings.syncMetadata[file.path];
 
             if (localContent === remote.content) {
                 // Still update metadata even if content matches
@@ -66,23 +73,56 @@ export class SyncManager {
                     lastSyncedSha: remote.sha,
                     lastSyncedAt: Date.now()
                 };
+                await this.saveSettings();
                 new Notice(`${file.name} is already up to date.`);
                 return;
             }
 
-            // For now, simple overwrite. Conflict UI will be added in Phase 4.
-            await this.app.vault.modify(file, remote.content);
+            // Conflict detection for pull
+            // If remote has changed since last sync AND local has also changed since last sync
+            if (remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
+                // Check if local content is different from what we think was last synced
+                // (This is a bit simplified as we don't store the last synced content, only the SHA)
+                // In a real scenario, we might want more robust check, but for now we follow the plan.
+                new SyncConflictModal(this.app, file, localContent, remote.content, (choice) => {
+                    void (async () => {
+                        if (choice === 'local') {
+                            await this.performPush(file, localContent);
+                        } else {
+                            await this.performPull(file, remote.content, remote.sha);
+                        }
+                    })();
+                }).open();
+                return;
+            }
 
-            // Update metadata
-            this.settings.syncMetadata[file.path] = {
-                lastSyncedSha: remote.sha,
-                lastSyncedAt: Date.now()
-            };
-
-            new Notice(`Pulled ${file.name} from GitLab`);
+            await this.performPull(file, remote.content, remote.sha);
         } catch (e) {
             console.error(e);
             new Notice(`Failed to pull ${file.name}`);
         }
+    }
+
+    private async performPull(file: TFile, remoteContent: string, remoteSha: string) {
+        await this.app.vault.modify(file, remoteContent);
+
+        // Update metadata
+        this.settings.syncMetadata[file.path] = {
+            lastSyncedSha: remoteSha,
+            lastSyncedAt: Date.now()
+        };
+
+        await this.saveSettings();
+        new Notice(`Pulled ${file.name} from GitLab`);
+    }
+
+    private async saveSettings() {
+        /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any */
+        // @ts-ignore - access private method to save settings
+        const plugin = (this.app as any).plugins?.plugins?.['gitlab-files-push'];
+        if (plugin) {
+            await plugin.saveSettings();
+        }
+        /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any */
     }
 }
