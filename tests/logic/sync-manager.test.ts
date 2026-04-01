@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/unbound-method */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/unbound-method, @typescript-eslint/no-unsafe-return */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SyncManager } from '../../src/logic/sync-manager';
 
@@ -102,7 +102,7 @@ describe('SyncManager', () => {
                 onOpen: vi.fn(),
                 onClose: vi.fn(),
                 setTitle: vi.fn().mockReturnThis(),
-            } as SyncConflictModal;
+            } as any;
         });
 
         await manager.pushFile(mockFile);
@@ -115,7 +115,7 @@ describe('SyncManager', () => {
 
         const pushSpy = mockGitLab.pushFile as any;
         expect(pushSpy).toHaveBeenCalledWith('test.md', 'local content', 'main', expect.any(String));
-        expect(mockSettings.syncMetadata['test.md'].lastSyncedSha).toBe('new-sha');
+        expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('new-sha');
     });
 
     it('should handle conflict by choosing remote', async () => {
@@ -142,7 +142,7 @@ describe('SyncManager', () => {
                 onOpen: vi.fn(),
                 onClose: vi.fn(),
                 setTitle: vi.fn().mockReturnThis(),
-            } as SyncConflictModal;
+            } as any;
         });
 
         await manager.pushFile(mockFile);
@@ -154,7 +154,7 @@ describe('SyncManager', () => {
         await new Promise(resolve => setTimeout(resolve, 0));
 
         expect(modifySpy).toHaveBeenCalledWith(mockFile, 'remote content');
-        expect(mockSettings.syncMetadata['test.md'].lastSyncedSha).toBe('remote-sha');
+        expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('remote-sha');
     });
 
     it('should update metadata after successful push', async () => {
@@ -172,7 +172,7 @@ describe('SyncManager', () => {
         await manager.pushFile(mockFile);
 
         expect(mockSettings.syncMetadata['test.md']).toBeDefined();
-        expect(mockSettings.syncMetadata['test.md'].lastSyncedSha).toBe('new-sha');
+        expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('new-sha');
     });
 
     it('should pull and modify file content correctly and update metadata', async () => {

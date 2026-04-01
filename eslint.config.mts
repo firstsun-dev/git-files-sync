@@ -15,9 +15,6 @@ export default tseslint.config(
 						'eslint.config.js',
 						'manifest.json',
 						'vitest.config.ts',
-						'tests/setup.ts',
-						'tests/main.test.ts',
-						'tests/services/pdf-export-service.test.ts'
 					]
 				},
 				ttsconfigRootDir: import.meta.dirname,
