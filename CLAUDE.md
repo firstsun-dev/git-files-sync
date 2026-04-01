@@ -6,8 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Build: `npm run build` (runs type check and esbuild in production mode)
 - Dev: `npm run dev` (builds in watch mode using esbuild)
 - Lint: `npm run lint` (runs eslint check)
+- Test: `npm run test` (runs vitest suite)
 - Version bump: `npm run version` (updates manifest.json and versions.json via script)
 - **CI/CD Monitoring**: After pushing changes, task a Haiku subagent to monitor the pipeline and report results as "Success: N stages, Failure: X stages".
+- **Cost Optimization**: Always use a Haiku subagent for running tests, linting, and final commits. Report as "Success: N items, Failure: X items".
 
 ## Code Architecture
 - **Type**: Obsidian Plugin (TypeScript)
