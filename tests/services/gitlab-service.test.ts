@@ -15,7 +15,7 @@ describe('GitLabService', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        service = new GitLabService(baseUrl, token, projectId);
+        service = new GitLabService(baseUrl, token, projectId, '');
     });
 
     describe('getFile', () => {

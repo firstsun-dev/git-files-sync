@@ -10,15 +10,18 @@ export class GitLabService {
     private baseUrl: string;
     private token: string;
     private projectId: string;
+    private rootPath: string;
 
-    constructor(baseUrl: string, token: string, projectId: string) {
+    constructor(baseUrl: string, token: string, projectId: string, rootPath: string = '') {
         this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
         this.token = token;
         this.projectId = projectId;
+        this.rootPath = rootPath.replace(/^\/|\/$/g, '');
     }
 
     private getApiUrl(path: string): string {
-        const encodedPath = encodeURIComponent(path);
+        const fullPath = this.rootPath ? `${this.rootPath}/${path}` : path;
+        const encodedPath = encodeURIComponent(fullPath);
         return `${this.baseUrl}/api/v4/projects/${this.projectId}/repository/files/${encodedPath}`;
     }
 
@@ -86,5 +89,23 @@ export class GitLabService {
         }
 
         return ((response.json as unknown) as GitLabFileResponse).file_path;
+    }
+
+    async testConnection(): Promise<void> {
+        if (!this.token) throw new Error('Token is missing');
+        if (!this.projectId) throw new Error('Project ID is missing');
+
+        const url = `${this.baseUrl}/api/v4/projects/${this.projectId}`;
+        const response = await requestUrl({
+            url,
+            method: 'GET',
+            headers: {
+                'PRIVATE-TOKEN': this.token
+            }
+        });
+
+        if (response.status !== 200) {
+            throw new Error(`Failed to connect: ${response.status}`);
+        }
     }
 }

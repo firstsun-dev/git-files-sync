@@ -27,6 +27,7 @@ const mockSettings: GitLabFilesPushSettings = {
     gitlabBaseUrl: 'https://gitlab.com',
     projectId: '123',
     branch: 'main',
+    rootPath: '',
     syncMetadata: {}
 };
 

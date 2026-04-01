@@ -15,7 +15,8 @@ export default class GitLabFilesPush extends Plugin {
 		this.gitlab = new GitLabService(
 			this.settings.gitlabBaseUrl,
 			this.settings.gitlabToken,
-			this.settings.projectId
+			this.settings.projectId,
+			this.settings.rootPath
 		);
 
 		this.sync = new SyncManager(this.app, this.gitlab, this.settings);

@@ -1,4 +1,4 @@
-import {App, PluginSettingTab, Setting} from 'obsidian';
+import {App, PluginSettingTab, Setting, Notice} from 'obsidian';
 import GitLabFilesPush from "./main";
 
 export interface SyncMetadata {
@@ -12,12 +12,14 @@ export interface GitLabFilesPushSettings {
 	projectId: string;
 	branch: string;
 	syncMetadata: Record<string, SyncMetadata>;
+    rootPath: string;
 }
 
 export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	gitlabToken: '',
 	gitlabBaseUrl: 'https://gitlab.com',
 	projectId: '',
+    rootPath: "",
 	branch: 'main',
 	syncMetadata: {}
 }
@@ -77,6 +79,32 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.branch = value || 'main';
 					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Root path')
+			.setDesc('Optional: subfolder in repository (e.g. "notes")')
+			.addText(text => text
+				.setPlaceholder('Enter subfolder path')
+				.setValue(this.plugin.settings.rootPath)
+				.onChange(async (value) => {
+					this.plugin.settings.rootPath = value.replace(/^\/|\/$/g, '');
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Test connection')
+			.setDesc('Verify your GitLab settings')
+			.addButton(button => button
+				.setButtonText('Test connection')
+				.onClick(async () => {
+					try {
+						await this.plugin.gitlab.testConnection();
+						new Notice('GitLab connection successful!');
+					} catch (e: unknown) {
+						const message = e instanceof Error ? e.message : String(e);
+						new Notice(`GitLab connection failed: ${message}`);
+					}
 				}));
 	}
 }
