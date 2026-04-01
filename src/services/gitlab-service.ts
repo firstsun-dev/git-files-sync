@@ -13,6 +13,10 @@ export class GitLabService {
     private rootPath: string;
 
     constructor(baseUrl: string, token: string, projectId: string, rootPath: string = '') {
+        this.updateConfig(baseUrl, token, projectId, rootPath);
+    }
+
+    updateConfig(baseUrl: string, token: string, projectId: string, rootPath: string = '') {
         this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
         this.token = token;
         this.projectId = projectId;

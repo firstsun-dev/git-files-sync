@@ -90,5 +90,13 @@ export default class GitLabFilesPush extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		if (this.gitlab) {
+			this.gitlab.updateConfig(
+				this.settings.gitlabBaseUrl,
+				this.settings.gitlabToken,
+				this.settings.projectId,
+				this.settings.rootPath
+			);
+		}
 	}
 }
