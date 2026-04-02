@@ -26,7 +26,8 @@ export class GitLabService {
     private getApiUrl(path: string): string {
         const fullPath = this.rootPath ? `${this.rootPath}/${path}` : path;
         const encodedPath = encodeURIComponent(fullPath);
-        return `${this.baseUrl}/api/v4/projects/${this.projectId}/repository/files/${encodedPath}`;
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        return `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/files/${encodedPath}`;
     }
 
     async getFile(path: string, branch: string): Promise<{ content: string; sha: string }> {
@@ -44,7 +45,7 @@ export class GitLabService {
         }
 
         if (response.status !== 200) {
-            throw new Error(`Failed to fetch file: ${response.status}`);
+            throw new Error(`Failed to fetch file: ${response.status} from ${url}`);
         }
 
         const data = (response.json as unknown) as GitLabFileResponse;
@@ -89,7 +90,7 @@ export class GitLabService {
         });
 
         if (response.status !== 200 && response.status !== 201) {
-            throw new Error(`Failed to push file: ${response.status}`);
+            throw new Error(`Failed to push file: ${response.status} ${method} ${url}`);
         }
 
         return ((response.json as unknown) as GitLabFileResponse).file_path;
@@ -99,7 +100,8 @@ export class GitLabService {
         if (!this.token) throw new Error('Token is missing');
         if (!this.projectId) throw new Error('Project ID is missing');
 
-        const url = `${this.baseUrl}/api/v4/projects/${this.projectId}`;
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}`;
         const response = await requestUrl({
             url,
             method: 'GET',
@@ -109,7 +111,7 @@ export class GitLabService {
         });
 
         if (response.status !== 200) {
-            throw new Error(`Failed to connect: ${response.status}`);
+            throw new Error(`Failed to connect: ${response.status} ${url}`);
         }
     }
 }
