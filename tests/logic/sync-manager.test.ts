@@ -14,6 +14,7 @@ const mockApp = {
     vault: {
         read: vi.fn(),
         modify: vi.fn(),
+        getFileByPath: vi.fn(),
     }
 } as unknown as App;
 
@@ -36,6 +37,8 @@ describe('SyncManager', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        // Default: file exists in vault
+        vi.spyOn(mockApp.vault, 'getFileByPath').mockReturnValue(new TFile());
         manager = new SyncManager(mockApp, mockGitLab, mockSettings);
     });
 
@@ -90,7 +93,7 @@ describe('SyncManager', () => {
 
         // Capture the callback passed to the modal
         let callback: (choice: 'local' | 'remote') => void = () => {};
-        modalMock.mockImplementation((app, file, local, remote, onChoose) => {
+        modalMock.mockImplementation(function(app, file, local, remote, onChoose) {
             callback = onChoose;
             return {
                 open: vi.fn(),
@@ -130,7 +133,7 @@ describe('SyncManager', () => {
         const modalMock = vi.mocked(SyncConflictModal);
 
         let callback: (choice: 'local' | 'remote') => void = () => {};
-        modalMock.mockImplementation((app, file, local, remote, onChoose) => {
+        modalMock.mockImplementation(function(app, file, local, remote, onChoose) {
             callback = onChoose;
             return {
                 open: vi.fn(),
@@ -189,5 +192,36 @@ describe('SyncManager', () => {
         expect(modifySpy).toHaveBeenCalledWith(mockFile, 'new content');
         expect(getSpy).toHaveBeenCalled();
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('sha');
+    });
+
+    it('should handle file not existing in vault', async () => {
+        const mockFile = Object.assign(new TFile(), { path: 'non-existent.md', name: 'non-existent.md' });
+        vi.spyOn(mockApp.vault, 'getFileByPath').mockReturnValue(null);
+
+        await manager.pushFile(mockFile);
+
+        expect(mockGitLab.getFile).not.toHaveBeenCalled();
+        expect(mockGitLab.pushFile).not.toHaveBeenCalled();
+    });
+
+    it('should add new file to repo when it exists locally but not on remote', async () => {
+        const mockFile = Object.assign(new TFile(), { path: 'new.md', name: 'new.md' });
+        mockSettings.syncMetadata = {};
+
+        vi.spyOn(mockApp.vault, 'read').mockResolvedValue('new local content');
+        // Remote returns 404/empty
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: '', sha: '' });
+        vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue('new.md');
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'new local content', sha: 'new-sha' });
+
+        await manager.pushFile(mockFile);
+
+        expect(mockGitLab.pushFile).toHaveBeenCalledWith(
+            'new.md',
+            'new local content',
+            'main',
+            expect.stringContaining('Update new.md')
+        );
+        expect(mockSettings.syncMetadata['new.md']?.lastSyncedSha).toBe('new-sha');
     });
 });

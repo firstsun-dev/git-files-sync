@@ -27,7 +27,9 @@ export const Setting = class {
   addToggle(_cb: unknown) { return this; }
   addButton(_cb: unknown) { return this; }
 };
-export const Notice = vi.fn().mockImplementation((message: string) => ({}));
+export const Notice = class {
+  constructor(message: string) {}
+};
 export const Modal = class {
   constructor(_app: unknown) {}
   open() {}
@@ -43,6 +45,7 @@ export const App = class {
   vault = {
     read: vi.fn(),
     modify: vi.fn(),
+    getFileByPath: vi.fn(),
     on: vi.fn(),
     adapter: {
       getBasePath: vi.fn().mockReturnValue('/mock/path'),

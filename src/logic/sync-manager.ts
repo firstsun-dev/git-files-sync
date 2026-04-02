@@ -16,6 +16,10 @@ export class SyncManager {
     }
 
     async pushFile(file: TFile) {
+        if (!this.app.vault.getFileByPath(file.path)) {
+            new Notice(`File ${file.name} no longer exists in vault.`);
+            return;
+        }
         const content = await this.app.vault.read(file);
         try {
             // Conflict detection
@@ -62,6 +66,10 @@ export class SyncManager {
     }
 
     async pullFile(file: TFile) {
+        if (!this.app.vault.getFileByPath(file.path)) {
+            new Notice(`File ${file.name} no longer exists in vault.`);
+            return;
+        }
         try {
             const remote = await this.gitlab.getFile(file.path, this.settings.branch);
             const localContent = await this.app.vault.read(file);
