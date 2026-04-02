@@ -45,7 +45,8 @@ export class GitLabService {
         }
 
         if (response.status !== 200) {
-            throw new Error(`Failed to fetch file: ${response.status} from ${url}`);
+            const errorBody = response.text || JSON.stringify(response.json);
+            throw new Error(`Failed to fetch file: ${response.status} from ${url}. Response: ${errorBody}`);
         }
 
         const data = (response.json as unknown) as GitLabFileResponse;
@@ -90,7 +91,8 @@ export class GitLabService {
         });
 
         if (response.status !== 200 && response.status !== 201) {
-            throw new Error(`Failed to push file: ${response.status} ${method} ${url}`);
+            const errorBody = response.text || JSON.stringify(response.json);
+            throw new Error(`Failed to push file: ${response.status} ${method} ${url}. Response: ${errorBody}`);
         }
 
         return ((response.json as unknown) as GitLabFileResponse).file_path;
@@ -111,7 +113,8 @@ export class GitLabService {
         });
 
         if (response.status !== 200) {
-            throw new Error(`Failed to connect: ${response.status} ${url}`);
+            const errorBody = response.text || JSON.stringify(response.json);
+            throw new Error(`Failed to connect: ${response.status} ${url}. Response: ${errorBody}`);
         }
     }
 }
