@@ -56,7 +56,8 @@ describe('SyncManager', () => {
             'test.md',
             'local content',
             'main',
-            expect.stringContaining('Update test.md')
+            'Update test.md from Obsidian',
+            ''
         );
     });
 
@@ -118,7 +119,7 @@ describe('SyncManager', () => {
         await new Promise(resolve => setTimeout(resolve, 0));
 
         const pushSpy = mockGitLab.pushFile as any;
-        expect(pushSpy).toHaveBeenCalledWith('test.md', 'local content', 'main', expect.any(String));
+        expect(pushSpy).toHaveBeenCalledWith('test.md', 'local content', 'main', 'Update test.md from Obsidian', 'remote-sha');
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('new-sha');
     });
 
@@ -220,7 +221,8 @@ describe('SyncManager', () => {
             'new.md',
             'new local content',
             'main',
-            expect.stringContaining('Update new.md')
+            'Update new.md from Obsidian',
+            ''
         );
         expect(mockSettings.syncMetadata['new.md']?.lastSyncedSha).toBe('new-sha');
     });

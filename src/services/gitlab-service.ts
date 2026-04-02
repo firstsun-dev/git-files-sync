@@ -65,11 +65,11 @@ export class GitLabService {
         };
     }
 
-    async pushFile(path: string, content: string, branch: string, commitMessage: string): Promise<string> {
+    async pushFile(path: string, content: string, branch: string, commitMessage: string, existingSha?: string): Promise<string> {
         const url = this.getApiUrl(path);
 
-        const existingFile = await this.getFile(path, branch);
-        const method = existingFile.sha ? 'PUT' : 'POST';
+        const sha = existingSha !== undefined ? existingSha : (await this.getFile(path, branch)).sha;
+        const method = sha ? 'PUT' : 'POST';
 
         const response = await requestUrl({
             url,

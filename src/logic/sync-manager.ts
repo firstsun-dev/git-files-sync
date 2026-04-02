@@ -30,7 +30,7 @@ export class SyncManager {
                 new SyncConflictModal(this.app, file, content, remote.content, (choice) => {
                     void (async () => {
                         if (choice === 'local') {
-                            await this.performPush(file, content);
+                            await this.performPush(file, content, remote.sha);
                         } else {
                             await this.performPull(file, remote.content, remote.sha);
                         }
@@ -39,19 +39,20 @@ export class SyncManager {
                 return;
             }
 
-            await this.performPush(file, content);
+            await this.performPush(file, content, remote.sha);
         } catch (e) {
             console.error(e);
             new Notice(`Failed to push ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
-    private async performPush(file: TFile, content: string) {
+    private async performPush(file: TFile, content: string, existingSha?: string) {
         await this.gitlab.pushFile(
             file.path,
             content,
             this.settings.branch,
-            `Update ${file.name} from Obsidian`
+            `Update ${file.name} from Obsidian`,
+            existingSha
         );
 
         // Update metadata
@@ -95,7 +96,7 @@ export class SyncManager {
                 new SyncConflictModal(this.app, file, localContent, remote.content, (choice) => {
                     void (async () => {
                         if (choice === 'local') {
-                            await this.performPush(file, localContent);
+                            await this.performPush(file, localContent, remote.sha);
                         } else {
                             await this.performPull(file, remote.content, remote.sha);
                         }
