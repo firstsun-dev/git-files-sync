@@ -42,7 +42,7 @@ export class SyncManager {
             await this.performPush(file, content);
         } catch (e) {
             console.error(e);
-            new Notice(`Failed to push ${file.name}`);
+            new Notice(`Failed to push ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
@@ -107,7 +107,7 @@ export class SyncManager {
             await this.performPull(file, remote.content, remote.sha);
         } catch (e) {
             console.error(e);
-            new Notice(`Failed to pull ${file.name}`);
+            new Notice(`Failed to pull ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
