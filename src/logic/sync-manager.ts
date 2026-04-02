@@ -29,10 +29,15 @@ export class SyncManager {
             if (remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
                 new SyncConflictModal(this.app, file, content, remote.content, (choice) => {
                     void (async () => {
-                        if (choice === 'local') {
-                            await this.performPush(file, content, remote.sha);
-                        } else {
-                            await this.performPull(file, remote.content, remote.sha);
+                        try {
+                            if (choice === 'local') {
+                                await this.performPush(file, content, remote.sha);
+                            } else {
+                                await this.performPull(file, remote.content, remote.sha);
+                            }
+                        } catch (e) {
+                            console.error(e);
+                            new Notice(`Failed to resolve conflict for ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
                         }
                     })();
                 }).open();
@@ -95,10 +100,15 @@ export class SyncManager {
                 // In a real scenario, we might want more robust check, but for now we follow the plan.
                 new SyncConflictModal(this.app, file, localContent, remote.content, (choice) => {
                     void (async () => {
-                        if (choice === 'local') {
-                            await this.performPush(file, localContent, remote.sha);
-                        } else {
-                            await this.performPull(file, remote.content, remote.sha);
+                        try {
+                            if (choice === 'local') {
+                                await this.performPush(file, localContent, remote.sha);
+                            } else {
+                                await this.performPull(file, remote.content, remote.sha);
+                            }
+                        } catch (e) {
+                            console.error(e);
+                            new Notice(`Failed to resolve conflict for ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
                         }
                     })();
                 }).open();

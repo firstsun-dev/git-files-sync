@@ -1,9 +1,20 @@
-import { requestUrl } from 'obsidian';
+import { requestUrl, RequestUrlResponse, RequestUrlParam } from 'obsidian';
 
 interface GitLabFileResponse {
     content: string;
     blob_id: string;
     file_path: string;
+}
+
+interface ObsidianErrorResponse {
+    headers: Record<string, string>;
+    json?: unknown;
+    text?: string;
+}
+
+interface ObsidianResponseError {
+    status: number;
+    response?: ObsidianErrorResponse;
 }
 
 export class GitLabService {
@@ -30,9 +41,38 @@ export class GitLabService {
         return `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/files/${encodedPath}`;
     }
 
+    /**
+     * Safely wraps requestUrl to handle potential throws from Obsidian and provide better error messages.
+     */
+    private async safeRequest(params: RequestUrlParam): Promise<RequestUrlResponse> {
+        try {
+            return await requestUrl(params);
+        } catch (e) {
+            // Obsidian's requestUrl might throw an error object that contains status/response
+            if (typeof e === 'object' && e !== null && 'status' in e) {
+                const error = e as ObsidianResponseError;
+                const status = error.status || 0;
+                const responseData = error.response;
+                const text = responseData?.text || (responseData?.json ? JSON.stringify(responseData.json) : '');
+                
+                // Re-throw as a standardized response-like object if it looks like one
+                if (status) {
+                    return {
+                        status,
+                        headers: responseData?.headers || {},
+                        arrayBuffer: new ArrayBuffer(0),
+                        json: responseData?.json || {},
+                        text: text
+                    };
+                }
+            }
+            throw e;
+        }
+    }
+
     async getFile(path: string, branch: string): Promise<{ content: string; sha: string }> {
         const url = `${this.getApiUrl(path)}?ref=${branch}`;
-        const response = await requestUrl({
+        const response = await this.safeRequest({
             url,
             method: 'GET',
             headers: {
@@ -73,7 +113,7 @@ export class GitLabService {
         const sha = existingSha !== undefined ? existingSha : (await this.getFile(path, branch)).sha;
         const method = sha ? 'PUT' : 'POST';
 
-        const response = await requestUrl({
+        const response = await this.safeRequest({
             url,
             method,
             headers: {
@@ -104,7 +144,7 @@ export class GitLabService {
 
         const encodedProjectId = encodeURIComponent(this.projectId);
         const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}`;
-        const response = await requestUrl({
+        const response = await this.safeRequest({
             url,
             method: 'GET',
             headers: {
