@@ -65,10 +65,7 @@
       "@semantic-release/github",
       {
         "assets": [
-          { "path": "git-files-push-*.zip", "label": "Plugin Package" },
-          { "path": "main.js", "label": "main.js" },
-          { "path": "manifest.json", "label": "manifest.json" },
-          { "path": "styles.css", "label": "styles.css" }
+          { "path": "git-files-push-*.zip", "label": "Plugin Package" }
         ]
       }
     ]

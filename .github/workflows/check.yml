@@ -107,9 +107,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: plugin-build-${{ steps.version.outputs.version }}-${{ github.sha }}
-          path: |
-            ${{ env.ZIP_NAME }}
-            main.js
-            manifest.json
-            styles.css
+          path: ${{ env.ZIP_NAME }}
           retention-days: 7
