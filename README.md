@@ -9,6 +9,12 @@
 
 [繁體中文使用說明](USAGE_zh.md)
 
+![sync-status](imgs/sync-status.png)
+*The Sync Status View provides a clear overview of your files, allowing you to selectively push, pull, or view diffs for modified files.*
+
+![conflict](imgs/git-diff.png)
+*The Built-in Diff Viewer lets you compare local and remote changes side-by-side before syncing.*
+
 ---
 
 ## Key Features
@@ -46,6 +52,9 @@ Full support for Obsidian Mobile. Push and pull your notes on the go with a resp
 ---
 
 ## Configuration
+
+![Plugin Settings](imgs/plugin-settings.png)
+*Configure the plugin by selecting your preferred Git service and providing the necessary credentials.*
 
 ### 1. Choose Your Service
 Go to **Settings** > **Git File Sync** and select either **GitLab** or **GitHub**.

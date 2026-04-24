@@ -413,6 +413,7 @@
     border: 1px solid var(--background-modifier-border);
     border-radius: 5px;
     overflow: hidden;
+    background: var(--background-primary);
 }
 
 .ssv-diff-grid {
@@ -460,8 +461,8 @@
     background-color: transparent;
 }
 
-.ssv-diff-cell.removed   { background: rgba(248, 81, 73, 0.12); }
-.ssv-diff-cell.added     { background: rgba(46, 160, 67, 0.12); }
+.ssv-diff-cell.removed   { background: rgba(var(--color-red-rgb), 0.12); }
+.ssv-diff-cell.added     { background: rgba(var(--color-green-rgb), 0.12); }
 .ssv-diff-cell.unchanged { background: transparent; }
 .ssv-diff-cell.empty     { background: var(--background-secondary); opacity: 0.6; }
 
@@ -503,8 +504,8 @@
     border-radius: 2px;
 }
 
-.ssv-u-line.removed   { background: rgba(248, 81, 73, 0.18); }
-.ssv-u-line.added     { background: rgba(46, 160, 67, 0.18); }
+.ssv-u-line.removed   { background: rgba(var(--color-red-rgb), 0.18); }
+.ssv-u-line.added     { background: rgba(var(--color-green-rgb), 0.18); }
 .ssv-u-line.unchanged { color: var(--text-muted); }
 
 /* Container query: switch layout based on the diff panel's own width */

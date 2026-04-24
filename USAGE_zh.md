@@ -8,6 +8,9 @@
 
 在開始同步之前，請確保您已完成以下設定：
 
+![Plugin Settings](imgs/plugin-settings.png)
+*在設定面板選擇您的 Git 服務並填入對應的憑證與路徑。*
+
 1. **選擇服務**：在 `設定` > `Git File Sync` 中選擇 GitLab 或 GitHub。
 2. **填寫憑證**：
    - **GitHub**：需要 個人存取權杖 (PAT)、帳號名稱、儲存庫名稱。
@@ -26,6 +29,9 @@
    - **Synced**：已同步（與雲端一致）。
    - **Modified**：本機已修改（需要 Push）。
    - **Remote only**：雲端有新檔案（需要 Pull）。
+
+![sync-status](imgs/sync-status.png)
+*同步狀態面板讓您可以一目了然地確認哪些檔案已經修改，並進行上傳或下載。*
 
 ---
 
@@ -55,6 +61,9 @@
 2. 您可以查看差異處。
 3. 選擇 **Keep Local**（保留本機）或 **Keep Remote**（採用雲端版本）。
 4. 選擇後系統會自動更新檔案。
+
+![conflict](imgs/git-diff.png)
+*內建的差異比對工具 (Diff Viewer) 可讓您在同步前並排比對本機與雲端的修改差異。*
 
 ---
 
