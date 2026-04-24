@@ -91,11 +91,24 @@ jobs:
           fi
           echo "✓ All build artifacts present"
 
+      - name: Get version from manifest
+        id: version
+        run: echo "version=$(node -p "require('./manifest.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Create plugin package
+        run: |
+          BRANCH_NAME=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
+          BRANCH_NAME_SAFE=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          ZIP_NAME="git-files-push-${{ steps.version.outputs.version }}-${BRANCH_NAME_SAFE}.zip"
+          zip -j "$ZIP_NAME" main.js manifest.json styles.css
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: plugin-build
+          name: plugin-build-${{ steps.version.outputs.version }}-${{ github.sha }}
           path: |
+            ${{ env.ZIP_NAME }}
             main.js
             manifest.json
             styles.css
