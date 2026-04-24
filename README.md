@@ -1,90 +1,139 @@
-# Obsidian Sample Plugin
+# Git File Push
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+An Obsidian plugin that enables seamless synchronization of individual notes with GitLab or GitHub repositories across mobile and desktop platforms.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+## Features
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+- **Multiple Git Services**: Support for both GitLab and GitHub (user selectable)
+- **Push to Remote**: Upload individual notes to your Git repository
+- **Pull from Remote**: Download and sync notes from your repository
+- **Batch Operations**: Push or pull all modified files at once
+- **Sync Status View**: Visual dashboard showing all files' sync status with complete git diff
+- **Conflict Resolution**: Visual diff viewer to compare local and remote versions when conflicts occur
+- **Vault Folder Filter**: Optionally sync only files within a specific vault folder
+- **Ribbon Icon**: Quick access button in the left sidebar for pushing the current note
+- **Command Palette**: Commands for pushing and pulling files (single or batch)
+- **Context Menu**: Right-click any file to push or pull directly from the file menu
+- **Cross-Platform**: Works on both desktop and mobile versions of Obsidian
+- **Sync Tracking**: Maintains metadata to track last synced SHA and timestamp for each file
+- **Conflict Detection**: Automatically detects conflicts and prompts for resolution
 
-## First time developing plugins?
+## Setup
 
-Quick starting guide for new plugin devs:
+1. Install the plugin in Obsidian
+2. Open Settings → Git File Push
+3. Select your preferred Git service (GitLab or GitHub)
+4. Configure the settings based on your choice:
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+### GitLab Configuration
+   - **GitLab Personal Access Token**: Create a token in GitLab (User Settings → Access Tokens) with "API" scope
+   - **GitLab Base URL**: Defaults to `https://gitlab.com` (change if using self-hosted GitLab)
+   - **Project ID**: Found in your GitLab project's overview page
 
-## Releasing new releases
+### GitHub Configuration
+   - **GitHub Personal Access Token**: Create a token in GitHub (Settings → Developer Settings → Personal Access Tokens) with "repo" scope
+   - **Repository Owner**: Your GitHub username or organization name
+   - **Repository Name**: Name of the GitHub repository
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+### Common Settings
+   - **Branch**: The branch to sync with (defaults to `main`)
+   - **Root Path**: Optional path prefix in the repository (e.g., "notes" to store files in a notes/ folder)
+   - **Vault Folder**: Optional vault folder to sync (e.g., "sync" to only sync files in the sync/ folder, leave empty to sync all files)
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+## Usage
 
-## Adding your plugin to the community plugin list
+### View Sync Status
+- Click the list-checks icon in the left ribbon, or
+- Use Command Palette: "Open sync status view"
+- Click "Refresh Status" to check all files against the remote repository
+- View complete git diff for modified files
+- Push or pull individual files directly from the status view
+- Use "Push All Modified" or "Pull All Modified" for batch operations
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+### Push Files
+**Single file:**
+- Click the cloud upload icon in the left ribbon, or
+- Use Command Palette: "Push current file to GitLab/GitHub", or
+- Right-click a file and select "Push to GitLab/GitHub"
 
-## How to use
+**All files:**
+- Use Command Palette: "Push all markdown files"
+- Or use "Push All Modified" button in the sync status view
 
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+### Pull Files
+**Single file:**
+- Use Command Palette: "Pull current file from GitLab/GitHub", or
+- Right-click a file and select "Pull from GitLab/GitHub"
 
-## Manually installing the plugin
+**All files:**
+- Use Command Palette: "Pull all markdown files"
+- Or use "Pull All Modified" button in the sync status view
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+### Conflict Resolution
+When a conflict is detected:
+1. A modal will appear showing both local and remote versions
+2. Review the differences in the diff viewer
+3. Choose to keep either the local or remote version
+4. The chosen version will be synced
 
-## Improve code quality with eslint
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
+## Development
 
-## Funding URL
+### Prerequisites
+- Node.js v16 or higher
+- npm or yarn
 
-You can include funding URLs where people who use your plugin can financially support it.
+### Setup
+```bash
+# Clone the repository
+git clone https://github.com/tianyao/gitlab-files-push.git
 
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
+# Install dependencies
+npm install
 
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
+# Start development mode (watch mode)
+npm run dev
 ```
 
-If you have multiple URLs, you can also do:
+### Available Commands
+- `npm run dev` - Build in watch mode using esbuild
+- `npm run build` - Type check and build for production
+- `npm run lint` - Run ESLint checks
+- `npm run test` - Run Vitest test suite
+- `npm run test:ui` - Run tests with UI
+- `npm run version` - Bump version in manifest.json and versions.json
 
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
+### Manual Installation
+
+Copy `main.js`, `manifest.json`, and `styles.css` (if exists) to your vault:
+```
+VaultFolder/.obsidian/plugins/git-file-push/
 ```
 
-## API Documentation
+## Project Structure
 
-See https://docs.obsidian.md
+- `src/main.ts` - Main plugin class and command registration
+- `src/settings.ts` - Settings interface and configuration UI
+- `src/services/gitlab-service.ts` - GitLab API integration
+- `src/logic/sync-manager.ts` - Sync logic and conflict handling
+- `esbuild.config.mjs` - Build configuration
+
+## Releasing
+
+1. Update `minAppVersion` in `manifest.json` if needed
+2. Run `npm run version` to bump version numbers
+3. Create a GitHub release with tag matching the version
+4. Upload `manifest.json`, `main.js`, and `styles.css` as release assets
+
+## Code Quality
+
+- ESLint is configured with Obsidian-specific rules
+- Run `npm run lint` to check for issues
+- Husky pre-commit hooks ensure code quality
+
+## License
+
+0-BSD
+
+## Author
+
+[tianyao](https://github.com/tianyao)

@@ -21,8 +21,17 @@ export default tseslint.config(
 				extraFileExtensions: ['.json']
 			},
 		},
+		rules: {
+			'no-alert': 'off', // Allow confirm dialogs for user confirmation
+			'@typescript-eslint/await-thenable': 'off', // Settings methods may not return promises
+		}
 	},
 	...obsidianmd.configs.recommended,
+	{
+		rules: {
+			'obsidianmd/ui/sentence-case': 'off',
+		}
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",

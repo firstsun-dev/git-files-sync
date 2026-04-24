@@ -1,9 +1,9 @@
 {
-	"id": "gitlab-files-push",
-	"name": "GitLab Files Push",
+	"id": "git-file-push",
+	"name": "Git File Push",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Push and pull individual notes to GitLab across mobile and desktop.",
+	"description": "Sync individual notes with GitLab or GitHub. Push, pull, and track changes across mobile and desktop with visual diff and conflict resolution.",
 	"author": "tianyao",
 	"authorUrl": "https://github.com/tianyao",
 	"isDesktopOnly": false

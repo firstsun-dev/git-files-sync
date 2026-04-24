@@ -24,12 +24,17 @@ const mockGitLab = {
 } as unknown as GitLabService;
 
 const mockSettings: GitLabFilesPushSettings = {
+    serviceType: 'gitlab',
     gitlabToken: 'token',
     gitlabBaseUrl: 'https://gitlab.com',
     projectId: '123',
+    githubToken: '',
+    githubOwner: '',
+    githubRepo: '',
     branch: 'main',
     rootPath: '',
-    syncMetadata: {}
+    syncMetadata: {},
+    vaultFolder: ''
 };
 
 describe('SyncManager', () => {

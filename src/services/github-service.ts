@@ -1,10 +1,10 @@
 import { requestUrl, RequestUrlResponse, RequestUrlParam } from 'obsidian';
 import { GitServiceInterface } from './git-service-interface';
 
-interface GitLabFileResponse {
+interface GitHubFileResponse {
     content: string;
-    blob_id: string;
-    file_path: string;
+    sha: string;
+    path: string;
 }
 
 interface ObsidianErrorResponse {
@@ -18,45 +18,38 @@ interface ObsidianResponseError {
     response?: ObsidianErrorResponse;
 }
 
-export class GitLabService implements GitServiceInterface {
-    private baseUrl: string;
+export class GitHubService implements GitServiceInterface {
     private token: string;
-    private projectId: string;
+    private owner: string;
+    private repo: string;
     private rootPath: string;
 
-    constructor(baseUrl: string, token: string, projectId: string, rootPath: string = '') {
-        this.updateConfig(baseUrl, token, projectId, rootPath);
+    constructor(token: string, owner: string, repo: string, rootPath: string = '') {
+        this.updateConfig(token, owner, repo, rootPath);
     }
 
-    updateConfig(baseUrl: string, token: string, projectId: string, rootPath: string = '') {
-        this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    updateConfig(token: string, owner: string, repo: string, rootPath: string = '') {
         this.token = token;
-        this.projectId = projectId;
+        this.owner = owner;
+        this.repo = repo;
         this.rootPath = rootPath.replace(/^\/|\/$/g, '');
     }
 
     private getApiUrl(path: string): string {
         const fullPath = this.rootPath ? `${this.rootPath}/${path}` : path;
-        const encodedPath = encodeURIComponent(fullPath);
-        const encodedProjectId = encodeURIComponent(this.projectId);
-        return `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/files/${encodedPath}`;
+        return `https://api.github.com/repos/${this.owner}/${this.repo}/contents/${fullPath}`;
     }
 
-    /**
-     * Safely wraps requestUrl to handle potential throws from Obsidian and provide better error messages.
-     */
     private async safeRequest(params: RequestUrlParam): Promise<RequestUrlResponse> {
         try {
             return await requestUrl(params);
         } catch (e) {
-            // Obsidian's requestUrl might throw an error object that contains status/response
             if (typeof e === 'object' && e !== null && 'status' in e) {
                 const error = e as ObsidianResponseError;
                 const status = error.status || 0;
                 const responseData = error.response;
                 const text = responseData?.text || (responseData?.json ? JSON.stringify(responseData.json) : '');
-                
-                // Re-throw as a standardized response-like object if it looks like one
+
                 if (status) {
                     return {
                         status,
@@ -77,7 +70,9 @@ export class GitLabService implements GitServiceInterface {
             url,
             method: 'GET',
             headers: {
-                'PRIVATE-TOKEN': this.token
+                'Authorization': `Bearer ${this.token}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'Obsidian-GitLab-Files-Push'
             }
         });
 
@@ -90,7 +85,7 @@ export class GitLabService implements GitServiceInterface {
             throw new Error(`Failed to fetch file: ${response.status} from ${url}. Response: ${errorBody}`);
         }
 
-        const data = (response.json as unknown) as GitLabFileResponse;
+        const data = (response.json as unknown) as GitHubFileResponse;
         const content = atob(data.content);
         let decodedContent = '';
         try {
@@ -98,13 +93,12 @@ export class GitLabService implements GitServiceInterface {
                 return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
             }).join(''));
         } catch {
-            // Fallback to plain string if decodeURIComponent fails (e.g. for non-UTF8)
             decodedContent = content;
         }
 
         return {
             content: decodedContent,
-            sha: data.blob_id
+            sha: data.sha
         };
     }
 
@@ -112,44 +106,52 @@ export class GitLabService implements GitServiceInterface {
         const url = this.getApiUrl(path);
 
         const sha = existingSha !== undefined ? existingSha : (await this.getFile(path, branch)).sha;
-        const method = sha ? 'PUT' : 'POST';
+
+        const body: Record<string, unknown> = {
+            message: commitMessage,
+            content: btoa(encodeURIComponent(content).replace(/%([0-9A-F]{2})/g, (_match, p1: string) => {
+                return String.fromCharCode(parseInt(p1, 16));
+            })),
+            branch
+        };
+
+        if (sha) {
+            body.sha = sha;
+        }
 
         const response = await this.safeRequest({
             url,
-            method,
+            method: 'PUT',
             headers: {
-                'PRIVATE-TOKEN': this.token,
-                'Content-Type': 'application/json'
+                'Authorization': `Bearer ${this.token}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json',
+                'User-Agent': 'Obsidian-GitLab-Files-Push'
             },
-            body: JSON.stringify({
-                branch,
-                commit_message: commitMessage,
-                content: btoa(encodeURIComponent(content).replace(/%([0-9A-F]{2})/g, (_match, p1: string) => {
-                    return String.fromCharCode(parseInt(p1, 16));
-                })),
-                encoding: 'base64'
-            })
+            body: JSON.stringify(body)
         });
 
         if (response.status !== 200 && response.status !== 201) {
             const errorBody = response.text || JSON.stringify(response.json);
-            throw new Error(`Failed to push file: ${response.status} ${method} ${url}. Response: ${errorBody}`);
+            throw new Error(`Failed to push file: ${response.status} PUT ${url}. Response: ${errorBody}`);
         }
 
-        return ((response.json as unknown) as GitLabFileResponse).file_path;
+        return ((response.json as { content: GitHubFileResponse }).content).path;
     }
 
     async testConnection(): Promise<void> {
         if (!this.token) throw new Error('Token is missing');
-        if (!this.projectId) throw new Error('Project ID is missing');
+        if (!this.owner) throw new Error('Owner is missing');
+        if (!this.repo) throw new Error('Repository is missing');
 
-        const encodedProjectId = encodeURIComponent(this.projectId);
-        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}`;
+        const url = `https://api.github.com/repos/${this.owner}/${this.repo}`;
         const response = await this.safeRequest({
             url,
             method: 'GET',
             headers: {
-                'PRIVATE-TOKEN': this.token
+                'Authorization': `Bearer ${this.token}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'Obsidian-GitLab-Files-Push'
             }
         });
 

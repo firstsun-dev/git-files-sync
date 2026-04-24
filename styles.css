@@ -6,3 +6,268 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+
+.sync-status-view {
+    padding: 10px;
+    overflow-y: auto;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.sync-status-header {
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.sync-status-header h4 {
+    margin: 0;
+    font-size: 1.2em;
+}
+
+.sync-status-info {
+    margin-bottom: 15px;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: 5px;
+    font-size: 0.9em;
+}
+
+.sync-status-info div {
+    margin: 3px 0;
+}
+
+.sync-status-buttons {
+    margin-bottom: 15px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.sync-status-buttons button {
+    padding: 8px 16px;
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.sync-status-buttons button:hover {
+    background: var(--interactive-accent-hover);
+}
+
+.sync-status-buttons .push-all-btn {
+    background: var(--color-green);
+}
+
+.sync-status-buttons .push-all-btn:hover {
+    opacity: 0.8;
+}
+
+.sync-status-buttons .pull-all-btn {
+    background: var(--color-blue);
+}
+
+.sync-status-buttons .pull-all-btn:hover {
+    opacity: 0.8;
+}
+
+.sync-status-summary {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 15px;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: 5px;
+    font-weight: 500;
+}
+
+.sync-status-empty,
+.sync-status-loading {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.sync-status-file {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: var(--background-primary-alt);
+    border-radius: 5px;
+    border-left: 3px solid var(--background-modifier-border);
+}
+
+.sync-status-file-header {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 5px;
+}
+
+.status-icon {
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.status-synced {
+    color: var(--text-success);
+}
+
+.status-modified {
+    color: var(--text-warning);
+}
+
+.status-unsynced {
+    color: var(--text-error);
+}
+
+.status-checking {
+    color: var(--text-muted);
+}
+
+.file-path {
+    flex: 1;
+    font-family: var(--font-monospace);
+    font-size: 0.9em;
+}
+
+.status-text {
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+.diff-toggle {
+    margin-left: auto;
+    padding: 4px 10px;
+    font-size: 0.85em;
+    background: var(--interactive-normal);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.diff-toggle:hover {
+    background: var(--interactive-hover);
+}
+
+.sync-status-diff {
+    margin-top: 10px;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: 3px;
+    overflow-x: auto;
+}
+
+.sync-status-diff pre {
+    margin: 0;
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.sync-status-diff code {
+    color: var(--text-normal);
+}
+
+.sync-status-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+}
+
+.sync-status-actions button {
+    padding: 5px 12px;
+    font-size: 0.85em;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 3px;
+    cursor: pointer;
+    background: var(--interactive-normal);
+    color: var(--text-normal);
+}
+
+.sync-status-actions button:hover {
+    background: var(--interactive-hover);
+}
+
+/* Conflict Modal Styles */
+.sync-conflict-modal {
+    max-width: 900px;
+}
+
+.conflict-description {
+    color: var(--text-muted);
+    margin-bottom: 20px;
+}
+
+.conflict-diff-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.conflict-section h3 {
+    margin: 0 0 10px 0;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.conflict-content {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: 5px;
+    margin: 0;
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.conflict-diff-section {
+    margin-bottom: 20px;
+}
+
+.conflict-diff-section h3 {
+    margin: 0 0 10px 0;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.conflict-diff {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: 5px;
+    margin: 0;
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.conflict-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.conflict-buttons .setting-item {
+    border: none;
+    padding: 0;
+}
+
+.conflict-buttons .setting-item-control {
+    display: flex;
+    gap: 10px;
+}
+
