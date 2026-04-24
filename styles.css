@@ -40,38 +40,109 @@ If your plugin does not need CSS, delete this file.
 }
 
 .sync-status-buttons {
-    margin-bottom: 15px;
+    margin-bottom: 10px;
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
 }
 
-.sync-status-buttons button {
+.sync-selection-buttons {
+    margin-bottom: 10px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: 5px;
+}
+
+.sync-repo-buttons {
+    margin-bottom: 15px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: 5px;
+}
+
+.sync-status-buttons button,
+.sync-selection-buttons button,
+.sync-repo-buttons button {
     padding: 8px 16px;
     background: var(--interactive-accent);
     color: var(--text-on-accent);
     border: none;
     border-radius: 5px;
     cursor: pointer;
+    font-size: 0.9em;
+    white-space: nowrap;
 }
 
-.sync-status-buttons button:hover {
+.sync-status-buttons .refresh-btn {
+    background: var(--interactive-accent);
+    font-weight: 500;
+}
+
+/* Mobile optimization */
+@media (max-width: 768px) {
+    .sync-status-buttons,
+    .sync-selection-buttons,
+    .sync-repo-buttons {
+        gap: 6px;
+    }
+
+    .sync-status-buttons button,
+    .sync-selection-buttons button,
+    .sync-repo-buttons button {
+        padding: 6px 10px;
+        font-size: 0.85em;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+}
+
+.sync-status-buttons button:hover,
+.sync-selection-buttons button:hover,
+.sync-repo-buttons button:hover {
     background: var(--interactive-accent-hover);
 }
 
-.sync-status-buttons .push-all-btn {
+.sync-status-buttons button:disabled,
+.sync-selection-buttons button:disabled,
+.sync-repo-buttons button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sync-status-buttons button:disabled:hover,
+.sync-selection-buttons button:disabled:hover,
+.sync-repo-buttons button:disabled:hover {
+    opacity: 0.5;
+}
+
+.sync-repo-buttons .push-all-btn {
     background: var(--color-green);
 }
 
-.sync-status-buttons .push-all-btn:hover {
+.sync-repo-buttons .push-all-btn:hover {
     opacity: 0.8;
 }
 
-.sync-status-buttons .pull-all-btn {
+.sync-repo-buttons .pull-all-btn {
     background: var(--color-blue);
 }
 
-.sync-status-buttons .pull-all-btn:hover {
+.sync-repo-buttons .pull-all-btn:hover {
+    opacity: 0.8;
+}
+
+.sync-repo-buttons .delete-btn {
+    background: var(--color-red);
+    color: white;
+}
+
+.sync-repo-buttons .delete-btn:hover {
     opacity: 0.8;
 }
 
@@ -83,6 +154,19 @@ If your plugin does not need CSS, delete this file.
     background: var(--background-secondary);
     border-radius: 5px;
     font-weight: 500;
+    flex-wrap: wrap;
+}
+
+/* Mobile optimization */
+@media (max-width: 768px) {
+    .sync-status-summary {
+        gap: 10px;
+        font-size: 0.85em;
+    }
+
+    .sync-status-summary div {
+        flex: 1 1 45%;
+    }
 }
 
 .sync-status-empty,
@@ -90,6 +174,32 @@ If your plugin does not need CSS, delete this file.
     padding: 20px;
     text-align: center;
     color: var(--text-muted);
+}
+
+.sync-progress-container {
+    padding: 20px;
+    text-align: center;
+}
+
+.sync-progress-text {
+    margin-bottom: 10px;
+    color: var(--text-muted);
+    font-size: 0.9em;
+}
+
+.sync-progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--background-secondary);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.sync-progress-fill {
+    height: 100%;
+    background: var(--interactive-accent);
+    transition: width 0.3s ease;
+    border-radius: 4px;
 }
 
 .sync-status-file {
@@ -105,11 +215,43 @@ If your plugin does not need CSS, delete this file.
     align-items: center;
     gap: 5px;
     margin-bottom: 5px;
+    flex-wrap: wrap;
 }
 
 .status-icon {
     font-weight: bold;
     font-size: 1.1em;
+    flex-shrink: 0;
+}
+
+/* Mobile optimization for file items */
+@media (max-width: 768px) {
+    .sync-status-file-header {
+        gap: 3px;
+    }
+
+    .file-path {
+        font-size: 0.8em !important;
+        word-break: break-all;
+    }
+
+    .status-text {
+        font-size: 0.75em !important;
+    }
+
+    .diff-toggle {
+        margin-left: 0 !important;
+        margin-top: 5px;
+        width: 100%;
+    }
+
+    .sync-status-actions {
+        flex-direction: column;
+    }
+
+    .sync-status-actions button {
+        width: 100%;
+    }
 }
 
 .status-synced {
@@ -124,8 +266,74 @@ If your plugin does not need CSS, delete this file.
     color: var(--text-error);
 }
 
+.status-remote-only {
+    color: var(--color-cyan);
+}
+
 .status-checking {
     color: var(--text-muted);
+}
+
+.sync-status-filters {
+    margin-bottom: 15px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.sync-status-filters button {
+    padding: 6px 12px;
+    font-size: 0.9em;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+/* Mobile optimization */
+@media (max-width: 768px) {
+    .sync-status-filters {
+        gap: 5px;
+    }
+
+    .sync-status-filters button {
+        padding: 5px 8px;
+        font-size: 0.8em;
+        flex: 1 1 auto;
+    }
+
+    .sync-status-filters span {
+        width: 100%;
+        font-size: 0.85em;
+        margin-bottom: 5px;
+    }
+}
+
+.sync-status-filters button:hover {
+    background: var(--background-modifier-hover);
+}
+
+.sync-status-filters button.filter-active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+}
+
+.sync-status-file-header input[type="checkbox"] {
+    margin-right: 8px;
+    cursor: pointer;
+}
+
+.sync-status-actions .remove-btn {
+    background: var(--color-red);
+    color: white;
+    border-color: var(--color-red);
+}
+
+.sync-status-actions .remove-btn:hover {
+    opacity: 0.8;
 }
 
 .file-path {
@@ -269,5 +477,34 @@ If your plugin does not need CSS, delete this file.
 .conflict-buttons .setting-item-control {
     display: flex;
     gap: 10px;
+}
+
+/* GitHub style diff viewer */
+.diff-line {
+    display: block;
+    padding: 0 4px;
+    font-family: var(--font-monospace);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.diff-line.added {
+    background-color: rgba(46, 160, 67, 0.2);
+    color: var(--text-normal);
+}
+
+.diff-line.removed {
+    background-color: rgba(248, 81, 73, 0.2);
+    color: var(--text-normal);
+}
+
+.diff-line.unchanged {
+    color: var(--text-muted);
+}
+
+.diff-line.header {
+    color: var(--text-accent);
+    font-weight: bold;
+    margin-bottom: 4px;
 }
 

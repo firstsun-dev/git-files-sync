@@ -40,6 +40,7 @@
 		"vitest": "^4.1.2"
 	},
 	"dependencies": {
+		"ignore": "^7.0.5",
 		"obsidian": "latest"
 	}
 }

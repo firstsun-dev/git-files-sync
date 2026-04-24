@@ -1,14 +1,14 @@
-import { App, Modal, Setting, TFile } from 'obsidian';
+import { App, Modal, Setting } from 'obsidian';
 
 export class SyncConflictModal extends Modal {
-    private file: TFile;
+    private fileName: string;
     private localContent: string;
     private remoteContent: string;
     private onChoose: (choice: 'local' | 'remote') => void;
 
-    constructor(app: App, file: TFile, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
+    constructor(app: App, fileName: string, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
         super(app);
-        this.file = file;
+        this.fileName = fileName;
         this.localContent = local;
         this.remoteContent = remote;
         this.onChoose = onChoose;
@@ -18,7 +18,7 @@ export class SyncConflictModal extends Modal {
         const { contentEl } = this;
         contentEl.addClass('sync-conflict-modal');
 
-        contentEl.createEl('h2', { text: `Conflict in ${this.file.name}` });
+        contentEl.createEl('h2', { text: `Conflict in ${this.fileName}` });
         contentEl.createEl('p', {
             text: 'The remote file has different content. Review the differences and choose which version to keep.',
             cls: 'conflict-description'
@@ -39,7 +39,7 @@ export class SyncConflictModal extends Modal {
         const diffSection = contentEl.createDiv({ cls: 'conflict-diff-section' });
         diffSection.createEl('h3', { text: 'Differences' });
         const diffPre = diffSection.createEl('pre', { cls: 'conflict-diff' });
-        diffPre.createEl('code', { text: this.generateDiff() });
+        this.renderDiff(diffPre);
 
         const buttonContainer = contentEl.createDiv({ cls: 'conflict-buttons' });
 
@@ -67,14 +67,18 @@ export class SyncConflictModal extends Modal {
                 }));
     }
 
-    private generateDiff(): string {
+    private renderDiff(container: HTMLElement) {
         const localLines = this.localContent.split('\n');
         const remoteLines = this.remoteContent.split('\n');
 
-        const diff: string[] = [];
-        diff.push('--- Remote');
-        diff.push('+++ Local');
-        diff.push('');
+        const createLine = (text: string, type: 'header' | 'added' | 'removed' | 'unchanged') => {
+            const lineEl = container.createSpan({ cls: `diff-line ${type}` });
+            lineEl.textContent = text + '\n';
+        };
+
+        createLine('--- Remote', 'header');
+        createLine('+++ Local', 'header');
+        createLine('', 'unchanged');
 
         const maxLines = Math.max(localLines.length, remoteLines.length);
 
@@ -84,17 +88,15 @@ export class SyncConflictModal extends Modal {
 
             if (remoteLine !== localLine) {
                 if (remoteLine !== undefined) {
-                    diff.push(`- ${remoteLine}`);
+                    createLine(`- ${remoteLine}`, 'removed');
                 }
                 if (localLine !== undefined) {
-                    diff.push(`+ ${localLine}`);
+                    createLine(`+ ${localLine}`, 'added');
                 }
             } else if (remoteLine !== undefined) {
-                diff.push(`  ${remoteLine}`);
+                createLine(`  ${remoteLine}`, 'unchanged');
             }
         }
-
-        return diff.join('\n');
     }
 
     onClose() {

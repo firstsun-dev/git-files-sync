@@ -36,7 +36,9 @@ export class GitLabService implements GitServiceInterface {
     }
 
     private getApiUrl(path: string): string {
-        const fullPath = this.rootPath ? `${this.rootPath}/${path}` : path;
+        const isAbsolute = path.startsWith('/');
+        const cleanPath = path.replace(/^\//, '');
+        const fullPath = (this.rootPath && !isAbsolute) ? `${this.rootPath}/${cleanPath}` : cleanPath;
         const encodedPath = encodeURIComponent(fullPath);
         const encodedProjectId = encodeURIComponent(this.projectId);
         return `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/files/${encodedPath}`;
@@ -157,5 +159,94 @@ export class GitLabService implements GitServiceInterface {
             const errorBody = response.text || JSON.stringify(response.json);
             throw new Error(`Failed to connect: ${response.status} ${url}. Response: ${errorBody}`);
         }
+    }
+
+    async listFiles(branch: string, path: string = ''): Promise<string[]> {
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const searchPath = this.rootPath || path || '';
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/tree?ref=${branch}&recursive=true&per_page=100${searchPath ? `&path=${encodeURIComponent(searchPath)}` : ''}`;
+
+        const response = await this.safeRequest({
+            url,
+            method: 'GET',
+            headers: {
+                'PRIVATE-TOKEN': this.token
+            }
+        });
+
+        if (response.status !== 200) {
+            const errorBody = response.text || JSON.stringify(response.json);
+            throw new Error(`Failed to list files: ${response.status} ${url}. Response: ${errorBody}`);
+        }
+
+        interface TreeItem {
+            path: string;
+            type: string;
+            name: string;
+        }
+
+        const data = response.json as TreeItem[];
+        const allFiles = data
+            .filter(item => item.type === 'blob')
+            .map(item => item.path);
+
+        // Filter by rootPath if set
+        if (this.rootPath) {
+            const prefix = this.rootPath + '/';
+            return allFiles
+                .filter(file => file.startsWith(prefix))
+                .map(file => file.substring(prefix.length));
+        }
+
+        return allFiles;
+    }
+
+    async deleteFile(path: string, branch: string, commitMessage: string): Promise<void> {
+        const url = this.getApiUrl(path);
+
+        const response = await this.safeRequest({
+            url,
+            method: 'DELETE',
+            headers: {
+                'PRIVATE-TOKEN': this.token,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                branch,
+                commit_message: commitMessage
+            })
+        });
+
+        if (response.status !== 200 && response.status !== 204) {
+            const errorBody = response.text || JSON.stringify(response.json);
+            throw new Error(`Failed to delete file: ${response.status} DELETE ${url}. Response: ${errorBody}`);
+        }
+    }
+
+    async getRepoGitignores(branch: string): Promise<string[]> {
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/tree?ref=${branch}&recursive=true&per_page=100`;
+
+        const response = await this.safeRequest({
+            url,
+            method: 'GET',
+            headers: {
+                'PRIVATE-TOKEN': this.token
+            }
+        });
+
+        if (response.status !== 200) {
+            return [];
+        }
+
+        interface TreeItem {
+            path: string;
+            type: string;
+        }
+
+        const data = response.json as TreeItem[];
+        return data
+            .filter(item => item.type === 'blob' && item.path.endsWith('.gitignore'))
+            .map(item => item.path);
     }
 }
