@@ -99,7 +99,7 @@ jobs:
         run: |
           BRANCH_NAME=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
           BRANCH_NAME_SAFE=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
-          ZIP_NAME="git-files-push-${{ steps.version.outputs.version }}-${BRANCH_NAME_SAFE}.zip"
+          ZIP_NAME="git-files-sync-${{ steps.version.outputs.version }}-${BRANCH_NAME_SAFE}.zip"
           zip -j "$ZIP_NAME" main.js manifest.json styles.css
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 

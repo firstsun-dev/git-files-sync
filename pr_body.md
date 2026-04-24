@@ -5,7 +5,7 @@
 ## Repo URL
 
 <!--- Paste a link to your repo here for easy access -->
-Link to my plugin: https://github.com/firstsun-dev/git-files-push
+Link to my plugin: https://github.com/firstsun-dev/git-files-sync
 
 ## Release Checklist
 - [ ] I have tested the plugin on

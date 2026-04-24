@@ -36,4 +36,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Smart Rename**: Automatically detects file renames
 - **Flexible Sync**: Sync entire vault or specific folders
 
-[1.0.0]: https://github.com/firstsun-dev/git-files-push/releases/tag/1.0.0
+[1.0.0]: https://github.com/firstsun-dev/git-files-sync/releases/tag/1.0.0

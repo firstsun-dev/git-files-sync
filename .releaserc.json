@@ -59,14 +59,14 @@
       "@semantic-release/exec",
       {
         "prepareCmd": "node -e \"const fs=require('fs'); const m=JSON.parse(fs.readFileSync('manifest.json')); m.version='${nextRelease.version}'; fs.writeFileSync('manifest.json', JSON.stringify(m,null,'\\t')); const v=JSON.parse(fs.readFileSync('versions.json')); v['${nextRelease.version}']=m.minAppVersion; fs.writeFileSync('versions.json', JSON.stringify(v,null,'\\t'));\"",
-        "publishCmd": "zip -j git-files-push-${nextRelease.version}.zip main.js manifest.json styles.css"
+        "publishCmd": "zip -j git-files-sync-${nextRelease.version}.zip main.js manifest.json styles.css"
       }
     ],
     [
       "@semantic-release/github",
       {
         "assets": [
-          { "path": "git-files-push-*.zip", "label": "Plugin Package" }
+          { "path": "git-files-sync-*.zip", "label": "Plugin Package" }
         ]
       }
     ]

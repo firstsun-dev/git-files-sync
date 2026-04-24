@@ -4,7 +4,7 @@
 	"version": "1.1.0",
 	"minAppVersion": "0.15.0",
 	"description": "Selectively sync individual notes with GitLab or GitHub. Push, pull, diff, and resolve conflicts — file by file, on mobile and desktop.",
-	"author": "firstsun-dev",
-	"authorUrl": "https://github.com/firstsun-dev",
+	"author": "ClaudiaFang",
+	"authorUrl": "https://github.com/ClaudiaFang",
 	"isDesktopOnly": false
 }

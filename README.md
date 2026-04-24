@@ -1,8 +1,8 @@
 # Git File Sync
 
-[![Release](https://img.shields.io/github/v/release/firstsun-dev/git-files-push?style=flat-square)](https://github.com/firstsun-dev/git-files-push/releases)
-[![Downloads](https://img.shields.io/github/downloads/firstsun-dev/git-files-push/total?style=flat-square)](https://github.com/firstsun-dev/git-files-push/releases)
-[![License](https://img.shields.io/github/license/firstsun-dev/git-files-push?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/firstsun-dev/git-files-sync?style=flat-square)](https://github.com/firstsun-dev/git-files-sync/releases)
+[![Downloads](https://img.shields.io/github/downloads/firstsun-dev/git-files-sync/total?style=flat-square)](https://github.com/firstsun-dev/git-files-sync/releases)
+[![License](https://img.shields.io/github/license/firstsun-dev/git-files-sync?style=flat-square)](LICENSE)
 [![Obsidian](https://img.shields.io/badge/Obsidian-v0.15.0+-purple?style=flat-square)](https://obsidian.md)
 
 **Git File Sync** is a powerful Obsidian plugin that enables seamless synchronization of individual notes with GitLab or GitHub repositories. Unlike full-vault sync solutions, it gives you granular control over what gets pushed and pulled, making it perfect for shared projects, selective backups, and cross-platform workflows.
@@ -44,7 +44,7 @@ Full support for Obsidian Mobile. Push and pull your notes on the go with a resp
 3. Click **Install**, then **Enable**.
 
 ### Manual Installation
-1. Download the latest `main.js`, `manifest.json`, and `styles.css` from the [Releases](https://github.com/firstsun-dev/git-files-push/releases) page.
+1. Download the latest `main.js`, `manifest.json`, and `styles.css` from the [Releases](https://github.com/firstsun-dev/git-files-sync/releases) page.
 2. Create a folder named `git-file-sync` in `<vault>/.obsidian/plugins/`.
 3. Copy the downloaded files into that folder.
 4. Reload Obsidian and enable the plugin.
@@ -121,7 +121,7 @@ If you want to contribute or build from source:
 
 ```bash
 # Clone and install
-git clone https://github.com/firstsun-dev/git-files-push.git
+git clone https://github.com/firstsun-dev/git-files-sync.git
 npm install
 
 # Development build
@@ -139,4 +139,4 @@ This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-**Created by [firstsun-dev](https://github.com/firstsun-dev)**
+**Created by [ClaudiaFang](https://github.com/ClaudiaFang)**
