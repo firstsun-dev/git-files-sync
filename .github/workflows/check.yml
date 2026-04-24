@@ -2,15 +2,13 @@ name: Check
 
 on:
   push:
-    branches:
+    branches-ignore:
       - main
       - master
-      - develop
   pull_request:
     branches:
       - main
       - master
-      - develop
 
 jobs:
   lint:
