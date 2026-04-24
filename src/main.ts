@@ -1,4 +1,4 @@
-import { Plugin, TFile, MarkdownView, Notice } from 'obsidian';
+import { Plugin, TFile, MarkdownView, Notice, Platform } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab } from "./settings";
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
@@ -40,7 +40,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
-		this.addRibbonIcon('upload-cloud', `Push to ${serviceName}`, (evt: MouseEvent) => {
+		this.addRibbonIcon('upload-cloud', Platform.isMobile ? `Push` : `Push to ${serviceName}`, (evt: MouseEvent) => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView && activeView.file instanceof TFile) {
 				void this.sync.pushFile(activeView.file);

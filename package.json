@@ -1,7 +1,7 @@
 {
-	"name": "git-file-push",
+	"name": "git-file-sync",
 	"version": "1.0.0",
-	"description": "Push and pull individual notes to GitLab or GitHub across mobile and desktop.",
+	"description": "Selectively sync individual notes with GitLab or GitHub across mobile and desktop.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {

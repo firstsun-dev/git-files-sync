@@ -234,7 +234,7 @@ export class SyncManager {
     private async saveSettings() {
         /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any */
         // @ts-ignore - access private method to save settings
-        const plugin = (this.app as any).plugins?.plugins?.['git-file-push'];
+        const plugin = (this.app as any).plugins?.plugins?.['git-file-sync'];
         if (plugin) {
             await plugin.saveSettings();
         }
