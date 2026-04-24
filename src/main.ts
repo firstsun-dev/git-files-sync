@@ -70,7 +70,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'push-all-files',
-			name: 'Push all markdown files',
+			name: 'Push all files',
 			callback: () => {
 				void this.pushAllFiles();
 			}
@@ -78,7 +78,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'pull-all-files',
-			name: 'Pull all markdown files',
+			name: 'Pull all files',
 			callback: () => {
 				void this.pullAllFiles();
 			}
@@ -133,7 +133,7 @@ export default class GitLabFilesPush extends Plugin {
 	}
 
 	async pushAllFiles(): Promise<void> {
-		const allFiles = this.app.vault.getMarkdownFiles();
+		const allFiles = this.app.vault.getFiles();
 		const files = this.filterFilesByVaultFolder(allFiles);
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
@@ -142,7 +142,7 @@ export default class GitLabFilesPush extends Plugin {
 			return;
 		}
 
-		const confirmed = await this.showConfirmDialog(`Push ${files.length} markdown file(s) to ${serviceName}?`);
+		const confirmed = await this.showConfirmDialog(`Push ${files.length} file(s) to ${serviceName}?`);
 		if (!confirmed) return;
 
 		const progressNotice = new Notice(`Pushing 0/${files.length} files...`, 0);
@@ -165,7 +165,7 @@ export default class GitLabFilesPush extends Plugin {
 	}
 
 	async pullAllFiles(): Promise<void> {
-		const allFiles = this.app.vault.getMarkdownFiles();
+		const allFiles = this.app.vault.getFiles();
 		const files = this.filterFilesByVaultFolder(allFiles);
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
@@ -174,7 +174,7 @@ export default class GitLabFilesPush extends Plugin {
 			return;
 		}
 
-		const confirmed = await this.showConfirmDialog(`Pull ${files.length} markdown file(s) from ${serviceName}? This will overwrite local changes.`);
+		const confirmed = await this.showConfirmDialog(`Pull ${files.length} file(s) from ${serviceName}? This will overwrite local changes.`);
 		if (!confirmed) return;
 
 		const progressNotice = new Notice(`Pulling 0/${files.length} files...`, 0);

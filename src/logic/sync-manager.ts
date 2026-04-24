@@ -19,47 +19,60 @@ export class SyncManager {
         this.gitService = gitService;
     }
 
-    async pushFile(file: TFile) {
-        if (!this.app.vault.getFileByPath(file.path)) {
-            new Notice(`File ${file.name} no longer exists in vault.`);
+    async pushFile(fileOrPath: TFile | string) {
+        const isString = typeof fileOrPath === 'string';
+        const path = isString ? fileOrPath : fileOrPath.path;
+        const name = isString ? path.split('/').pop() || path : fileOrPath.name;
+
+        if (isString) {
+            if (!(await this.app.vault.adapter.exists(path))) {
+                new Notice(`File ${name} no longer exists in vault.`);
+                return;
+            }
+        } else if (!this.app.vault.getFileByPath(path)) {
+            new Notice(`File ${name} no longer exists in vault.`);
             return;
         }
-        const content = await this.app.vault.read(file);
+
+        const content = isString ? await this.app.vault.adapter.read(path) : (fileOrPath instanceof TFile ? await this.app.vault.read(fileOrPath) : '');
         const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
         try {
             // Check if this is a renamed file
-            const renamedFrom = this.detectRename(file);
-            if (renamedFrom) {
-                await this.handleRename(file, renamedFrom, content);
-                return;
+            let renamedFrom = null;
+            if (!isString && fileOrPath instanceof TFile) {
+                renamedFrom = this.detectRename(fileOrPath);
+                if (renamedFrom) {
+                    await this.handleRename(fileOrPath, renamedFrom, content);
+                    return;
+                }
             }
 
             // Conflict detection
-            const remote = await this.gitService.getFile(file.path, this.settings.branch);
-            const lastSynced = this.settings.syncMetadata[file.path];
+            const remote = await this.gitService.getFile(path, this.settings.branch);
+            const lastSynced = this.settings.syncMetadata[path];
 
             if (remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
-                new SyncConflictModal(this.app, file, content, remote.content, (choice) => {
+                new SyncConflictModal(this.app, name, content, remote.content, (choice) => {
                     void (async () => {
                         try {
                             if (choice === 'local') {
-                                await this.performPush(file, content, remote.sha);
+                                await this.performPush({ path, name }, content, remote.sha);
                             } else {
-                                await this.performPull(file, remote.content, remote.sha);
+                                await this.performPull(isString ? { path, name } : fileOrPath, remote.content, remote.sha);
                             }
                         } catch (e) {
                             console.error(e);
-                            new Notice(`Failed to resolve conflict for ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+                            new Notice(`Failed to resolve conflict for ${name}: ${e instanceof Error ? e.message : String(e)}`);
                         }
                     })();
                 }).open();
                 return;
             }
 
-            await this.performPush(file, content, remote.sha);
+            await this.performPush({ path, name }, content, remote.sha);
         } catch (e) {
             console.error(e);
-            new Notice(`Failed to push ${file.name} to ${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
+            new Notice(`Failed to push ${name} to ${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
@@ -117,7 +130,7 @@ export class SyncManager {
         }
     }
 
-    private async performPush(file: TFile, content: string, existingSha?: string) {
+    private async performPush(file: {path: string, name: string}, content: string, existingSha?: string) {
         const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
         await this.gitService.pushFile(
             file.path,
@@ -139,57 +152,72 @@ export class SyncManager {
         new Notice(`Pushed ${file.name} to ${serviceName}`);
     }
 
-    async pullFile(file: TFile) {
-        if (!this.app.vault.getFileByPath(file.path)) {
-            new Notice(`File ${file.name} no longer exists in vault.`);
+    async pullFile(fileOrPath: TFile | string) {
+        const isString = typeof fileOrPath === 'string';
+        const path = isString ? fileOrPath : fileOrPath.path;
+        const name = isString ? path.split('/').pop() || path : fileOrPath.name;
+
+        if (isString) {
+            if (!(await this.app.vault.adapter.exists(path))) {
+                new Notice(`File ${name} no longer exists in vault.`);
+                return;
+            }
+        } else if (!this.app.vault.getFileByPath(path)) {
+            new Notice(`File ${name} no longer exists in vault.`);
             return;
         }
+
         const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
         try {
-            const remote = await this.gitService.getFile(file.path, this.settings.branch);
-            const localContent = await this.app.vault.read(file);
-            const lastSynced = this.settings.syncMetadata[file.path];
+            const remote = await this.gitService.getFile(path, this.settings.branch);
+            const localContent = isString ? await this.app.vault.adapter.read(path) : (fileOrPath instanceof TFile ? await this.app.vault.read(fileOrPath) : '');
+            const lastSynced = this.settings.syncMetadata[path];
 
             if (localContent === remote.content) {
                 // Still update metadata even if content matches
-                this.settings.syncMetadata[file.path] = {
+                this.settings.syncMetadata[path] = {
                     lastSyncedSha: remote.sha,
                     lastSyncedAt: Date.now()
                 };
                 await this.saveSettings();
-                new Notice(`${file.name} is already up to date.`);
+                new Notice(`${name} is already up to date.`);
                 return;
             }
 
             // Conflict detection for pull
             if (remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
-                new SyncConflictModal(this.app, file, localContent, remote.content, (choice) => {
+                new SyncConflictModal(this.app, name, localContent, remote.content, (choice) => {
                     void (async () => {
                         try {
                             if (choice === 'local') {
-                                await this.performPush(file, localContent, remote.sha);
+                                await this.performPush({ path, name }, localContent, remote.sha);
                             } else {
-                                await this.performPull(file, remote.content, remote.sha);
+                                await this.performPull(isString ? { path, name } : fileOrPath, remote.content, remote.sha);
                             }
                         } catch (e) {
                             console.error(e);
-                            new Notice(`Failed to resolve conflict for ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+                            new Notice(`Failed to resolve conflict for ${name}: ${e instanceof Error ? e.message : String(e)}`);
                         }
                     })();
                 }).open();
                 return;
             }
 
-            await this.performPull(file, remote.content, remote.sha);
+            await this.performPull(isString ? { path, name } : fileOrPath, remote.content, remote.sha);
         } catch (e) {
             console.error(e);
-            new Notice(`Failed to pull ${file.name} from ${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
+            new Notice(`Failed to pull ${name} from ${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
-    private async performPull(file: TFile, remoteContent: string, remoteSha: string) {
+    private async performPull(file: TFile | {path: string, name: string}, remoteContent: string, remoteSha: string) {
         const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-        await this.app.vault.modify(file, remoteContent);
+        
+        if (file instanceof TFile || ('vault' in file)) {
+            await this.app.vault.modify(file as TFile, remoteContent);
+        } else {
+            await this.app.vault.adapter.write(file.path, remoteContent);
+        }
 
         // Update metadata
         this.settings.syncMetadata[file.path] = {
@@ -199,7 +227,8 @@ export class SyncManager {
         };
 
         await this.saveSettings();
-        new Notice(`Pulled ${file.name} from ${serviceName}`);
+        const name = file instanceof TFile ? file.name : file.name;
+        new Notice(`Pulled ${name} from ${serviceName}`);
     }
 
     private async saveSettings() {
@@ -212,50 +241,64 @@ export class SyncManager {
         /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any */
     }
 
-    async pushAllFiles(files: TFile[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
+    async pushAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
         const results = { success: 0, failed: 0, errors: [] as Array<{ file: string; error: string }> };
         const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
         for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            if (!file) continue;
+            const fileOrPath = files[i];
+            if (!fileOrPath) continue;
+
+            const isString = typeof fileOrPath === 'string';
+            const path = isString ? fileOrPath : fileOrPath.path;
+            const name = isString ? path.split('/').pop() || path : fileOrPath.name;
 
             if (onProgress) {
-                onProgress(i + 1, files.length, file.name);
+                onProgress(i + 1, files.length, name);
             }
 
             try {
-                const existingFile = this.app.vault.getFileByPath(file.path);
-                if (!existingFile) {
-                    results.failed++;
-                    results.errors.push({ file: file.path, error: 'File no longer exists' });
-                    continue;
+                let content: string;
+                if (isString) {
+                    if (!(await this.app.vault.adapter.exists(path))) {
+                        results.failed++;
+                        results.errors.push({ file: path, error: 'File no longer exists' });
+                        continue;
+                    }
+                    content = await this.app.vault.adapter.read(path);
+                } else {
+                    const existingFile = this.app.vault.getFileByPath(path);
+                    if (!existingFile) {
+                        results.failed++;
+                        results.errors.push({ file: path, error: 'File no longer exists' });
+                        continue;
+                    }
+                    content = await this.app.vault.read(existingFile);
                 }
 
-                const content = await this.app.vault.read(existingFile);
-                const remote = await this.gitService.getFile(file.path, this.settings.branch);
+                const remote = await this.gitService.getFile(path, this.settings.branch);
 
                 await this.gitService.pushFile(
-                    file.path,
+                    path,
                     content,
                     this.settings.branch,
-                    `Update ${file.name} from Obsidian`,
+                    `Update ${name} from Obsidian`,
                     remote.sha || undefined
                 );
 
-                const newRemote = await this.gitService.getFile(file.path, this.settings.branch);
-                this.settings.syncMetadata[file.path] = {
+                const newRemote = await this.gitService.getFile(path, this.settings.branch);
+                this.settings.syncMetadata[path] = {
                     lastSyncedSha: newRemote.sha,
                     lastSyncedAt: Date.now(),
-                    lastKnownPath: file.path
+                    lastKnownPath: path
                 };
 
                 results.success++;
             } catch (e) {
-                console.error(`Failed to push ${file.path}:`, e);
+                console.error(`Failed to push ${path}:`, e);
                 results.failed++;
                 results.errors.push({
-                    file: file.path,
+                    file: path,
                     error: e instanceof Error ? e.message : String(e)
                 });
             }
@@ -273,48 +316,64 @@ export class SyncManager {
         return results;
     }
 
-    async pullAllFiles(files: TFile[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
+    async pullAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
         const results = { success: 0, failed: 0, errors: [] as Array<{ file: string; error: string }> };
         const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
         for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            if (!file) continue;
+            const fileOrPath = files[i];
+            if (!fileOrPath) continue;
+
+            const isString = typeof fileOrPath === 'string';
+            const path = isString ? fileOrPath : fileOrPath.path;
+            const name = isString ? path.split('/').pop() || path : fileOrPath.name;
 
             if (onProgress) {
-                onProgress(i + 1, files.length, file.name);
+                onProgress(i + 1, files.length, name);
             }
 
             try {
-                const existingFile = this.app.vault.getFileByPath(file.path);
-                if (!existingFile) {
-                    results.failed++;
-                    results.errors.push({ file: file.path, error: 'File no longer exists' });
-                    continue;
+                if (isString) {
+                    if (!(await this.app.vault.adapter.exists(path))) {
+                        results.failed++;
+                        results.errors.push({ file: path, error: 'File no longer exists' });
+                        continue;
+                    }
+                } else {
+                    const existingFile = this.app.vault.getFileByPath(path);
+                    if (!existingFile) {
+                        results.failed++;
+                        results.errors.push({ file: path, error: 'File no longer exists' });
+                        continue;
+                    }
                 }
 
-                const remote = await this.gitService.getFile(file.path, this.settings.branch);
+                const remote = await this.gitService.getFile(path, this.settings.branch);
 
                 if (!remote.sha) {
                     results.failed++;
-                    results.errors.push({ file: file.path, error: 'File not found in remote' });
+                    results.errors.push({ file: path, error: 'File not found in remote' });
                     continue;
                 }
 
-                await this.app.vault.modify(existingFile, remote.content);
+                if (isString) {
+                    await this.app.vault.adapter.write(path, remote.content);
+                } else if (fileOrPath instanceof TFile) {
+                    await this.app.vault.modify(fileOrPath, remote.content);
+                }
 
-                this.settings.syncMetadata[file.path] = {
+                this.settings.syncMetadata[path] = {
                     lastSyncedSha: remote.sha,
                     lastSyncedAt: Date.now(),
-                    lastKnownPath: file.path
+                    lastKnownPath: path
                 };
 
                 results.success++;
             } catch (e) {
-                console.error(`Failed to pull ${file.path}:`, e);
+                console.error(`Failed to pull ${path}:`, e);
                 results.failed++;
                 results.errors.push({
-                    file: file.path,
+                    file: path,
                     error: e instanceof Error ? e.message : String(e)
                 });
             }

@@ -70,9 +70,8 @@ export class GitHubService implements GitServiceInterface {
             url,
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${this.token}`,
-                'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'Obsidian-GitLab-Files-Push'
+                'Authorization': `token ${this.token}`,
+                'Accept': 'application/vnd.github.v3+json'
             }
         });
 
@@ -123,10 +122,9 @@ export class GitHubService implements GitServiceInterface {
             url,
             method: 'PUT',
             headers: {
-                'Authorization': `Bearer ${this.token}`,
+                'Authorization': `token ${this.token}`,
                 'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json',
-                'User-Agent': 'Obsidian-GitLab-Files-Push'
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(body)
         });
@@ -145,19 +143,105 @@ export class GitHubService implements GitServiceInterface {
         if (!this.repo) throw new Error('Repository is missing');
 
         const url = `https://api.github.com/repos/${this.owner}/${this.repo}`;
+
+        try {
+            const response = await this.safeRequest({
+                url,
+                method: 'GET',
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+
+            if (response.status !== 200) {
+                const errorBody = response.text || JSON.stringify(response.json);
+                throw new Error(`Failed to connect: ${response.status} ${url}. Response: ${errorBody}`);
+            }
+        } catch (e) {
+            if (e instanceof Error) {
+                // Provide more helpful error messages for common issues
+                if (e.message.includes('NAME') || e.message.includes('resolve')) {
+                    throw new Error(`DNS resolution failed. Please check your network connection or try restarting Obsidian. Original error: ${e.message}`);
+                }
+                if (e.message.includes('CERT') || e.message.includes('certificate')) {
+                    throw new Error(`SSL certificate error. This may be caused by network security settings. Original error: ${e.message}`);
+                }
+            }
+            throw e;
+        }
+    }
+
+    async listFiles(branch: string, path: string = ''): Promise<string[]> {
+        const searchPath = this.rootPath ? (path ? `${this.rootPath}/${path}` : this.rootPath) : path;
+        const url = `https://api.github.com/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
+
         const response = await this.safeRequest({
             url,
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${this.token}`,
-                'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'Obsidian-GitLab-Files-Push'
+                'Authorization': `token ${this.token}`,
+                'Accept': 'application/vnd.github.v3+json'
             }
         });
 
         if (response.status !== 200) {
             const errorBody = response.text || JSON.stringify(response.json);
-            throw new Error(`Failed to connect: ${response.status} ${url}. Response: ${errorBody}`);
+            throw new Error(`Failed to list files: ${response.status} ${url}. Response: ${errorBody}`);
+        }
+
+        interface TreeItem {
+            path: string;
+            type: string;
+        }
+
+        interface TreeResponse {
+            tree: TreeItem[];
+        }
+
+        const data = response.json as TreeResponse;
+        const allFiles = data.tree
+            .filter(item => item.type === 'blob' && item.path.endsWith('.md'))
+            .map(item => item.path);
+
+        // Filter by rootPath if set
+        if (this.rootPath) {
+            const prefix = this.rootPath + '/';
+            return allFiles
+                .filter(file => file.startsWith(prefix))
+                .map(file => file.substring(prefix.length));
+        }
+
+        return allFiles;
+    }
+
+    async deleteFile(path: string, branch: string, commitMessage: string): Promise<void> {
+        const url = this.getApiUrl(path);
+
+        // Get current file SHA
+        const fileInfo = await this.getFile(path, branch);
+        if (!fileInfo.sha) {
+            throw new Error(`File not found: ${path}`);
+        }
+
+        const response = await this.safeRequest({
+            url,
+            method: 'DELETE',
+            headers: {
+                'Authorization': `token ${this.token}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                message: commitMessage,
+                sha: fileInfo.sha,
+                branch
+            })
+        });
+
+        if (response.status !== 200 && response.status !== 204) {
+            const errorBody = response.text || JSON.stringify(response.json);
+            throw new Error(`Failed to delete file: ${response.status} DELETE ${url}. Response: ${errorBody}`);
         }
     }
 }

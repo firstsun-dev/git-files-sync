@@ -1,14 +1,14 @@
 import { App, Modal, Setting, TFile } from 'obsidian';
 
 export class SyncConflictModal extends Modal {
-    private file: TFile;
+    private fileName: string;
     private localContent: string;
     private remoteContent: string;
     private onChoose: (choice: 'local' | 'remote') => void;
 
-    constructor(app: App, file: TFile, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
+    constructor(app: App, fileName: string, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
         super(app);
-        this.file = file;
+        this.fileName = fileName;
         this.localContent = local;
         this.remoteContent = remote;
         this.onChoose = onChoose;
@@ -18,7 +18,7 @@ export class SyncConflictModal extends Modal {
         const { contentEl } = this;
         contentEl.addClass('sync-conflict-modal');
 
-        contentEl.createEl('h2', { text: `Conflict in ${this.file.name}` });
+        contentEl.createEl('h2', { text: `Conflict in ${this.fileName}` });
         contentEl.createEl('p', {
             text: 'The remote file has different content. Review the differences and choose which version to keep.',
             cls: 'conflict-description'
