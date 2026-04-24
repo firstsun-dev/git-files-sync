@@ -479,3 +479,32 @@ If your plugin does not need CSS, delete this file.
     gap: 10px;
 }
 
+/* GitHub style diff viewer */
+.diff-line {
+    display: block;
+    padding: 0 4px;
+    font-family: var(--font-monospace);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.diff-line.added {
+    background-color: rgba(46, 160, 67, 0.2);
+    color: var(--text-normal);
+}
+
+.diff-line.removed {
+    background-color: rgba(248, 81, 73, 0.2);
+    color: var(--text-normal);
+}
+
+.diff-line.unchanged {
+    color: var(--text-muted);
+}
+
+.diff-line.header {
+    color: var(--text-accent);
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+

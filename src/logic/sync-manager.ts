@@ -213,8 +213,8 @@ export class SyncManager {
     private async performPull(file: TFile | {path: string, name: string}, remoteContent: string, remoteSha: string) {
         const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
         
-        if (file instanceof TFile || ('vault' in file)) {
-            await this.app.vault.modify(file as TFile, remoteContent);
+        if (file instanceof TFile) {
+            await this.app.vault.modify(file, remoteContent);
         } else {
             await this.app.vault.adapter.write(file.path, remoteContent);
         }

@@ -5,11 +5,13 @@ import { GitHubService } from './services/github-service';
 import { GitServiceInterface } from './services/git-service-interface';
 import { SyncManager } from './logic/sync-manager';
 import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
+import { GitignoreManager } from './logic/gitignore-manager';
 
 export default class GitLabFilesPush extends Plugin {
 	settings: GitLabFilesPushSettings;
 	gitService: GitServiceInterface;
 	sync: SyncManager;
+	gitignoreManager: GitignoreManager;
 
 	async onload() {
 		await this.loadSettings();
@@ -33,6 +35,7 @@ export default class GitLabFilesPush extends Plugin {
 		});
 
 		this.initializeGitService();
+		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch);
 		this.sync = new SyncManager(this.app, this.gitService, this.settings);
 
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
@@ -134,8 +137,12 @@ export default class GitLabFilesPush extends Plugin {
 
 	async pushAllFiles(): Promise<void> {
 		const allFiles = this.app.vault.getFiles();
-		const files = this.filterFilesByVaultFolder(allFiles);
+		let files = this.filterFilesByVaultFolder(allFiles);
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+
+		const remoteFiles = await this.gitService.listFiles(this.settings.branch);
+		await this.gitignoreManager.loadGitignores(remoteFiles);
+		files = files.filter(f => !this.gitignoreManager.isIgnored(f.path));
 
 		if (files.length === 0) {
 			new Notice('No files to push in the configured vault folder');
@@ -166,8 +173,12 @@ export default class GitLabFilesPush extends Plugin {
 
 	async pullAllFiles(): Promise<void> {
 		const allFiles = this.app.vault.getFiles();
-		const files = this.filterFilesByVaultFolder(allFiles);
+		let files = this.filterFilesByVaultFolder(allFiles);
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+
+		const remoteFiles = await this.gitService.listFiles(this.settings.branch);
+		await this.gitignoreManager.loadGitignores(remoteFiles);
+		files = files.filter(f => !this.gitignoreManager.isIgnored(f.path));
 
 		if (files.length === 0) {
 			new Notice('No files to pull in the configured vault folder');

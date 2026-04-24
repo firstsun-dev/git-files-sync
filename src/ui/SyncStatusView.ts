@@ -385,7 +385,17 @@ export class SyncStatusView extends ItemView {
             diffContainer.addClass('hidden');
 
             const diffPre = diffContainer.createEl('pre');
-            diffPre.createEl('code', { text: fileStatus.diff });
+            
+            const diffLines = fileStatus.diff.split('\n');
+            for (const line of diffLines) {
+                let type: 'header' | 'added' | 'removed' | 'unchanged' = 'unchanged';
+                if (line.startsWith('---') || line.startsWith('+++')) type = 'header';
+                else if (line.startsWith('+ ')) type = 'added';
+                else if (line.startsWith('- ')) type = 'removed';
+                
+                const lineEl = diffPre.createSpan({ cls: `diff-line ${type}` });
+                lineEl.textContent = line + '\n';
+            }
 
             diffToggle.addEventListener('click', () => {
                 if (diffContainer.hasClass('hidden')) {
@@ -473,10 +483,16 @@ export class SyncStatusView extends ItemView {
 
         try {
             const allFiles = this.app.vault.getFiles();
-            const files = this.plugin.filterFilesByVaultFolder(allFiles);
+            let files = this.plugin.filterFilesByVaultFolder(allFiles);
 
             // Get remote files
-            const remoteFiles = await this.plugin.gitService.listFiles(this.plugin.settings.branch);
+            let remoteFiles = await this.plugin.gitService.listFiles(this.plugin.settings.branch);
+
+            // Load .gitignore rules based on remote files, then filter out ignored paths
+            await this.plugin.gitignoreManager.loadGitignores(remoteFiles);
+            remoteFiles = remoteFiles.filter(path => !this.plugin.gitignoreManager.isIgnored(path));
+            files = files.filter(f => !this.plugin.gitignoreManager.isIgnored(f.path));
+
             const localFilePaths = new Set(files.map(f => f.path));
             // Use ALL local files (not just vaultFolder-filtered) for remote-only detection,
             // so files like .claude/skills/*.md that live outside vaultFolder are not
@@ -530,7 +546,13 @@ export class SyncStatusView extends ItemView {
             this.renderView();
 
             // Check status for local files with progress
-            const filesToCheck: Array<TFile | string> = [...files, ...extraFilesToCheck];
+            let filesToCheck: Array<TFile | string> = [...files, ...extraFilesToCheck];
+            
+            // Final filter for extra files to check (some might be ignored)
+            filesToCheck = filesToCheck.filter(f => {
+                const path = typeof f === 'string' ? f : f.path;
+                return !this.plugin.gitignoreManager.isIgnored(path);
+            });
             const totalFiles = filesToCheck.length;
             let checkedFiles = 0;
 
@@ -567,9 +589,9 @@ export class SyncStatusView extends ItemView {
             const path = isString ? fileOrPath : fileOrPath.path;
             const file = isString ? undefined : fileOrPath;
 
-            const localContent = isString 
-                ? await this.app.vault.adapter.read(path) 
-                : await this.app.vault.read(file as TFile);
+            const localContent = typeof fileOrPath === 'string'
+                ? await this.app.vault.adapter.read(fileOrPath) 
+                : await this.app.vault.read(fileOrPath);
             
             const remote = await this.plugin.gitService.getFile(path, this.plugin.settings.branch);
 
