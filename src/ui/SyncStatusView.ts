@@ -267,45 +267,49 @@ export class SyncStatusView extends ItemView {
             const pushBtn = actionsEl.createEl('button', { text: 'Push to remote' });
             const removeBtn = actionsEl.createEl('button', { text: 'Remove local file', cls: 'remove-btn' });
 
-            pushBtn.addEventListener('click', async () => {
-                try {
-                    // Mark as checking
-                    fileStatus.status = 'checking';
-                    this.renderView();
-
-                    await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
-
-                    // Wait a bit for the remote to update
-                    await new Promise(resolve => setTimeout(resolve, 500));
-
-                    await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                    this.renderView();
-                } catch (e) {
-                    console.error(e);
-                    new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
-                    // Refresh to show current state
-                    await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                    this.renderView();
-                }
-            });
-
-            removeBtn.addEventListener('click', async () => {
-                const confirmed = await this.showConfirmDialog(`Delete local file "${fileStatus.path}"?`);
-                if (confirmed) {
+            pushBtn.addEventListener('click', () => {
+                void (async () => {
                     try {
-                        if (fileStatus.file) {
-                            await this.app.vault.delete(fileStatus.file);
-                        } else {
-                            await this.app.vault.adapter.remove(fileStatus.path);
-                        }
-                        new Notice(`Deleted ${fileStatus.path}`);
-                        this.fileStatuses.delete(fileStatus.path);
+                        // Mark as checking
+                        fileStatus.status = 'checking';
+                        this.renderView();
+
+                        await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
+
+                        // Wait a bit for the remote to update
+                        await new Promise(resolve => setTimeout(resolve, 500));
+
+                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
                         this.renderView();
                     } catch (e) {
                         console.error(e);
-                        new Notice(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
+                        new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
+                        // Refresh to show current state
+                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+                        this.renderView();
                     }
-                }
+                })();
+            });
+
+            removeBtn.addEventListener('click', () => {
+                void (async () => {
+                    const confirmed = await this.showConfirmDialog(`Delete local file "${fileStatus.path}"?`);
+                    if (confirmed) {
+                        try {
+                            if (fileStatus.file) {
+                                await this.app.fileManager.trashFile(fileStatus.file);
+                            } else {
+                                await this.app.vault.adapter.remove(fileStatus.path);
+                            }
+                            new Notice(`Deleted ${fileStatus.path}`);
+                            this.fileStatuses.delete(fileStatus.path);
+                            this.renderView();
+                        } catch (e) {
+                            console.error(e);
+                            new Notice(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
+                        }
+                    }
+                })();
             });
         }
 
@@ -313,65 +317,59 @@ export class SyncStatusView extends ItemView {
             const actionsEl = fileEl.createDiv({ cls: 'sync-status-actions' });
             const pullBtn = actionsEl.createEl('button', { text: 'Pull from remote' });
 
-            pullBtn.addEventListener('click', async () => {
-                try {
-                    // Mark as checking
-                    fileStatus.status = 'checking';
-                    this.renderView();
+            pullBtn.addEventListener('click', () => {
+                void (async () => {
+                    try {
+                        // Mark as checking
+                        fileStatus.status = 'checking';
+                        this.renderView();
 
-                    console.log('Pulling remote-only file:', fileStatus.path);
-                    const remote = await this.plugin.gitService.getFile(fileStatus.path, this.plugin.settings.branch);
-                    console.log('Got remote file, content length:', remote.content.length, 'sha:', remote.sha);
+                        const remote = await this.plugin.gitService.getFile(fileStatus.path, this.plugin.settings.branch);
 
-                    if (remote.content) {
-                        console.log('Creating file at path:', fileStatus.path);
-
-                        // Ensure parent directories exist (recursively)
-                        const pathParts = fileStatus.path.split('/');
-                        if (pathParts.length > 1) {
-                            let currentPath = '';
-                            for (let i = 0; i < pathParts.length - 1; i++) {
-                                currentPath += (i > 0 ? '/' : '') + pathParts[i];
-                                const dir = this.app.vault.getAbstractFileByPath(currentPath);
-                                if (!dir) {
-                                    console.log('Creating directory:', currentPath);
-                                    try {
-                                        await this.app.vault.createFolder(currentPath);
-                                    } catch (e) {
-                                        // Folder might already exist, ignore error
-                                        console.log('Folder creation error (might already exist):', e);
+                        if (remote.content) {
+                            // Ensure parent directories exist (recursively)
+                            const pathParts = fileStatus.path.split('/');
+                            if (pathParts.length > 1) {
+                                let currentPath = '';
+                                for (let i = 0; i < pathParts.length - 1; i++) {
+                                    currentPath += (i > 0 ? '/' : '') + pathParts[i];
+                                    const dir = this.app.vault.getAbstractFileByPath(currentPath);
+                                    if (!dir) {
+                                        try {
+                                            await this.app.vault.createFolder(currentPath);
+                                        } catch {
+                                            // Folder might already exist, ignore error
+                                        }
                                     }
                                 }
                             }
+
+                            // Use adapter to support hidden files
+                            await this.app.vault.adapter.write(fileStatus.path, remote.content);
+
+                            // Update sync metadata
+                            this.plugin.settings.syncMetadata[fileStatus.path] = {
+                                lastSyncedSha: remote.sha,
+                                lastSyncedAt: Date.now(),
+                                lastKnownPath: fileStatus.path
+                            };
+                            await this.plugin.saveSettings();
+
+                            new Notice(`Pulled ${fileStatus.path}`);
+
+                            // Wait for file to be created and vault to update
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+
+                            // Force refresh all statuses to pick up the new file
+                            await this.refreshAllStatuses();
                         }
-
-                        await this.app.vault.create(fileStatus.path, remote.content);
-                        console.log('File created successfully');
-
-                        // Update sync metadata
-                        this.plugin.settings.syncMetadata[fileStatus.path] = {
-                            lastSyncedSha: remote.sha,
-                            lastSyncedAt: Date.now(),
-                            lastKnownPath: fileStatus.path
-                        };
-                        await this.plugin.saveSettings();
-                        console.log('Metadata saved');
-
-                        new Notice(`Pulled ${fileStatus.path}`);
-
-                        // Wait for file to be created and vault to update
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-
-                        // Force refresh all statuses to pick up the new file
-                        console.log('Refreshing all statuses after pull');
+                    } catch (e) {
+                        console.error(e);
+                        new Notice(`Failed to pull: ${e instanceof Error ? e.message : String(e)}`);
+                        // Refresh to show current state
                         await this.refreshAllStatuses();
                     }
-                } catch (e) {
-                    console.error(e);
-                    new Notice(`Failed to pull: ${e instanceof Error ? e.message : String(e)}`);
-                    // Refresh to show current state
-                    await this.refreshAllStatuses();
-                }
+                })();
             });
         }
 
@@ -411,48 +409,52 @@ export class SyncStatusView extends ItemView {
             const pushBtn = actionsEl.createEl('button', { text: 'Push' });
             const pullBtn = actionsEl.createEl('button', { text: 'Pull' });
 
-            pushBtn.addEventListener('click', async () => {
-                try {
-                    // Mark as checking
-                    fileStatus.status = 'checking';
-                    this.renderView();
+            pushBtn.addEventListener('click', () => {
+                void (async () => {
+                    try {
+                        // Mark as checking
+                        fileStatus.status = 'checking';
+                        this.renderView();
 
-                    await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
+                        await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
 
-                    // Wait a bit for the remote to update
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                        // Wait a bit for the remote to update
+                        await new Promise(resolve => setTimeout(resolve, 500));
 
-                    await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                    this.renderView();
-                } catch (e) {
-                    console.error(e);
-                    new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
-                    // Refresh to show current state
-                    await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                    this.renderView();
-                }
+                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+                        this.renderView();
+                    } catch (e) {
+                        console.error(e);
+                        new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
+                        // Refresh to show current state
+                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+                        this.renderView();
+                    }
+                })();
             });
 
-            pullBtn.addEventListener('click', async () => {
-                try {
-                    // Mark as checking
-                    fileStatus.status = 'checking';
-                    this.renderView();
+            pullBtn.addEventListener('click', () => {
+                void (async () => {
+                    try {
+                        // Mark as checking
+                        fileStatus.status = 'checking';
+                        this.renderView();
 
-                    await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
+                        await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
 
-                    // Wait a bit for the file to be written
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                        // Wait a bit for the file to be written
+                        await new Promise(resolve => setTimeout(resolve, 500));
 
-                    await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                    this.renderView();
-                } catch (e) {
-                    console.error(e);
-                    new Notice(`Pull failed: ${e instanceof Error ? e.message : String(e)}`);
-                    // Refresh to show current state
-                    await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                    this.renderView();
-                }
+                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+                        this.renderView();
+                    } catch (e) {
+                        console.error(e);
+                        new Notice(`Pull failed: ${e instanceof Error ? e.message : String(e)}`);
+                        // Refresh to show current state
+                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+                        this.renderView();
+                    }
+                })();
             });
         }
     }
@@ -477,7 +479,7 @@ export class SyncStatusView extends ItemView {
                 progressContainer.createEl('div', { text: 'Checking files...', cls: 'sync-progress-text' });
                 const progressBar = progressContainer.createDiv({ cls: 'sync-progress-bar' });
                 const progressFill = progressBar.createDiv({ cls: 'sync-progress-fill' });
-                progressFill.style.width = '0%';
+                progressFill.setAttr('style', 'width: 0%');
             }
         }
 
@@ -489,7 +491,7 @@ export class SyncStatusView extends ItemView {
             let remoteFiles = await this.plugin.gitService.listFiles(this.plugin.settings.branch);
 
             // Load .gitignore rules based on remote files, then filter out ignored paths
-            await this.plugin.gitignoreManager.loadGitignores(remoteFiles);
+            await this.plugin.gitignoreManager.loadGitignores();
             remoteFiles = remoteFiles.filter(path => !this.plugin.gitignoreManager.isIgnored(path));
             files = files.filter(f => !this.plugin.gitignoreManager.isIgnored(f.path));
 
@@ -826,7 +828,7 @@ export class SyncStatusView extends ItemView {
                                     if (!dir) {
                                         try {
                                             await this.app.vault.createFolder(currentPath);
-                                        } catch (e) {
+                                        } catch {
                                             // Folder might already exist, ignore error
                                         }
                                     }
@@ -918,7 +920,7 @@ export class SyncStatusView extends ItemView {
 
                 try {
                     if (status.file) {
-                        await this.app.vault.delete(status.file);
+                        await this.app.fileManager.trashFile(status.file);
                     } else {
                         await this.app.vault.adapter.remove(status.path);
                     }

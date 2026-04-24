@@ -1,4 +1,4 @@
-import { App, Modal, Setting, TFile } from 'obsidian';
+import { App, Modal, Setting } from 'obsidian';
 
 export class SyncConflictModal extends Modal {
     private fileName: string;

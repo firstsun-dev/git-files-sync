@@ -35,7 +35,7 @@ export default class GitLabFilesPush extends Plugin {
 		});
 
 		this.initializeGitService();
-		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch);
+		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath);
 		this.sync = new SyncManager(this.app, this.gitService, this.settings);
 
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
@@ -140,8 +140,8 @@ export default class GitLabFilesPush extends Plugin {
 		let files = this.filterFilesByVaultFolder(allFiles);
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
-		const remoteFiles = await this.gitService.listFiles(this.settings.branch);
-		await this.gitignoreManager.loadGitignores(remoteFiles);
+		await this.gitService.listFiles(this.settings.branch);
+		await this.gitignoreManager.loadGitignores();
 		files = files.filter(f => !this.gitignoreManager.isIgnored(f.path));
 
 		if (files.length === 0) {
@@ -176,8 +176,8 @@ export default class GitLabFilesPush extends Plugin {
 		let files = this.filterFilesByVaultFolder(allFiles);
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
-		const remoteFiles = await this.gitService.listFiles(this.settings.branch);
-		await this.gitignoreManager.loadGitignores(remoteFiles);
+		await this.gitService.listFiles(this.settings.branch);
+		await this.gitignoreManager.loadGitignores();
 		files = files.filter(f => !this.gitignoreManager.isIgnored(f.path));
 
 		if (files.length === 0) {

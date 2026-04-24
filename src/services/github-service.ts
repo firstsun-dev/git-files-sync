@@ -36,7 +36,9 @@ export class GitHubService implements GitServiceInterface {
     }
 
     private getApiUrl(path: string): string {
-        const fullPath = this.rootPath ? `${this.rootPath}/${path}` : path;
+        const isAbsolute = path.startsWith('/');
+        const cleanPath = path.replace(/^\//, '');
+        const fullPath = (this.rootPath && !isAbsolute) ? `${this.rootPath}/${cleanPath}` : cleanPath;
         return `https://api.github.com/repos/${this.owner}/${this.repo}/contents/${fullPath}`;
     }
 
@@ -173,7 +175,6 @@ export class GitHubService implements GitServiceInterface {
     }
 
     async listFiles(branch: string, path: string = ''): Promise<string[]> {
-        const searchPath = this.rootPath ? (path ? `${this.rootPath}/${path}` : this.rootPath) : path;
         const url = `https://api.github.com/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
 
         const response = await this.safeRequest({
@@ -201,7 +202,7 @@ export class GitHubService implements GitServiceInterface {
 
         const data = response.json as TreeResponse;
         const allFiles = data.tree
-            .filter(item => item.type === 'blob' && item.path.endsWith('.md'))
+            .filter(item => item.type === 'blob')
             .map(item => item.path);
 
         // Filter by rootPath if set
@@ -243,5 +244,35 @@ export class GitHubService implements GitServiceInterface {
             const errorBody = response.text || JSON.stringify(response.json);
             throw new Error(`Failed to delete file: ${response.status} DELETE ${url}. Response: ${errorBody}`);
         }
+    }
+
+    async getRepoGitignores(branch: string): Promise<string[]> {
+        const url = `https://api.github.com/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
+        const response = await this.safeRequest({
+            url,
+            method: 'GET',
+            headers: {
+                'Authorization': `token ${this.token}`,
+                'Accept': 'application/vnd.github.v3+json'
+            }
+        });
+
+        if (response.status !== 200) {
+            return [];
+        }
+
+        interface TreeItem {
+            path: string;
+            type: string;
+        }
+
+        interface TreeResponse {
+            tree: TreeItem[];
+        }
+
+        const data = response.json as TreeResponse;
+        return data.tree
+            .filter(item => item.type === 'blob' && item.path.endsWith('.gitignore'))
+            .map(item => item.path);
     }
 }

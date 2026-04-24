@@ -36,7 +36,9 @@ export class GitLabService implements GitServiceInterface {
     }
 
     private getApiUrl(path: string): string {
-        const fullPath = this.rootPath ? `${this.rootPath}/${path}` : path;
+        const isAbsolute = path.startsWith('/');
+        const cleanPath = path.replace(/^\//, '');
+        const fullPath = (this.rootPath && !isAbsolute) ? `${this.rootPath}/${cleanPath}` : cleanPath;
         const encodedPath = encodeURIComponent(fullPath);
         const encodedProjectId = encodeURIComponent(this.projectId);
         return `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/files/${encodedPath}`;
@@ -185,7 +187,7 @@ export class GitLabService implements GitServiceInterface {
 
         const data = response.json as TreeItem[];
         const allFiles = data
-            .filter(item => item.type === 'blob' && item.path.endsWith('.md'))
+            .filter(item => item.type === 'blob')
             .map(item => item.path);
 
         // Filter by rootPath if set
@@ -219,5 +221,32 @@ export class GitLabService implements GitServiceInterface {
             const errorBody = response.text || JSON.stringify(response.json);
             throw new Error(`Failed to delete file: ${response.status} DELETE ${url}. Response: ${errorBody}`);
         }
+    }
+
+    async getRepoGitignores(branch: string): Promise<string[]> {
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/tree?ref=${branch}&recursive=true&per_page=100`;
+
+        const response = await this.safeRequest({
+            url,
+            method: 'GET',
+            headers: {
+                'PRIVATE-TOKEN': this.token
+            }
+        });
+
+        if (response.status !== 200) {
+            return [];
+        }
+
+        interface TreeItem {
+            path: string;
+            type: string;
+        }
+
+        const data = response.json as TreeItem[];
+        return data
+            .filter(item => item.type === 'blob' && item.path.endsWith('.gitignore'))
+            .map(item => item.path);
     }
 }

@@ -5,4 +5,5 @@ export interface GitServiceInterface {
     testConnection(): Promise<void>;
     listFiles(branch: string, path?: string): Promise<string[]>;
     deleteFile(path: string, branch: string, commitMessage: string): Promise<void>;
+    getRepoGitignores(branch: string): Promise<string[]>;
 }
