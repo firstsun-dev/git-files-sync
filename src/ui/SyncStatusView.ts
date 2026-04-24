@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, Notice } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
@@ -13,212 +13,214 @@ interface FileStatus {
     diff?: string;
 }
 
+interface DiffSide {
+    lineNum: number | null;
+    content: string | null;
+    type: 'removed' | 'added' | 'unchanged' | 'empty';
+}
+
+interface DiffRow {
+    left: DiffSide;
+    right: DiffSide;
+}
+
+type FilterValue = 'all' | 'synced' | 'modified' | 'unsynced' | 'remote-only';
+
 export class SyncStatusView extends ItemView {
     plugin: GitLabFilesPush;
     private fileStatuses: Map<string, FileStatus> = new Map();
     private isRefreshing = false;
-    private statusFilter: 'all' | 'synced' | 'modified' | 'unsynced' | 'remote-only' = 'all';
+    private statusFilter: FilterValue = 'all';
     private selectedFiles: Set<string> = new Set();
     private lastSyncTime: number = 0;
-    private previousFilter: typeof this.statusFilter = 'all';
 
     constructor(leaf: WorkspaceLeaf, plugin: GitLabFilesPush) {
         super(leaf);
         this.plugin = plugin;
     }
 
-    getViewType(): string {
-        return SYNC_STATUS_VIEW_TYPE;
-    }
-
-    getDisplayText(): string {
-        return 'Sync status';
-    }
-
-    getIcon(): string {
-        return 'git-compare';
-    }
+    getViewType(): string { return SYNC_STATUS_VIEW_TYPE; }
+    getDisplayText(): string { return 'Sync status'; }
+    getIcon(): string { return 'git-compare'; }
 
     async onOpen(): Promise<void> {
         const container = this.containerEl.children[1];
         if (!container) return;
         container.empty();
         container.addClass('sync-status-view');
-
         this.renderView();
     }
 
     private renderView(): void {
-        const container = this.containerEl.children[1];
+        const container = this.containerEl.children[1] as HTMLElement;
         if (!container) return;
         container.empty();
 
-        const headerEl = container.createDiv({ cls: 'sync-status-header' });
-        headerEl.createEl('h4', { text: 'Repository sync status' });
+        this.renderInfoStrip(container);
+        this.renderTabs(container);
+        this.renderActionBar(container);
 
+        const listEl = container.createDiv({ cls: 'ssv-list' });
+        if (this.fileStatuses.size === 0) {
+            listEl.createDiv({ cls: 'ssv-empty', text: 'Click "Refresh" to check sync status' });
+        } else {
+            this.renderFileList(listEl);
+        }
+    }
+
+    private renderInfoStrip(container: HTMLElement): void {
+        const el = container.createDiv({ cls: 'ssv-info' });
         const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-        const serviceInfo = container.createDiv({ cls: 'sync-status-info' });
-        serviceInfo.createEl('div', { text: `Service: ${serviceName}` });
-        serviceInfo.createEl('div', { text: `Branch: ${this.plugin.settings.branch}` });
+
+        el.createSpan({ cls: 'ssv-info-item', text: serviceName });
+
+        if (!Platform.isMobile) {
+            el.createSpan({ cls: 'ssv-info-sep', text: '·' });
+            const branchEl = el.createSpan({ cls: 'ssv-info-item' });
+            branchEl.textContent = `⎇ ${this.plugin.settings.branch}`;
+        }
+
         if (this.plugin.settings.vaultFolder) {
-            serviceInfo.createEl('div', { text: `Vault Folder: ${this.plugin.settings.vaultFolder}` });
+            el.createSpan({ cls: 'ssv-info-sep', text: '·' });
+            el.createSpan({ cls: 'ssv-info-item', text: `📁 ${this.plugin.settings.vaultFolder}` });
         }
+
         if (this.lastSyncTime > 0) {
-            const lastSyncDate = new Date(this.lastSyncTime);
-            const timeStr = lastSyncDate.toLocaleString();
-            serviceInfo.createEl('div', { text: `Last sync: ${timeStr}` });
+            el.createSpan({ cls: 'ssv-info-sep', text: '·' });
+            el.createSpan({
+                cls: 'ssv-info-time',
+                text: Platform.isMobile ? new Date(this.lastSyncTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : `Last sync: ${new Date(this.lastSyncTime).toLocaleTimeString()}`
+            });
         }
+    }
 
-        const buttonContainer = container.createDiv({ cls: 'sync-status-buttons' });
+    private renderTabs(container: HTMLElement): void {
+        const all = Array.from(this.fileStatuses.values());
+        const counts: Record<FilterValue, number> = {
+            all: all.length,
+            synced: all.filter(s => s.status === 'synced').length,
+            modified: all.filter(s => s.status === 'modified').length,
+            unsynced: all.filter(s => s.status === 'unsynced').length,
+            'remote-only': all.filter(s => s.status === 'remote-only').length,
+        };
 
-        // Refresh button
-        const refreshBtn = buttonContainer.createEl('button', { text: 'Refresh status', cls: 'refresh-btn' });
-        refreshBtn.addEventListener('click', () => {
-            void this.refreshAllStatuses();
-        });
-
-        // Selection buttons container
-        const selectionContainer = container.createDiv({ cls: 'sync-selection-buttons' });
-
-        const selectAllBtn = selectionContainer.createEl('button', { text: 'Select all' });
-        selectAllBtn.addEventListener('click', () => {
-            const visibleStatuses = this.statusFilter === 'all'
-                ? Array.from(this.fileStatuses.values())
-                : Array.from(this.fileStatuses.values()).filter(s => s.status === this.statusFilter);
-
-            for (const status of visibleStatuses) {
-                this.selectedFiles.add(status.path);
-            }
-            this.renderView();
-        });
-
-        const deselectAllBtn = selectionContainer.createEl('button', { text: 'Deselect all' });
-        deselectAllBtn.addEventListener('click', () => {
-            this.selectedFiles.clear();
-            this.renderView();
-        });
-
-        // Repository operation buttons container
-        const repoContainer = container.createDiv({ cls: 'sync-repo-buttons' });
-
-        // Calculate counts for each operation
-        const selectedStatuses = Array.from(this.selectedFiles)
-            .map(path => this.fileStatuses.get(path))
-            .filter(s => s) as FileStatus[];
-
-        const canPush = selectedStatuses.filter(s => s.file && (s.status === 'modified' || s.status === 'unsynced')).length;
-        const canPull = selectedStatuses.filter(s => s.status === 'modified' || s.status === 'remote-only').length;
-        const canDelete = selectedStatuses.filter(s => s.file || s.status === 'remote-only').length;
-
-        const pushSelectedBtn = repoContainer.createEl('button', {
-            text: `Push selected (${canPush})`,
-            cls: 'push-all-btn'
-        });
-        pushSelectedBtn.disabled = canPush === 0;
-        pushSelectedBtn.addEventListener('click', () => {
-            void this.pushSelected();
-        });
-
-        const pullSelectedBtn = repoContainer.createEl('button', {
-            text: `Pull selected (${canPull})`,
-            cls: 'pull-all-btn'
-        });
-        pullSelectedBtn.disabled = canPull === 0;
-        pullSelectedBtn.addEventListener('click', () => {
-            void this.pullSelected();
-        });
-
-        const deleteSelectedBtn = repoContainer.createEl('button', {
-            text: `Delete selected (${canDelete})`,
-            cls: 'delete-btn'
-        });
-        deleteSelectedBtn.disabled = canDelete === 0;
-        deleteSelectedBtn.addEventListener('click', () => {
-            void this.deleteSelected();
-        });
-
-        // Filter buttons
-        const filterContainer = container.createDiv({ cls: 'sync-status-filters' });
-        filterContainer.createEl('span', { text: 'Show: ' });
-
-        type FilterValue = 'all' | 'synced' | 'modified' | 'unsynced' | 'remote-only';
-        const filters: Array<{ value: FilterValue; label: string }> = [
-            { value: 'all', label: 'All' },
-            { value: 'synced', label: 'Synced' },
-            { value: 'modified', label: 'Modified' },
-            { value: 'unsynced', label: 'Not in remote' },
-            { value: 'remote-only', label: 'Remote only' }
+        const tabs: Array<{ value: FilterValue; label: string; icon: string }> = [
+            { value: 'all',         label: 'All',        icon: '' },
+            { value: 'synced',      label: 'Synced',     icon: '✓' },
+            { value: 'modified',    label: 'Changed',    icon: '⚠' },
+            { value: 'unsynced',    label: 'Local only', icon: '↑' },
+            { value: 'remote-only', label: 'Remote',     icon: '↓' },
         ];
 
-        for (const filter of filters) {
-            const btn = filterContainer.createEl('button', {
-                text: filter.label,
-                cls: this.statusFilter === filter.value ? 'filter-active' : ''
+        const tabsEl = container.createDiv({ cls: 'ssv-tabs' });
+        for (const tab of tabs) {
+            const btn = tabsEl.createEl('button', {
+                cls: `ssv-tab${this.statusFilter === tab.value ? ' active' : ''}`
             });
+            if (tab.icon) btn.createSpan({ text: tab.icon });
+            btn.createSpan({ cls: 'ssv-tab-label', text: ` ${tab.label}` });
+            const count = counts[tab.value];
+            if (tab.value === 'all' || count > 0) {
+                btn.createSpan({ cls: 'ssv-tab-count', text: String(count) });
+            }
+            setTooltip(btn, tab.label);
             btn.addEventListener('click', () => {
-                // Clear selections when switching filter
-                if (this.statusFilter !== filter.value) {
-                    this.selectedFiles.clear();
-                }
-                this.statusFilter = filter.value;
+                if (this.statusFilter !== tab.value) this.selectedFiles.clear();
+                this.statusFilter = tab.value;
                 this.renderView();
             });
         }
+    }
 
-        const statusContainer = container.createDiv({ cls: 'sync-status-list' });
+    private renderActionBar(container: HTMLElement): void {
+        const all = Array.from(this.fileStatuses.values());
+        const visible = this.statusFilter === 'all'
+            ? all
+            : all.filter(s => s.status === this.statusFilter);
 
-        if (this.fileStatuses.size === 0) {
-            statusContainer.createEl('div', {
-                text: 'Click "Refresh status" to check all files',
-                cls: 'sync-status-empty'
+        const selected = Array.from(this.selectedFiles)
+            .map(p => this.fileStatuses.get(p))
+            .filter(Boolean) as FileStatus[];
+
+        const canPush   = selected.filter(s => s.file && (s.status === 'modified' || s.status === 'unsynced')).length;
+        const canPull   = selected.filter(s => s.status === 'modified' || s.status === 'remote-only').length;
+        const canDelete = selected.filter(s => s.file || s.status === 'remote-only').length;
+
+        const allSelected = visible.length > 0 && visible.every(s => this.selectedFiles.has(s.path));
+
+        const bar = container.createDiv({ cls: 'ssv-action-bar' });
+
+        const refreshBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-refresh' });
+        refreshBtn.createSpan({ text: '↻' });
+        refreshBtn.createSpan({ cls: 'ssv-btn-label', text: ' Refresh' });
+        setTooltip(refreshBtn, 'Refresh all statuses');
+        refreshBtn.addEventListener('click', () => void this.refreshAllStatuses());
+
+        if (this.fileStatuses.size > 0) {
+            bar.createDiv({ cls: 'ssv-bar-spacer' });
+
+            const selectRow = bar.createDiv({ cls: 'ssv-select-row' });
+            const cb = selectRow.createEl('input', { type: 'checkbox' });
+            cb.checked = allSelected;
+            cb.indeterminate = this.selectedFiles.size > 0 && !allSelected;
+            selectRow.createSpan({ cls: 'ssv-select-label', text: 'Select' });
+            cb.addEventListener('change', () => {
+                if (cb.checked) {
+                    for (const s of visible) this.selectedFiles.add(s.path);
+                } else {
+                    this.selectedFiles.clear();
+                }
+                this.renderView();
             });
-        } else {
-            this.renderFileStatuses(statusContainer);
+
+            const pushBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-push' });
+            pushBtn.createSpan({ text: '↑' });
+            pushBtn.createSpan({ cls: 'ssv-btn-label', text: ` Push (${canPush})` });
+            pushBtn.disabled = canPush === 0;
+            setTooltip(pushBtn, `Push ${canPush} files`);
+            pushBtn.addEventListener('click', () => void this.pushSelected());
+
+            const pullBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-pull' });
+            pullBtn.createSpan({ text: '↓' });
+            pullBtn.createSpan({ cls: 'ssv-btn-label', text: ` Pull (${canPull})` });
+            pullBtn.disabled = canPull === 0;
+            setTooltip(pullBtn, `Pull ${canPull} files`);
+            pullBtn.addEventListener('click', () => void this.pullSelected());
+
+            const delBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-delete' });
+            delBtn.createSpan({ text: '✕' });
+            delBtn.createSpan({ cls: 'ssv-btn-label', text: ` Del (${canDelete})` });
+            delBtn.disabled = canDelete === 0;
+            setTooltip(delBtn, `Delete ${canDelete} files`);
+            delBtn.addEventListener('click', () => void this.deleteSelected());
         }
     }
 
-    private renderFileStatuses(container: HTMLElement): void {
-        const allStatuses = Array.from(this.fileStatuses.values());
-
-        // Apply filter
+    private renderFileList(container: HTMLElement): void {
+        const all = Array.from(this.fileStatuses.values());
         const statuses = this.statusFilter === 'all'
-            ? allStatuses
-            : allStatuses.filter(s => s.status === this.statusFilter);
-
-        const summary = container.createDiv({ cls: 'sync-status-summary' });
-        const synced = allStatuses.filter(s => s.status === 'synced').length;
-        const modified = allStatuses.filter(s => s.status === 'modified').length;
-        const unsynced = allStatuses.filter(s => s.status === 'unsynced').length;
-        const remoteOnly = allStatuses.filter(s => s.status === 'remote-only').length;
-
-        summary.createEl('div', { text: `✓ Synced: ${synced}` });
-        summary.createEl('div', { text: `⚠ Modified: ${modified}` });
-        summary.createEl('div', { text: `✗ Unsynced: ${unsynced}` });
-        summary.createEl('div', { text: `↓ Remote only: ${remoteOnly}` });
+            ? all
+            : all.filter(s => s.status === this.statusFilter);
 
         if (statuses.length === 0) {
-            container.createEl('div', {
-                text: this.statusFilter === 'all' ? 'No files found' : `No ${this.statusFilter} files`,
-                cls: 'sync-status-empty'
-            });
+            container.createDiv({ cls: 'ssv-empty', text: `No ${this.statusFilter} files` });
             return;
         }
-
-        for (const fileStatus of statuses) {
-            this.renderFileStatus(container, fileStatus);
-        }
+        for (const fs of statuses) this.renderFileItem(container, fs);
     }
 
-    private renderFileStatus(container: HTMLElement, fileStatus: FileStatus): void {
-        const fileEl = container.createDiv({ cls: 'sync-status-file' });
+    private renderFileItem(container: HTMLElement, fileStatus: FileStatus): void {
+        const { icon, label, iconCls, badgeCls, fileCls } = this.statusMeta(fileStatus.status);
 
-        const headerEl = fileEl.createDiv({ cls: 'sync-status-file-header' });
+        const fileEl = container.createDiv({ cls: `ssv-file ${fileCls}` });
 
-        // Add checkbox
-        const checkbox = headerEl.createEl('input', { type: 'checkbox' });
-        checkbox.checked = this.selectedFiles.has(fileStatus.path);
-        checkbox.addEventListener('change', () => {
-            if (checkbox.checked) {
+        // ── Main row ──
+        const row = fileEl.createDiv({ cls: 'ssv-file-row' });
+
+        const cb = row.createEl('input', { type: 'checkbox', cls: 'ssv-file-checkbox' });
+        cb.checked = this.selectedFiles.has(fileStatus.path);
+        cb.addEventListener('change', () => {
+            if (cb.checked) {
                 this.selectedFiles.add(fileStatus.path);
             } else {
                 this.selectedFiles.delete(fileStatus.path);
@@ -226,260 +228,282 @@ export class SyncStatusView extends ItemView {
             this.renderView();
         });
 
-        let icon = '○';
-        let statusText = '';
-        let statusClass = '';
+        row.createSpan({ cls: `ssv-file-icon ${iconCls}`, text: icon });
+        row.createSpan({ cls: 'ssv-file-path', text: fileStatus.path });
+        row.createSpan({ cls: `ssv-status-badge ${badgeCls}`, text: label });
 
-        switch (fileStatus.status) {
-            case 'synced':
-                icon = '✓';
-                statusText = 'Synced';
-                statusClass = 'status-synced';
-                break;
-            case 'modified':
-                icon = '⚠';
-                statusText = 'Modified';
-                statusClass = 'status-modified';
-                break;
-            case 'unsynced':
-                icon = '✗';
-                statusText = 'Not in remote';
-                statusClass = 'status-unsynced';
-                break;
-            case 'remote-only':
-                icon = '↓';
-                statusText = 'Remote only';
-                statusClass = 'status-remote-only';
-                break;
-            case 'checking':
-                icon = '⟳';
-                statusText = 'Checking...';
-                statusClass = 'status-checking';
-                break;
+        if (fileStatus.status === 'synced' || fileStatus.status === 'checking') return;
+
+        // ── Action row ──
+        const actions = fileEl.createDiv({ cls: 'ssv-file-actions' });
+
+        // Diff toggle (modified only)
+        if (fileStatus.status === 'modified' && fileStatus.diff) {
+            const diffBtn = actions.createEl('button', { cls: 'ssv-action-btn diff' });
+            diffBtn.createSpan({ text: '≡' });
+            const btnLabel = diffBtn.createSpan({ cls: 'ssv-btn-label', text: ' Diff' });
+            const diffEl = this.renderDiffPanel(fileEl, fileStatus);
+            setTooltip(diffBtn, 'Toggle diff view');
+            diffBtn.addEventListener('click', () => {
+                const open = diffEl.hasClass('visible');
+                diffEl.toggleClass('visible', !open);
+                btnLabel.setText(open ? ' Diff' : ' Hide');
+                const firstChild = diffBtn.firstChild;
+                if (firstChild) firstChild.textContent = open ? '≡' : '▴';
+            });
         }
 
-        headerEl.createSpan({ text: `${icon} `, cls: `status-icon ${statusClass}` });
-        headerEl.createSpan({ text: fileStatus.path, cls: 'file-path' });
-        headerEl.createSpan({ text: ` (${statusText})`, cls: `status-text ${statusClass}` });
+        // Push
+        if ((fileStatus.status === 'modified' || fileStatus.status === 'unsynced') && fileStatus.file) {
+            const pushBtn = actions.createEl('button', { cls: 'ssv-action-btn push' });
+            pushBtn.createSpan({ text: '↑' });
+            pushBtn.createSpan({ cls: 'ssv-btn-label', text: ' Push' });
+            setTooltip(pushBtn, 'Push to remote');
+            pushBtn.addEventListener('click', () => void this.runSingleFile(fileStatus, 'push'));
+        }
 
+        // Pull
+        if (fileStatus.status === 'modified' || fileStatus.status === 'remote-only') {
+            const pullBtn = actions.createEl('button', { cls: 'ssv-action-btn pull' });
+            pullBtn.createSpan({ text: '↓' });
+            pullBtn.createSpan({ cls: 'ssv-btn-label', text: ' Pull' });
+            setTooltip(pullBtn, 'Pull from remote');
+            pullBtn.addEventListener('click', () => void this.runSingleFile(fileStatus, 'pull'));
+        }
+
+        // Remove local
         if (fileStatus.status === 'unsynced' && fileStatus.file) {
-            const actionsEl = fileEl.createDiv({ cls: 'sync-status-actions' });
-            const pushBtn = actionsEl.createEl('button', { text: 'Push to remote' });
-            const removeBtn = actionsEl.createEl('button', { text: 'Remove local file', cls: 'remove-btn' });
-
-            pushBtn.addEventListener('click', () => {
-                void (async () => {
-                    try {
-                        // Mark as checking
-                        fileStatus.status = 'checking';
-                        this.renderView();
-
-                        await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
-
-                        // Wait a bit for the remote to update
-                        await new Promise(resolve => setTimeout(resolve, 500));
-
-                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                        this.renderView();
-                    } catch (e) {
-                        console.error(e);
-                        new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
-                        // Refresh to show current state
-                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                        this.renderView();
-                    }
-                })();
-            });
-
+            const removeBtn = actions.createEl('button', { cls: 'ssv-action-btn danger' });
+            removeBtn.createSpan({ text: '✕' });
+            removeBtn.createSpan({ cls: 'ssv-btn-label', text: ' Remove' });
+            setTooltip(removeBtn, 'Delete local file');
             removeBtn.addEventListener('click', () => {
                 void (async () => {
                     const confirmed = await this.showConfirmDialog(`Delete local file "${fileStatus.path}"?`);
-                    if (confirmed) {
-                        try {
-                            if (fileStatus.file) {
-                                await this.app.fileManager.trashFile(fileStatus.file);
-                            } else {
-                                await this.app.vault.adapter.remove(fileStatus.path);
-                            }
-                            new Notice(`Deleted ${fileStatus.path}`);
-                            this.fileStatuses.delete(fileStatus.path);
-                            this.renderView();
-                        } catch (e) {
-                            console.error(e);
-                            new Notice(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
+                    if (!confirmed) return;
+                    try {
+                        if (fileStatus.file) {
+                            await this.app.fileManager.trashFile(fileStatus.file);
+                        } else {
+                            await this.app.vault.adapter.remove(fileStatus.path);
                         }
-                    }
-                })();
-            });
-        }
-
-        if (fileStatus.status === 'remote-only') {
-            const actionsEl = fileEl.createDiv({ cls: 'sync-status-actions' });
-            const pullBtn = actionsEl.createEl('button', { text: 'Pull from remote' });
-
-            pullBtn.addEventListener('click', () => {
-                void (async () => {
-                    try {
-                        // Mark as checking
-                        fileStatus.status = 'checking';
-                        this.renderView();
-
-                        const remote = await this.plugin.gitService.getFile(fileStatus.path, this.plugin.settings.branch);
-
-                        if (remote.content) {
-                            // Ensure parent directories exist (recursively)
-                            const pathParts = fileStatus.path.split('/');
-                            if (pathParts.length > 1) {
-                                let currentPath = '';
-                                for (let i = 0; i < pathParts.length - 1; i++) {
-                                    currentPath += (i > 0 ? '/' : '') + pathParts[i];
-                                    const dir = this.app.vault.getAbstractFileByPath(currentPath);
-                                    if (!dir) {
-                                        try {
-                                            await this.app.vault.createFolder(currentPath);
-                                        } catch {
-                                            // Folder might already exist, ignore error
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Use adapter to support hidden files
-                            await this.app.vault.adapter.write(fileStatus.path, remote.content);
-
-                            // Update sync metadata
-                            this.plugin.settings.syncMetadata[fileStatus.path] = {
-                                lastSyncedSha: remote.sha,
-                                lastSyncedAt: Date.now(),
-                                lastKnownPath: fileStatus.path
-                            };
-                            await this.plugin.saveSettings();
-
-                            new Notice(`Pulled ${fileStatus.path}`);
-
-                            // Wait for file to be created and vault to update
-                            await new Promise(resolve => setTimeout(resolve, 1000));
-
-                            // Force refresh all statuses to pick up the new file
-                            await this.refreshAllStatuses();
-                        }
-                    } catch (e) {
-                        console.error(e);
-                        new Notice(`Failed to pull: ${e instanceof Error ? e.message : String(e)}`);
-                        // Refresh to show current state
-                        await this.refreshAllStatuses();
-                    }
-                })();
-            });
-        }
-
-        if (fileStatus.status === 'modified' && fileStatus.diff) {
-            const diffToggle = headerEl.createEl('button', {
-                text: 'Show diff',
-                cls: 'diff-toggle'
-            });
-
-            const diffContainer = fileEl.createDiv({ cls: 'sync-status-diff' });
-            diffContainer.addClass('hidden');
-
-            const diffPre = diffContainer.createEl('pre');
-            
-            const diffLines = fileStatus.diff.split('\n');
-            for (const line of diffLines) {
-                let type: 'header' | 'added' | 'removed' | 'unchanged' = 'unchanged';
-                if (line.startsWith('---') || line.startsWith('+++')) type = 'header';
-                else if (line.startsWith('+ ')) type = 'added';
-                else if (line.startsWith('- ')) type = 'removed';
-                
-                const lineEl = diffPre.createSpan({ cls: `diff-line ${type}` });
-                lineEl.textContent = line + '\n';
-            }
-
-            diffToggle.addEventListener('click', () => {
-                if (diffContainer.hasClass('hidden')) {
-                    diffContainer.removeClass('hidden');
-                    diffToggle.setText('Hide diff');
-                } else {
-                    diffContainer.addClass('hidden');
-                    diffToggle.setText('Show diff');
-                }
-            });
-
-            const actionsEl = fileEl.createDiv({ cls: 'sync-status-actions' });
-            const pushBtn = actionsEl.createEl('button', { text: 'Push' });
-            const pullBtn = actionsEl.createEl('button', { text: 'Pull' });
-
-            pushBtn.addEventListener('click', () => {
-                void (async () => {
-                    try {
-                        // Mark as checking
-                        fileStatus.status = 'checking';
-                        this.renderView();
-
-                        await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
-
-                        // Wait a bit for the remote to update
-                        await new Promise(resolve => setTimeout(resolve, 500));
-
-                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+                        new Notice(`Deleted ${fileStatus.path}`);
+                        this.fileStatuses.delete(fileStatus.path);
                         this.renderView();
                     } catch (e) {
-                        console.error(e);
-                        new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
-                        // Refresh to show current state
-                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                        this.renderView();
-                    }
-                })();
-            });
-
-            pullBtn.addEventListener('click', () => {
-                void (async () => {
-                    try {
-                        // Mark as checking
-                        fileStatus.status = 'checking';
-                        this.renderView();
-
-                        await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
-
-                        // Wait a bit for the file to be written
-                        await new Promise(resolve => setTimeout(resolve, 500));
-
-                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                        this.renderView();
-                    } catch (e) {
-                        console.error(e);
-                        new Notice(`Pull failed: ${e instanceof Error ? e.message : String(e)}`);
-                        // Refresh to show current state
-                        await this.refreshFileStatus(fileStatus.file || fileStatus.path);
-                        this.renderView();
+                        new Notice(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
                     }
                 })();
             });
         }
     }
 
+    private async runSingleFile(fileStatus: FileStatus, op: 'push' | 'pull'): Promise<void> {
+        try {
+            const originalStatus = fileStatus.status;
+            fileStatus.status = 'checking';
+            this.renderView();
+
+            if (op === 'push') {
+                await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
+                await new Promise(r => setTimeout(r, 500));
+            } else if (originalStatus === 'remote-only' || !fileStatus.file) {
+                // pull remote-only
+                const remote = await this.plugin.gitService.getFile(fileStatus.path, this.plugin.settings.branch);
+                if (remote.content) {
+                    await this.ensureParentDirs(fileStatus.path);
+                    await this.app.vault.adapter.write(fileStatus.path, remote.content);
+                    this.plugin.settings.syncMetadata[fileStatus.path] = {
+                        lastSyncedSha: remote.sha,
+                        lastSyncedAt: Date.now(),
+                        lastKnownPath: fileStatus.path
+                    };
+                    await this.plugin.saveSettings();
+                }
+                await new Promise(r => setTimeout(r, 1000));
+                await this.refreshAllStatuses();
+                return;
+            } else {
+                await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
+                await new Promise(r => setTimeout(r, 500));
+            }
+
+            await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+            this.renderView();
+        } catch (e) {
+            new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
+            await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+            this.renderView();
+        }
+    }
+
+    private statusMeta(status: FileStatus['status']) {
+        switch (status) {
+            case 'synced':      return { icon: '✓', label: 'Synced',     iconCls: 'ssv-icon-synced',   badgeCls: 'ssv-badge-synced',   fileCls: 'status-synced' };
+            case 'modified':    return { icon: '⚠', label: 'Changed',    iconCls: 'ssv-icon-modified', badgeCls: 'ssv-badge-modified', fileCls: 'status-modified' };
+            case 'unsynced':    return { icon: '↑', label: 'Local only', iconCls: 'ssv-icon-unsynced', badgeCls: 'ssv-badge-unsynced', fileCls: 'status-unsynced' };
+            case 'remote-only': return { icon: '↓', label: 'Remote',     iconCls: 'ssv-icon-remote',   badgeCls: 'ssv-badge-remote',   fileCls: 'status-remote' };
+            default:            return { icon: '⟳', label: 'Checking',   iconCls: 'ssv-icon-checking', badgeCls: 'ssv-badge-checking', fileCls: 'status-checking' };
+        }
+    }
+
+    // ── Side-by-side diff ─────────────────────────────────────────
+
+    private renderDiffPanel(fileEl: HTMLElement, fileStatus: FileStatus): HTMLElement {
+        const diffEl = fileEl.createDiv({ cls: 'ssv-diff' });
+        const rows = this.computeSideBySideDiff(fileStatus.remoteContent ?? '', fileStatus.localContent ?? '');
+
+        // Side-by-side (shown on wide containers via container query)
+        const splitEl = diffEl.createDiv({ cls: 'ssv-diff-split' });
+        const grid = splitEl.createDiv({ cls: 'ssv-diff-grid' });
+        grid.createDiv({ cls: 'ssv-diff-hd', text: 'Remote' });
+        grid.createDiv({ cls: 'ssv-diff-hd', text: 'Local' });
+        for (const row of rows) {
+            this.renderDiffCell(grid, row.left);
+            this.renderDiffCell(grid, row.right);
+        }
+
+        // Unified (shown on narrow containers / mobile via container query)
+        const unifiedEl = diffEl.createEl('pre', { cls: 'ssv-diff-unified' });
+        for (const row of rows) {
+            const { left, right } = row;
+            if (left.type === 'removed') {
+                unifiedEl.createSpan({ cls: 'ssv-u-line removed' }).textContent = `- ${left.content ?? ''}\n`;
+            }
+            if (right.type === 'added') {
+                unifiedEl.createSpan({ cls: 'ssv-u-line added' }).textContent = `+ ${right.content ?? ''}\n`;
+            }
+            if (left.type === 'unchanged') {
+                unifiedEl.createSpan({ cls: 'ssv-u-line unchanged' }).textContent = `  ${left.content ?? ''}\n`;
+            }
+        }
+
+        return diffEl;
+    }
+
+    private renderDiffCell(grid: HTMLElement, side: DiffSide): void {
+        const cell = grid.createDiv({ cls: `ssv-diff-cell ${side.type}` });
+        cell.createSpan({ cls: 'ssv-diff-ln' }).textContent = side.lineNum !== null ? String(side.lineNum) : '';
+        if (side.content !== null) {
+            cell.createSpan({ cls: 'ssv-diff-code' }).textContent = side.content;
+        }
+    }
+
+    private computeSideBySideDiff(remote: string, local: string): DiffRow[] {
+        const normalize = (s: string) => s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const L = normalize(remote).split('\n');
+        const R = normalize(local).split('\n');
+        const m = L.length, n = R.length;
+
+        // For very large files fall back to simple comparison
+        if (m * n > 250_000) return this.simpleDiff(L, R);
+
+        // LCS DP — flat Uint32Array avoids noUncheckedIndexedAccess issues
+        const W = n + 1;
+        const dp = new Uint32Array((m + 1) * W);
+        for (let i = 1; i <= m; i++) {
+            for (let j = 1; j <= n; j++) {
+                dp[i * W + j] = L[i - 1] === R[j - 1]
+                    ? (dp[(i - 1) * W + (j - 1)] ?? 0) + 1
+                    : Math.max(dp[(i - 1) * W + j] ?? 0, dp[i * W + (j - 1)] ?? 0);
+            }
+        }
+
+        // Backtrack — li/ri = -1 when not applicable (avoids optional fields)
+        type Op = { type: 'unchanged' | 'removed' | 'added'; li: number; ri: number };
+        const ops: Op[] = [];
+        let i = m, j = n;
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && L[i - 1] === R[j - 1]) {
+                ops.push({ type: 'unchanged', li: i - 1, ri: j - 1 });
+                i--; j--;
+            } else if (j > 0 && (i === 0 || (dp[i * W + (j - 1)] ?? 0) >= (dp[(i - 1) * W + j] ?? 0))) {
+                ops.push({ type: 'added', li: -1, ri: j - 1 });
+                j--;
+            } else {
+                ops.push({ type: 'removed', li: i - 1, ri: -1 });
+                i--;
+            }
+        }
+        ops.reverse();
+
+        // Pair consecutive removed ↔ added side-by-side
+        const rows: DiffRow[] = [];
+        let k = 0;
+        while (k < ops.length) {
+            const op = ops[k];
+            if (op === undefined) break;
+
+            if (op.type === 'unchanged') {
+                rows.push({
+                    left:  { lineNum: op.li + 1, content: L[op.li] ?? null, type: 'unchanged' },
+                    right: { lineNum: op.ri + 1, content: R[op.ri] ?? null, type: 'unchanged' },
+                });
+                k++;
+            } else {
+                const removedIdxs: number[] = [];
+                const addedIdxs: number[] = [];
+                while (k < ops.length) {
+                    const cur = ops[k];
+                    if (cur === undefined || cur.type === 'unchanged') break;
+                    if (cur.type === 'removed') removedIdxs.push(cur.li);
+                    else addedIdxs.push(cur.ri);
+                    k++;
+                }
+                const len = Math.max(removedIdxs.length, addedIdxs.length);
+                for (let x = 0; x < len; x++) {
+                    const rIdx = removedIdxs[x];
+                    const aIdx = addedIdxs[x];
+                    rows.push({
+                        left:  rIdx !== undefined
+                            ? { lineNum: rIdx + 1, content: L[rIdx] ?? null, type: 'removed' }
+                            : { lineNum: null, content: null, type: 'empty' },
+                        right: aIdx !== undefined
+                            ? { lineNum: aIdx + 1, content: R[aIdx] ?? null, type: 'added'   }
+                            : { lineNum: null, content: null, type: 'empty' },
+                    });
+                }
+            }
+        }
+        return rows;
+    }
+
+    // Fallback for very large files (> 500×500 lines)
+    private simpleDiff(L: string[], R: string[]): DiffRow[] {
+        const rows: DiffRow[] = [];
+        const max = Math.max(L.length, R.length);
+        for (let i = 0; i < max; i++) {
+            const l = L[i], r = R[i];
+            if (l === undefined)      rows.push({ left: { lineNum: null,  content: null, type: 'empty'     }, right: { lineNum: i + 1, content: r ?? null, type: 'added'     } });
+            else if (r === undefined) rows.push({ left: { lineNum: i + 1, content: l,    type: 'removed'   }, right: { lineNum: null,  content: null,      type: 'empty'     } });
+            else if (l === r)         rows.push({ left: { lineNum: i + 1, content: l,    type: 'unchanged' }, right: { lineNum: i + 1, content: r,         type: 'unchanged' } });
+            else                      rows.push({ left: { lineNum: i + 1, content: l,    type: 'removed'   }, right: { lineNum: i + 1, content: r,         type: 'added'     } });
+        }
+        return rows;
+    }
+
+    // ── Batch / refresh operations (logic unchanged) ──────────────
+
     async refreshAllStatuses(): Promise<void> {
         if (this.isRefreshing) {
-            new Notice('Already refreshing...');
+            new Notice('Already refreshing…');
             return;
         }
 
         this.isRefreshing = true;
         this.fileStatuses.clear();
 
+        // Show progress bar inside the list container
         const container = this.containerEl.children[1];
         if (container) {
-            const statusContainer = container.querySelector('.sync-status-list') as HTMLElement;
-            if (statusContainer) {
-                statusContainer.empty();
-
-                // Add progress bar
-                const progressContainer = statusContainer.createDiv({ cls: 'sync-progress-container' });
-                progressContainer.createEl('div', { text: 'Checking files...', cls: 'sync-progress-text' });
-                const progressBar = progressContainer.createDiv({ cls: 'sync-progress-bar' });
-                const progressFill = progressBar.createDiv({ cls: 'sync-progress-fill' });
-                progressFill.setAttr('style', 'width: 0%');
+            const listEl = container.querySelector('.ssv-list');
+            if (listEl) {
+                listEl.empty();
+                const prog = listEl.createDiv({ cls: 'ssv-progress' });
+                prog.createDiv({ cls: 'ssv-progress-text', text: 'Checking files…' });
+                const bar = prog.createDiv({ cls: 'ssv-progress-bar' });
+                const fill = bar.createDiv({ cls: 'ssv-progress-fill' });
+                fill.setAttr('style', 'width: 0%');
             }
         }
 
@@ -487,98 +511,68 @@ export class SyncStatusView extends ItemView {
             const allFiles = this.app.vault.getFiles();
             let files = this.plugin.filterFilesByVaultFolder(allFiles);
 
-            // Get remote files
             let remoteFiles = await this.plugin.gitService.listFiles(this.plugin.settings.branch);
 
-            // Load .gitignore rules based on remote files, then filter out ignored paths
             await this.plugin.gitignoreManager.loadGitignores();
-            remoteFiles = remoteFiles.filter(path => !this.plugin.gitignoreManager.isIgnored(path));
+            remoteFiles = remoteFiles.filter(p => !this.plugin.gitignoreManager.isIgnored(p));
             files = files.filter(f => !this.plugin.gitignoreManager.isIgnored(f.path));
 
             const localFilePaths = new Set(files.map(f => f.path));
-            // Use ALL local files (not just vaultFolder-filtered) for remote-only detection,
-            // so files like .claude/skills/*.md that live outside vaultFolder are not
-            // incorrectly labelled "remote only" when they actually exist locally.
             const allLocalFileMap = new Map<string, TFile>(allFiles.map(f => [f.path, f]));
 
-            // Add local files to status
             for (const file of files) {
-                this.fileStatuses.set(file.path, {
-                    file,
-                    path: file.path,
-                    status: 'checking'
-                });
+                this.fileStatuses.set(file.path, { file, path: file.path, status: 'checking' });
             }
 
-            // Add remote-only files to status, or queue cross-vaultFolder files for checking
             const extraFilesToCheck: Array<TFile | string> = [];
             for (const remotePath of remoteFiles) {
                 if (!localFilePaths.has(remotePath)) {
                     let localFile = allLocalFileMap.get(remotePath);
                     if (!localFile) {
-                        const abstractFile = this.app.vault.getAbstractFileByPath(remotePath);
-                        if (abstractFile instanceof TFile) {
-                            localFile = abstractFile;
-                        }
+                        const abs = this.app.vault.getAbstractFileByPath(remotePath);
+                        if (abs instanceof TFile) localFile = abs;
                     }
-
                     if (localFile) {
-                        // File exists locally but outside vaultFolder – check its real status
-                        this.fileStatuses.set(remotePath, {
-                            file: localFile,
-                            path: remotePath,
-                            status: 'checking'
-                        });
+                        this.fileStatuses.set(remotePath, { file: localFile, path: remotePath, status: 'checking' });
                         extraFilesToCheck.push(localFile);
                     } else if (await this.app.vault.adapter.exists(remotePath)) {
-                        this.fileStatuses.set(remotePath, {
-                            path: remotePath,
-                            status: 'checking'
-                        });
+                        this.fileStatuses.set(remotePath, { path: remotePath, status: 'checking' });
                         extraFilesToCheck.push(remotePath);
                     } else {
-                        this.fileStatuses.set(remotePath, {
-                            path: remotePath,
-                            status: 'remote-only'
-                        });
+                        this.fileStatuses.set(remotePath, { path: remotePath, status: 'remote-only' });
                     }
                 }
             }
 
             this.renderView();
 
-            // Check status for local files with progress
             let filesToCheck: Array<TFile | string> = [...files, ...extraFilesToCheck];
-            
-            // Final filter for extra files to check (some might be ignored)
             filesToCheck = filesToCheck.filter(f => {
-                const path = typeof f === 'string' ? f : f.path;
-                return !this.plugin.gitignoreManager.isIgnored(path);
+                const p = typeof f === 'string' ? f : f.path;
+                return !this.plugin.gitignoreManager.isIgnored(p);
             });
-            const totalFiles = filesToCheck.length;
-            let checkedFiles = 0;
+            const total = filesToCheck.length;
+            let checked = 0;
 
             for (const file of filesToCheck) {
                 await this.refreshFileStatus(file);
-                checkedFiles++;
-
-                // Update progress bar
-                if (container) {
-                    const progressFill = container.querySelector('.sync-progress-fill') as HTMLElement;
-                    const progressText = container.querySelector('.sync-progress-text') as HTMLElement;
-                    if (progressFill && progressText) {
-                        const percentage = Math.round((checkedFiles / totalFiles) * 100);
-                        progressFill.style.width = `${percentage}%`;
-                        progressText.textContent = `Checking files... ${checkedFiles}/${totalFiles} (${percentage}%)`;
+                checked++;
+                const c = this.containerEl.children[1];
+                if (c) {
+                    const fill = c.querySelector('.ssv-progress-fill');
+                    const text = c.querySelector('.ssv-progress-text');
+                    if (fill && text) {
+                        const pct = Math.round((checked / total) * 100);
+                        fill.setAttr('style', `width: ${pct}%`);
+                        text.textContent = `Checking files… ${checked}/${total} (${pct}%)`;
                     }
                 }
             }
 
             this.lastSyncTime = Date.now();
             this.renderView();
-            new Notice(`Checked ${files.length} local files and ${remoteFiles.length} remote files`);
+            new Notice(`Checked ${files.length} local + ${remoteFiles.length} remote files`);
         } catch (e) {
-            console.error(e);
             new Notice(`Failed to refresh: ${e instanceof Error ? e.message : String(e)}`);
         } finally {
             this.isRefreshing = false;
@@ -587,14 +581,14 @@ export class SyncStatusView extends ItemView {
 
     private async refreshFileStatus(fileOrPath: TFile | string): Promise<void> {
         try {
-            const isString = typeof fileOrPath === 'string';
-            const path = isString ? fileOrPath : fileOrPath.path;
-            const file = isString ? undefined : fileOrPath;
+            const isStr = typeof fileOrPath === 'string';
+            const path = isStr ? fileOrPath : fileOrPath.path;
+            const file = isStr ? undefined : fileOrPath;
 
-            const localContent = typeof fileOrPath === 'string'
-                ? await this.app.vault.adapter.read(fileOrPath) 
+            const localContent = isStr
+                ? await this.app.vault.adapter.read(fileOrPath)
                 : await this.app.vault.read(fileOrPath);
-            
+
             const remote = await this.plugin.gitService.getFile(path, this.plugin.settings.branch);
 
             let status: FileStatus['status'];
@@ -609,22 +603,12 @@ export class SyncStatusView extends ItemView {
                 diff = this.generateDiff(remote.content, localContent);
             }
 
-            this.fileStatuses.set(path, {
-                file,
-                path: path,
-                status,
-                localContent,
-                remoteContent: remote.content,
-                remoteSha: remote.sha,
-                diff
-            });
-
-        } catch (e) {
+            this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha, diff });
+        } catch {
             const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
-            console.error(`Error checking ${path}:`, e);
             this.fileStatuses.set(path, {
                 file: typeof fileOrPath === 'string' ? undefined : fileOrPath,
-                path: path,
+                path,
                 status: 'unsynced'
             });
         }
@@ -633,63 +617,49 @@ export class SyncStatusView extends ItemView {
     private generateDiff(oldContent: string, newContent: string): string {
         const oldLines = oldContent.split('\n');
         const newLines = newContent.split('\n');
-
-        const diff: string[] = [];
-        diff.push('--- Remote');
-        diff.push('+++ Local');
-        diff.push('');
-
+        const diff = ['--- Remote', '+++ Local', ''];
         const maxLines = Math.max(oldLines.length, newLines.length);
-
         for (let i = 0; i < maxLines; i++) {
-            const oldLine = oldLines[i];
-            const newLine = newLines[i];
-
-            if (oldLine !== newLine) {
-                if (oldLine !== undefined) {
-                    diff.push(`- ${oldLine}`);
-                }
-                if (newLine !== undefined) {
-                    diff.push(`+ ${newLine}`);
-                }
+            const o = oldLines[i], n = newLines[i];
+            if (o !== n) {
+                if (o !== undefined) diff.push(`- ${o}`);
+                if (n !== undefined) diff.push(`+ ${n}`);
             }
         }
-
         return diff.join('\n');
+    }
+
+    private async ensureParentDirs(filePath: string): Promise<void> {
+        const parts = filePath.split('/');
+        let cur = '';
+        for (let i = 0; i < parts.length - 1; i++) {
+            cur += (i > 0 ? '/' : '') + parts[i];
+            if (!this.app.vault.getAbstractFileByPath(cur)) {
+                try { await this.app.vault.createFolder(cur); } catch { /* already exists */ }
+            }
+        }
     }
 
     async pushAllModified(): Promise<void> {
         const modifiedFiles = Array.from(this.fileStatuses.values())
             .filter(s => s.status === 'modified' || s.status === 'unsynced')
             .map(s => s.file || s.path);
-
-        if (modifiedFiles.length === 0) {
-            new Notice('No modified files to push');
-            return;
-        }
+        if (modifiedFiles.length === 0) { new Notice('No modified files to push'); return; }
 
         const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-        const confirmed = await this.showConfirmDialog(`Push ${modifiedFiles.length} file(s) to ${serviceName}?`);
-        if (!confirmed) return;
+        if (!await this.showConfirmDialog(`Push ${modifiedFiles.length} file(s) to ${serviceName}?`)) return;
 
-        const progressNotice = new Notice(`Pushing 0/${modifiedFiles.length} files...`, 0);
-
+        const prog = new Notice(`Pushing 0/${modifiedFiles.length} files…`, 0);
         try {
-            const results = await this.plugin.sync.pushAllFiles(modifiedFiles, (current, total, fileName) => {
-                progressNotice.setMessage(`Pushing ${current}/${total}: ${fileName}`);
+            const results = await this.plugin.sync.pushAllFiles(modifiedFiles, (cur, total, name) => {
+                prog.setMessage(`Pushing ${cur}/${total}: ${name}`);
             });
-
-            progressNotice.hide();
-
-            if (results.errors.length > 0) {
-                console.error('Push errors:', results.errors);
-            }
-
-            new Notice(`Push completed. Refreshing status...`);
+            prog.hide();
+            if (results.errors.length > 0) console.error('Push errors:', results.errors);
+            new Notice('Push completed. Refreshing…');
             await this.refreshAllStatuses();
         } catch (e) {
-            progressNotice.hide();
-            console.error(e);
+            prog.hide();
             new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
@@ -698,284 +668,164 @@ export class SyncStatusView extends ItemView {
         const modifiedFiles = Array.from(this.fileStatuses.values())
             .filter(s => s.status === 'modified')
             .map(s => s.file || s.path);
-
-        if (modifiedFiles.length === 0) {
-            new Notice('No modified files to pull');
-            return;
-        }
+        if (modifiedFiles.length === 0) { new Notice('No modified files to pull'); return; }
 
         const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-        const confirmed = await this.showConfirmDialog(`Pull ${modifiedFiles.length} file(s) from ${serviceName}? This will overwrite local changes.`);
-        if (!confirmed) return;
+        if (!await this.showConfirmDialog(`Pull ${modifiedFiles.length} file(s) from ${serviceName}? This will overwrite local changes.`)) return;
 
-        const progressNotice = new Notice(`Pulling 0/${modifiedFiles.length} files...`, 0);
-
+        const prog = new Notice(`Pulling 0/${modifiedFiles.length} files…`, 0);
         try {
-            const results = await this.plugin.sync.pullAllFiles(modifiedFiles, (current, total, fileName) => {
-                progressNotice.setMessage(`Pulling ${current}/${total}: ${fileName}`);
+            const results = await this.plugin.sync.pullAllFiles(modifiedFiles, (cur, total, name) => {
+                prog.setMessage(`Pulling ${cur}/${total}: ${name}`);
             });
-
-            progressNotice.hide();
-
-            if (results.errors.length > 0) {
-                console.error('Pull errors:', results.errors);
-            }
-
-            // Wait a bit for files to be written
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            new Notice(`Pull completed. Refreshing status...`);
+            prog.hide();
+            if (results.errors.length > 0) console.error('Pull errors:', results.errors);
+            await new Promise(r => setTimeout(r, 1000));
+            new Notice('Pull completed. Refreshing…');
             await this.refreshAllStatuses();
         } catch (e) {
-            progressNotice.hide();
-            console.error(e);
+            prog.hide();
             new Notice(`Pull failed: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
     async pushSelected(): Promise<void> {
-        if (this.selectedFiles.size === 0) {
-            new Notice('No files selected');
-            return;
-        }
+        if (this.selectedFiles.size === 0) { new Notice('No files selected'); return; }
 
-        const selectedStatuses = Array.from(this.selectedFiles)
-            .map(path => this.fileStatuses.get(path))
+        const targets = Array.from(this.selectedFiles)
+            .map(p => this.fileStatuses.get(p))
             .filter(s => s && (s.status === 'modified' || s.status === 'unsynced')) as FileStatus[];
+        if (targets.length === 0) { new Notice('No pushable files selected (need modified or local-only).'); return; }
 
-        if (selectedStatuses.length === 0) {
-            new Notice('No files can be pushed. Only modified or unsynced files can be pushed.');
-            return;
-        }
-
-        const files = selectedStatuses.map(s => s.file || s.path);
-
+        const files = targets.map(s => s.file || s.path);
         const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-        const confirmed = await this.showConfirmDialog(`Push ${files.length} selected file(s) to ${serviceName}?`);
-        if (!confirmed) return;
+        if (!await this.showConfirmDialog(`Push ${files.length} selected file(s) to ${serviceName}?`)) return;
 
-        const progressNotice = new Notice(`Pushing 0/${files.length} files...`, 0);
-
+        const prog = new Notice(`Pushing 0/${files.length} files…`, 0);
         try {
-            const results = await this.plugin.sync.pushAllFiles(files, (current, total, fileName) => {
-                progressNotice.setMessage(`Pushing ${current}/${total}: ${fileName}`);
+            const results = await this.plugin.sync.pushAllFiles(files, (cur, total, name) => {
+                prog.setMessage(`Pushing ${cur}/${total}: ${name}`);
             });
-
-            progressNotice.hide();
-
-            if (results.errors.length > 0) {
-                console.error('Push errors:', results.errors);
-            }
-
+            prog.hide();
+            if (results.errors.length > 0) console.error('Push errors:', results.errors);
             this.selectedFiles.clear();
-
-            // Wait a bit for remote to update
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            new Notice(`Push completed. Refreshing status...`);
+            await new Promise(r => setTimeout(r, 1000));
+            new Notice('Push completed. Refreshing…');
             await this.refreshAllStatuses();
         } catch (e) {
-            progressNotice.hide();
-            console.error(e);
+            prog.hide();
             new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
     async pullSelected(): Promise<void> {
-        if (this.selectedFiles.size === 0) {
-            new Notice('No files selected');
-            return;
-        }
+        if (this.selectedFiles.size === 0) { new Notice('No files selected'); return; }
 
-        const selectedStatuses = Array.from(this.selectedFiles)
-            .map(path => this.fileStatuses.get(path))
+        const targets = Array.from(this.selectedFiles)
+            .map(p => this.fileStatuses.get(p))
             .filter(s => s && (s.status === 'modified' || s.status === 'remote-only')) as FileStatus[];
-
-        if (selectedStatuses.length === 0) {
-            new Notice('No files can be pulled. Only modified or remote-only files can be pulled.');
-            return;
-        }
+        if (targets.length === 0) { new Notice('No pullable files selected (need changed or remote-only).'); return; }
 
         const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-        const confirmed = await this.showConfirmDialog(`Pull ${selectedStatuses.length} selected file(s) from ${serviceName}? This will overwrite local changes.`);
-        if (!confirmed) return;
+        if (!await this.showConfirmDialog(`Pull ${targets.length} file(s) from ${serviceName}? This will overwrite local changes.`)) return;
 
-        const progressNotice = new Notice(`Pulling 0/${selectedStatuses.length} files...`, 0);
+        const prog = new Notice(`Pulling 0/${targets.length} files…`, 0);
+        const errors: string[] = [];
+        let cur = 0;
 
-        try {
-            let current = 0;
-            const errors: string[] = [];
-
-            for (const status of selectedStatuses) {
-                current++;
-                progressNotice.setMessage(`Pulling ${current}/${selectedStatuses.length}: ${status.path}`);
-
-                try {
-                    if (status.status !== 'remote-only') {
-                        // Existing file - use sync manager
-                        await this.plugin.sync.pullFile(status.file || status.path);
-                    } else {
-                        // Remote-only file - create it
-                        const remote = await this.plugin.gitService.getFile(status.path, this.plugin.settings.branch);
-                        if (remote.content) {
-                            // Ensure parent directories exist (recursively)
-                            const pathParts = status.path.split('/');
-                            if (pathParts.length > 1) {
-                                let currentPath = '';
-                                for (let i = 0; i < pathParts.length - 1; i++) {
-                                    currentPath += (i > 0 ? '/' : '') + pathParts[i];
-                                    const dir = this.app.vault.getAbstractFileByPath(currentPath);
-                                    if (!dir) {
-                                        try {
-                                            await this.app.vault.createFolder(currentPath);
-                                        } catch {
-                                            // Folder might already exist, ignore error
-                                        }
-                                    }
-                                }
-                            }
-
-                            await this.app.vault.create(status.path, remote.content);
-
-                            // Update sync metadata
-                            this.plugin.settings.syncMetadata[status.path] = {
-                                lastSyncedSha: remote.sha,
-                                lastSyncedAt: Date.now(),
-                                lastKnownPath: status.path
-                            };
-                        }
+        for (const status of targets) {
+            cur++;
+            prog.setMessage(`Pulling ${cur}/${targets.length}: ${status.path}`);
+            try {
+                if (status.status !== 'remote-only') {
+                    await this.plugin.sync.pullFile(status.file || status.path);
+                } else {
+                    const remote = await this.plugin.gitService.getFile(status.path, this.plugin.settings.branch);
+                    if (remote.content) {
+                        await this.ensureParentDirs(status.path);
+                        await this.app.vault.create(status.path, remote.content);
+                        this.plugin.settings.syncMetadata[status.path] = {
+                            lastSyncedSha: remote.sha,
+                            lastSyncedAt: Date.now(),
+                            lastKnownPath: status.path
+                        };
                     }
-                } catch (e) {
-                    console.error(`Error pulling ${status.path}:`, e);
-                    errors.push(status.path);
                 }
+            } catch {
+                errors.push(status.path);
             }
-
-            progressNotice.hide();
-
-            // Save settings if any metadata was updated
-            await this.plugin.saveSettings();
-
-            if (errors.length > 0) {
-                new Notice(`Pulled ${selectedStatuses.length - errors.length}/${selectedStatuses.length} files. ${errors.length} failed.`);
-            } else {
-                new Notice(`Successfully pulled ${selectedStatuses.length} files`);
-            }
-
-            this.selectedFiles.clear();
-
-            // Wait a bit for files to be written
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            new Notice(`Pull completed. Refreshing status...`);
-            await this.refreshAllStatuses();
-        } catch (e) {
-            progressNotice.hide();
-            console.error(e);
-            new Notice(`Pull failed: ${e instanceof Error ? e.message : String(e)}`);
         }
+
+        prog.hide();
+        await this.plugin.saveSettings();
+
+        new Notice(errors.length > 0
+            ? `Pulled ${targets.length - errors.length}/${targets.length}. ${errors.length} failed.`
+            : `Pulled ${targets.length} files`
+        );
+        this.selectedFiles.clear();
+        await new Promise(r => setTimeout(r, 1000));
+        await this.refreshAllStatuses();
     }
 
     async deleteSelected(): Promise<void> {
-        if (this.selectedFiles.size === 0) {
-            new Notice('No files selected');
-            return;
+        if (this.selectedFiles.size === 0) { new Notice('No files selected'); return; }
+
+        const targets = Array.from(this.selectedFiles)
+            .map(p => this.fileStatuses.get(p))
+            .filter(Boolean) as FileStatus[];
+
+        const local  = targets.filter(s => s.status !== 'remote-only');
+        const remote = targets.filter(s => s.status === 'remote-only');
+        if (local.length === 0 && remote.length === 0) { new Notice('Nothing to delete'); return; }
+
+        let msg = '';
+        if (local.length > 0 && remote.length > 0) msg = `Delete ${local.length} local + ${remote.length} remote file(s)? Cannot be undone.`;
+        else if (local.length > 0) msg = `Delete ${local.length} local file(s)? Cannot be undone.`;
+        else msg = `Delete ${remote.length} remote file(s)? Cannot be undone.`;
+
+        if (!await this.showConfirmDialog(msg)) return;
+
+        const total = local.length + remote.length;
+        const prog = new Notice(`Deleting 0/${total} files…`, 0);
+        const errors: string[] = [];
+        let cur = 0;
+
+        for (const s of local) {
+            cur++;
+            prog.setMessage(`Deleting local ${cur}/${total}: ${s.path}`);
+            try {
+                if (s.file) await this.app.fileManager.trashFile(s.file);
+                else await this.app.vault.adapter.remove(s.path);
+                this.fileStatuses.delete(s.path);
+                this.selectedFiles.delete(s.path);
+            } catch { errors.push(s.path); }
         }
 
-        const selectedStatuses = Array.from(this.selectedFiles)
-            .map(path => this.fileStatuses.get(path))
-            .filter(s => s) as FileStatus[];
-
-        const localFiles = selectedStatuses.filter(s => s.status !== 'remote-only');
-        const remoteOnlyFiles = selectedStatuses.filter(s => s.status === 'remote-only');
-
-        if (localFiles.length === 0 && remoteOnlyFiles.length === 0) {
-            new Notice('No files selected to delete');
-            return;
+        for (const s of remote) {
+            cur++;
+            prog.setMessage(`Deleting remote ${cur}/${total}: ${s.path}`);
+            try {
+                await this.plugin.gitService.deleteFile(s.path, this.plugin.settings.branch, `Delete ${s.path}`);
+                this.fileStatuses.delete(s.path);
+                this.selectedFiles.delete(s.path);
+            } catch { errors.push(s.path); }
         }
 
-        let confirmMessage = '';
-        if (localFiles.length > 0 && remoteOnlyFiles.length > 0) {
-            confirmMessage = `Delete ${localFiles.length} local file(s) and ${remoteOnlyFiles.length} remote file(s)? This cannot be undone.`;
-        } else if (localFiles.length > 0) {
-            confirmMessage = `Delete ${localFiles.length} local file(s)? This cannot be undone.`;
-        } else {
-            confirmMessage = `Delete ${remoteOnlyFiles.length} remote file(s)? This cannot be undone.`;
-        }
-
-        const confirmed = await this.showConfirmDialog(confirmMessage);
-        if (!confirmed) return;
-
-        const totalFiles = localFiles.length + remoteOnlyFiles.length;
-        const progressNotice = new Notice(`Deleting 0/${totalFiles} files...`, 0);
-
-        try {
-            let current = 0;
-            const errors: string[] = [];
-
-            // Delete local files
-            for (const status of localFiles) {
-                current++;
-                progressNotice.setMessage(`Deleting local ${current}/${totalFiles}: ${status.path}`);
-
-                try {
-                    if (status.file) {
-                        await this.app.fileManager.trashFile(status.file);
-                    } else {
-                        await this.app.vault.adapter.remove(status.path);
-                    }
-                    this.fileStatuses.delete(status.path);
-                    this.selectedFiles.delete(status.path);
-                } catch (e) {
-                    console.error(`Error deleting local ${status.path}:`, e);
-                    errors.push(status.path);
-                }
-            }
-
-            // Delete remote files
-            for (const status of remoteOnlyFiles) {
-                current++;
-                progressNotice.setMessage(`Deleting remote ${current}/${totalFiles}: ${status.path}`);
-
-                try {
-                    await this.plugin.gitService.deleteFile(
-                        status.path,
-                        this.plugin.settings.branch,
-                        `Delete ${status.path}`
-                    );
-                    this.fileStatuses.delete(status.path);
-                    this.selectedFiles.delete(status.path);
-                } catch (e) {
-                    console.error(`Error deleting remote ${status.path}:`, e);
-                    errors.push(status.path);
-                }
-            }
-
-            progressNotice.hide();
-
-            if (errors.length > 0) {
-                new Notice(`Deleted ${totalFiles - errors.length}/${totalFiles} files. ${errors.length} failed.`);
-            } else {
-                new Notice(`Successfully deleted ${totalFiles} files`);
-            }
-
-            this.renderView();
-        } catch (e) {
-            progressNotice.hide();
-            console.error(e);
-            new Notice(`Delete failed: ${e instanceof Error ? e.message : String(e)}`);
-        }
+        prog.hide();
+        new Notice(errors.length > 0
+            ? `Deleted ${total - errors.length}/${total}. ${errors.length} failed.`
+            : `Deleted ${total} files`
+        );
+        this.renderView();
     }
 
-    async onClose(): Promise<void> {
-        // Cleanup
-    }
+    async onClose(): Promise<void> { /* cleanup */ }
 
     private showConfirmDialog(message: string): Promise<boolean> {
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
             // eslint-disable-next-line no-alert
-            const confirmed = confirm(message);
-            resolve(confirmed);
+            resolve(confirm(message));
         });
     }
 }

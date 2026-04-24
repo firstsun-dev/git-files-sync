@@ -1,7 +1,7 @@
 {
-	"name": "git-file-push",
+	"name": "git-file-sync",
 	"version": "1.0.0",
-	"description": "Push and pull individual notes to GitLab or GitHub across mobile and desktop.",
+	"description": "Selectively sync individual notes with GitLab or GitHub across mobile and desktop.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
@@ -15,7 +15,7 @@
 		"semantic-release": "semantic-release"
 	},
 	"keywords": [],
-	"license": "0-BSD",
+	"license": "MIT",
 	"devDependencies": {
 		"@eslint/js": "9.30.1",
 		"@eslint/json": "0.14.0",

@@ -1,228 +1,142 @@
-# Git File Push
+# Git File Sync
 
-An Obsidian plugin that enables seamless synchronization of individual notes with GitLab or GitHub repositories across mobile and desktop platforms.
+[![Release](https://img.shields.io/github/v/release/firstsun-dev/git-files-push?style=flat-square)](https://github.com/firstsun-dev/git-files-push/releases)
+[![Downloads](https://img.shields.io/github/downloads/firstsun-dev/git-files-push/total?style=flat-square)](https://github.com/firstsun-dev/git-files-push/releases)
+[![License](https://img.shields.io/github/license/firstsun-dev/git-files-push?style=flat-square)](LICENSE)
+[![Obsidian](https://img.shields.io/badge/Obsidian-v0.15.0+-purple?style=flat-square)](https://obsidian.md)
 
-## Features
+**Git File Sync** is a powerful Obsidian plugin that enables seamless synchronization of individual notes with GitLab or GitHub repositories. Unlike full-vault sync solutions, it gives you granular control over what gets pushed and pulled, making it perfect for shared projects, selective backups, and cross-platform workflows.
 
-- **Multiple Git Services**: Support for both GitLab and GitHub (user selectable)
-- **GitHub Organization Support**: Works with both personal and organization repositories
-- **Push to Remote**: Upload individual notes to your Git repository
-- **Pull from Remote**: Download and sync notes from your repository
-- **Batch Operations**: Push or pull all modified files at once with progress tracking
-- **Sync Status View**: Visual dashboard showing all files' sync status with complete git diff
-- **Remote-Only Files Detection**: Shows files that exist on remote but not locally
-- **Batch Selection**: Select multiple files for batch push/pull/delete operations
-- **Status Filtering**: Filter files by sync status (All/Synced/Modified/Not in remote/Remote only)
-- **Progress Bar**: Real-time progress indicator during sync operations
-- **Last Sync Time**: Display when the last sync check was performed
-- **Conflict Resolution**: Visual diff viewer to compare local and remote versions when conflicts occur
-- **Vault Folder Filter**: Optionally sync only files within a specific vault folder
-- **Ribbon Icon**: Quick access button in the left sidebar for pushing the current note
-- **Command Palette**: Commands for pushing and pulling files (single or batch)
-- **Context Menu**: Right-click any file to push or pull directly from the file menu
-- **Cross-Platform**: Works on both desktop and mobile versions of Obsidian
-- **Mobile Optimized**: Responsive UI design for small screens
-- **Sync Tracking**: Maintains metadata to track last synced SHA and timestamp for each file
-- **Conflict Detection**: Automatically detects conflicts and prompts for resolution
-- **Auto-Refresh**: Automatically updates file status after push/pull operations
+[繁體中文使用說明](USAGE_zh.md)
 
-## Setup
+![sync-status](imgs/sync-status.png)
+*The Sync Status View provides a clear overview of your files, allowing you to selectively push, pull, or view diffs for modified files.*
 
-1. Install the plugin in Obsidian
-2. Open Settings → Git File Push
-3. Select your preferred Git service (GitLab or GitHub)
-4. Configure the settings based on your choice:
+![conflict](imgs/git-diff.png)
+*The Built-in Diff Viewer lets you compare local and remote changes side-by-side before syncing.*
 
-### GitLab Configuration
-   - **GitLab Personal Access Token**: Create a token in GitLab (User Settings → Access Tokens) with "API" scope
-   - **GitLab Base URL**: Defaults to `https://gitlab.com` (change if using self-hosted GitLab)
-   - **Project ID**: Found in your GitLab project's overview page
+---
 
-### GitHub Configuration
-   - **GitHub Personal Access Token**: Create a token in GitHub (Settings → Developer Settings → Personal Access Tokens) with "repo" scope
-   - **Repository Owner**: Your GitHub username or organization name
-   - **Repository Name**: Name of the GitHub repository
+## Key Features
 
-### Common Settings
-   - **Branch**: The branch to sync with (defaults to `main`)
-   - **Root Path**: Optional path prefix in the repository (e.g., "notes" to store files in a notes/ folder)
-   - **Vault Folder**: Optional vault folder to sync (e.g., "sync" to only sync files in the sync/ folder, leave empty to sync all files)
+### Selective Synchronization
+Don't sync your whole vault. Selectively push or pull individual notes, or use batch operations for specific folders. Perfect for keeping personal notes private while sharing project files.
 
-## Usage
+### Visual Sync Dashboard
+A comprehensive dashboard provides a bird's-eye view of your vault's status:
+- **Status Filtering**: Instantly see what's modified, new, or missing.
+- **Visual Diffs**: Compare local and remote changes line-by-line before syncing.
+- **Remote-Only Detection**: Identify files existing on GitLab/GitHub that aren't in your vault yet.
 
-### Sync Status View
+### Intelligent Conflict Resolution
+When versions clash, Git File Sync provides a dedicated diff viewer to help you resolve conflicts manually. Choose the local version, the remote version, or merge them with confidence.
 
-The Sync Status View is the main interface for managing your file synchronization.
+### Mobile First
+Full support for Obsidian Mobile. Push and pull your notes on the go with a responsive UI designed specifically for touch interfaces.
 
-**Opening the view:**
-- Click the list-checks icon in the left ribbon, or
-- Use Command Palette: "Open sync status view"
+---
 
-**Understanding the interface:**
+## Installation
 
-1. **Service Information Panel**
-   - Shows current service (GitLab/GitHub), branch, and vault folder
-   - Displays last sync time
+### From Community Plugins (Recommended)
+1. Open **Obsidian Settings** > **Community plugins**.
+2. Click **Browse** and search for `Git File Sync`.
+3. Click **Install**, then **Enable**.
 
-2. **Control Buttons**
-   - **Refresh status**: Check all files against remote repository (shows progress bar)
-   - **Select all**: Select all files in current filter view
-   - **Deselect all**: Clear all selections
-   - **Push selected (N)**: Push all selected files to remote
-   - **Pull selected (N)**: Pull all selected files from remote
-   - **Delete selected (N)**: Delete selected local files (with confirmation)
+### Manual Installation
+1. Download the latest `main.js`, `manifest.json`, and `styles.css` from the [Releases](https://github.com/firstsun-dev/git-files-push/releases) page.
+2. Create a folder named `git-file-sync` in `<vault>/.obsidian/plugins/`.
+3. Copy the downloaded files into that folder.
+4. Reload Obsidian and enable the plugin.
 
-3. **Status Filters**
-   - **All**: Show all files
-   - **Synced**: Files that match remote (✓)
-   - **Modified**: Files with local changes (⚠)
-   - **Not in remote**: Local files not yet pushed (✗)
-   - **Remote only**: Files on remote but not local (↓)
+---
 
-4. **File Status Summary**
-   - Shows count of files in each status category
+## Configuration
 
-5. **File List**
-   - Each file shows: checkbox, status icon, file path, and status text
-   - Click checkbox to select files for batch operations
-   - Files show different actions based on status:
-     - **Modified files**: Show diff button, Push, and Pull buttons
-     - **Not in remote**: Push to remote, Remove local file buttons
-     - **Remote only**: Pull from remote button
+![Plugin Settings](imgs/plugin-settings.png)
+*Configure the plugin by selecting your preferred Git service and providing the necessary credentials.*
 
-**Workflow examples:**
+### 1. Choose Your Service
+Go to **Settings** > **Git File Sync** and select either **GitLab** or **GitHub**.
 
-*Sync all changes to remote:*
-1. Click "Refresh status"
-2. Review modified files
-3. Click "Select all" or manually select files
-4. Click "Push selected"
+### 2. Provider Setup
+| Service | Required Info | Scope Needed |
+| :--- | :--- | :--- |
+| **GitLab** | Personal Access Token, Project ID, Base URL | `api` |
+| **GitHub** | Personal Access Token, Owner, Repo Name | `repo` |
 
-*Pull new files from remote:*
-1. Click "Refresh status"
-2. Click "Remote only" filter
-3. Click "Select all"
-4. Click "Pull selected"
+### 3. Common Settings
+- **Branch**: Specify the target branch (default: `main`).
+- **Root Path**: Prefix for files in the repository (e.g., `notes/`).
+- **Vault Folder**: Limit sync to a specific folder in your vault.
 
-*Clean up local files not in remote:*
-1. Click "Refresh status"
-2. Click "Not in remote" filter
-3. Select unwanted files
-4. Click "Delete selected"
+---
 
-### Push Files
+## Usage Guide
 
-**Single file:**
-- Click the cloud upload icon in the left ribbon, or
-- Use Command Palette: "Push current file to GitLab/GitHub", or
-- Right-click a file and select "Push to GitLab/GitHub"
-- Status updates automatically after push
+### First-Time Setup
+Once configured, you should perform an initial status check:
+1. Open the **Sync Status View** by clicking the list icon in the left ribbon or using the Command Palette (`Open sync status view`).
+2. Click **Refresh status**. The plugin will compare your local files with the remote repository.
+3. Review the file list to see which files are synchronized, modified, or missing.
 
-**Multiple files:**
-- Open Sync Status View
-- Select files using checkboxes
-- Click "Push selected (N)"
-- Or use "Refresh status" and filter by "Modified" or "Not in remote"
+### Daily Workflow: Pushing Changes
+When you finish editing a note and want to save it to Git:
+- **Current Note**: Use the cloud icon in the ribbon or the command `Push current file to GitLab/GitHub`.
+- **Multiple Notes**: Open the Sync Status View, use the **Modified** filter, select the files you want to sync, and click **Push selected**.
+- **Context Menu**: Right-click any file in the File Explorer and select `Push to GitLab/GitHub`.
 
-### Pull Files
+### Daily Workflow: Pulling Changes
+To get the latest updates from other devices:
+1. Open the Sync Status View and click **Refresh status**.
+2. Files with remote updates will show as **Modified** or **Remote only**.
+3. Select these files and click **Pull selected**.
+4. **Warning**: Pulling will overwrite local changes. If there are conflicts, the Conflict Resolution tool will open.
 
-**Single file:**
-- Use Command Palette: "Pull current file from GitLab/GitHub", or
-- Right-click a file and select "Pull from GitLab/GitHub"
-- Status updates automatically after pull
+### Handling Conflicts
+If a file has changed both locally and on the remote server:
+1. A **Conflict Resolution** window will appear.
+2. The left pane shows your **Local** version, and the right pane shows the **Remote** version.
+3. Review the differences.
+4. Click **Keep Local** to overwrite the remote version on next push, or **Keep Remote** to accept the remote changes and overwrite your local file.
 
-**Multiple files:**
-- Open Sync Status View
-- Select files using checkboxes
-- Click "Pull selected (N)"
-- Or filter by "Remote only" to see files only on remote
+### Mobile Synchronization
+On mobile devices:
+- Swipe from the left to access the ribbon and open the Sync Status View.
+- Use the **Pull** action to keep your mobile vault up to date before editing.
+- After editing, use the **Push** action to save your changes back to the repository.
 
-**Pull remote-only files:**
-- These are files that exist on remote but not in your local vault
-- Open Sync Status View → Click "Remote only" filter
-- Select files and click "Pull selected" to download them
+---
 
-### Batch Operations
+## Privacy and Security
 
-**Push all modified files:**
-- Use Command Palette: "Push all markdown files"
-- Confirms before pushing
-- Shows progress during operation
-- Auto-refreshes status when complete
+- **Local Storage**: Your Personal Access Tokens (PAT) are stored locally in the plugin's data folder within your vault. They are never sent to any server other than GitLab/GitHub.
+- **No Telemetry**: This plugin does not collect any data or usage analytics.
 
-**Pull all modified files:**
-- Use Command Palette: "Pull all markdown files"
-- Warns about overwriting local changes
-- Shows progress during operation
-- Auto-refreshes status when complete
-
-### Conflict Resolution
-
-When a conflict is detected:
-1. A modal will appear showing both local and remote versions
-2. Review the differences in the diff viewer
-3. Choose to keep either the local or remote version
-4. The chosen version will be synced
-5. File status updates automatically
+---
 
 ## Development
 
-### Prerequisites
-- Node.js v16 or higher
-- npm or yarn
+If you want to contribute or build from source:
 
-### Setup
 ```bash
-# Clone the repository
-git clone https://github.com/tianyao/gitlab-files-push.git
-
-# Install dependencies
+# Clone and install
+git clone https://github.com/firstsun-dev/git-files-push.git
 npm install
 
-# Start development mode (watch mode)
+# Development build
 npm run dev
+
+# Production build
+npm run build
 ```
 
-### Available Commands
-- `npm run dev` - Build in watch mode using esbuild
-- `npm run build` - Type check and build for production
-- `npm run lint` - Run ESLint checks
-- `npm run test` - Run Vitest test suite
-- `npm run test:ui` - Run tests with UI
-- `npm run version` - Bump version in manifest.json and versions.json
-
-### Manual Installation
-
-Copy `main.js`, `manifest.json`, and `styles.css` (if exists) to your vault:
-```
-VaultFolder/.obsidian/plugins/git-file-push/
-```
-
-## Project Structure
-
-- `src/main.ts` - Main plugin class and command registration
-- `src/settings.ts` - Settings interface and configuration UI
-- `src/services/gitlab-service.ts` - GitLab API integration
-- `src/logic/sync-manager.ts` - Sync logic and conflict handling
-- `esbuild.config.mjs` - Build configuration
-
-## Releasing
-
-1. Update `minAppVersion` in `manifest.json` if needed
-2. Run `npm run version` to bump version numbers
-3. Create a GitHub release with tag matching the version
-4. Upload `manifest.json`, `main.js`, and `styles.css` as release assets
-
-## Code Quality
-
-- ESLint is configured with Obsidian-specific rules
-- Run `npm run lint` to check for issues
-- Husky pre-commit hooks ensure code quality
+---
 
 ## License
 
-0-BSD
+This project is licensed under the [MIT License](LICENSE).
 
-## Author
+---
 
-[tianyao](https://github.com/tianyao)
+**Created by [firstsun-dev](https://github.com/firstsun-dev)**

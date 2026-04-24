@@ -1,10 +1,10 @@
 {
-	"id": "git-file-push",
-	"name": "Git File Push",
+	"id": "git-file-sync",
+	"name": "Git File Sync",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Sync individual notes with GitLab or GitHub. Push, pull, and track changes across mobile and desktop with visual diff and conflict resolution.",
-	"author": "tianyao",
-	"authorUrl": "https://github.com/tianyao",
+	"description": "Selectively sync individual notes with GitLab or GitHub. Push, pull, diff, and resolve conflicts — file by file, on mobile and desktop.",
+	"author": "firstsun-dev",
+	"authorUrl": "https://github.com/firstsun-dev",
 	"isDesktopOnly": false
 }
