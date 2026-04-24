@@ -1,6 +1,6 @@
 {
 	"name": "git-file-sync",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "Selectively sync individual notes with GitLab or GitHub. Push, pull, diff, and resolve conflicts — file by file, on mobile and desktop.",
 	"main": "main.js",
 	"type": "module",
