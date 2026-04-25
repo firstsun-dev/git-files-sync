@@ -404,7 +404,12 @@ export class SyncStatusView extends ItemView {
 
         // LCS DP — flat Uint32Array avoids noUncheckedIndexedAccess issues
         const W = n + 1;
-        const dp = new Uint32Array((m + 1) * W);
+        const totalSize = (m + 1) * W;
+        
+        // Security hotspot: prevent huge memory allocations that could lead to DoS
+        if (totalSize > 1_000_000) return this.simpleDiff(L, R);
+
+        const dp = new Uint32Array(totalSize);
         for (let i = 1; i <= m; i++) {
             for (let j = 1; j <= n; j++) {
                 dp[i * W + j] = L[i - 1] === R[j - 1]
@@ -645,131 +650,58 @@ export class SyncStatusView extends ItemView {
     }
 
     async pushAllModified(): Promise<void> {
-        const modifiedFiles = Array.from(this.fileStatuses.values())
-            .filter(s => s.status === 'modified' || s.status === 'unsynced')
-            .map(s => s.file || s.path);
-        if (modifiedFiles.length === 0) { new Notice('No modified files to push'); return; }
-
-        const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-        if (!await this.showConfirmDialog(`Push ${modifiedFiles.length} file(s) to ${serviceName}?`)) return;
-
-        const prog = new Notice(`Pushing 0/${modifiedFiles.length} files…`, 0);
-        try {
-            const results = await this.plugin.sync.pushAllFiles(modifiedFiles, (cur, total, name) => {
-                prog.setMessage(`Pushing ${cur}/${total}: ${name}`);
-            });
-            prog.hide();
-            if (results.errors.length > 0) console.error('Push errors:', results.errors);
-            new Notice('Push completed. Refreshing…');
-            await this.refreshAllStatuses();
-        } catch (e) {
-            prog.hide();
-            new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
-        }
+        await this.runBatchOperation('modified', 'push');
     }
 
     async pullAllModified(): Promise<void> {
-        const modifiedFiles = Array.from(this.fileStatuses.values())
-            .filter(s => s.status === 'modified')
-            .map(s => s.file || s.path);
-        if (modifiedFiles.length === 0) { new Notice('No modified files to pull'); return; }
+        await this.runBatchOperation('modified', 'pull');
+    }
 
-        const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-        if (!await this.showConfirmDialog(`Pull ${modifiedFiles.length} file(s) from ${serviceName}? This will overwrite local changes.`)) return;
-
-        const prog = new Notice(`Pulling 0/${modifiedFiles.length} files…`, 0);
-        try {
-            const results = await this.plugin.sync.pullAllFiles(modifiedFiles, (cur, total, name) => {
-                prog.setMessage(`Pulling ${cur}/${total}: ${name}`);
+    private async runBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull'): Promise<void> {
+        const targets = Array.from(this.fileStatuses.values())
+            .filter(s => {
+                if (filter === 'selected' && !this.selectedFiles.has(s.path)) return false;
+                if (op === 'push') return s.status === 'modified' || s.status === 'unsynced';
+                return s.status === 'modified' || s.status === 'remote-only';
             });
+
+        if (targets.length === 0) {
+            new Notice(`No ${op}able files ${filter === 'selected' ? 'selected' : 'found'}.`);
+            return;
+        }
+
+        const files = targets.map(s => s.file || s.path);
+        const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+        const msg = op === 'push' 
+            ? `Push ${files.length} file(s) to ${serviceName}?`
+            : `Pull ${files.length} file(s) from ${serviceName}? This will overwrite local changes.`;
+
+        if (!await this.showConfirmDialog(msg)) return;
+
+        const prog = new Notice(`${op === 'push' ? 'Pushing' : 'Pulling'} 0/${files.length} files…`, 0);
+        try {
+            const results = op === 'push'
+                ? await this.plugin.sync.pushAllFiles(files, (cur, total, name) => prog.setMessage(`Pushing ${cur}/${total}: ${name}`))
+                : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(`Pulling ${cur}/${total}: ${name}`));
+
             prog.hide();
-            if (results.errors.length > 0) console.error('Pull errors:', results.errors);
-            await new Promise(r => setTimeout(r, 1000));
-            new Notice('Pull completed. Refreshing…');
+            if (results.errors.length > 0) console.error(`${op} errors:`, results.errors);
+            if (filter === 'selected') this.selectedFiles.clear();
+            
+            new Notice(`${op === 'push' ? 'Push' : 'Pull'} completed. Refreshing…`);
             await this.refreshAllStatuses();
         } catch (e) {
             prog.hide();
-            new Notice(`Pull failed: ${e instanceof Error ? e.message : String(e)}`);
+            new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
     async pushSelected(): Promise<void> {
-        if (this.selectedFiles.size === 0) { new Notice('No files selected'); return; }
-
-        const targets = Array.from(this.selectedFiles)
-            .map(p => this.fileStatuses.get(p))
-            .filter(s => s && (s.status === 'modified' || s.status === 'unsynced')) as FileStatus[];
-        if (targets.length === 0) { new Notice('No pushable files selected (need modified or local-only).'); return; }
-
-        const files = targets.map(s => s.file || s.path);
-        const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-        if (!await this.showConfirmDialog(`Push ${files.length} selected file(s) to ${serviceName}?`)) return;
-
-        const prog = new Notice(`Pushing 0/${files.length} files…`, 0);
-        try {
-            const results = await this.plugin.sync.pushAllFiles(files, (cur, total, name) => {
-                prog.setMessage(`Pushing ${cur}/${total}: ${name}`);
-            });
-            prog.hide();
-            if (results.errors.length > 0) console.error('Push errors:', results.errors);
-            this.selectedFiles.clear();
-            await new Promise(r => setTimeout(r, 1000));
-            new Notice('Push completed. Refreshing…');
-            await this.refreshAllStatuses();
-        } catch (e) {
-            prog.hide();
-            new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
-        }
+        await this.runBatchOperation('selected', 'push');
     }
 
     async pullSelected(): Promise<void> {
-        if (this.selectedFiles.size === 0) { new Notice('No files selected'); return; }
-
-        const targets = Array.from(this.selectedFiles)
-            .map(p => this.fileStatuses.get(p))
-            .filter(s => s && (s.status === 'modified' || s.status === 'remote-only')) as FileStatus[];
-        if (targets.length === 0) { new Notice('No pullable files selected (need changed or remote-only).'); return; }
-
-        const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-        if (!await this.showConfirmDialog(`Pull ${targets.length} file(s) from ${serviceName}? This will overwrite local changes.`)) return;
-
-        const prog = new Notice(`Pulling 0/${targets.length} files…`, 0);
-        const errors: string[] = [];
-        let cur = 0;
-
-        for (const status of targets) {
-            cur++;
-            prog.setMessage(`Pulling ${cur}/${targets.length}: ${status.path}`);
-            try {
-                if (status.status !== 'remote-only') {
-                    await this.plugin.sync.pullFile(status.file || status.path);
-                } else {
-                    const remote = await this.plugin.gitService.getFile(status.path, this.plugin.settings.branch);
-                    if (remote.content) {
-                        await this.ensureParentDirs(status.path);
-                        await this.app.vault.create(status.path, remote.content);
-                        this.plugin.settings.syncMetadata[status.path] = {
-                            lastSyncedSha: remote.sha,
-                            lastSyncedAt: Date.now(),
-                            lastKnownPath: status.path
-                        };
-                    }
-                }
-            } catch {
-                errors.push(status.path);
-            }
-        }
-
-        prog.hide();
-        await this.plugin.saveSettings();
-
-        new Notice(errors.length > 0
-            ? `Pulled ${targets.length - errors.length}/${targets.length}. ${errors.length} failed.`
-            : `Pulled ${targets.length} files`
-        );
-        this.selectedFiles.clear();
-        await new Promise(r => setTimeout(r, 1000));
-        await this.refreshAllStatuses();
+        await this.runBatchOperation('selected', 'pull');
     }
 
     async deleteSelected(): Promise<void> {

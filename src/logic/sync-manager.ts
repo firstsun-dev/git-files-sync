@@ -1,13 +1,12 @@
 import { TFile, App, Notice } from 'obsidian';
 import { GitServiceInterface } from '../services/git-service-interface';
-import { GitLabFilesPushSettings, SyncMetadata } from '../settings';
+import { GitLabFilesPushSettings } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
 
 export class SyncManager {
     private app: App;
     private gitService: GitServiceInterface;
     private settings: GitLabFilesPushSettings;
-    private metadata: Record<string, SyncMetadata> = {};
 
     constructor(app: App, gitService: GitServiceInterface, settings: GitLabFilesPushSettings) {
         this.app = app;
@@ -240,81 +239,18 @@ export class SyncManager {
     }
 
     async pushAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
-        const results = { success: 0, failed: 0, errors: [] as Array<{ file: string; error: string }> };
-        const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-
-        for (let i = 0; i < files.length; i++) {
-            const fileOrPath = files[i];
-            if (!fileOrPath) continue;
-
-            const isString = typeof fileOrPath === 'string';
-            const path = isString ? fileOrPath : fileOrPath.path;
-            const name = isString ? path.split('/').pop() || path : fileOrPath.name;
-
-            if (onProgress) {
-                onProgress(i + 1, files.length, name);
-            }
-
-            try {
-                let content: string;
-                if (isString) {
-                    if (!(await this.app.vault.adapter.exists(path))) {
-                        results.failed++;
-                        results.errors.push({ file: path, error: 'File no longer exists' });
-                        continue;
-                    }
-                    content = await this.app.vault.adapter.read(path);
-                } else {
-                    const existingFile = this.app.vault.getFileByPath(path);
-                    if (!existingFile) {
-                        results.failed++;
-                        results.errors.push({ file: path, error: 'File no longer exists' });
-                        continue;
-                    }
-                    content = await this.app.vault.read(existingFile);
-                }
-
-                const remote = await this.gitService.getFile(path, this.settings.branch);
-
-                await this.gitService.pushFile(
-                    path,
-                    content,
-                    this.settings.branch,
-                    `Update ${name} from Obsidian`,
-                    remote.sha || undefined
-                );
-
-                const newRemote = await this.gitService.getFile(path, this.settings.branch);
-                this.settings.syncMetadata[path] = {
-                    lastSyncedSha: newRemote.sha,
-                    lastSyncedAt: Date.now(),
-                    lastKnownPath: path
-                };
-
-                results.success++;
-            } catch (e) {
-                console.error(`Failed to push ${path}:`, e);
-                results.failed++;
-                results.errors.push({
-                    file: path,
-                    error: e instanceof Error ? e.message : String(e)
-                });
-            }
-        }
-
-        await this.saveSettings();
-
-        if (results.success > 0) {
-            new Notice(`Pushed ${results.success} file(s) to ${serviceName}`);
-        }
-        if (results.failed > 0) {
-            new Notice(`Failed to push ${results.failed} file(s). Check console for details.`);
-        }
-
-        return results;
+        return this.processBatch(files, 'push', onProgress);
     }
 
     async pullAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
+        return this.processBatch(files, 'pull', onProgress);
+    }
+
+    private async processBatch(
+        files: (TFile | string)[],
+        op: 'push' | 'pull',
+        onProgress?: (current: number, total: number, fileName: string) => void
+    ): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
         const results = { success: 0, failed: 0, errors: [] as Array<{ file: string; error: string }> };
         const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
@@ -331,60 +267,45 @@ export class SyncManager {
             }
 
             try {
-                if (isString) {
-                    if (!(await this.app.vault.adapter.exists(path))) {
-                        results.failed++;
-                        results.errors.push({ file: path, error: 'File no longer exists' });
-                        continue;
+                if (op === 'push') {
+                    let content: string;
+                    if (isString) {
+                        if (!(await this.app.vault.adapter.exists(path))) throw new Error('File no longer exists');
+                        content = await this.app.vault.adapter.read(path);
+                    } else {
+                        const existingFile = this.app.vault.getFileByPath(path);
+                        if (!existingFile) throw new Error('File no longer exists');
+                        content = await this.app.vault.read(existingFile);
                     }
+
+                    const remote = await this.gitService.getFile(path, this.settings.branch);
+                    await this.gitService.pushFile(path, content, this.settings.branch, `Update ${name} from Obsidian`, remote.sha || undefined);
+
+                    const newRemote = await this.gitService.getFile(path, this.settings.branch);
+                    this.settings.syncMetadata[path] = { lastSyncedSha: newRemote.sha, lastSyncedAt: Date.now(), lastKnownPath: path };
                 } else {
-                    const existingFile = this.app.vault.getFileByPath(path);
-                    if (!existingFile) {
-                        results.failed++;
-                        results.errors.push({ file: path, error: 'File no longer exists' });
-                        continue;
+                    const remote = await this.gitService.getFile(path, this.settings.branch);
+                    if (!remote.sha) throw new Error('File not found in remote');
+
+                    if (isString) {
+                        await this.app.vault.adapter.write(path, remote.content);
+                    } else if (fileOrPath instanceof TFile) {
+                        await this.app.vault.modify(fileOrPath, remote.content);
                     }
+
+                    this.settings.syncMetadata[path] = { lastSyncedSha: remote.sha, lastSyncedAt: Date.now(), lastKnownPath: path };
                 }
-
-                const remote = await this.gitService.getFile(path, this.settings.branch);
-
-                if (!remote.sha) {
-                    results.failed++;
-                    results.errors.push({ file: path, error: 'File not found in remote' });
-                    continue;
-                }
-
-                if (isString) {
-                    await this.app.vault.adapter.write(path, remote.content);
-                } else if (fileOrPath instanceof TFile) {
-                    await this.app.vault.modify(fileOrPath, remote.content);
-                }
-
-                this.settings.syncMetadata[path] = {
-                    lastSyncedSha: remote.sha,
-                    lastSyncedAt: Date.now(),
-                    lastKnownPath: path
-                };
-
                 results.success++;
             } catch (e) {
-                console.error(`Failed to pull ${path}:`, e);
+                console.error(`Failed to ${op} ${path}:`, e);
                 results.failed++;
-                results.errors.push({
-                    file: path,
-                    error: e instanceof Error ? e.message : String(e)
-                });
+                results.errors.push({ file: path, error: e instanceof Error ? e.message : String(e) });
             }
         }
 
         await this.saveSettings();
-
-        if (results.success > 0) {
-            new Notice(`Pulled ${results.success} file(s) from ${serviceName}`);
-        }
-        if (results.failed > 0) {
-            new Notice(`Failed to pull ${results.failed} file(s). Check console for details.`);
-        }
+        if (results.success > 0) new Notice(`${op === 'push' ? 'Pushed' : 'Pulled'} ${results.success} file(s) to ${serviceName}`);
+        if (results.failed > 0) new Notice(`Failed to ${op} ${results.failed} file(s). Check console for details.`);
 
         return results;
     }

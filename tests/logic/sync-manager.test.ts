@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SyncManager } from '../../src/logic/sync-manager';
 
 // Mock dependencies
-import { App, TFile } from 'obsidian';
+import { App, TFile, Notice } from 'obsidian';
 import { SyncConflictModal } from '../../src/ui/SyncConflictModal';
 
 vi.mock('../../src/ui/SyncConflictModal');
@@ -216,5 +216,73 @@ describe('SyncManager', () => {
             ''
         );
         expect(mockSettings.syncMetadata['new.md']?.lastSyncedSha).toBe('new-sha');
+    });
+
+    describe('Renames and Moves', () => {
+        it('should detect and handle file rename', async () => {
+            const oldPath = 'old.md';
+            const newPath = 'new.md';
+            const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
+            
+            // Setup metadata for the old path
+            mockSettings.syncMetadata[oldPath] = {
+                lastSyncedSha: 'old-sha',
+                lastSyncedAt: Date.now(),
+                lastKnownPath: oldPath
+            };
+
+            // Mock: old file no longer exists in vault
+            vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation((path) => {
+                if (path === oldPath) return null;
+                if (path === newPath) return mockFile;
+                return null;
+            });
+
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue(newPath);
+            vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'content', sha: 'new-sha' });
+
+            await manager.pushFile(mockFile);
+
+            expect(mockGitLab.pushFile).toHaveBeenCalledWith(
+                newPath,
+                'content',
+                'main',
+                `Rename ${oldPath} to ${newPath}`,
+                undefined
+            );
+            expect(mockSettings.syncMetadata[oldPath]).toBeUndefined();
+            expect(mockSettings.syncMetadata[newPath]?.lastSyncedSha).toBe('new-sha');
+        });
+    });
+
+    describe('Error Handling', () => {
+        it('should handle push errors gracefully', async () => {
+            const mockFile = Object.assign(new TFile(), { path: 'fail.md', name: 'fail.md' });
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
+            vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
+            vi.spyOn(mockGitLab, 'pushFile').mockRejectedValue(new Error('Network error'));
+
+            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            
+            await manager.pushFile(mockFile);
+
+            expect(consoleSpy).toHaveBeenCalled();
+            expect(vi.mocked(Notice)).toHaveBeenCalledWith(expect.stringContaining('Failed to push'));
+        });
+
+        it('should handle rename errors gracefully', async () => {
+            const oldPath = 'old.md';
+            const newPath = 'new.md';
+            const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
+            mockSettings.syncMetadata[oldPath] = { lastSyncedSha: 's', lastSyncedAt: 0, lastKnownPath: oldPath };
+            
+            vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation(p => p === oldPath ? null : mockFile);
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('c');
+            vi.spyOn(mockGitLab, 'pushFile').mockRejectedValue(new Error('Rename failed'));
+
+            await manager.pushFile(mockFile);
+            expect(vi.mocked(Notice)).toHaveBeenCalledWith(expect.stringContaining('Failed to handle rename'));
+        });
     });
 });

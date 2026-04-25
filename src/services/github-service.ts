@@ -1,3 +1,4 @@
+/* global Buffer */
 import { requestUrl, RequestUrlResponse, RequestUrlParam } from 'obsidian';
 import { GitServiceInterface } from './git-service-interface';
 
@@ -87,15 +88,7 @@ export class GitHubService implements GitServiceInterface {
         }
 
         const data = (response.json as unknown) as GitHubFileResponse;
-        const content = atob(data.content);
-        let decodedContent = '';
-        try {
-            decodedContent = decodeURIComponent(content.split('').map(c => {
-                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-            }).join(''));
-        } catch {
-            decodedContent = content;
-        }
+        const decodedContent = Buffer.from(data.content, 'base64').toString('utf8');
 
         return {
             content: decodedContent,
@@ -110,9 +103,7 @@ export class GitHubService implements GitServiceInterface {
 
         const body: Record<string, unknown> = {
             message: commitMessage,
-            content: btoa(encodeURIComponent(content).replace(/%([0-9A-F]{2})/g, (_match, p1: string) => {
-                return String.fromCharCode(parseInt(p1, 16));
-            })),
+            content: Buffer.from(content, 'utf8').toString('base64'),
             branch
         };
 

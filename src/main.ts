@@ -251,7 +251,7 @@ export default class GitLabFilesPush extends Plugin {
 	}
 
 	onunload() {
-
+		// Cleanup is handled by Obsidian for registered components
 	}
 
 	async loadSettings() {
