@@ -15,9 +15,6 @@ on:
       - main
       - master
 
-permissions:
-  contents: read
-
 jobs:
   lint:
     name: Lint
