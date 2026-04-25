@@ -1,6 +1,6 @@
 # Git File Sync 使用說明書
 
-<video src="https://blog-assets.firstsun.org/video/obsidian-plugins/git-file-sync-zh.webm" width="100%" controls autoplay loop muted playsinline></video>
+<video src="imgs/git-file-sync-zh.webm" width="100%" controls autoplay loop muted playsinline></video>
 
 本指南將引導您如何使用 Git File Sync 插件，在行動裝置與桌面電腦之間，透過 GitLab 或 GitHub 輕鬆同步您的筆記。
 
