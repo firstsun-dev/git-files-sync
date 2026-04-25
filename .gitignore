@@ -18,5 +18,11 @@ main.js
 # obsidian
 data.json
 
+# test coverage
+coverage/
+
+# Claude worktrees
+.claude/
+
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
