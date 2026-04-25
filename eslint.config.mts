@@ -13,25 +13,15 @@ export default tseslint.config(
 				projectService: {
 					allowDefaultProject: [
 						'eslint.config.js',
-						'manifest.json',
-						'vitest.config.ts',
+						'manifest.json'
 					]
 				},
-				ttsconfigRootDir: import.meta.dirname,
+				tsconfigRootDir: import.meta.dirname,
 				extraFileExtensions: ['.json']
 			},
 		},
-		rules: {
-			'no-alert': 'off', // Allow confirm dialogs for user confirmation
-			'@typescript-eslint/await-thenable': 'off', // Settings methods may not return promises
-		}
 	},
 	...obsidianmd.configs.recommended,
-	{
-		rules: {
-			'obsidianmd/ui/sentence-case': 'off',
-		}
-	},
 	globalIgnores([
 		"node_modules",
 		"dist",

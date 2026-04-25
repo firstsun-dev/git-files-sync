@@ -232,13 +232,11 @@ export class SyncManager {
     }
 
     private async saveSettings() {
-        /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any */
-        // @ts-ignore - access private method to save settings
-        const plugin = (this.app as any).plugins?.plugins?.['git-file-sync'];
-        if (plugin) {
+        const plugins = (this.app as unknown as { plugins: { plugins: Record<string, { saveSettings: () => Promise<void> }> } }).plugins;
+        const plugin = plugins?.plugins?.['git-file-sync'];
+        if (plugin && typeof plugin.saveSettings === 'function') {
             await plugin.saveSettings();
         }
-        /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any */
     }
 
     async pushAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {

@@ -174,7 +174,7 @@ export class GitHubService implements GitServiceInterface {
         }
     }
 
-    async listFiles(branch: string, path: string = ''): Promise<string[]> {
+    async listFiles(branch: string, _path: string = ''): Promise<string[]> {
         const url = `https://api.github.com/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
 
         const response = await this.safeRequest({

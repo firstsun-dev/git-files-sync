@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
+import { ConfirmModal } from './ConfirmModal';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
 
@@ -43,12 +44,13 @@ export class SyncStatusView extends ItemView {
     getDisplayText(): string { return 'Sync status'; }
     getIcon(): string { return 'git-compare'; }
 
-    async onOpen(): Promise<void> {
+    onOpen(): Promise<void> {
         const container = this.containerEl.children[1];
-        if (!container) return;
+        if (!container) return Promise.resolve();
         container.empty();
         container.addClass('sync-status-view');
         this.renderView();
+        return Promise.resolve();
     }
 
     private renderView(): void {
@@ -189,7 +191,7 @@ export class SyncStatusView extends ItemView {
 
             const delBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-delete' });
             delBtn.createSpan({ text: '✕' });
-            delBtn.createSpan({ cls: 'ssv-btn-label', text: ` Del (${canDelete})` });
+            delBtn.createSpan({ cls: 'ssv-btn-label', text: ` Delete (${canDelete})` });
             delBtn.disabled = canDelete === 0;
             setTooltip(delBtn, `Delete ${canDelete} files`);
             delBtn.addEventListener('click', () => void this.deleteSelected());
@@ -249,7 +251,9 @@ export class SyncStatusView extends ItemView {
                 diffEl.toggleClass('visible', !open);
                 btnLabel.setText(open ? ' Diff' : ' Hide');
                 const firstChild = diffBtn.firstChild;
-                if (firstChild) firstChild.textContent = open ? '≡' : '▴';
+                if (firstChild instanceof HTMLElement || firstChild instanceof Text) {
+                    firstChild.textContent = open ? '≡' : '▴';
+                }
             });
         }
 
@@ -820,12 +824,18 @@ export class SyncStatusView extends ItemView {
         this.renderView();
     }
 
-    async onClose(): Promise<void> { /* cleanup */ }
+    onClose(): Promise<void> {
+        return Promise.resolve();
+    }
 
     private showConfirmDialog(message: string): Promise<boolean> {
         return new Promise(resolve => {
-            // eslint-disable-next-line no-alert
-            resolve(confirm(message));
+            new ConfirmModal(
+                this.app,
+                message,
+                () => resolve(true),
+                () => resolve(false)
+            ).open();
         });
     }
 }

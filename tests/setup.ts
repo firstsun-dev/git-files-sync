@@ -17,21 +17,21 @@ if (typeof window === 'undefined') {
 // Mock Obsidian API components
 export const Plugin = class {};
 export const PluginSettingTab = class {
-  constructor(_app: unknown, _plugin: unknown) {}
+  constructor() {}
 };
 export const Setting = class {
-  constructor(_containerEl: unknown) {}
-  setName(_name: string) { return this; }
-  setDesc(_desc: string) { return this; }
-  addText(_cb: unknown) { return this; }
-  addToggle(_cb: unknown) { return this; }
-  addButton(_cb: unknown) { return this; }
+  constructor() {}
+  setName() { return this; }
+  setDesc() { return this; }
+  addText() { return this; }
+  addToggle() { return this; }
+  addButton() { return this; }
 };
 export const Notice = class {
-  constructor(message: string) {}
+  constructor() {}
 };
 export const Modal = class {
-  constructor(_app: unknown) {}
+  constructor() {}
   open() {}
   close() {}
 };
