@@ -169,6 +169,10 @@ export class SyncManager {
         const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
         try {
             const remote = await this.gitService.getFile(path, this.settings.branch);
+            if (!remote.sha) {
+                new Notice(`File ${name} not found on remote.`);
+                return;
+            }
             const localContent = isString ? await this.app.vault.adapter.read(path) : (fileOrPath instanceof TFile ? await this.app.vault.read(fileOrPath) : '');
             const lastSynced = this.settings.syncMetadata[path];
 
