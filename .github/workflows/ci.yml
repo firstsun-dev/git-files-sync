@@ -98,6 +98,15 @@ jobs:
         with:
           args: >
             -Dsonar.qualitygate.wait=true
+            -Dsonar.scanner.dumpToFile=sonar-project.properties
+      - name: Upload Sonar logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sonar-scan-logs
+          path: |
+            .scannerwork/
+            sonar-project.properties
 
   artifact:
     name: Package Artifact

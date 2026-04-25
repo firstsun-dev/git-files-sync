@@ -29,10 +29,10 @@ type FilterValue = 'all' | 'synced' | 'modified' | 'unsynced' | 'remote-only';
 
 export class SyncStatusView extends ItemView {
     plugin: GitLabFilesPush;
-    private fileStatuses: Map<string, FileStatus> = new Map();
+    private readonly fileStatuses: Map<string, FileStatus> = new Map();
     private isRefreshing = false;
     private statusFilter: FilterValue = 'all';
-    private selectedFiles: Set<string> = new Set();
+    private readonly selectedFiles: Set<string> = new Set();
     private lastSyncTime: number = 0;
 
     constructor(leaf: WorkspaceLeaf, plugin: GitLabFilesPush) {
@@ -135,67 +135,77 @@ export class SyncStatusView extends ItemView {
     }
 
     private renderActionBar(container: HTMLElement): void {
-        const all = Array.from(this.fileStatuses.values());
-        const visible = this.statusFilter === 'all'
-            ? all
-            : all.filter(s => s.status === this.statusFilter);
-
-        const selected = Array.from(this.selectedFiles)
-            .map(p => this.fileStatuses.get(p))
-            .filter(Boolean) as FileStatus[];
-
-        const canPush   = selected.filter(s => s.file && (s.status === 'modified' || s.status === 'unsynced')).length;
-        const canPull   = selected.filter(s => s.status === 'modified' || s.status === 'remote-only').length;
-        const canDelete = selected.filter(s => s.file || s.status === 'remote-only').length;
-
-        const allSelected = visible.length > 0 && visible.every(s => this.selectedFiles.has(s.path));
-
+        const { visible, canPush, canPull, canDelete, allSelected } = this.getActionBarState();
         const bar = container.createDiv({ cls: 'ssv-action-bar' });
 
-        const refreshBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-refresh' });
-        refreshBtn.createSpan({ text: '↻' });
-        refreshBtn.createSpan({ cls: 'ssv-btn-label', text: ' Refresh' });
-        setTooltip(refreshBtn, 'Refresh all statuses');
-        refreshBtn.addEventListener('click', () => void this.refreshAllStatuses());
+        this.renderRefreshButton(bar);
 
         if (this.fileStatuses.size > 0) {
             bar.createDiv({ cls: 'ssv-bar-spacer' });
-
-            const selectRow = bar.createDiv({ cls: 'ssv-select-row' });
-            const cb = selectRow.createEl('input', { type: 'checkbox' });
-            cb.checked = allSelected;
-            cb.indeterminate = this.selectedFiles.size > 0 && !allSelected;
-            selectRow.createSpan({ cls: 'ssv-select-label', text: 'Select' });
-            cb.addEventListener('change', () => {
-                if (cb.checked) {
-                    for (const s of visible) this.selectedFiles.add(s.path);
-                } else {
-                    this.selectedFiles.clear();
-                }
-                this.renderView();
-            });
-
-            const pushBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-push' });
-            pushBtn.createSpan({ text: '↑' });
-            pushBtn.createSpan({ cls: 'ssv-btn-label', text: ` Push (${canPush})` });
-            pushBtn.disabled = canPush === 0;
-            setTooltip(pushBtn, `Push ${canPush} files`);
-            pushBtn.addEventListener('click', () => void this.pushSelected());
-
-            const pullBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-pull' });
-            pullBtn.createSpan({ text: '↓' });
-            pullBtn.createSpan({ cls: 'ssv-btn-label', text: ` Pull (${canPull})` });
-            pullBtn.disabled = canPull === 0;
-            setTooltip(pullBtn, `Pull ${canPull} files`);
-            pullBtn.addEventListener('click', () => void this.pullSelected());
-
-            const delBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-delete' });
-            delBtn.createSpan({ text: '✕' });
-            delBtn.createSpan({ cls: 'ssv-btn-label', text: ` Delete (${canDelete})` });
-            delBtn.disabled = canDelete === 0;
-            setTooltip(delBtn, `Delete ${canDelete} files`);
-            delBtn.addEventListener('click', () => void this.deleteSelected());
+            this.renderSelectAllRow(bar, allSelected, visible);
+            this.renderActionButtons(bar, canPush, canPull, canDelete);
         }
+    }
+
+    private getActionBarState() {
+        const all = Array.from(this.fileStatuses.values());
+        const visible = this.statusFilter === 'all' ? all : all.filter(s => s.status === this.statusFilter);
+        const selected = Array.from(this.selectedFiles).map(p => this.fileStatuses.get(p)).filter(Boolean) as FileStatus[];
+
+        return {
+            visible,
+            canPush: selected.filter(s => s.file && (s.status === 'modified' || s.status === 'unsynced')).length,
+            canPull: selected.filter(s => s.status === 'modified' || s.status === 'remote-only').length,
+            canDelete: selected.filter(s => s.file || s.status === 'remote-only').length,
+            allSelected: visible.length > 0 && visible.every(s => this.selectedFiles.has(s.path))
+        };
+    }
+
+    private renderRefreshButton(bar: HTMLElement): void {
+        const btn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-refresh' });
+        btn.createSpan({ text: '↻' });
+        btn.createSpan({ cls: 'ssv-btn-label', text: ' Refresh' });
+        setTooltip(btn, 'Refresh all statuses');
+        btn.addEventListener('click', () => void this.refreshAllStatuses());
+    }
+
+    private renderSelectAllRow(bar: HTMLElement, allSelected: boolean, visible: FileStatus[]): void {
+        const selectRow = bar.createDiv({ cls: 'ssv-select-row' });
+        const cb = selectRow.createEl('input', { type: 'checkbox' });
+        cb.checked = allSelected;
+        cb.indeterminate = this.selectedFiles.size > 0 && !allSelected;
+        selectRow.createSpan({ cls: 'ssv-select-label', text: 'Select' });
+        cb.addEventListener('change', () => {
+            if (cb.checked) {
+                for (const s of visible) this.selectedFiles.add(s.path);
+            } else {
+                this.selectedFiles.clear();
+            }
+            this.renderView();
+        });
+    }
+
+    private renderActionButtons(bar: HTMLElement, canPush: number, canPull: number, canDelete: number): void {
+        const pushBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-push' });
+        pushBtn.createSpan({ text: '↑' });
+        pushBtn.createSpan({ cls: 'ssv-btn-label', text: ` Push (${canPush})` });
+        pushBtn.disabled = canPush === 0;
+        setTooltip(pushBtn, `Push ${canPush} files`);
+        pushBtn.addEventListener('click', () => void this.pushSelected());
+
+        const pullBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-pull' });
+        pullBtn.createSpan({ text: '↓' });
+        pullBtn.createSpan({ cls: 'ssv-btn-label', text: ` Pull (${canPull})` });
+        pullBtn.disabled = canPull === 0;
+        setTooltip(pullBtn, `Pull ${canPull} files`);
+        pullBtn.addEventListener('click', () => void this.pullSelected());
+
+        const delBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-delete' });
+        delBtn.createSpan({ text: '✕' });
+        delBtn.createSpan({ cls: 'ssv-btn-label', text: ` Delete (${canDelete})` });
+        delBtn.disabled = canDelete === 0;
+        setTooltip(delBtn, `Delete ${canDelete} files`);
+        delBtn.addEventListener('click', () => void this.deleteSelected());
     }
 
     private renderFileList(container: HTMLElement): void {
@@ -213,12 +223,21 @@ export class SyncStatusView extends ItemView {
 
     private renderFileItem(container: HTMLElement, fileStatus: FileStatus): void {
         const { icon, label, iconCls, badgeCls, fileCls } = this.statusMeta(fileStatus.status);
-
         const fileEl = container.createDiv({ cls: `ssv-file ${fileCls}` });
 
-        // ── Main row ──
         const row = fileEl.createDiv({ cls: 'ssv-file-row' });
+        this.renderFileCheckbox(row, fileStatus);
 
+        row.createSpan({ cls: `ssv-file-icon ${iconCls}`, text: icon });
+        row.createSpan({ cls: 'ssv-file-path', text: fileStatus.path });
+        row.createSpan({ cls: `ssv-status-badge ${badgeCls}`, text: label });
+
+        if (fileStatus.status !== 'synced' && fileStatus.status !== 'checking') {
+            this.renderFileActions(fileEl, fileStatus);
+        }
+    }
+
+    private renderFileCheckbox(row: HTMLElement, fileStatus: FileStatus): void {
         const cb = row.createEl('input', { type: 'checkbox', cls: 'ssv-file-checkbox' });
         cb.checked = this.selectedFiles.has(fileStatus.path);
         cb.addEventListener('change', () => {
@@ -229,76 +248,67 @@ export class SyncStatusView extends ItemView {
             }
             this.renderView();
         });
+    }
 
-        row.createSpan({ cls: `ssv-file-icon ${iconCls}`, text: icon });
-        row.createSpan({ cls: 'ssv-file-path', text: fileStatus.path });
-        row.createSpan({ cls: `ssv-status-badge ${badgeCls}`, text: label });
-
-        if (fileStatus.status === 'synced' || fileStatus.status === 'checking') return;
-
-        // ── Action row ──
+    private renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus): void {
         const actions = fileEl.createDiv({ cls: 'ssv-file-actions' });
 
-        // Diff toggle (modified only)
         if (fileStatus.status === 'modified' && fileStatus.diff) {
-            const diffBtn = actions.createEl('button', { cls: 'ssv-action-btn diff' });
-            diffBtn.createSpan({ text: '≡' });
-            const btnLabel = diffBtn.createSpan({ cls: 'ssv-btn-label', text: ' Diff' });
-            const diffEl = this.renderDiffPanel(fileEl, fileStatus);
-            setTooltip(diffBtn, 'Toggle diff view');
-            diffBtn.addEventListener('click', () => {
-                const open = diffEl.hasClass('visible');
-                diffEl.toggleClass('visible', !open);
-                btnLabel.setText(open ? ' Diff' : ' Hide');
-                const firstChild = diffBtn.firstChild;
-                if (firstChild instanceof HTMLElement || firstChild instanceof Text) {
-                    firstChild.textContent = open ? '≡' : '▴';
-                }
-            });
+            this.renderDiffToggleButton(actions, fileEl, fileStatus);
         }
 
-        // Push
         if ((fileStatus.status === 'modified' || fileStatus.status === 'unsynced') && fileStatus.file) {
-            const pushBtn = actions.createEl('button', { cls: 'ssv-action-btn push' });
-            pushBtn.createSpan({ text: '↑' });
-            pushBtn.createSpan({ cls: 'ssv-btn-label', text: ' Push' });
-            setTooltip(pushBtn, 'Push to remote');
-            pushBtn.addEventListener('click', () => void this.runSingleFile(fileStatus, 'push'));
+            this.renderActionButton(actions, '↑', ' Push', 'Push to remote', () => void this.runSingleFile(fileStatus, 'push'), 'push');
         }
 
-        // Pull
         if (fileStatus.status === 'modified' || fileStatus.status === 'remote-only') {
-            const pullBtn = actions.createEl('button', { cls: 'ssv-action-btn pull' });
-            pullBtn.createSpan({ text: '↓' });
-            pullBtn.createSpan({ cls: 'ssv-btn-label', text: ' Pull' });
-            setTooltip(pullBtn, 'Pull from remote');
-            pullBtn.addEventListener('click', () => void this.runSingleFile(fileStatus, 'pull'));
+            this.renderActionButton(actions, '↓', ' Pull', 'Pull from remote', () => void this.runSingleFile(fileStatus, 'pull'), 'pull');
         }
 
-        // Remove local
         if (fileStatus.status === 'unsynced' && fileStatus.file) {
-            const removeBtn = actions.createEl('button', { cls: 'ssv-action-btn danger' });
-            removeBtn.createSpan({ text: '✕' });
-            removeBtn.createSpan({ cls: 'ssv-btn-label', text: ' Remove' });
-            setTooltip(removeBtn, 'Delete local file');
-            removeBtn.addEventListener('click', () => {
-                void (async () => {
-                    const confirmed = await this.showConfirmDialog(`Delete local file "${fileStatus.path}"?`);
-                    if (!confirmed) return;
-                    try {
-                        if (fileStatus.file) {
-                            await this.app.fileManager.trashFile(fileStatus.file);
-                        } else {
-                            await this.app.vault.adapter.remove(fileStatus.path);
-                        }
-                        new Notice(`Deleted ${fileStatus.path}`);
-                        this.fileStatuses.delete(fileStatus.path);
-                        this.renderView();
-                    } catch (e) {
-                        new Notice(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
-                    }
-                })();
-            });
+            this.renderActionButton(actions, '✕', ' Remove', 'Delete local file', () => void this.handleLocalDelete(fileStatus), 'danger');
+        }
+    }
+
+    private renderDiffToggleButton(actions: HTMLElement, fileEl: HTMLElement, fileStatus: FileStatus): void {
+        const diffBtn = actions.createEl('button', { cls: 'ssv-action-btn diff' });
+        diffBtn.createSpan({ text: '≡' });
+        const btnLabel = diffBtn.createSpan({ cls: 'ssv-btn-label', text: ' Diff' });
+        const diffEl = this.renderDiffPanel(fileEl, fileStatus);
+        setTooltip(diffBtn, 'Toggle diff view');
+        diffBtn.addEventListener('click', () => {
+            const open = diffEl.hasClass('visible');
+            diffEl.toggleClass('visible', !open);
+            btnLabel.setText(open ? ' Diff' : ' Hide');
+            const firstChild = diffBtn.firstChild;
+            if (firstChild instanceof HTMLElement || firstChild instanceof Text) {
+                firstChild.textContent = open ? '≡' : '▴';
+            }
+        });
+    }
+
+    private renderActionButton(actions: HTMLElement, icon: string, label: string, tooltip: string, onClick: () => void, cls: string): void {
+        const btn = actions.createEl('button', { cls: `ssv-action-btn ${cls}` });
+        btn.createSpan({ text: icon });
+        btn.createSpan({ cls: 'ssv-btn-label', text: label });
+        setTooltip(btn, tooltip);
+        btn.addEventListener('click', onClick);
+    }
+
+    private async handleLocalDelete(fileStatus: FileStatus): Promise<void> {
+        const confirmed = await this.showConfirmDialog(`Delete local file "${fileStatus.path}"?`);
+        if (!confirmed) return;
+        try {
+            if (fileStatus.file) {
+                await this.app.fileManager.trashFile(fileStatus.file);
+            } else {
+                await this.app.vault.adapter.remove(fileStatus.path);
+            }
+            new Notice(`Deleted ${fileStatus.path}`);
+            this.fileStatuses.delete(fileStatus.path);
+            this.renderView();
+        } catch (e) {
+            new Notice(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
@@ -387,7 +397,7 @@ export class SyncStatusView extends ItemView {
 
     private renderDiffCell(grid: HTMLElement, side: DiffSide): void {
         const cell = grid.createDiv({ cls: `ssv-diff-cell ${side.type}` });
-        cell.createSpan({ cls: 'ssv-diff-ln' }).textContent = side.lineNum !== null ? String(side.lineNum) : '';
+        cell.createSpan({ cls: 'ssv-diff-ln' }).textContent = side.lineNum === null ? '' : String(side.lineNum);
         if (side.content !== null) {
             cell.createSpan({ cls: 'ssv-diff-code' }).textContent = side.content;
         }
@@ -464,12 +474,12 @@ export class SyncStatusView extends ItemView {
                     const rIdx = removedIdxs[x];
                     const aIdx = addedIdxs[x];
                     rows.push({
-                        left:  rIdx !== undefined
-                            ? { lineNum: rIdx + 1, content: L[rIdx] ?? null, type: 'removed' }
-                            : { lineNum: null, content: null, type: 'empty' },
-                        right: aIdx !== undefined
-                            ? { lineNum: aIdx + 1, content: R[aIdx] ?? null, type: 'added'   }
-                            : { lineNum: null, content: null, type: 'empty' },
+                        left:  rIdx === undefined
+                            ? { lineNum: null, content: null, type: 'empty' }
+                            : { lineNum: rIdx + 1, content: L[rIdx] ?? null, type: 'removed' },
+                        right: aIdx === undefined
+                            ? { lineNum: null, content: null, type: 'empty' }
+                            : { lineNum: aIdx + 1, content: R[aIdx] ?? null, type: 'added'   },
                     });
                 }
             }
@@ -501,90 +511,123 @@ export class SyncStatusView extends ItemView {
 
         this.isRefreshing = true;
         this.fileStatuses.clear();
-
-        // Show progress bar inside the list container
-        const container = this.containerEl.children[1];
-        if (container) {
-            const listEl = container.querySelector('.ssv-list');
-            if (listEl) {
-                listEl.empty();
-                const prog = listEl.createDiv({ cls: 'ssv-progress' });
-                prog.createDiv({ cls: 'ssv-progress-text', text: 'Checking files…' });
-                const bar = prog.createDiv({ cls: 'ssv-progress-bar' });
-                const fill = bar.createDiv({ cls: 'ssv-progress-fill' });
-                fill.setAttr('style', 'width: 0%');
-            }
-        }
+        this.showProgressIndicator();
 
         try {
-            const allFiles = this.app.vault.getFiles();
-            let files = this.plugin.filterFilesByVaultFolder(allFiles);
-
-            let remoteFiles = await this.plugin.gitService.listFiles(this.plugin.settings.branch);
-
-            await this.plugin.gitignoreManager.loadGitignores();
-            remoteFiles = remoteFiles.filter(p => !this.plugin.gitignoreManager.isIgnored(p));
-            files = files.filter(f => !this.plugin.gitignoreManager.isIgnored(f.path));
-
-            const localFilePaths = new Set(files.map(f => f.path));
-            const allLocalFileMap = new Map<string, TFile>(allFiles.map(f => [f.path, f]));
-
-            for (const file of files) {
-                this.fileStatuses.set(file.path, { file, path: file.path, status: 'checking' });
-            }
-
-            const extraFilesToCheck: Array<TFile | string> = [];
-            for (const remotePath of remoteFiles) {
-                if (!localFilePaths.has(remotePath)) {
-                    let localFile = allLocalFileMap.get(remotePath);
-                    if (!localFile) {
-                        const abs = this.app.vault.getAbstractFileByPath(remotePath);
-                        if (abs instanceof TFile) localFile = abs;
-                    }
-                    if (localFile) {
-                        this.fileStatuses.set(remotePath, { file: localFile, path: remotePath, status: 'checking' });
-                        extraFilesToCheck.push(localFile);
-                    } else if (await this.app.vault.adapter.exists(remotePath)) {
-                        this.fileStatuses.set(remotePath, { path: remotePath, status: 'checking' });
-                        extraFilesToCheck.push(remotePath);
-                    } else {
-                        this.fileStatuses.set(remotePath, { path: remotePath, status: 'remote-only' });
-                    }
-                }
-            }
+            const files = await this.discoverFiles();
+            this.initializeFileStatuses(files.local);
+            const extra = await this.identifyExtraFiles(files.remote, files.localMap, files.allMap);
+            this.addExtraToStatuses(extra);
 
             this.renderView();
 
-            let filesToCheck: Array<TFile | string> = [...files, ...extraFilesToCheck];
-            filesToCheck = filesToCheck.filter(f => {
-                const p = typeof f === 'string' ? f : f.path;
-                return !this.plugin.gitignoreManager.isIgnored(p);
-            });
-            const total = filesToCheck.length;
-            let checked = 0;
-
-            for (const file of filesToCheck) {
-                await this.refreshFileStatus(file);
-                checked++;
-                const c = this.containerEl.children[1];
-                if (c) {
-                    const fill = c.querySelector('.ssv-progress-fill');
-                    const text = c.querySelector('.ssv-progress-text');
-                    if (fill && text) {
-                        const pct = Math.round((checked / total) * 100);
-                        fill.setAttr('style', `width: ${pct}%`);
-                        text.textContent = `Checking files… ${checked}/${total} (${pct}%)`;
-                    }
-                }
-            }
+            const filesToCheck = this.getCheckableFiles(files.local, extra);
+            await this.performStatusCheck(filesToCheck);
 
             this.lastSyncTime = Date.now();
             this.renderView();
-            new Notice(`Checked ${files.length} local + ${remoteFiles.length} remote files`);
+            new Notice(`Checked ${files.local.length} local + ${files.remote.length} remote files`);
         } catch (e) {
             new Notice(`Failed to refresh: ${e instanceof Error ? e.message : String(e)}`);
         } finally {
             this.isRefreshing = false;
+        }
+    }
+
+    private showProgressIndicator(): void {
+        const container = this.containerEl.children[1];
+        if (!container) return;
+        const listEl = container.querySelector('.ssv-list');
+        if (!listEl) return;
+        listEl.empty();
+        const prog = listEl.createDiv({ cls: 'ssv-progress' });
+        prog.createDiv({ cls: 'ssv-progress-text', text: 'Checking files…' });
+        const bar = prog.createDiv({ cls: 'ssv-progress-bar' });
+        const fill = bar.createDiv({ cls: 'ssv-progress-fill' });
+        fill.setAttr('style', 'width: 0%');
+    }
+
+    private async discoverFiles() {
+        const allFiles = this.app.vault.getFiles();
+        let local = this.plugin.filterFilesByVaultFolder(allFiles);
+        let remote = await this.plugin.gitService.listFiles(this.plugin.settings.branch);
+
+        await this.plugin.gitignoreManager.loadGitignores();
+        remote = remote.filter(p => !this.plugin.gitignoreManager.isIgnored(p));
+        local = local.filter(f => !this.plugin.gitignoreManager.isIgnored(f.path));
+
+        return {
+            local,
+            remote,
+            localMap: new Set(local.map(f => f.path)),
+            allMap: new Map<string, TFile>(allFiles.map(f => [f.path, f]))
+        };
+    }
+
+    private initializeFileStatuses(localFiles: TFile[]): void {
+        for (const file of localFiles) {
+            this.fileStatuses.set(file.path, { file, path: file.path, status: 'checking' });
+        }
+    }
+
+    private async identifyExtraFiles(remoteFiles: string[], localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>) {
+        const extra: Array<TFile | string> = [];
+        for (const remotePath of remoteFiles) {
+            if (localFilePaths.has(remotePath)) continue;
+
+            let localFile = allLocalFileMap.get(remotePath);
+            if (!localFile) {
+                const abs = this.app.vault.getAbstractFileByPath(remotePath);
+                if (abs instanceof TFile) localFile = abs;
+            }
+
+            if (localFile) {
+                extra.push(localFile);
+            } else if (await this.app.vault.adapter.exists(remotePath)) {
+                extra.push(remotePath);
+            } else {
+                this.fileStatuses.set(remotePath, { path: remotePath, status: 'remote-only' });
+            }
+        }
+        return extra;
+    }
+
+    private addExtraToStatuses(extra: Array<TFile | string>): void {
+        for (const item of extra) {
+            const path = typeof item === 'string' ? item : item.path;
+            const file = typeof item === 'string' ? undefined : item;
+            this.fileStatuses.set(path, { file, path, status: 'checking' });
+        }
+    }
+
+    private getCheckableFiles(local: TFile[], extra: Array<TFile | string>) {
+        const combined: Array<TFile | string> = [...local, ...extra];
+        return combined.filter(f => {
+            const p = typeof f === 'string' ? f : f.path;
+            return !this.plugin.gitignoreManager.isIgnored(p);
+        });
+    }
+
+    private async performStatusCheck(filesToCheck: Array<TFile | string>): Promise<void> {
+        const total = filesToCheck.length;
+        for (let i = 0; i < total; i++) {
+            const file = filesToCheck[i];
+            if (file) {
+                await this.refreshFileStatus(file);
+            }
+            this.updateRefreshProgress(i + 1, total);
+        }
+    }
+
+    private updateRefreshProgress(current: number, total: number): void {
+        const c = this.containerEl.children[1];
+        if (!c) return;
+        const fill = c.querySelector('.ssv-progress-fill');
+        const text = c.querySelector('.ssv-progress-text');
+        if (fill && text) {
+            const pct = Math.round((current / total) * 100);
+            fill.setAttr('style', `width: ${pct}%`);
+            text.textContent = `Checking files… ${current}/${total} (${pct}%)`;
         }
     }
 
@@ -705,28 +748,51 @@ export class SyncStatusView extends ItemView {
     }
 
     async deleteSelected(): Promise<void> {
-        if (this.selectedFiles.size === 0) { new Notice('No files selected'); return; }
+        const targets = this.getSelectedTargets();
+        if (targets.length === 0) return;
 
-        const targets = Array.from(this.selectedFiles)
-            .map(p => this.fileStatuses.get(p))
-            .filter(Boolean) as FileStatus[];
-
-        const local  = targets.filter(s => s.status !== 'remote-only');
-        const remote = targets.filter(s => s.status === 'remote-only');
+        const { local, remote } = this.partitionTargets(targets);
         if (local.length === 0 && remote.length === 0) { new Notice('Nothing to delete'); return; }
 
-        let msg = '';
-        if (local.length > 0 && remote.length > 0) msg = `Delete ${local.length} local + ${remote.length} remote file(s)? Cannot be undone.`;
-        else if (local.length > 0) msg = `Delete ${local.length} local file(s)? Cannot be undone.`;
-        else msg = `Delete ${remote.length} remote file(s)? Cannot be undone.`;
-
-        if (!await this.showConfirmDialog(msg)) return;
+        if (!await this.confirmDeletion(local.length, remote.length)) return;
 
         const total = local.length + remote.length;
         const prog = new Notice(`Deleting 0/${total} files…`, 0);
         const errors: string[] = [];
-        let cur = 0;
 
+        await this.performLocalDeletion(local, total, prog, errors);
+        await this.performRemoteDeletion(remote, total, local.length, prog, errors);
+
+        prog.hide();
+        this.notifyDeletionResults(total, errors.length);
+        this.renderView();
+    }
+
+    private getSelectedTargets(): FileStatus[] {
+        if (this.selectedFiles.size === 0) { new Notice('No files selected'); return []; }
+        return Array.from(this.selectedFiles)
+            .map(p => this.fileStatuses.get(p))
+            .filter(Boolean) as FileStatus[];
+    }
+
+    private partitionTargets(targets: FileStatus[]) {
+        return {
+            local: targets.filter(s => s.status !== 'remote-only'),
+            remote: targets.filter(s => s.status === 'remote-only')
+        };
+    }
+
+    private async confirmDeletion(localCount: number, remoteCount: number): Promise<boolean> {
+        let msg = '';
+        if (localCount > 0 && remoteCount > 0) msg = `Delete ${localCount} local + ${remoteCount} remote file(s)? Cannot be undone.`;
+        else if (localCount > 0) msg = `Delete ${localCount} local file(s)? Cannot be undone.`;
+        else msg = `Delete ${remoteCount} remote file(s)? Cannot be undone.`;
+
+        return await this.showConfirmDialog(msg);
+    }
+
+    private async performLocalDeletion(local: FileStatus[], total: number, prog: Notice, errors: string[]): Promise<void> {
+        let cur = 0;
         for (const s of local) {
             cur++;
             prog.setMessage(`Deleting local ${cur}/${total}: ${s.path}`);
@@ -737,7 +803,10 @@ export class SyncStatusView extends ItemView {
                 this.selectedFiles.delete(s.path);
             } catch { errors.push(s.path); }
         }
+    }
 
+    private async performRemoteDeletion(remote: FileStatus[], total: number, localCount: number, prog: Notice, errors: string[]): Promise<void> {
+        let cur = localCount;
         for (const s of remote) {
             cur++;
             prog.setMessage(`Deleting remote ${cur}/${total}: ${s.path}`);
@@ -747,13 +816,13 @@ export class SyncStatusView extends ItemView {
                 this.selectedFiles.delete(s.path);
             } catch { errors.push(s.path); }
         }
+    }
 
-        prog.hide();
-        new Notice(errors.length > 0
-            ? `Deleted ${total - errors.length}/${total}. ${errors.length} failed.`
+    private notifyDeletionResults(total: number, errorCount: number): void {
+        new Notice(errorCount > 0
+            ? `Deleted ${total - errorCount}/${total}. ${errorCount} failed.`
             : `Deleted ${total} files`
         );
-        this.renderView();
     }
 
     onClose(): Promise<void> {

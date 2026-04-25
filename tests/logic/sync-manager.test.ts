@@ -55,6 +55,7 @@ describe('SyncManager', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        mockSettings.syncMetadata = {};
         // Default: file exists in vault
         vi.spyOn(mockApp.vault, 'getFileByPath').mockReturnValue(new TFile());
         manager = new SyncManager(mockApp, mockGitLab, mockSettings);
@@ -294,7 +295,12 @@ describe('SyncManager', () => {
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('c');
             vi.spyOn(mockGitLab, 'pushFile').mockRejectedValue(new Error('Rename failed'));
 
+            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             await manager.pushFile(mockFile);
+            expect(consoleSpy).toHaveBeenCalled();
+            // Verify metadata wasn't updated
+            expect(mockSettings.syncMetadata[oldPath]).toBeDefined();
+            expect(mockSettings.syncMetadata[newPath]).toBeUndefined();
         });
     });
 
@@ -311,8 +317,9 @@ describe('SyncManager', () => {
             const mockFile = Object.assign(new TFile(), { path: 'fail.md', name: 'fail.md' });
             vi.mocked(mockGitLab.getFile).mockRejectedValue(new Error('Network error'));
             
+            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             await manager.pullFile(mockFile);
-            // Catch block covered
+            expect(consoleSpy).toHaveBeenCalled();
         });
     });
 });

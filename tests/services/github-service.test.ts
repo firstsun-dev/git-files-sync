@@ -10,7 +10,8 @@ describe('GitHubService', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        service = new GitHubService(token, owner, repo);
+        service = new GitHubService();
+        service.updateConfig(token, owner, repo);
     });
 
     describe('getFile', () => {
@@ -49,13 +50,12 @@ describe('GitHubService', () => {
     });
 
     describe('pushFile', () => {
-        it('should push new file correctly (no sha provided, remote 404)', async () => {
+        it('should push new file correctly (no sha provided)', async () => {
             vi.mocked(requestUrl)
-                .mockResolvedValueOnce({ status: 404 } as unknown as RequestUrlResponse) // getFile check
                 .mockResolvedValueOnce({ 
                     status: 201, 
                     json: { content: { path: 'new.md' } } 
-                } as unknown as RequestUrlResponse); // push
+                } as unknown as RequestUrlResponse);
 
             const result = await service.pushFile('new.md', 'new content', 'main', 'create');
 

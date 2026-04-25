@@ -1,9 +1,9 @@
 import { App, Modal, ButtonComponent } from 'obsidian';
 
 export class ConfirmModal extends Modal {
-    private message: string;
-    private onConfirm: () => void;
-    private onCancel?: () => void;
+    private readonly message: string;
+    private readonly onConfirm: () => void;
+    private readonly onCancel?: () => void;
 
     constructor(app: App, message: string, onConfirm: () => void, onCancel?: () => void) {
         super(app);

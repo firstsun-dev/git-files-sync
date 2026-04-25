@@ -23,15 +23,15 @@ export default class GitLabFilesPush extends Plugin {
 			(leaf) => new SyncStatusView(leaf, this)
 		);
 
-		this.addRibbonIcon('list-checks', 'Open sync status', () => {
-			void this.activateSyncStatusView();
+		this.addRibbonIcon('list-checks', 'Open sync status', async () => {
+			await this.activateSyncStatusView();
 		});
 
 		this.addCommand({
 			id: 'open-sync-status',
 			name: 'Open sync status',
-			callback: () => {
-				void this.activateSyncStatusView();
+			callback: async () => {
+				await this.activateSyncStatusView();
 			}
 		});
 
@@ -41,10 +41,10 @@ export default class GitLabFilesPush extends Plugin {
 
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
-		this.addRibbonIcon('upload-cloud', Platform.isMobile ? `Push` : `Push to ${serviceName}`, () => {
+		this.addRibbonIcon('upload-cloud', Platform.isMobile ? `Push` : `Push to ${serviceName}`, async () => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView && activeView.file instanceof TFile) {
-				void this.sync.pushFile(activeView.file);
+				await this.sync.pushFile(activeView.file);
 			} else {
 				new Notice('No active note to push');
 			}
@@ -53,10 +53,10 @@ export default class GitLabFilesPush extends Plugin {
 		this.addCommand({
 			id: 'push-current-file',
 			name: `Push current file to ${serviceName}`,
-			callback: () => {
+			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
-					void this.sync.pushFile(activeView.file);
+					await this.sync.pushFile(activeView.file);
 				}
 			}
 		});
@@ -64,10 +64,10 @@ export default class GitLabFilesPush extends Plugin {
 		this.addCommand({
 			id: 'pull-current-file',
 			name: `Pull current file from ${serviceName}`,
-			callback: () => {
+			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
-					void this.sync.pullFile(activeView.file);
+					await this.sync.pullFile(activeView.file);
 				}
 			}
 		});
@@ -75,16 +75,16 @@ export default class GitLabFilesPush extends Plugin {
 		this.addCommand({
 			id: 'push-all-files',
 			name: 'Push all files',
-			callback: () => {
-				void this.pushAllFiles();
+			callback: async () => {
+				await this.pushAllFiles();
 			}
 		});
 
 		this.addCommand({
 			id: 'pull-all-files',
 			name: 'Pull all files',
-			callback: () => {
-				void this.pullAllFiles();
+			callback: async () => {
+				await this.pullAllFiles();
 			}
 		});
 
@@ -94,12 +94,12 @@ export default class GitLabFilesPush extends Plugin {
 					menu.addItem((item) => {
 						item.setTitle(`Push to ${serviceName}`)
 							.setIcon('upload-cloud')
-							.onClick(() => { void this.sync.pushFile(file); });
+							.onClick(async () => { await this.sync.pushFile(file); });
 					});
 					menu.addItem((item) => {
 						item.setTitle(`Pull from ${serviceName}`)
 							.setIcon('download-cloud')
-							.onClick(() => { void this.sync.pullFile(file); });
+							.onClick(async () => { await this.sync.pullFile(file); });
 					});
 				}
 			})
@@ -132,7 +132,7 @@ export default class GitLabFilesPush extends Plugin {
 		}
 
 		if (leaf) {
-			void workspace.revealLeaf(leaf);
+			await workspace.revealLeaf(leaf);
 		}
 	}
 
@@ -219,19 +219,23 @@ export default class GitLabFilesPush extends Plugin {
 
 	initializeGitService(): void {
 		if (this.settings.serviceType === 'gitlab') {
-			this.gitService = new GitLabService(
+			const service = new GitLabService();
+			service.updateConfig(
 				this.settings.gitlabBaseUrl,
 				this.settings.gitlabToken,
 				this.settings.projectId,
 				this.settings.rootPath
 			);
+			this.gitService = service;
 		} else {
-			this.gitService = new GitHubService(
+			const service = new GitHubService();
+			service.updateConfig(
 				this.settings.githubToken,
 				this.settings.githubOwner,
 				this.settings.githubRepo,
 				this.settings.rootPath
 			);
+			this.gitService = service;
 		}
 
 		if (this.sync) {

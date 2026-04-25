@@ -3,14 +3,14 @@ import { App } from 'obsidian';
 import { GitServiceInterface } from '../services/git-service-interface';
 
 export class GitignoreManager {
-    private app: App;
-    private gitService: GitServiceInterface;
-    private branch: string;
+    private readonly app: App;
+    private readonly gitService: GitServiceInterface;
+    private readonly branch: string;
     
-    private rootPath: string;
+    private readonly rootPath: string;
     
     // Maps directory path (empty string for root) to Ignore instance
-    private ignoreMap: Map<string, Ignore> = new Map();
+    private readonly ignoreMap: Map<string, Ignore> = new Map();
 
     constructor(app: App, gitService: GitServiceInterface, branch: string, rootPath: string) {
         this.app = app;
@@ -38,45 +38,49 @@ export class GitignoreManager {
         // 2. Fetch and parse each .gitignore
         for (const fullGitignorePath of gitignorePaths) {
             const dirPath = fullGitignorePath === '.gitignore' ? '' : fullGitignorePath.slice(0, -('.gitignore'.length + 1));
-            
-            let content: string | undefined;
-
-            // Determine local path relative to vault root
-            let localPath: string | null = null;
-            if (!this.rootPath) {
-                localPath = fullGitignorePath;
-            } else if (fullGitignorePath === this.rootPath + '/.gitignore' || fullGitignorePath.startsWith(this.rootPath + '/')) {
-                localPath = fullGitignorePath.substring(this.rootPath.length + 1);
-            }
-
-            // Try local first if it's within the vault
-            if (localPath) {
-                try {
-                    if (await this.app.vault.adapter.exists(localPath)) {
-                        content = await this.app.vault.adapter.read(localPath);
-                    }
-                } catch (e) {
-                    console.warn(`Failed to read local ${localPath}`, e);
-                }
-            }
-
-            // Fallback to remote (use absolute path starting with / to bypass rootPath)
-            if (content === undefined) {
-                try {
-                    const remoteFile = await this.gitService.getFile('/' + fullGitignorePath, this.branch);
-                    if (remoteFile && remoteFile.content) {
-                        content = remoteFile.content;
-                    }
-                } catch {
-                    // It's okay if some gitignores fail to fetch
-                }
-            }
+            const content = await this.getGitignoreContent(fullGitignorePath);
 
             if (content) {
                 const ig = ignore().add(content);
                 this.ignoreMap.set(dirPath, ig);
             }
         }
+    }
+
+    private async getGitignoreContent(fullGitignorePath: string): Promise<string | undefined> {
+        let content: string | undefined;
+
+        // Determine local path relative to vault root
+        let localPath: string | null = null;
+        if (!this.rootPath) {
+            localPath = fullGitignorePath;
+        } else if (fullGitignorePath === this.rootPath + '/.gitignore' || fullGitignorePath.startsWith(this.rootPath + '/')) {
+            localPath = fullGitignorePath.substring(this.rootPath.length + 1);
+        }
+
+        // Try local first if it's within the vault
+        if (localPath) {
+            try {
+                if (await this.app.vault.adapter.exists(localPath)) {
+                    content = await this.app.vault.adapter.read(localPath);
+                }
+            } catch (e) {
+                console.warn(`Failed to read local ${localPath}`, e);
+            }
+        }
+
+        // Fallback to remote (use absolute path starting with / to bypass rootPath)
+        if (content === undefined) {
+            try {
+                const remoteFile = await this.gitService.getFile('/' + fullGitignorePath, this.branch);
+                if (remoteFile?.content) {
+                    content = remoteFile.content;
+                }
+            } catch {
+                // It's okay if some gitignores fail to fetch
+            }
+        }
+        return content;
     }
 
     /**

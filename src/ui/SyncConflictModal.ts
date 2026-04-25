@@ -1,10 +1,10 @@
 import { App, Modal, Setting } from 'obsidian';
 
 export class SyncConflictModal extends Modal {
-    private fileName: string;
-    private localContent: string;
-    private remoteContent: string;
-    private onChoose: (choice: 'local' | 'remote') => void;
+    private readonly fileName: string;
+    private readonly localContent: string;
+    private readonly remoteContent: string;
+    private readonly onChoose: (choice: 'local' | 'remote') => void;
 
     constructor(app: App, fileName: string, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
         super(app);

@@ -60,7 +60,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.onChange((value: string) => {
 					this.plugin.settings.serviceType = value as GitServiceType;
 					void this.plugin.saveSettings();
-					void this.plugin.initializeGitService();
+					this.plugin.initializeGitService();
 					this.display();
 				}));
 
@@ -92,7 +92,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.onChange((value) => {
 					this.plugin.settings.rootPath = value.replace(/^\/|\/$/g, '');
 					void this.plugin.saveSettings();
-					void this.plugin.initializeGitService();
+					this.plugin.initializeGitService();
 				}));
 
 		new Setting(containerEl)
@@ -132,7 +132,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.onChange((value) => {
 					this.plugin.settings.gitlabToken = value;
 					void this.plugin.saveSettings();
-					void this.plugin.initializeGitService();
+					this.plugin.initializeGitService();
 				}));
 
 		new Setting(containerEl)
@@ -144,7 +144,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.onChange((value) => {
 					this.plugin.settings.gitlabBaseUrl = value || 'https://gitlab.com';
 					void this.plugin.saveSettings();
-					void this.plugin.initializeGitService();
+					this.plugin.initializeGitService();
 				}));
 
 		new Setting(containerEl)
@@ -156,7 +156,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.onChange((value) => {
 					this.plugin.settings.projectId = value;
 					void this.plugin.saveSettings();
-					void this.plugin.initializeGitService();
+					this.plugin.initializeGitService();
 				}));
 	}
 
@@ -170,7 +170,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.onChange((value) => {
 					this.plugin.settings.githubToken = value;
 					void this.plugin.saveSettings();
-					void this.plugin.initializeGitService();
+					this.plugin.initializeGitService();
 				}));
 
 		new Setting(containerEl)
@@ -182,7 +182,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.onChange((value) => {
 					this.plugin.settings.githubOwner = value;
 					void this.plugin.saveSettings();
-					void this.plugin.initializeGitService();
+					this.plugin.initializeGitService();
 				}));
 
 		new Setting(containerEl)
@@ -194,7 +194,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.onChange((value) => {
 					this.plugin.settings.githubRepo = value;
 					void this.plugin.saveSettings();
-					void this.plugin.initializeGitService();
+					this.plugin.initializeGitService();
 				}));
 	}
 }

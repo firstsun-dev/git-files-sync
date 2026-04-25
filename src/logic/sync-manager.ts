@@ -4,9 +4,9 @@ import { GitLabFilesPushSettings } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
 
 export class SyncManager {
-    private app: App;
+    private readonly app: App;
     private gitService: GitServiceInterface;
-    private settings: GitLabFilesPushSettings;
+    private readonly settings: GitLabFilesPushSettings;
 
     constructor(app: App, gitService: GitServiceInterface, settings: GitLabFilesPushSettings) {
         this.app = app;
@@ -19,21 +19,14 @@ export class SyncManager {
     }
 
     async pushFile(fileOrPath: TFile | string) {
-        const isString = typeof fileOrPath === 'string';
-        const path = isString ? fileOrPath : fileOrPath.path;
-        const name = isString ? path.split('/').pop() || path : fileOrPath.name;
+        const { path, name, isString } = this.getFileInfo(fileOrPath);
 
-        if (isString) {
-            if (!(await this.app.vault.adapter.exists(path))) {
-                new Notice(`File ${name} no longer exists in vault.`);
-                return;
-            }
-        } else if (!this.app.vault.getFileByPath(path)) {
+        if (!await this.checkFileExists(path, isString)) {
             new Notice(`File ${name} no longer exists in vault.`);
             return;
         }
 
-        const content = isString ? await this.app.vault.adapter.read(path) : (fileOrPath instanceof TFile ? await this.app.vault.read(fileOrPath) : '');
+        const content = await this.getFileContent(fileOrPath);
         const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
         try {
             // Check if this is a renamed file
@@ -54,10 +47,11 @@ export class SyncManager {
                 new SyncConflictModal(this.app, name, content, remote.content, (choice) => {
                     void (async () => {
                         try {
+                            const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
                             if (choice === 'local') {
                                 await this.performPush({ path, name }, content, remote.sha);
                             } else {
-                                await this.performPull(isString ? { path, name } : fileOrPath, remote.content, remote.sha);
+                                await this.performPull(fileRep, remote.content, remote.sha);
                             }
                         } catch (e) {
                             console.error(e);
@@ -152,16 +146,9 @@ export class SyncManager {
     }
 
     async pullFile(fileOrPath: TFile | string) {
-        const isString = typeof fileOrPath === 'string';
-        const path = isString ? fileOrPath : fileOrPath.path;
-        const name = isString ? path.split('/').pop() || path : fileOrPath.name;
+        const { path, name, isString } = this.getFileInfo(fileOrPath);
 
-        if (isString) {
-            if (!(await this.app.vault.adapter.exists(path))) {
-                new Notice(`File ${name} no longer exists in vault.`);
-                return;
-            }
-        } else if (!this.app.vault.getFileByPath(path)) {
+        if (!await this.checkFileExists(path, isString)) {
             new Notice(`File ${name} no longer exists in vault.`);
             return;
         }
@@ -173,7 +160,7 @@ export class SyncManager {
                 new Notice(`File ${name} not found on remote.`);
                 return;
             }
-            const localContent = isString ? await this.app.vault.adapter.read(path) : (fileOrPath instanceof TFile ? await this.app.vault.read(fileOrPath) : '');
+            const localContent = await this.getFileContent(fileOrPath);
             const lastSynced = this.settings.syncMetadata[path];
 
             if (localContent === remote.content) {
@@ -192,10 +179,11 @@ export class SyncManager {
                 new SyncConflictModal(this.app, name, localContent, remote.content, (choice) => {
                     void (async () => {
                         try {
+                            const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
                             if (choice === 'local') {
                                 await this.performPush({ path, name }, localContent, remote.sha);
                             } else {
-                                await this.performPull(isString ? { path, name } : fileOrPath, remote.content, remote.sha);
+                                await this.performPull(fileRep, remote.content, remote.sha);
                             }
                         } catch (e) {
                             console.error(e);
@@ -206,7 +194,8 @@ export class SyncManager {
                 return;
             }
 
-            await this.performPull(isString ? { path, name } : fileOrPath, remote.content, remote.sha);
+            const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
+            await this.performPull(fileRep, remote.content, remote.sha);
         } catch (e) {
             console.error(e);
             new Notice(`Failed to pull ${name} from ${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
@@ -230,7 +219,7 @@ export class SyncManager {
         };
 
         await this.saveSettings();
-        const name = file instanceof TFile ? file.name : file.name;
+        const name = file.name;
         new Notice(`Pulled ${name} from ${serviceName}`);
     }
 
@@ -262,9 +251,7 @@ export class SyncManager {
             const fileOrPath = files[i];
             if (!fileOrPath) continue;
 
-            const isString = typeof fileOrPath === 'string';
-            const path = isString ? fileOrPath : fileOrPath.path;
-            const name = isString ? path.split('/').pop() || path : fileOrPath.name;
+            const { path, name, isString } = this.getFileInfo(fileOrPath);
 
             if (onProgress) {
                 onProgress(i + 1, files.length, name);
@@ -272,32 +259,9 @@ export class SyncManager {
 
             try {
                 if (op === 'push') {
-                    let content: string;
-                    if (isString) {
-                        if (!(await this.app.vault.adapter.exists(path))) throw new Error('File no longer exists');
-                        content = await this.app.vault.adapter.read(path);
-                    } else {
-                        const existingFile = this.app.vault.getFileByPath(path);
-                        if (!existingFile) throw new Error('File no longer exists');
-                        content = await this.app.vault.read(existingFile);
-                    }
-
-                    const remote = await this.gitService.getFile(path, this.settings.branch);
-                    await this.gitService.pushFile(path, content, this.settings.branch, `Update ${name} from Obsidian`, remote.sha || undefined);
-
-                    const newRemote = await this.gitService.getFile(path, this.settings.branch);
-                    this.settings.syncMetadata[path] = { lastSyncedSha: newRemote.sha, lastSyncedAt: Date.now(), lastKnownPath: path };
+                    await this.processSingleBatchPush(fileOrPath, path, name, isString);
                 } else {
-                    const remote = await this.gitService.getFile(path, this.settings.branch);
-                    if (!remote.sha) throw new Error('File not found in remote');
-
-                    if (isString) {
-                        await this.app.vault.adapter.write(path, remote.content);
-                    } else if (fileOrPath instanceof TFile) {
-                        await this.app.vault.modify(fileOrPath, remote.content);
-                    }
-
-                    this.settings.syncMetadata[path] = { lastSyncedSha: remote.sha, lastSyncedAt: Date.now(), lastKnownPath: path };
+                    await this.processSingleBatchPull(fileOrPath, path, name, isString);
                 }
                 results.success++;
             } catch (e) {
@@ -312,5 +276,58 @@ export class SyncManager {
         if (results.failed > 0) new Notice(`Failed to ${op} ${results.failed} file(s). Check console for details.`);
 
         return results;
+    }
+
+    private getFileInfo(fileOrPath: TFile | string) {
+        const isString = typeof fileOrPath === 'string';
+        const path = isString ? fileOrPath : fileOrPath.path;
+        const name = isString ? path.split('/').pop() || path : fileOrPath.name;
+        return { path, name, isString };
+    }
+
+    private async checkFileExists(path: string, isString: boolean): Promise<boolean> {
+        if (isString) {
+            return await this.app.vault.adapter.exists(path);
+        }
+        return !!this.app.vault.getFileByPath(path);
+    }
+
+    private async getFileContent(fileOrPath: TFile | string): Promise<string> {
+        if (typeof fileOrPath === 'string') {
+            return await this.app.vault.adapter.read(fileOrPath);
+        }
+        return await this.app.vault.read(fileOrPath);
+    }
+
+    private async processSingleBatchPush(fileOrPath: TFile | string, path: string, name: string, isString: boolean) {
+        if (!await this.checkFileExists(path, isString)) throw new Error('File no longer exists');
+        const content = await this.getFileContent(fileOrPath);
+
+        // Rename detection
+        if (!isString && fileOrPath instanceof TFile) {
+            const renamedFrom = this.detectRename(fileOrPath);
+            if (renamedFrom) {
+                await this.handleRename(fileOrPath, renamedFrom, content);
+                return;
+            }
+        }
+
+        const remote = await this.gitService.getFile(path, this.settings.branch);
+        await this.gitService.pushFile(path, content, this.settings.branch, `Update ${name} from Obsidian`, remote.sha || undefined);
+        const newRemote = await this.gitService.getFile(path, this.settings.branch);
+        this.settings.syncMetadata[path] = { lastSyncedSha: newRemote.sha, lastSyncedAt: Date.now(), lastKnownPath: path };
+    }
+
+    private async processSingleBatchPull(fileOrPath: TFile | string, path: string, name: string, isString: boolean) {
+        const remote = await this.gitService.getFile(path, this.settings.branch);
+        if (!remote.sha) throw new Error('File not found in remote');
+
+        if (typeof fileOrPath === 'string') {
+            await this.app.vault.adapter.write(fileOrPath, remote.content);
+        } else if (fileOrPath instanceof TFile) {
+            await this.app.vault.modify(fileOrPath, remote.content);
+        }
+
+        this.settings.syncMetadata[path] = { lastSyncedSha: remote.sha, lastSyncedAt: Date.now(), lastKnownPath: path };
     }
 }
