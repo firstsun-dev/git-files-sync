@@ -9,11 +9,35 @@ on:
       - main
       - master
       - '**'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'imgs/**'
+      - '.gitignore'
+      - 'sonar-project.properties'
+      - '.releaserc.json'
+      - 'manifest.json'
+      - 'versions.json'
+      - 'LICENSE'
+      - '.editorconfig'
+      - '.npmrc'
   pull_request:
     types: [opened, synchronize, reopened]
     branches:
       - main
       - master
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'imgs/**'
+      - '.gitignore'
+      - 'sonar-project.properties'
+      - '.releaserc.json'
+      - 'manifest.json'
+      - 'versions.json'
+      - 'LICENSE'
+      - '.editorconfig'
+      - '.npmrc'
 
 jobs:
   lint:
