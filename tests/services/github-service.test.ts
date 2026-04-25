@@ -61,8 +61,9 @@ describe('GitHubService', () => {
 
             expect(result).toBe('new.md');
             const calls = vi.mocked(requestUrl).mock.calls;
-            const lastCall = calls[calls.length - 1] ? (calls[calls.length - 1][0] as RequestUrlParam) : null;
-            if (!lastCall) throw new Error('lastCall is undefined');
+            const lastCallParams = calls[calls.length - 1];
+            if (!lastCallParams) throw new Error('lastCall is undefined');
+            const lastCall = lastCallParams[0] as RequestUrlParam;
             expect(lastCall.method).toBe('PUT');
             expect(lastCall.body).not.toContain('"sha":');
         });
@@ -77,8 +78,9 @@ describe('GitHubService', () => {
 
             expect(result).toBe('existing.md');
             const calls = vi.mocked(requestUrl).mock.calls;
-            const lastCall = calls[calls.length - 1] ? (calls[calls.length - 1][0] as RequestUrlParam) : null;
-            if (!lastCall) throw new Error('lastCall is undefined');
+            const lastCallParams = calls[calls.length - 1];
+            if (!lastCallParams) throw new Error('lastCall is undefined');
+            const lastCall = lastCallParams[0] as RequestUrlParam;
             expect(lastCall.method).toBe('PUT');
             expect(lastCall.body).toContain('"sha":"old-sha"');
         });
