@@ -63,10 +63,20 @@
       }
     ],
     [
+      "@semantic-release/git",
+      {
+        "assets": ["manifest.json", "versions.json", "CHANGELOG.md"],
+        "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+      }
+    ],
+    [
       "@semantic-release/github",
       {
         "assets": [
-          { "path": "git-files-sync-*.zip", "label": "Plugin Package" }
+          { "path": "main.js" },
+          { "path": "manifest.json" },
+          { "path": "styles.css" },
+          { "path": "git-files-sync-*.zip", "label": "Plugin Package (Zip)" }
         ]
       }
     ]
