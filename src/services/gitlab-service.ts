@@ -1,4 +1,4 @@
-/* global Buffer */
+
 import { requestUrl, RequestUrlResponse, RequestUrlParam } from 'obsidian';
 import { GitServiceInterface } from './git-service-interface';
 
@@ -58,7 +58,7 @@ export class GitLabService implements GitServiceInterface {
                 const status = error.status || 0;
                 const responseData = error.response;
                 const text = responseData?.text || (responseData?.json ? JSON.stringify(responseData.json) : '');
-                
+
                 // Re-throw as a standardized response-like object if it looks like one
                 if (status) {
                     return {
@@ -94,7 +94,7 @@ export class GitLabService implements GitServiceInterface {
         }
 
         const data = (response.json as unknown) as GitLabFileResponse;
-        const decodedContent = Buffer.from(data.content, 'base64').toString('utf8');
+        const decodedContent = this.fromBase64(data.content);
 
         return {
             content: decodedContent,
@@ -118,7 +118,7 @@ export class GitLabService implements GitServiceInterface {
             body: JSON.stringify({
                 branch,
                 commit_message: commitMessage,
-                content: Buffer.from(content, 'utf8').toString('base64'),
+                content: this.toBase64(content),
                 encoding: 'base64'
             })
         });
@@ -238,5 +238,23 @@ export class GitLabService implements GitServiceInterface {
         return data
             .filter(item => item.type === 'blob' && item.path.endsWith('.gitignore'))
             .map(item => item.path);
+    }
+
+    private toBase64(str: string): string {
+        const bytes = new TextEncoder().encode(str);
+        let binary = '';
+        bytes.forEach((byte) => {
+            binary += String.fromCharCode(byte);
+        });
+        return btoa(binary);
+    }
+
+    private fromBase64(base64: string): string {
+        const binary = atob(base64.replace(/\s/g, ''));
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return new TextDecoder().decode(bytes);
     }
 }
