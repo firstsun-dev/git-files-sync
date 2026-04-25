@@ -14,98 +14,53 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run linter
-        run: npm run lint
+      - run: npm ci
+      - run: npm run lint
 
   test:
     name: Test
     runs-on: ubuntu-latest
-
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm run test
-
-      - name: Run tests with coverage
-        run: npm run test -- --coverage
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build plugin
-        run: npm run build
-
-      - name: Check build artifacts
-        run: |
-          if [ ! -f main.js ]; then
-            echo "Error: main.js not found"
-            exit 1
-          fi
-          if [ ! -f manifest.json ]; then
-            echo "Error: manifest.json not found"
-            exit 1
-          fi
-          if [ ! -f styles.css ]; then
-            echo "Error: styles.css not found"
-            exit 1
-          fi
-          echo "✓ All build artifacts present"
-
-      - name: Get version from manifest
-        id: version
+      - run: npm ci
+      - run: npm run test -- --coverage
+      - id: version
         run: echo "version=$(node -p "require('./manifest.json').version")" >> $GITHUB_OUTPUT
 
+  artifact:
+    name: Package Artifact
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
       - name: Create plugin package
         run: |
+          VERSION=${{ needs.test.outputs.version }}
           BRANCH_NAME=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
           BRANCH_NAME_SAFE=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
-          ZIP_NAME="git-files-sync-${{ steps.version.outputs.version }}-${BRANCH_NAME_SAFE}.zip"
+          ZIP_NAME="git-files-sync-${VERSION}-${BRANCH_NAME_SAFE}.zip"
           zip -j "$ZIP_NAME" main.js manifest.json styles.css
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: plugin-build-${{ steps.version.outputs.version }}-${{ github.sha }}
+          name: plugin-build-${{ needs.test.outputs.version }}-${{ github.sha }}
           path: ${{ env.ZIP_NAME }}
           retention-days: 7

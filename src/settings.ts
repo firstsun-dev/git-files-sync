@@ -163,7 +163,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	private displayGitHubSettings(containerEl: HTMLElement): void {
 		new Setting(containerEl)
 			.setName('GitHub personal access token')
-			.setDesc('Create a token in GitHub settings > Developer settings > Personal access tokens with "repo" scope')
+			.setDesc('Create a token in GitHub settings > developer settings > personal access tokens with "repo" scope')
 			.addText(text => text
 				.setPlaceholder('Enter your token')
 				.setValue(this.plugin.settings.githubToken)
@@ -177,7 +177,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 			.setName('Repository owner')
 			.setDesc('GitHub username or organization name')
 			.addText(text => text
-				.setPlaceholder('username')
+				.setPlaceholder('Username')
 				.setValue(this.plugin.settings.githubOwner)
 				.onChange((value) => {
 					this.plugin.settings.githubOwner = value;
@@ -189,7 +189,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 			.setName('Repository name')
 			.setDesc('Name of the GitHub repository')
 			.addText(text => text
-				.setPlaceholder('my-notes')
+				.setPlaceholder('My notes')
 				.setValue(this.plugin.settings.githubRepo)
 				.onChange((value) => {
 					this.plugin.settings.githubRepo = value;

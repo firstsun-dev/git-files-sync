@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/unbound-method, @typescript-eslint/no-unsafe-return */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SyncManager } from '../../src/logic/sync-manager';
 
@@ -98,21 +97,13 @@ describe('SyncManager', () => {
         const modalMock = vi.mocked(SyncConflictModal);
 
         // Capture the callback passed to the modal
-        let callback: (choice: 'local' | 'remote') => void = () => {};
-        modalMock.mockImplementation(function(app, file, local, remote, onChoose) {
+        let callback: (choice: 'local' | 'remote') => void = () => { };
+        modalMock.mockImplementation(function (this: SyncConflictModal, app: App, fileName: string, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
             callback = onChoose;
-            return {
-                open: vi.fn(),
-                close: vi.fn(),
-                app,
-                scope: {} as unknown,
-                containerEl: {} as HTMLElement,
-                contentEl: {} as HTMLElement,
-                titleEl: {} as HTMLElement,
-                onOpen: vi.fn(),
-                onClose: vi.fn(),
-                setTitle: vi.fn().mockReturnThis(),
-            } as any;
+            (this as unknown as Record<string, unknown>).open = vi.fn();
+            (this as unknown as Record<string, unknown>).close = vi.fn();
+            (this as unknown as Record<string, unknown>).app = app;
+            (this as unknown as Record<string, unknown>).setTitle = vi.fn().mockReturnThis();
         });
 
         await manager.pushFile(mockFile);
@@ -123,7 +114,7 @@ describe('SyncManager', () => {
         // Wait for async operations in callback
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        const pushSpy = mockGitLab.pushFile as any;
+        const pushSpy = vi.spyOn(mockGitLab, 'pushFile');
         expect(pushSpy).toHaveBeenCalledWith('test.md', 'local content', 'main', 'Update test.md from Obsidian', 'remote-sha');
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('new-sha');
     });
@@ -138,21 +129,13 @@ describe('SyncManager', () => {
 
         const modalMock = vi.mocked(SyncConflictModal);
 
-        let callback: (choice: 'local' | 'remote') => void = () => {};
-        modalMock.mockImplementation(function(app, file, local, remote, onChoose) {
+        let callback: (choice: 'local' | 'remote') => void = () => { };
+        modalMock.mockImplementation(function (this: SyncConflictModal, app: App, fileName: string, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
             callback = onChoose;
-            return {
-                open: vi.fn(),
-                close: vi.fn(),
-                app,
-                scope: {} as unknown,
-                containerEl: {} as HTMLElement,
-                contentEl: {} as HTMLElement,
-                titleEl: {} as HTMLElement,
-                onOpen: vi.fn(),
-                onClose: vi.fn(),
-                setTitle: vi.fn().mockReturnThis(),
-            } as any;
+            (this as unknown as Record<string, unknown>).open = vi.fn();
+            (this as unknown as Record<string, unknown>).close = vi.fn();
+            (this as unknown as Record<string, unknown>).app = app;
+            (this as unknown as Record<string, unknown>).setTitle = vi.fn().mockReturnThis();
         });
 
         await manager.pushFile(mockFile);
@@ -161,7 +144,7 @@ describe('SyncManager', () => {
         callback('remote');
 
         // Wait for async operations in callback
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 50));
 
         expect(modifySpy).toHaveBeenCalledWith(mockFile, 'remote content');
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('remote-sha');
@@ -206,8 +189,10 @@ describe('SyncManager', () => {
 
         await manager.pushFile(mockFile);
 
-        expect(mockGitLab.getFile).not.toHaveBeenCalled();
-        expect(mockGitLab.pushFile).not.toHaveBeenCalled();
+        const getFileSpy = vi.spyOn(mockGitLab, 'getFile');
+        const pushFileSpy = vi.spyOn(mockGitLab, 'pushFile');
+        expect(getFileSpy).not.toHaveBeenCalled();
+        expect(pushFileSpy).not.toHaveBeenCalled();
     });
 
     it('should add new file to repo when it exists locally but not on remote', async () => {
@@ -222,7 +207,8 @@ describe('SyncManager', () => {
 
         await manager.pushFile(mockFile);
 
-        expect(mockGitLab.pushFile).toHaveBeenCalledWith(
+        const pushFileSpy = vi.spyOn(mockGitLab, 'pushFile');
+        expect(pushFileSpy).toHaveBeenCalledWith(
             'new.md',
             'new local content',
             'main',

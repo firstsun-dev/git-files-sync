@@ -1,11 +1,6 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitLabService } from '../../src/services/gitlab-service';
 import { requestUrl, RequestUrlResponse } from 'obsidian';
-
-vi.mock('obsidian', () => ({
-    requestUrl: vi.fn(),
-}));
 
 describe('GitLabService', () => {
     let service: GitLabService;
@@ -49,14 +44,14 @@ describe('GitLabService', () => {
         });
 
         it('should return blob_id as sha', async () => {
-            const mockResponse: any = {
+            const mockResponse: unknown = {
                 status: 200,
                 json: {
                     content: btoa('test content'),
                     blob_id: 'test-blob-id'
                 }
             };
-            vi.mocked(requestUrl).mockResolvedValue(mockResponse as unknown as RequestUrlResponse);
+            vi.mocked(requestUrl).mockResolvedValue(mockResponse as RequestUrlResponse);
             const result = await service.getFile('test.md', 'main');
             expect(result.sha).toBe('test-blob-id');
         });
@@ -74,7 +69,7 @@ describe('GitLabService', () => {
             expect(result).toBe('test.md');
             expect(requestUrl).toHaveBeenLastCalledWith(expect.objectContaining({
                 method: 'POST',
-                body: expect.stringContaining('bmV3IGNvbnRlbnQ=')
+                body: expect.stringContaining(btoa('new content')) as unknown as string
             }));
         });
 
@@ -92,7 +87,7 @@ describe('GitLabService', () => {
             expect(result).toBe('test.md');
             expect(requestUrl).toHaveBeenLastCalledWith(expect.objectContaining({
                 method: 'PUT',
-                body: expect.stringContaining('dXBkYXRlZCBjb250ZW50')
+                body: expect.stringContaining(btoa('updated content')) as unknown as string
             }));
         });
     });

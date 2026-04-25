@@ -6,6 +6,7 @@ import { GitServiceInterface } from './services/git-service-interface';
 import { SyncManager } from './logic/sync-manager';
 import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
 import { GitignoreManager } from './logic/gitignore-manager';
+import { ConfirmModal } from './ui/ConfirmModal';
 
 export default class GitLabFilesPush extends Plugin {
 	settings: GitLabFilesPushSettings;
@@ -40,7 +41,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
-		this.addRibbonIcon('upload-cloud', Platform.isMobile ? `Push` : `Push to ${serviceName}`, (evt: MouseEvent) => {
+		this.addRibbonIcon('upload-cloud', Platform.isMobile ? `Push` : `Push to ${serviceName}`, () => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView && activeView.file instanceof TFile) {
 				void this.sync.pushFile(activeView.file);
@@ -240,9 +241,12 @@ export default class GitLabFilesPush extends Plugin {
 
 	private showConfirmDialog(message: string): Promise<boolean> {
 		return new Promise((resolve) => {
-			// eslint-disable-next-line no-alert
-			const confirmed = confirm(message);
-			resolve(confirmed);
+			new ConfirmModal(
+				this.app,
+				message,
+				() => resolve(true),
+				() => resolve(false)
+			).open();
 		});
 	}
 
