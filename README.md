@@ -9,7 +9,7 @@
 
 [繁體中文使用說明](USAGE_zh.md)
 
-<video src="https://blog-assets.firstsun.org/video/obsidian-plugins/git-file-sync-en.webm" width="100%" controls autoplay loop muted playsinline></video>
+<video src="imgs/git-file-sync-en.webm" width="100%" controls autoplay loop muted playsinline></video>
 
 ![sync-status](imgs/sync-status.png)
 *The Sync Status View provides a clear overview of your files, allowing you to selectively push, pull, or view diffs for modified files.*
