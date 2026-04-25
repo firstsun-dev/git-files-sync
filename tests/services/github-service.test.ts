@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitHubService } from '../../src/services/github-service';
-import { requestUrl, RequestUrlResponse } from 'obsidian';
+import { requestUrl, RequestUrlResponse, RequestUrlParam } from 'obsidian';
 
 describe('GitHubService', () => {
     let service: GitHubService;
@@ -60,10 +60,11 @@ describe('GitHubService', () => {
             const result = await service.pushFile('new.md', 'new content', 'main', 'create');
 
             expect(result).toBe('new.md');
-            expect(requestUrl).toHaveBeenLastCalledWith(expect.objectContaining({
-                method: 'PUT',
-                body: expect.not.stringContaining('"sha":')
-            }));
+            const calls = vi.mocked(requestUrl).mock.calls;
+            const lastCall = calls[calls.length - 1] ? (calls[calls.length - 1][0] as RequestUrlParam) : null;
+            if (!lastCall) throw new Error('lastCall is undefined');
+            expect(lastCall.method).toBe('PUT');
+            expect(lastCall.body).not.toContain('"sha":');
         });
 
         it('should update existing file correctly (sha provided)', async () => {
@@ -75,10 +76,11 @@ describe('GitHubService', () => {
             const result = await service.pushFile('existing.md', 'updated content', 'main', 'update', 'old-sha');
 
             expect(result).toBe('existing.md');
-            expect(requestUrl).toHaveBeenCalledWith(expect.objectContaining({
-                method: 'PUT',
-                body: expect.stringContaining('"sha":"old-sha"')
-            }));
+            const calls = vi.mocked(requestUrl).mock.calls;
+            const lastCall = calls[calls.length - 1] ? (calls[calls.length - 1][0] as RequestUrlParam) : null;
+            if (!lastCall) throw new Error('lastCall is undefined');
+            expect(lastCall.method).toBe('PUT');
+            expect(lastCall.body).toContain('"sha":"old-sha"');
         });
     });
 });
