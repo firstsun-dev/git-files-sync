@@ -97,14 +97,14 @@ describe('SyncManager', () => {
         const modalMock = vi.mocked(SyncConflictModal);
 
         // Capture the callback passed to the modal
-        let callback: (choice: 'local' | 'remote') => void = () => {};
-        modalMock.mockImplementation(function (this: SyncConflictModal, app: App, fileName: string, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
+        let callback: (choice: 'local' | 'remote') => void = () => { };
+        modalMock.mockImplementation(function (this: any, app: App, file: TFile, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
             callback = onChoose;
-            (this as unknown as Record<string, unknown>).open = vi.fn();
-            (this as unknown as Record<string, unknown>).close = vi.fn();
-            (this as unknown as Record<string, unknown>).app = app;
-            (this as unknown as Record<string, unknown>).setTitle = vi.fn().mockReturnThis();
-        });
+            this.open = vi.fn();
+            this.close = vi.fn();
+            this.app = app;
+            this.setTitle = vi.fn().mockReturnThis();
+        } as any);
 
         await manager.pushFile(mockFile);
 
@@ -129,14 +129,22 @@ describe('SyncManager', () => {
 
         const modalMock = vi.mocked(SyncConflictModal);
 
-        let callback: (choice: 'local' | 'remote') => void = () => {};
-        modalMock.mockImplementation(function (this: SyncConflictModal, app: App, fileName: string, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
+        let callback: (choice: 'local' | 'remote') => void = () => { };
+        modalMock.mockImplementation(((app: App, file: TFile, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) => {
             callback = onChoose;
-            (this as unknown as Record<string, unknown>).open = vi.fn();
-            (this as unknown as Record<string, unknown>).close = vi.fn();
-            (this as unknown as Record<string, unknown>).app = app;
-            (this as unknown as Record<string, unknown>).setTitle = vi.fn().mockReturnThis();
-        });
+            return {
+                open: vi.fn(),
+                close: vi.fn(),
+                app,
+                scope: {} as any,
+                containerEl: {} as HTMLElement,
+                contentEl: {} as HTMLElement,
+                titleEl: {} as HTMLElement,
+                onOpen: vi.fn(),
+                onClose: vi.fn(),
+                setTitle: vi.fn().mockReturnThis(),
+            } as unknown as SyncConflictModal;
+        }) as any);
 
         await manager.pushFile(mockFile);
 
