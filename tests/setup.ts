@@ -54,6 +54,7 @@ export const App = class {
 };
 
 export const TFile = class {};
+export const requestUrl = vi.fn();
 
 vi.mock('obsidian', () => ({
   Plugin,
@@ -65,4 +66,5 @@ vi.mock('obsidian', () => ({
   Editor,
   App,
   TFile,
+  requestUrl,
 }));

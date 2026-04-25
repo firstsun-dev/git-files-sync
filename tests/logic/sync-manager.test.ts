@@ -98,21 +98,13 @@ describe('SyncManager', () => {
 
         // Capture the callback passed to the modal
         let callback: (choice: 'local' | 'remote') => void = () => {};
-        modalMock.mockImplementation((app, file, local, remote, onChoose) => {
+        modalMock.mockImplementation(function (this: any, app: App, file: TFile, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
             callback = onChoose;
-            return {
-                open: vi.fn(),
-                close: vi.fn(),
-                app,
-                scope: {} as unknown,
-                containerEl: {} as HTMLElement,
-                contentEl: {} as HTMLElement,
-                titleEl: {} as HTMLElement,
-                onOpen: vi.fn(),
-                onClose: vi.fn(),
-                setTitle: vi.fn().mockReturnThis(),
-            } as unknown as SyncConflictModal;
-        });
+            this.open = vi.fn();
+            this.close = vi.fn();
+            this.app = app;
+            this.setTitle = vi.fn().mockReturnThis();
+        } as any);
 
         await manager.pushFile(mockFile);
 
@@ -138,21 +130,13 @@ describe('SyncManager', () => {
         const modalMock = vi.mocked(SyncConflictModal);
 
         let callback: (choice: 'local' | 'remote') => void = () => {};
-        modalMock.mockImplementation((app, file, local, remote, onChoose) => {
+        modalMock.mockImplementation(function (this: any, app: App, file: TFile, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
             callback = onChoose;
-            return {
-                open: vi.fn(),
-                close: vi.fn(),
-                app,
-                scope: {} as unknown,
-                containerEl: {} as HTMLElement,
-                contentEl: {} as HTMLElement,
-                titleEl: {} as HTMLElement,
-                onOpen: vi.fn(),
-                onClose: vi.fn(),
-                setTitle: vi.fn().mockReturnThis(),
-            } as unknown as SyncConflictModal;
-        });
+            this.open = vi.fn();
+            this.close = vi.fn();
+            this.app = app;
+            this.setTitle = vi.fn().mockReturnThis();
+        } as any);
 
         await manager.pushFile(mockFile);
 
@@ -160,7 +144,7 @@ describe('SyncManager', () => {
         callback('remote');
 
         // Wait for async operations in callback
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 50));
 
         expect(modifySpy).toHaveBeenCalledWith(mockFile, 'remote content');
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('remote-sha');

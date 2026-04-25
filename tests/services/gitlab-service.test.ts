@@ -2,10 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitLabService } from '../../src/services/gitlab-service';
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 
-vi.mock('obsidian', () => ({
-    requestUrl: vi.fn(),
-}));
-
 describe('GitLabService', () => {
     let service: GitLabService;
     const baseUrl = 'https://gitlab.com';
