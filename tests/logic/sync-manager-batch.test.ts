@@ -118,7 +118,7 @@ describe('SyncManager Batch Operations', () => {
 
         it('should handle missing remote files during batch pull', async () => {
             const files = ['exists.md', 'missing.md'];
-            
+
             vi.mocked(mockGitService.getFile)
                 .mockResolvedValueOnce({ content: 'content', sha: 'sha' })
                 .mockResolvedValueOnce({ content: '', sha: '' });
@@ -128,6 +128,50 @@ describe('SyncManager Batch Operations', () => {
             expect(results.success).toBe(1);
             expect(results.failed).toBe(1);
             expect(results.errors[0]!.error).toContain('File not found in remote');
+        });
+    });
+
+    describe('onProgress callback', () => {
+        it('should call onProgress for each file processed', async () => {
+            const files = ['file1.md', 'file2.md', 'file3.md'];
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('content');
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: 'sha' });
+            vi.mocked(mockGitService.pushFile).mockResolvedValue('path');
+
+            const onProgress = vi.fn();
+            await manager.pushAllFiles(files, onProgress);
+
+            expect(onProgress).toHaveBeenCalledTimes(3);
+            expect(onProgress).toHaveBeenCalledWith(1, 3, 'file1.md');
+            expect(onProgress).toHaveBeenCalledWith(2, 3, 'file2.md');
+            expect(onProgress).toHaveBeenCalledWith(3, 3, 'file3.md');
+        });
+    });
+
+    describe('batch push with rename detection', () => {
+        it('should detect and handle rename during batch push', async () => {
+            const oldPath = 'old.md';
+            const newPath = 'new.md';
+            const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
+            mockSettings.syncMetadata = {
+                [oldPath]: { lastSyncedSha: 'sha', lastSyncedAt: 0, lastKnownPath: oldPath }
+            };
+
+            vi.mocked(mockApp.vault.getFileByPath).mockImplementation(p => p === oldPath ? null : mockFile);
+            vi.mocked(mockApp.vault.read).mockResolvedValue('content');
+            vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+            vi.mocked(mockGitService.pushFile).mockResolvedValue(newPath);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'content', sha: 'new-sha' });
+
+            const results = await manager.pushAllFiles([mockFile]);
+
+            expect(results.success).toBe(1);
+            expect(mockGitService.pushFile).toHaveBeenCalledWith(
+                newPath, 'content', 'main', `Rename ${oldPath} to ${newPath}`, undefined
+            );
         });
     });
 });

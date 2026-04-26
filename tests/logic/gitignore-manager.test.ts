@@ -62,6 +62,34 @@ describe('GitignoreManager', () => {
             expect(manager.isIgnored('secret.txt')).toBe(true);
         });
 
+        it('should fall back to [".gitignore"] when getRepoGitignores throws', async () => {
+            vi.mocked(mockGitService.getRepoGitignores).mockRejectedValue(new Error('Network error'));
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('node_modules/');
+
+            const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            await manager.loadGitignores();
+
+            expect(consoleSpy).toHaveBeenCalled();
+            expect(manager.isIgnored('node_modules/test.js')).toBe(true);
+        });
+
+        it('should fall back to remote when local .gitignore read throws', async () => {
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue(['.gitignore']);
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockRejectedValue(new Error('Permission denied'));
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'secret.txt', sha: 'sha' });
+
+            const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            await manager.loadGitignores();
+
+            expect(consoleSpy).toHaveBeenCalled();
+            expect(mockGitService.getFile).toHaveBeenCalledWith('/.gitignore', branch);
+            expect(manager.isIgnored('secret.txt')).toBe(true);
+        });
+
         it('should handle subdirectory gitignores correctly', async () => {
             // Repo structure:
             // .gitignore

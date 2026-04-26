@@ -88,10 +88,43 @@ export abstract class BaseGitService {
         return cleanRoot + cleanPath;
     }
 
+    protected encodeContent(content: string): string {
+        const bytes = new TextEncoder().encode(content);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+            const byte = bytes[i];
+            if (byte !== undefined) {
+                binary += String.fromCodePoint(byte);
+            }
+        }
+        return btoa(binary);
+    }
+
+    protected decodeContent(base64: string): string {
+        const binary = atob(base64.replace(/\s/g, ''));
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            const cp = binary.codePointAt(i);
+            bytes[i] = cp !== undefined ? cp : 0;
+        }
+        return new TextDecoder().decode(bytes);
+    }
+
+    protected handleFileNotFound(e: unknown): GitFile {
+        if (e instanceof Error && e.message.includes('404')) {
+            return { content: '', sha: '' };
+        }
+        throw e;
+    }
+
+    async getRepoGitignores(branch: string): Promise<string[]> {
+        const allFiles = await this.listFiles(branch);
+        return allFiles.filter(p => p.endsWith('.gitignore'));
+    }
+
     abstract getFile(path: string, branch: string): Promise<GitFile>;
     abstract pushFile(path: string, content: string, branch: string, message: string, sha?: string): Promise<string>;
     abstract listFiles(branch: string): Promise<string[]>;
     abstract deleteFile(path: string, branch: string, message: string): Promise<void>;
     abstract testConnection(): Promise<boolean>;
-    abstract getRepoGitignores(branch: string): Promise<string[]>;
 }

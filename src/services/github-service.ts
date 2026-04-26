@@ -32,10 +32,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
                 sha: data.sha
             };
         } catch (e) {
-            if (e instanceof Error && e.message.includes('404')) {
-                return { content: '', sha: '' };
-            }
-            throw e;
+            return this.handleFileNotFound(e);
         }
     }
 
@@ -86,30 +83,4 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         }
     }
 
-    async getRepoGitignores(branch: string): Promise<string[]> {
-        const allFiles = await this.listFiles(branch);
-        return allFiles.filter(p => p.endsWith('.gitignore'));
-    }
-
-    private encodeContent(content: string): string {
-        const bytes = new TextEncoder().encode(content);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-            const byte = bytes[i];
-            if (byte !== undefined) {
-                binary += String.fromCodePoint(byte);
-            }
-        }
-        return btoa(binary);
-    }
-
-    private decodeContent(base64: string): string {
-        const binary = atob(base64.replace(/\s/g, ''));
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-            const cp = binary.codePointAt(i);
-            bytes[i] = cp !== undefined ? cp : 0;
-        }
-        return new TextDecoder().decode(bytes);
-    }
 }
