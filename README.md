@@ -4,6 +4,7 @@
 [![Downloads](https://img.shields.io/github/downloads/firstsun-dev/git-files-sync/total?style=flat-square)](https://github.com/firstsun-dev/git-files-sync/releases)
 [![License](https://img.shields.io/github/license/firstsun-dev/git-files-sync?style=flat-square)](LICENSE)
 [![Obsidian](https://img.shields.io/badge/Obsidian-v0.15.0+-purple?style=flat-square)](https://obsidian.md)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=firstsun-dev_git-files-sync&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=firstsun-dev_git-files-sync)
 
 **Git File Sync** is a powerful Obsidian plugin that enables seamless synchronization of individual notes with GitLab or GitHub repositories. Unlike full-vault sync solutions, it gives you granular control over what gets pushed and pulled, making it perfect for shared projects, selective backups, and cross-platform workflows.
 
