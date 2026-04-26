@@ -18,6 +18,7 @@ export interface GitHubTreeItem {
 
 export interface GitHubTreeResponse {
     tree: GitHubTreeItem[];
+    truncated: boolean;
 }
 
 export interface GitLabFileResponse {

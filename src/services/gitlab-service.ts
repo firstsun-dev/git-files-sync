@@ -56,14 +56,29 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
     async listFiles(branch: string): Promise<string[]> {
         const encodedProjectId = encodeURIComponent(this.projectId);
-        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/tree?ref=${branch}&recursive=true&per_page=100`;
-        const response = await this.safeRequest(url, 'GET');
-        const data = response.json as GitLabTreeItem[];
+        let allPaths: string[] = [];
+        let page = 1;
+        const perPage = 100;
         
-        return data
-            .filter(item => item.type === 'blob')
-            .map(item => item.path)
-            .filter(p => !this.rootPath || p.startsWith(this.rootPath));
+        while (true) {
+            const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/tree?ref=${branch}&recursive=true&per_page=${perPage}&page=${page}`;
+            const response = await this.safeRequest(url, 'GET');
+            const data = response.json as GitLabTreeItem[];
+            
+            if (!data || data.length === 0) break;
+            
+            const paths = data
+                .filter(item => item.type === 'blob')
+                .map(item => item.path)
+                .filter(p => !this.rootPath || p.startsWith(this.rootPath));
+            
+            allPaths = allPaths.concat(paths);
+            
+            if (data.length < perPage) break;
+            page++;
+        }
+        
+        return allPaths;
     }
 
     async deleteFile(path: string, branch: string, message: string): Promise<void> {

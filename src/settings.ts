@@ -23,6 +23,10 @@ export interface GitLabFilesPushSettings {
     vaultFolder: string;
 }
 
+export function getServiceName(settings: GitLabFilesPushSettings): string {
+    return settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+}
+
 export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	serviceType: 'gitlab',
 	gitlabToken: '',
@@ -108,13 +112,13 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Test connection')
-			.setDesc(`Verify your ${this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub'} settings`)
+			.setDesc(`Verify your ${getServiceName(this.plugin.settings)} settings`)
 			.addButton(button => button
 				.setButtonText('Test connection')
 				.onClick(async () => {
 					try {
 						await this.plugin.gitService.testConnection();
-						new Notice(`${this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub'} connection successful!`);
+						new Notice(`${getServiceName(this.plugin.settings)} connection successful!`);
 					} catch (e: unknown) {
 						const message = e instanceof Error ? e.message : String(e);
 						new Notice(`Connection failed: ${message}`);

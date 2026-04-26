@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
+import { getServiceName } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
@@ -26,6 +27,14 @@ interface DiffRow {
 }
 
 type FilterValue = 'all' | 'synced' | 'modified' | 'unsynced' | 'remote-only';
+
+type DiffOpType = 'unchanged' | 'removed' | 'added';
+
+interface DiffOp {
+    type: DiffOpType;
+    li: number;
+    ri: number;
+}
 
 export class SyncStatusView extends ItemView {
     plugin: GitLabFilesPush;
@@ -72,7 +81,7 @@ export class SyncStatusView extends ItemView {
 
     private renderInfoStrip(container: HTMLElement): void {
         const el = container.createDiv({ cls: 'ssv-info' });
-        const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+        const serviceName = getServiceName(this.plugin.settings);
 
         el.createSpan({ cls: 'ssv-info-item', text: serviceName });
 
@@ -186,26 +195,18 @@ export class SyncStatusView extends ItemView {
     }
 
     private renderActionButtons(bar: HTMLElement, canPush: number, canPull: number, canDelete: number): void {
-        const pushBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-push' });
-        pushBtn.createSpan({ text: '↑' });
-        pushBtn.createSpan({ cls: 'ssv-btn-label', text: ` Push (${canPush})` });
-        pushBtn.disabled = canPush === 0;
-        setTooltip(pushBtn, `Push ${canPush} files`);
-        pushBtn.addEventListener('click', () => void this.pushSelected());
+        this.renderLargeButton(bar, '↑', ` Push (${canPush})`, `Push ${canPush} files`, () => void this.pushSelected(), 'push', canPush === 0);
+        this.renderLargeButton(bar, '↓', ` Pull (${canPull})`, `Pull ${canPull} files`, () => void this.pullSelected(), 'pull', canPull === 0);
+        this.renderLargeButton(bar, '✕', ` Delete (${canDelete})`, `Delete ${canDelete} files`, () => void this.deleteSelected(), 'danger', canDelete === 0);
+    }
 
-        const pullBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-pull' });
-        pullBtn.createSpan({ text: '↓' });
-        pullBtn.createSpan({ cls: 'ssv-btn-label', text: ` Pull (${canPull})` });
-        pullBtn.disabled = canPull === 0;
-        setTooltip(pullBtn, `Pull ${canPull} files`);
-        pullBtn.addEventListener('click', () => void this.pullSelected());
-
-        const delBtn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-delete' });
-        delBtn.createSpan({ text: '✕' });
-        delBtn.createSpan({ cls: 'ssv-btn-label', text: ` Delete (${canDelete})` });
-        delBtn.disabled = canDelete === 0;
-        setTooltip(delBtn, `Delete ${canDelete} files`);
-        delBtn.addEventListener('click', () => void this.deleteSelected());
+    private renderLargeButton(container: HTMLElement, icon: string, label: string, tooltip: string, onClick: () => void, cls: string, disabled: boolean): void {
+        const btn = container.createEl('button', { cls: `ssv-btn ssv-btn-${cls}` });
+        btn.createSpan({ text: icon });
+        btn.createSpan({ cls: 'ssv-btn-label', text: label });
+        btn.disabled = disabled;
+        setTooltip(btn, tooltip);
+        btn.addEventListener('click', onClick);
     }
 
     private renderFileList(container: HTMLElement): void {
@@ -386,87 +387,126 @@ export class SyncStatusView extends ItemView {
     }
 
     private computeSideBySideDiff(remote: string, local: string): DiffRow[] {
-        const normalize = (s: string) => s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        const L = normalize(remote).split('\n');
-        const R = normalize(local).split('\n');
+        const L = this.normalizeContent(remote).split('\n');
+        const R = this.normalizeContent(local).split('\n');
         const m = L.length, n = R.length;
 
-        // For very large files fall back to simple comparison
-        if (m * n > 250_000) return this.simpleDiff(L, R);
+        if (m * n > 250_000 || (m + 1) * (n + 1) > 1_000_000) {
+            return this.simpleDiff(L, R);
+        }
 
-        // LCS DP — flat Uint32Array avoids noUncheckedIndexedAccess issues
+        const dp = this.buildDPMatrix(L, R, m, n);
+        const ops = this.tracePath(L, R, dp, m, n);
+        return this.pairDiffOps(ops, L, R);
+    }
+
+    private normalizeContent(s: string): string {
+        return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    }
+
+    private buildDPMatrix(L: string[], R: string[], m: number, n: number): Uint32Array {
         const W = n + 1;
-        const totalSize = (m + 1) * W;
-        
-        // Security hotspot: prevent huge memory allocations that could lead to DoS
-        if (totalSize > 1_000_000) return this.simpleDiff(L, R);
-
-        const dp = new Uint32Array(totalSize);
+        const dp = new Uint32Array((m + 1) * W);
         for (let i = 1; i <= m; i++) {
             for (let j = 1; j <= n; j++) {
                 dp[i * W + j] = L[i - 1] === R[j - 1]
-                    ? (dp[(i - 1) * W + (j - 1)] ?? 0) + 1
-                    : Math.max(dp[(i - 1) * W + j] ?? 0, dp[i * W + (j - 1)] ?? 0);
+                    ? (dp[(i - 1) * W + (j - 1)]!) + 1
+                    : Math.max(dp[(i - 1) * W + j]!, dp[i * W + (j - 1)]!);
             }
         }
+        return dp;
+    }
 
-        // Backtrack — li/ri = -1 when not applicable (avoids optional fields)
-        type Op = { type: 'unchanged' | 'removed' | 'added'; li: number; ri: number };
-        const ops: Op[] = [];
+    private tracePath(L: string[], R: string[], dp: Uint32Array, m: number, n: number): DiffOp[] {
+        const W = n + 1;
+        const ops: DiffOp[] = [];
         let i = m, j = n;
         while (i > 0 || j > 0) {
-            if (i > 0 && j > 0 && L[i - 1] === R[j - 1]) {
-                ops.push({ type: 'unchanged', li: i - 1, ri: j - 1 });
-                i--; j--;
-            } else if (j > 0 && (i === 0 || (dp[i * W + (j - 1)] ?? 0) >= (dp[(i - 1) * W + j] ?? 0))) {
-                ops.push({ type: 'added', li: -1, ri: j - 1 });
-                j--;
-            } else {
-                ops.push({ type: 'removed', li: i - 1, ri: -1 });
-                i--;
-            }
+            const op = this.getNextDiffOp(L, R, dp, W, i, j);
+            ops.push(op);
+            [i, j] = this.updateIndices(op, i, j);
         }
-        ops.reverse();
+        return ops.reverse();
+    }
 
-        // Pair consecutive removed ↔ added side-by-side
+    private updateIndices(op: DiffOp, i: number, j: number): [number, number] {
+        if (op.type === 'unchanged') return [i - 1, j - 1];
+        if (op.type === 'added') return [i, j - 1];
+        return [i - 1, j];
+    }
+
+    private getNextDiffOp(L: string[], R: string[], dp: Uint32Array, W: number, i: number, j: number): DiffOp {
+        if (i > 0 && j > 0 && L[i - 1] === R[j - 1]) {
+            return { type: 'unchanged', li: i - 1, ri: j - 1 };
+        }
+        
+        const canAdd = j > 0;
+        const preferAdd = canAdd && (i === 0 || dp[i * W + (j - 1)]! >= dp[(i - 1) * W + j]!);
+
+        if (preferAdd) {
+            return { type: 'added', li: -1, ri: j - 1 };
+        }
+        return { type: 'removed', li: i - 1, ri: -1 };
+    }
+
+    private pairDiffOps(ops: DiffOp[], L: string[], R: string[]): DiffRow[] {
         const rows: DiffRow[] = [];
         let k = 0;
         while (k < ops.length) {
             const op = ops[k];
-            if (op === undefined) break;
+            if (!op) break;
 
             if (op.type === 'unchanged') {
-                rows.push({
-                    left:  { lineNum: op.li + 1, content: L[op.li] ?? null, type: 'unchanged' },
-                    right: { lineNum: op.ri + 1, content: R[op.ri] ?? null, type: 'unchanged' },
-                });
+                rows.push(this.createUnchangedRow(op, L, R));
                 k++;
             } else {
-                const removedIdxs: number[] = [];
-                const addedIdxs: number[] = [];
-                while (k < ops.length) {
-                    const cur = ops[k];
-                    if (cur === undefined || cur.type === 'unchanged') break;
-                    if (cur.type === 'removed') removedIdxs.push(cur.li);
-                    else addedIdxs.push(cur.ri);
-                    k++;
-                }
-                const len = Math.max(removedIdxs.length, addedIdxs.length);
-                for (let x = 0; x < len; x++) {
-                    const rIdx = removedIdxs[x];
-                    const aIdx = addedIdxs[x];
-                    rows.push({
-                        left:  rIdx === undefined
-                            ? { lineNum: null, content: null, type: 'empty' }
-                            : { lineNum: rIdx + 1, content: L[rIdx] ?? null, type: 'removed' },
-                        right: aIdx === undefined
-                            ? { lineNum: null, content: null, type: 'empty' }
-                            : { lineNum: aIdx + 1, content: R[aIdx] ?? null, type: 'added'   },
-                    });
-                }
+                const batch = this.collectChangeBatch(ops, k);
+                rows.push(...this.createChangeRows(batch, L, R));
+                k += batch.length;
             }
         }
         return rows;
+    }
+
+    private createUnchangedRow(op: DiffOp, L: string[], R: string[]): DiffRow {
+        return {
+            left:  { lineNum: op.li + 1, content: L[op.li] ?? null, type: 'unchanged' },
+            right: { lineNum: op.ri + 1, content: R[op.ri] ?? null, type: 'unchanged' },
+        };
+    }
+
+    private collectChangeBatch(ops: DiffOp[], startIdx: number): DiffOp[] {
+        const batch: DiffOp[] = [];
+        let k = startIdx;
+        while (k < ops.length) {
+            const item = ops[k];
+            if (!item || item.type === 'unchanged') break;
+            batch.push(item);
+            k++;
+        }
+        return batch;
+    }
+
+    private createChangeRows(batch: DiffOp[], L: string[], R: string[]): DiffRow[] {
+        const removedIdxs = batch.filter(o => o.type === 'removed').map(o => o.li);
+        const addedIdxs = batch.filter(o => o.type === 'added').map(o => o.ri);
+        const len = Math.max(removedIdxs.length, addedIdxs.length);
+        const rows: DiffRow[] = [];
+
+        for (let x = 0; x < len; x++) {
+            rows.push({
+                left: this.createDiffSide(removedIdxs[x], L, 'removed'),
+                right: this.createDiffSide(addedIdxs[x], R, 'added')
+            });
+        }
+        return rows;
+    }
+
+    private createDiffSide(idx: number | undefined, lines: string[], type: 'removed' | 'added'): DiffSide {
+        if (idx === undefined) {
+            return { lineNum: null, content: null, type: 'empty' };
+        }
+        return { lineNum: idx + 1, content: lines[idx] ?? null, type };
     }
 
     // Fallback for very large files (> 500×500 lines)
@@ -685,7 +725,7 @@ export class SyncStatusView extends ItemView {
         }
 
         const files = targets.map(s => s.file || s.path);
-        const serviceName = this.plugin.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+        const serviceName = getServiceName(this.plugin.settings);
         const msg = op === 'push' 
             ? `Push ${files.length} file(s) to ${serviceName}?`
             : `Pull ${files.length} file(s) from ${serviceName}? This will overwrite local changes.`;

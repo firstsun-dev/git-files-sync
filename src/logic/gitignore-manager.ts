@@ -87,27 +87,18 @@ export class GitignoreManager {
      * Checks if a given file path should be ignored based on loaded .gitignore rules.
      */
     isIgnored(filePath: string): boolean {
-        // Path relative to Git Root
         const fullPath = this.rootPath ? `${this.rootPath}/${filePath}` : filePath;
 
-        // Iterate through all loaded .gitignore files.
         for (const [dirPath, ig] of this.ignoreMap.entries()) {
             if (dirPath === '') {
-                // Root .gitignore applies to everything (test against fullPath)
-                if (ig.ignores(fullPath)) {
-                    return true;
-                }
-            } else {
-                // Subdirectory .gitignore
-                // Check if the file is inside this directory (dirPath is relative to git root)
-                const prefix = dirPath + '/';
-                if (fullPath.startsWith(prefix)) {
-                    // Extract the path relative to the directory containing .gitignore
-                    const relativePath = fullPath.substring(prefix.length);
-                    if (ig.ignores(relativePath)) {
-                        return true;
-                    }
-                }
+                if (ig.ignores(fullPath)) return true;
+                continue;
+            }
+
+            const prefix = dirPath + '/';
+            if (fullPath.startsWith(prefix)) {
+                const relativePath = fullPath.substring(prefix.length);
+                if (ig.ignores(relativePath)) return true;
             }
         }
         return false;

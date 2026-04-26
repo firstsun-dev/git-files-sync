@@ -1,5 +1,5 @@
 import { Plugin, TFile, MarkdownView, Notice, Platform } from 'obsidian';
-import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab } from "./settings";
+import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getServiceName } from "./settings";
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
 import { GitServiceInterface } from './services/git-service-interface';
@@ -37,7 +37,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.initializeGitService();
 		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath);
-		this.sync = new SyncManager(this.app, this.gitService, this.settings);
+		this.sync = new SyncManager(this.app, this.gitService, this.settings, this.saveSettings.bind(this));
 
 		this.addRibbonIcon('upload-cloud', Platform.isMobile ? `Push` : `Push to ${this.serviceName}`, async () => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -102,19 +102,10 @@ export default class GitLabFilesPush extends Plugin {
 				}
 			})
 		);
-
-		this.registerEvent(
-			this.app.workspace.on('file-open', (file) => {
-				if (file instanceof TFile && (this.settings.gitlabToken || this.settings.githubToken)) {
-					// Optional: Check for updates automatically
-					// this.sync.pullFile(file);
-				}
-			})
-		);
 	}
 
 	private get serviceName(): string {
-		return this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+		return getServiceName(this.settings);
 	}
 
 	async activateSyncStatusView(): Promise<void> {

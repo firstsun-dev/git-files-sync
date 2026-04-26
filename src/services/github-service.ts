@@ -55,6 +55,10 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         const response = await this.safeRequest(url, 'GET');
         const data = response.json as GitHubTreeResponse;
         
+        if (data.truncated) {
+            console.warn('GitHub tree result is truncated. Some files might not be shown.');
+        }
+
         return data.tree
             .filter(item => item.type === 'blob')
             .map(item => item.path)

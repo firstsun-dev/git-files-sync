@@ -1,21 +1,23 @@
 import { TFile, App, Notice } from 'obsidian';
 import { GitServiceInterface } from '../services/git-service-interface';
-import { GitLabFilesPushSettings } from '../settings';
+import { GitLabFilesPushSettings, getServiceName } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
 
 export class SyncManager {
     private readonly app: App;
     private gitService: GitServiceInterface;
     private readonly settings: GitLabFilesPushSettings;
+    private readonly onSaveSettings?: () => Promise<void>;
 
-    constructor(app: App, gitService: GitServiceInterface, settings: GitLabFilesPushSettings) {
+    constructor(app: App, gitService: GitServiceInterface, settings: GitLabFilesPushSettings, onSaveSettings?: () => Promise<void>) {
         this.app = app;
         this.gitService = gitService;
         this.settings = settings;
+        this.onSaveSettings = onSaveSettings;
     }
 
     private get serviceName(): string {
-        return this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+        return getServiceName(this.settings);
     }
 
     public async updateMetadata(path: string, sha: string): Promise<void> {
@@ -66,8 +68,7 @@ export class SyncManager {
                                 await this.performPull(fileRep, remote.content, remote.sha);
                             }
                         } catch (e) {
-                            console.error(e);
-                            new Notice(`Failed to resolve conflict for ${name}: ${e instanceof Error ? e.message : String(e)}`);
+                            this.handleError(`Failed to resolve conflict for ${name}`, e);
                         }
                     })();
                 }).open();
@@ -76,8 +77,7 @@ export class SyncManager {
 
             await this.performPush({ path, name }, content, remote.sha);
         } catch (e) {
-            console.error(e);
-            new Notice(`Failed to push ${name} to ${this.serviceName}: ${e instanceof Error ? e.message : String(e)}`);
+            this.handleError(`Failed to push ${name} to ${this.serviceName}`, e);
         }
     }
 
@@ -124,8 +124,7 @@ export class SyncManager {
             await this.saveSettings();
             new Notice(`Renamed and pushed ${file.name} to ${this.serviceName}\nNote: Old file at ${oldPath} may need manual deletion from remote`);
         } catch (e) {
-            console.error(e);
-            new Notice(`Failed to handle rename: ${e instanceof Error ? e.message : String(e)}`);
+            this.handleError('Failed to handle rename', e);
         }
     }
 
@@ -178,8 +177,7 @@ export class SyncManager {
                                 await this.performPull(fileRep, remote.content, remote.sha);
                             }
                         } catch (e) {
-                            console.error(e);
-                            new Notice(`Failed to resolve conflict for ${name}: ${e instanceof Error ? e.message : String(e)}`);
+                            this.handleError(`Failed to resolve conflict for ${name}`, e);
                         }
                     })();
                 }).open();
@@ -189,8 +187,7 @@ export class SyncManager {
             const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
             await this.performPull(fileRep, remote.content, remote.sha);
         } catch (e) {
-            console.error(e);
-            new Notice(`Failed to pull ${name} from ${this.serviceName}: ${e instanceof Error ? e.message : String(e)}`);
+            this.handleError(`Failed to pull ${name} from ${this.serviceName}`, e);
         }
     }
 
@@ -225,11 +222,15 @@ export class SyncManager {
     }
 
     private async saveSettings() {
-        const plugins = (this.app as unknown as { plugins: { plugins: Record<string, { saveSettings: () => Promise<void> }> } }).plugins;
-        const plugin = plugins?.plugins?.['git-file-sync'];
-        if (plugin && typeof plugin.saveSettings === 'function') {
-            await plugin.saveSettings();
+        if (this.onSaveSettings) {
+            await this.onSaveSettings();
         }
+    }
+
+    private handleError(message: string, error: unknown): void {
+        console.error(message, error);
+        const detail = error instanceof Error ? error.message : String(error);
+        new Notice(`${message}: ${detail}`);
     }
 
     async pushAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
@@ -246,17 +247,13 @@ export class SyncManager {
         onProgress?: (current: number, total: number, fileName: string) => void
     ): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
         const results = { success: 0, failed: 0, errors: [] as Array<{ file: string; error: string }> };
-        const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
         for (let i = 0; i < files.length; i++) {
             const fileOrPath = files[i];
             if (!fileOrPath) continue;
 
             const { path, name, isString } = this.getFileInfo(fileOrPath);
-
-            if (onProgress) {
-                onProgress(i + 1, files.length, name);
-            }
+            onProgress?.(i + 1, files.length, name);
 
             try {
                 if (op === 'push') {
@@ -273,10 +270,19 @@ export class SyncManager {
         }
 
         await this.saveSettings();
-        if (results.success > 0) new Notice(`${op === 'push' ? 'Pushed' : 'Pulled'} ${results.success} file(s) to ${serviceName}`);
-        if (results.failed > 0) new Notice(`Failed to ${op} ${results.failed} file(s). Check console for details.`);
+        this.notifyBatchResult(op, results.success, results.failed);
 
         return results;
+    }
+
+    private notifyBatchResult(op: 'push' | 'pull', success: number, failed: number): void {
+        const opName = op === 'push' ? 'Pushed' : 'Pulled';
+        if (success > 0) {
+            new Notice(`${opName} ${success} file(s) to ${this.serviceName}`);
+        }
+        if (failed > 0) {
+            new Notice(`Failed to ${op} ${failed} file(s). Check console for details.`);
+        }
     }
 
     private getFileInfo(fileOrPath: TFile | string) {
