@@ -28,6 +28,13 @@ const mockApp = {
         read: vi.fn(),
         modify: vi.fn(),
         getFileByPath: vi.fn(),
+        getAbstractFileByPath: vi.fn(),
+        createFolder: vi.fn(),
+        adapter: {
+            exists: vi.fn(),
+            read: vi.fn(),
+            write: vi.fn(),
+        }
     }
 } as unknown as App;
 
@@ -311,6 +318,23 @@ describe('SyncManager', () => {
             
             await manager.pullFile(mockFile);
             expect(mockApp.vault.modify).not.toHaveBeenCalled();
+        });
+
+        it('should pull a new file that does not exist locally', async () => {
+            const path = 'new-remote-file.md';
+            vi.mocked(mockGitLab.getFile).mockResolvedValue({ content: 'remote content', sha: 'new-sha' });
+            vi.spyOn(mockApp.vault, 'getFileByPath').mockReturnValue(null);
+            
+            const writeSpy = vi.spyOn(mockApp.vault.adapter, 'write').mockResolvedValue(undefined);
+            vi.spyOn(mockApp.vault.adapter, 'exists').mockResolvedValue(false);
+
+            // Mock ensureParentDirs by mocking getAbstractFileByPath to return folder for parent
+            vi.spyOn(mockApp.vault, 'getAbstractFileByPath').mockReturnValue(new TFile());
+
+            await manager.pullFile(path);
+
+            expect(writeSpy).toHaveBeenCalledWith(path, 'remote content');
+            expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe('new-sha');
         });
 
         it('should handle pull errors gracefully', async () => {

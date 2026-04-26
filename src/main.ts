@@ -39,9 +39,7 @@ export default class GitLabFilesPush extends Plugin {
 		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath);
 		this.sync = new SyncManager(this.app, this.gitService, this.settings);
 
-		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-
-		this.addRibbonIcon('upload-cloud', Platform.isMobile ? `Push` : `Push to ${serviceName}`, async () => {
+		this.addRibbonIcon('upload-cloud', Platform.isMobile ? `Push` : `Push to ${this.serviceName}`, async () => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView && activeView.file instanceof TFile) {
 				await this.sync.pushFile(activeView.file);
@@ -52,7 +50,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'push-current-file',
-			name: `Push current file to ${serviceName}`,
+			name: `Push current file to ${this.serviceName}`,
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
@@ -63,7 +61,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'pull-current-file',
-			name: `Pull current file from ${serviceName}`,
+			name: `Pull current file from ${this.serviceName}`,
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
@@ -92,12 +90,12 @@ export default class GitLabFilesPush extends Plugin {
 			this.app.workspace.on('file-menu', (menu, file) => {
 				if (file instanceof TFile) {
 					menu.addItem((item) => {
-						item.setTitle(`Push to ${serviceName}`)
+						item.setTitle(`Push to ${this.serviceName}`)
 							.setIcon('upload-cloud')
 							.onClick(async () => { await this.sync.pushFile(file); });
 					});
 					menu.addItem((item) => {
-						item.setTitle(`Pull from ${serviceName}`)
+						item.setTitle(`Pull from ${this.serviceName}`)
 							.setIcon('download-cloud')
 							.onClick(async () => { await this.sync.pullFile(file); });
 					});
@@ -113,6 +111,10 @@ export default class GitLabFilesPush extends Plugin {
 				}
 			})
 		);
+	}
+
+	private get serviceName(): string {
+		return this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 	}
 
 	async activateSyncStatusView(): Promise<void> {
@@ -137,74 +139,53 @@ export default class GitLabFilesPush extends Plugin {
 	}
 
 	async pushAllFiles(): Promise<void> {
-		const allFiles = this.app.vault.getFiles();
-		let files = this.filterFilesByVaultFolder(allFiles);
-		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-
-		await this.gitService.listFiles(this.settings.branch);
-		await this.gitignoreManager.loadGitignores();
-		files = files.filter(f => !this.gitignoreManager.isIgnored(f.path));
-
-		if (files.length === 0) {
-			new Notice('No files to push in the configured vault folder');
-			return;
-		}
-
-		const confirmed = await this.showConfirmDialog(`Push ${files.length} file(s) to ${serviceName}?`);
-		if (!confirmed) return;
-
-		const progressNotice = new Notice(`Pushing 0/${files.length} files...`, 0);
-
-		try {
-			const results = await this.sync.pushAllFiles(files, (current, total, fileName) => {
-				progressNotice.setMessage(`Pushing ${current}/${total}: ${fileName}`);
-			});
-
-			progressNotice.hide();
-
-			if (results.errors.length > 0) {
-				console.error('Push errors:', results.errors);
-			}
-		} catch (e) {
-			progressNotice.hide();
-			console.error(e);
-			new Notice(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
-		}
+		await this.runAllFiles('push');
 	}
 
 	async pullAllFiles(): Promise<void> {
+		await this.runAllFiles('pull');
+	}
+
+	private async runAllFiles(op: 'push' | 'pull'): Promise<void> {
 		const allFiles = this.app.vault.getFiles();
 		let files = this.filterFilesByVaultFolder(allFiles);
-		const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
 
 		await this.gitService.listFiles(this.settings.branch);
 		await this.gitignoreManager.loadGitignores();
 		files = files.filter(f => !this.gitignoreManager.isIgnored(f.path));
 
 		if (files.length === 0) {
-			new Notice('No files to pull in the configured vault folder');
+			new Notice(`No files to ${op} in the configured vault folder`);
 			return;
 		}
 
-		const confirmed = await this.showConfirmDialog(`Pull ${files.length} file(s) from ${serviceName}? This will overwrite local changes.`);
+		const msg = op === 'push'
+			? `Push ${files.length} file(s) to ${this.serviceName}?`
+			: `Pull ${files.length} file(s) from ${this.serviceName}? This will overwrite local changes.`;
+
+		const confirmed = await this.showConfirmDialog(msg);
 		if (!confirmed) return;
 
-		const progressNotice = new Notice(`Pulling 0/${files.length} files...`, 0);
+		const progressNotice = new Notice(`${op === 'push' ? 'Pushing' : 'Pulling'} 0/${files.length} files...`, 0);
 
 		try {
-			const results = await this.sync.pullAllFiles(files, (current, total, fileName) => {
-				progressNotice.setMessage(`Pulling ${current}/${total}: ${fileName}`);
-			});
+			const results = op === 'push'
+				? await this.sync.pushAllFiles(files, (current, total, fileName) => {
+					progressNotice.setMessage(`Pushing ${current}/${total}: ${fileName}`);
+				})
+				: await this.sync.pullAllFiles(files, (current, total, fileName) => {
+					progressNotice.setMessage(`Pulling ${current}/${total}: ${fileName}`);
+				});
 
 			progressNotice.hide();
 
 			if (results.errors.length > 0) {
-				console.error('Pull errors:', results.errors);
+				console.error(`${op} errors:`, results.errors);
 			}
 		} catch (e) {
 			progressNotice.hide();
 			console.error(e);
-			new Notice(`Pull failed: ${e instanceof Error ? e.message : String(e)}`);
+			new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 

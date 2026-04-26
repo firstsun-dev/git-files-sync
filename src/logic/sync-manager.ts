@@ -14,6 +14,19 @@ export class SyncManager {
         this.settings = settings;
     }
 
+    private get serviceName(): string {
+        return this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+    }
+
+    public async updateMetadata(path: string, sha: string): Promise<void> {
+        this.settings.syncMetadata[path] = {
+            lastSyncedSha: sha,
+            lastSyncedAt: Date.now(),
+            lastKnownPath: path
+        };
+        await this.saveSettings();
+    }
+
     updateGitService(gitService: GitServiceInterface): void {
         this.gitService = gitService;
     }
@@ -27,7 +40,6 @@ export class SyncManager {
         }
 
         const content = await this.getFileContent(fileOrPath);
-        const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
         try {
             // Check if this is a renamed file
             let renamedFrom = null;
@@ -65,7 +77,7 @@ export class SyncManager {
             await this.performPush({ path, name }, content, remote.sha);
         } catch (e) {
             console.error(e);
-            new Notice(`Failed to push ${name} to ${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
+            new Notice(`Failed to push ${name} to ${this.serviceName}: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
@@ -88,8 +100,6 @@ export class SyncManager {
     }
 
     private async handleRename(file: TFile, oldPath: string, content: string): Promise<void> {
-        const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
-
         try {
             // Push the file to the new location
             await this.gitService.pushFile(
@@ -106,25 +116,20 @@ export class SyncManager {
 
             // Update metadata
             const newRemote = await this.gitService.getFile(file.path, this.settings.branch);
-            this.settings.syncMetadata[file.path] = {
-                lastSyncedSha: newRemote.sha,
-                lastSyncedAt: Date.now(),
-                lastKnownPath: file.path
-            };
+            await this.updateMetadata(file.path, newRemote.sha);
 
             // Remove old metadata
             delete this.settings.syncMetadata[oldPath];
 
             await this.saveSettings();
-            new Notice(`Renamed and pushed ${file.name} to ${serviceName}\nNote: Old file at ${oldPath} may need manual deletion from remote`);
+            new Notice(`Renamed and pushed ${file.name} to ${this.serviceName}\nNote: Old file at ${oldPath} may need manual deletion from remote`);
         } catch (e) {
             console.error(e);
             new Notice(`Failed to handle rename: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
-    private async performPush(file: {path: string, name: string}, content: string, existingSha?: string) {
-        const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+    private async performPush(file: {path: string, name: string}, content: string, existingSha?: string, silent = false) {
         await this.gitService.pushFile(
             file.path,
             content,
@@ -135,53 +140,40 @@ export class SyncManager {
 
         // Update metadata
         const newRemote = await this.gitService.getFile(file.path, this.settings.branch);
-        this.settings.syncMetadata[file.path] = {
-            lastSyncedSha: newRemote.sha,
-            lastSyncedAt: Date.now(),
-            lastKnownPath: file.path
-        };
-
-        await this.saveSettings();
-        new Notice(`Pushed ${file.name} to ${serviceName}`);
+        await this.updateMetadata(file.path, newRemote.sha);
+        
+        if (!silent) new Notice(`Pushed ${file.name} to ${this.serviceName}`);
     }
 
     async pullFile(fileOrPath: TFile | string) {
         const { path, name, isString } = this.getFileInfo(fileOrPath);
 
-        if (!await this.checkFileExists(path, isString)) {
-            new Notice(`File ${name} no longer exists in vault.`);
-            return;
-        }
-
-        const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
         try {
             const remote = await this.gitService.getFile(path, this.settings.branch);
             if (!remote.sha) {
                 new Notice(`File ${name} not found on remote.`);
                 return;
             }
-            const localContent = await this.getFileContent(fileOrPath);
+
+            const exists = await this.checkFileExists(path, isString);
+            const localContent = exists ? await this.getFileContent(fileOrPath) : null;
             const lastSynced = this.settings.syncMetadata[path];
 
-            if (localContent === remote.content) {
+            if (exists && localContent === remote.content) {
                 // Still update metadata even if content matches
-                this.settings.syncMetadata[path] = {
-                    lastSyncedSha: remote.sha,
-                    lastSyncedAt: Date.now()
-                };
-                await this.saveSettings();
+                await this.updateMetadata(path, remote.sha);
                 new Notice(`${name} is already up to date.`);
                 return;
             }
 
-            // Conflict detection for pull
-            if (remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
-                new SyncConflictModal(this.app, name, localContent, remote.content, (choice) => {
+            // Conflict detection for pull (only if local exists)
+            if (exists && remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
+                new SyncConflictModal(this.app, name, localContent || '', remote.content, (choice) => {
                     void (async () => {
                         try {
                             const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
                             if (choice === 'local') {
-                                await this.performPush({ path, name }, localContent, remote.sha);
+                                await this.performPush({ path, name }, localContent || '', remote.sha);
                             } else {
                                 await this.performPull(fileRep, remote.content, remote.sha);
                             }
@@ -198,12 +190,12 @@ export class SyncManager {
             await this.performPull(fileRep, remote.content, remote.sha);
         } catch (e) {
             console.error(e);
-            new Notice(`Failed to pull ${name} from ${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
+            new Notice(`Failed to pull ${name} from ${this.serviceName}: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
-    private async performPull(file: TFile | {path: string, name: string}, remoteContent: string, remoteSha: string) {
-        const serviceName = this.settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+    private async performPull(file: TFile | {path: string, name: string}, remoteContent: string, remoteSha: string, silent = false) {
+        await this.ensureParentDirs(file.path);
         
         if (file instanceof TFile) {
             await this.app.vault.modify(file, remoteContent);
@@ -212,15 +204,24 @@ export class SyncManager {
         }
 
         // Update metadata
-        this.settings.syncMetadata[file.path] = {
-            lastSyncedSha: remoteSha,
-            lastSyncedAt: Date.now(),
-            lastKnownPath: file.path
-        };
+        await this.updateMetadata(file.path, remoteSha);
 
-        await this.saveSettings();
-        const name = file.name;
-        new Notice(`Pulled ${name} from ${serviceName}`);
+        if (!silent) new Notice(`Pulled ${file.name} from ${this.serviceName}`);
+    }
+
+    private async ensureParentDirs(filePath: string): Promise<void> {
+        const parts = filePath.split('/');
+        let cur = '';
+        for (let i = 0; i < parts.length - 1; i++) {
+            cur += (i > 0 ? '/' : '') + parts[i];
+            if (!this.app.vault.getAbstractFileByPath(cur)) {
+                try {
+                    await this.app.vault.createFolder(cur);
+                } catch {
+                    // already exists or failed
+                }
+            }
+        }
     }
 
     private async saveSettings() {
@@ -313,21 +314,14 @@ export class SyncManager {
         }
 
         const remote = await this.gitService.getFile(path, this.settings.branch);
-        await this.gitService.pushFile(path, content, this.settings.branch, `Update ${name} from Obsidian`, remote.sha || undefined);
-        const newRemote = await this.gitService.getFile(path, this.settings.branch);
-        this.settings.syncMetadata[path] = { lastSyncedSha: newRemote.sha, lastSyncedAt: Date.now(), lastKnownPath: path };
+        await this.performPush({ path, name }, content, remote.sha || undefined, true);
     }
 
     private async processSingleBatchPull(fileOrPath: TFile | string, path: string, name: string, isString: boolean) {
         const remote = await this.gitService.getFile(path, this.settings.branch);
         if (!remote.sha) throw new Error('File not found in remote');
 
-        if (typeof fileOrPath === 'string') {
-            await this.app.vault.adapter.write(fileOrPath, remote.content);
-        } else if (fileOrPath instanceof TFile) {
-            await this.app.vault.modify(fileOrPath, remote.content);
-        }
-
-        this.settings.syncMetadata[path] = { lastSyncedSha: remote.sha, lastSyncedAt: Date.now(), lastKnownPath: path };
+        const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
+        await this.performPull(fileRep, remote.content, remote.sha, true);
     }
 }

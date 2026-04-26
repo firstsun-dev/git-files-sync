@@ -16,7 +16,7 @@ jobs:
     uses: firstsun-dev/general-workflows/.github/workflows/obsidian-plugin-ci.yml@main
     with:
       plugin-id: "git-file-sync"
-      skip-sonar: false
+      skip-sonar: ${{ secrets.SONAR_TOKEN == '' || vars.ENABLE_CI_SONAR != 'true' }}
     secrets:
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

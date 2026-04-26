@@ -314,34 +314,16 @@ export class SyncStatusView extends ItemView {
 
     private async runSingleFile(fileStatus: FileStatus, op: 'push' | 'pull'): Promise<void> {
         try {
-            const originalStatus = fileStatus.status;
             fileStatus.status = 'checking';
             this.renderView();
 
             if (op === 'push') {
                 await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
-                await new Promise(r => setTimeout(r, 500));
-            } else if (originalStatus === 'remote-only' || !fileStatus.file) {
-                // pull remote-only
-                const remote = await this.plugin.gitService.getFile(fileStatus.path, this.plugin.settings.branch);
-                if (remote.content) {
-                    await this.ensureParentDirs(fileStatus.path);
-                    await this.app.vault.adapter.write(fileStatus.path, remote.content);
-                    this.plugin.settings.syncMetadata[fileStatus.path] = {
-                        lastSyncedSha: remote.sha,
-                        lastSyncedAt: Date.now(),
-                        lastKnownPath: fileStatus.path
-                    };
-                    await this.plugin.saveSettings();
-                }
-                await new Promise(r => setTimeout(r, 1000));
-                await this.refreshAllStatuses();
-                return;
             } else {
                 await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
-                await new Promise(r => setTimeout(r, 500));
             }
 
+            await new Promise(r => setTimeout(r, 500));
             await this.refreshFileStatus(fileStatus.file || fileStatus.path);
             this.renderView();
         } catch (e) {
@@ -679,17 +661,6 @@ export class SyncStatusView extends ItemView {
             }
         }
         return diff.join('\n');
-    }
-
-    private async ensureParentDirs(filePath: string): Promise<void> {
-        const parts = filePath.split('/');
-        let cur = '';
-        for (let i = 0; i < parts.length - 1; i++) {
-            cur += (i > 0 ? '/' : '') + parts[i];
-            if (!this.app.vault.getAbstractFileByPath(cur)) {
-                try { await this.app.vault.createFolder(cur); } catch { /* already exists */ }
-            }
-        }
     }
 
     async pushAllModified(): Promise<void> {
