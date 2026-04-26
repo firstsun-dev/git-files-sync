@@ -1,179 +1,22 @@
 name: CI/CD
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
+  pull-requests: write
 
 on:
   push:
-    branches:
-      - main
-      - master
-      - '**'
+    branches: [main, master, '**']
   pull_request:
     types: [opened, synchronize, reopened]
-    branches:
-      - main
-      - master
 
 jobs:
-  filter:
-    name: Check for Code Changes
-    runs-on: ubuntu-latest
-    outputs:
-      code: ${{ steps.filter.outputs.code }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            code:
-              - 'src/**'
-              - 'package.json'
-              - 'package-lock.json'
-              - 'tsconfig.json'
-              - 'esbuild.config.mjs'
-              - 'eslint.config.mts'
-              - 'vitest.config.ts'
-              - 'styles.css'
-              - 'main.js'
-
-  lint:
-    name: Lint
-    needs: filter
-    if: needs.filter.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run lint
-
-  test:
-    name: Test
-    needs: filter
-    if: needs.filter.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run test -- --coverage
-      - id: version
-        run: echo "version=$(node -p "require('./manifest.json').version")" >> $GITHUB_OUTPUT
-      - name: Upload coverage
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: coverage/
-
-  sonar:
-    name: SonarQube
-    needs: [filter, test]
-    if: (needs.filter.outputs.code == 'true') && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - name: Download coverage
-        uses: actions/download-artifact@v8
-        with:
-          name: coverage-report
-          path: coverage/
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v7.1.0
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: https://sonarcloud.io
-        with:
-          args: >
-            -Dsonar.qualitygate.wait=true
-            -Dsonar.scanner.dumpToFile=sonar-project.properties
-      - name: Upload Sonar logs
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: sonar-scan-logs
-          path: |
-            .scannerwork/
-            sonar-project.properties
-
-  artifact:
-    name: Package Artifact
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    needs: [filter, test]
-    # Run on PRs or feature branches if code changed
-    if: needs.filter.outputs.code == 'true' && (github.event_name == 'pull_request' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'))
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run build
-      - name: Create plugin package
-        run: |
-          VERSION=${{ needs.test.outputs.version }}
-          BRANCH_NAME=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
-          BRANCH_NAME_SAFE=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
-          ZIP_NAME="git-files-sync-${VERSION}-${BRANCH_NAME_SAFE}.zip"
-          zip -j "$ZIP_NAME" main.js manifest.json styles.css
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-      - uses: actions/upload-artifact@v7
-        with:
-          name: plugin-build-${{ needs.test.outputs.version }}-${{ github.sha }}
-          path: ${{ env.ZIP_NAME }}
-          retention-days: 7
-
-  release:
-    name: Build and Release
-    runs-on: ubuntu-latest
-    needs: [filter, lint, test, sonar]
-    # Only run on push to main/master if code changed
-    if: needs.filter.outputs.code == 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run build
-      - env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
-
-  status:
-    name: CI/CD Status
-    runs-on: ubuntu-latest
-    if: always()
-    needs: [filter, lint, test, sonar, artifact, release]
-    steps:
-      - name: Check for failures
-        if: |
-          contains(needs.*.result, 'failure') || 
-          contains(needs.*.result, 'cancelled') ||
-          (needs.filter.result == 'skipped')
-        run: exit 1
-      - name: Success
-        run: echo "All required checks passed or were appropriately skipped"
+  CI:
+    uses: firstsun-dev/general-workflows/.github/workflows/obsidian-plugin-ci.yml@main
+    with:
+      plugin-id: "git-file-sync"
+      skip-sonar: false
+    secrets:
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

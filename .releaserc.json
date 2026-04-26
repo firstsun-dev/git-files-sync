@@ -1,5 +1,5 @@
 {
-  "branches": ["main", "master"],
+  "branches": ["main", "master", "feat/use-shared-workflow"],
   "tagFormat": "${version}",
   "plugins": [
     [
