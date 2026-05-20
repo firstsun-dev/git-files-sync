@@ -25,6 +25,7 @@
 		"@semantic-release/exec": "^7.1.0",
 		"@semantic-release/git": "^10.0.1",
 		"@semantic-release/github": "^12.0.6",
+		"@types/jsdom": "^28.0.3",
 		"@types/node": "^24.0.0",
 		"@vitest/coverage-v8": "^4.1.5",
 		"@vitest/ui": "^4.1.2",
