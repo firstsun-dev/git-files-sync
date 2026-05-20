@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { renderFileItem, statusMeta, type FileItemCallbacks } from '../../src/ui/components/FileListItem';
 import type { FileStatus } from '../../src/ui/types';
-import type { TFile } from 'obsidian';
+import { TFile } from 'obsidian';
 import { setupObsidianDOM, createContainer } from './setup-dom';
 
 beforeAll(() => { setupObsidianDOM(); });
 
-const mockFile = {} as TFile;
+const mockFile = Object.assign(new TFile(), { path: 'docs/test.md' });
 
 function makeFileStatus(status: FileStatus['status'], overrides?: Partial<FileStatus>): FileStatus {
     return { path: 'docs/test.md', status, ...overrides };
