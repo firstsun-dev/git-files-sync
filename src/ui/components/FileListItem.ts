@@ -49,7 +49,7 @@ function renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus, callback
         renderDiffToggleButton(actions, fileEl, fileStatus);
     }
 
-    if ((fileStatus.status === 'modified' || fileStatus.status === 'unsynced') && fileStatus.file) {
+    if (fileStatus.status === 'modified' || fileStatus.status === 'unsynced') {
         renderActionBtn(actions, '↑', ' Push', 'Push to remote', () => callbacks.onPush(fileStatus), 'push');
     }
 
@@ -57,7 +57,7 @@ function renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus, callback
         renderActionBtn(actions, '↓', ' Pull', 'Pull from remote', () => callbacks.onPull(fileStatus), 'pull');
     }
 
-    if (fileStatus.status === 'unsynced' && fileStatus.file) {
+    if (fileStatus.status === 'unsynced') {
         renderActionBtn(actions, '✕', ' Remove', 'Delete local file', () => callbacks.onDelete(fileStatus), 'danger');
     }
 }
@@ -66,7 +66,15 @@ function renderDiffToggleButton(actions: HTMLElement, fileEl: HTMLElement, fileS
     const diffBtn = actions.createEl('button', { cls: 'ssv-action-btn diff' });
     diffBtn.createSpan({ text: '≡' });
     const btnLabel = diffBtn.createSpan({ cls: 'ssv-btn-label', text: ' Diff' });
-    const diffEl = renderDiffPanel(fileEl, fileStatus.remoteContent ?? '', fileStatus.localContent ?? '');
+    
+    let diffEl: HTMLElement;
+    if (typeof fileStatus.remoteContent === 'string' && typeof fileStatus.localContent === 'string') {
+        diffEl = renderDiffPanel(fileEl, fileStatus.remoteContent, fileStatus.localContent);
+    } else {
+        diffEl = fileEl.createDiv({ cls: 'ssv-diff' });
+        diffEl.createDiv({ cls: 'ssv-diff-binary', text: 'Binary file changed' });
+    }
+    
     setTooltip(diffBtn, 'Toggle diff view');
     diffBtn.addEventListener('click', () => {
         const open = diffEl.hasClass('visible');
