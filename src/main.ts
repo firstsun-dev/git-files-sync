@@ -6,6 +6,7 @@ import { GitServiceInterface } from './services/git-service-interface';
 import { SyncManager } from './logic/sync-manager';
 import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
 import { GitignoreManager } from './logic/gitignore-manager';
+import { logger } from './utils/logger';
 import { ConfirmModal } from './ui/ConfirmModal';
 
 export default class GitLabFilesPush extends Plugin {
@@ -36,7 +37,7 @@ export default class GitLabFilesPush extends Plugin {
 		});
 
 		this.initializeGitService();
-		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath);
+		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath, this.settings.vaultFolder);
 		this.sync = new SyncManager(this.app, this.gitService, this.settings, this.saveSettings.bind(this));
 
 		this.addRibbonIcon('upload-cloud', Platform.isMobile ? `Push` : `Push to ${this.serviceName}`, async () => {
@@ -143,7 +144,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		await this.gitService.listFiles(this.settings.branch);
 		await this.gitignoreManager.loadGitignores();
-		files = files.filter(f => !this.gitignoreManager.isIgnored(f.path));
+		files = files.filter(f => !this.gitignoreManager.isIgnored(this.getNormalizedPath(f.path)));
 
 		if (files.length === 0) {
 			new Notice(`No files to ${op} in the configured vault folder`);
@@ -171,11 +172,11 @@ export default class GitLabFilesPush extends Plugin {
 			progressNotice.hide();
 
 			if (results.errors.length > 0) {
-				console.error(`${op} errors:`, results.errors);
+				logger.error(`${op} errors:`, results.errors);
 			}
 		} catch (e) {
 			progressNotice.hide();
-			console.error(e);
+			logger.error(String(e));
 			new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
@@ -187,6 +188,28 @@ export default class GitLabFilesPush extends Plugin {
 
 		const folderPath = this.settings.vaultFolder + '/';
 		return files.filter(file => file.path.startsWith(folderPath) || file.path === this.settings.vaultFolder);
+	}
+
+	filterPathByVaultFolder(path: string): boolean {
+		if (!this.settings.vaultFolder) return true;
+		const folderPath = this.settings.vaultFolder + '/';
+		return path.startsWith(folderPath) || path === this.settings.vaultFolder;
+	}
+
+	getNormalizedPath(path: string): string {
+		if (!this.settings.vaultFolder) return path;
+		const folderPath = this.settings.vaultFolder + '/';
+		if (path.startsWith(folderPath)) {
+			return path.substring(folderPath.length);
+		}
+		if (path === this.settings.vaultFolder) return '';
+		return path;
+	}
+
+	getVaultPath(normalizedPath: string): string {
+		if (!this.settings.vaultFolder) return normalizedPath;
+		if (!normalizedPath) return this.settings.vaultFolder;
+		return this.settings.vaultFolder + '/' + normalizedPath;
 	}
 
 	initializeGitService(): void {

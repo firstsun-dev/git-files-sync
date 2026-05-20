@@ -71,8 +71,9 @@ describe('SyncManager', () => {
     it('should push file content correctly', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
         const readSpy = vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
-        const getSpy = vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
-        const pushSpy = vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue('test.md');
+        // Mock getFile to return different content to trigger a push
+        const getSpy = vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'different content', sha: 'old-sha' });
+        const pushSpy = vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'test.md', sha: 'new-sha' });
 
         await manager.pushFile(mockFile);
 
@@ -83,7 +84,7 @@ describe('SyncManager', () => {
             'local content',
             'main',
             'Update test.md from Obsidian',
-            ''
+            'old-sha'
         );
     });
 
@@ -97,7 +98,7 @@ describe('SyncManager', () => {
         };
 
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
-        // Mock GitLab returning a different remote SHA
+        // Mock GitLab returning a different remote SHA and different content
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'remote content', sha: 'new-remote-sha' });
 
         const modalMock = vi.mocked(SyncConflictModal);
@@ -113,8 +114,8 @@ describe('SyncManager', () => {
 
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: 'remote content', sha: 'remote-sha' });
-        vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue('test.md');
-        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'local content', sha: 'new-sha' });
+        vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'test.md', sha: 'new-sha' });
+        // No second getFile call needed if pushFile returns sha
 
         const modalMock = vi.mocked(SyncConflictModal);
 
@@ -134,7 +135,7 @@ describe('SyncManager', () => {
         callback('local');
 
         // Wait for async operations in callback
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 50));
 
         const pushSpy = vi.spyOn(mockGitLab, 'pushFile');
         expect(pushSpy).toHaveBeenCalledWith('test.md', 'local content', 'main', 'Update test.md from Obsidian', 'remote-sha');
@@ -177,12 +178,9 @@ describe('SyncManager', () => {
         mockSettings.syncMetadata = {};
 
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
-        // First call for conflict detection
-        vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: '', sha: '' });
-        vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue('test.md');
-
-        // Second call for metadata update
-        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'local content', sha: 'new-sha' });
+        // Mock getFile to return different content to trigger push
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: 'diff', sha: 'old' });
+        vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'test.md', sha: 'new-sha' });
 
         await manager.pushFile(mockFile);
 
@@ -224,8 +222,7 @@ describe('SyncManager', () => {
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('new local content');
         // Remote returns 404/empty
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: '', sha: '' });
-        vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue('new.md');
-        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'new local content', sha: 'new-sha' });
+        vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'new.md', sha: 'new-sha' });
 
         await manager.pushFile(mockFile);
 
@@ -261,8 +258,7 @@ describe('SyncManager', () => {
             });
 
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
-            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue(newPath);
-            vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'content', sha: 'new-sha' });
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
 
             await manager.pushFile(mockFile);
 
