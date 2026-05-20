@@ -1,5 +1,6 @@
 import { GitServiceInterface } from './git-service-interface';
 import { BaseGitService, GitFile, GitHubContentResponse, GitHubTreeResponse } from './git-service-base';
+import { logger } from '../utils/logger';
 
 export class GitHubService extends BaseGitService implements GitServiceInterface {
     private owner: string = '';
@@ -56,7 +57,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         const data = response.json as GitHubTreeResponse;
         
         if (data.truncated) {
-            console.warn('GitHub tree result is truncated. Some files might not be shown.');
+            logger.warn('GitHub tree result is truncated. Some files might not be shown.');
         }
 
         return data.tree

@@ -1,6 +1,7 @@
 import ignore, { Ignore } from 'ignore';
 import { App } from 'obsidian';
 import { GitServiceInterface } from '../services/git-service-interface';
+import { logger } from '../utils/logger';
 
 export class GitignoreManager {
     private readonly app: App;
@@ -30,7 +31,7 @@ export class GitignoreManager {
         try {
             gitignorePaths = await this.gitService.getRepoGitignores(this.branch);
         } catch (e) {
-            console.warn('Failed to fetch repo gitignores', e);
+            logger.warn('Failed to fetch repo gitignores', e);
             // Fallback to at least checking the root
             gitignorePaths = ['.gitignore'];
         }
@@ -65,7 +66,7 @@ export class GitignoreManager {
                     content = await this.app.vault.adapter.read(localPath);
                 }
             } catch (e) {
-                console.warn(`Failed to read local ${localPath}`, e);
+                logger.warn(`Failed to read local ${localPath}`, e);
             }
         }
 

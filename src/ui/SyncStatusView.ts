@@ -2,39 +2,12 @@ import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setTooltip } from 'ob
 import GitLabFilesPush from '../main';
 import { getServiceName } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
+import { logger } from '../utils/logger';
+import { type FileStatus, type FilterValue } from './types';
+import { renderActionBar } from './components/ActionBar';
+import { renderFileItem } from './components/FileListItem';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
-
-interface FileStatus {
-    file?: TFile;
-    path: string;
-    status: 'synced' | 'modified' | 'unsynced' | 'remote-only' | 'checking';
-    localContent?: string;
-    remoteContent?: string;
-    remoteSha?: string;
-    diff?: string;
-}
-
-interface DiffSide {
-    lineNum: number | null;
-    content: string | null;
-    type: 'removed' | 'added' | 'unchanged' | 'empty';
-}
-
-interface DiffRow {
-    left: DiffSide;
-    right: DiffSide;
-}
-
-type FilterValue = 'all' | 'synced' | 'modified' | 'unsynced' | 'remote-only';
-
-type DiffOpType = 'unchanged' | 'removed' | 'added';
-
-interface DiffOp {
-    type: DiffOpType;
-    li: number;
-    ri: number;
-}
 
 export class SyncStatusView extends ItemView {
     plugin: GitLabFilesPush;
@@ -69,7 +42,7 @@ export class SyncStatusView extends ItemView {
 
         this.renderInfoStrip(container);
         this.renderTabs(container);
-        this.renderActionBar(container);
+        this.renderActionBarSection(container);
 
         const listEl = container.createDiv({ cls: 'ssv-list' });
         if (this.fileStatuses.size === 0) {
@@ -79,6 +52,8 @@ export class SyncStatusView extends ItemView {
         }
     }
 
+    // ── Info strip ─────────────────────────────────────────────────
+
     private renderInfoStrip(container: HTMLElement): void {
         const el = container.createDiv({ cls: 'ssv-info' });
         const serviceName = getServiceName(this.plugin.settings);
@@ -87,8 +62,7 @@ export class SyncStatusView extends ItemView {
 
         if (!Platform.isMobile) {
             el.createSpan({ cls: 'ssv-info-sep', text: '·' });
-            const branchEl = el.createSpan({ cls: 'ssv-info-item' });
-            branchEl.textContent = `⎇ ${this.plugin.settings.branch}`;
+            el.createSpan({ cls: 'ssv-info-item' }).textContent = `⎇ ${this.plugin.settings.branch}`;
         }
 
         if (this.plugin.settings.vaultFolder) {
@@ -100,10 +74,14 @@ export class SyncStatusView extends ItemView {
             el.createSpan({ cls: 'ssv-info-sep', text: '·' });
             el.createSpan({
                 cls: 'ssv-info-time',
-                text: Platform.isMobile ? new Date(this.lastSyncTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : `Last sync: ${new Date(this.lastSyncTime).toLocaleTimeString()}`
+                text: Platform.isMobile
+                    ? new Date(this.lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : `Last sync: ${new Date(this.lastSyncTime).toLocaleTimeString()}`
             });
         }
     }
+
+    // ── Filter tabs ─────────────────────────────────────────────────
 
     private renderTabs(container: HTMLElement): void {
         const all = Array.from(this.fileStatuses.values());
@@ -143,71 +121,38 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    private renderActionBar(container: HTMLElement): void {
-        const { visible, canPush, canPull, canDelete, allSelected } = this.getActionBarState();
-        const bar = container.createDiv({ cls: 'ssv-action-bar' });
+    // ── Action bar ─────────────────────────────────────────────────
 
-        this.renderRefreshButton(bar);
-
-        if (this.fileStatuses.size > 0) {
-            bar.createDiv({ cls: 'ssv-bar-spacer' });
-            this.renderSelectAllRow(bar, allSelected, visible);
-            this.renderActionButtons(bar, canPush, canPull, canDelete);
-        }
-    }
-
-    private getActionBarState() {
+    private renderActionBarSection(container: HTMLElement): void {
         const all = Array.from(this.fileStatuses.values());
         const visible = this.statusFilter === 'all' ? all : all.filter(s => s.status === this.statusFilter);
-        const selected = Array.from(this.selectedFiles).map(p => this.fileStatuses.get(p)).filter(Boolean) as FileStatus[];
+        const selected = Array.from(this.selectedFiles)
+            .map(p => this.fileStatuses.get(p))
+            .filter(Boolean) as FileStatus[];
 
-        return {
-            visible,
-            canPush: selected.filter(s => s.file && (s.status === 'modified' || s.status === 'unsynced')).length,
-            canPull: selected.filter(s => s.status === 'modified' || s.status === 'remote-only').length,
+        const allSelected = visible.length > 0 && visible.every(s => this.selectedFiles.has(s.path));
+
+        renderActionBar(container, {
+            hasFiles:      this.fileStatuses.size > 0,
+            allSelected,
+            indeterminate: this.selectedFiles.size > 0 && !allSelected,
+            canPush:   selected.filter(s => s.file && (s.status === 'modified' || s.status === 'unsynced')).length,
+            canPull:   selected.filter(s => s.status === 'modified' || s.status === 'remote-only').length,
             canDelete: selected.filter(s => s.file || s.status === 'remote-only').length,
-            allSelected: visible.length > 0 && visible.every(s => this.selectedFiles.has(s.path))
-        };
-    }
-
-    private renderRefreshButton(bar: HTMLElement): void {
-        const btn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-refresh' });
-        btn.createSpan({ text: '↻' });
-        btn.createSpan({ cls: 'ssv-btn-label', text: ' Refresh' });
-        setTooltip(btn, 'Refresh all statuses');
-        btn.addEventListener('click', () => void this.refreshAllStatuses());
-    }
-
-    private renderSelectAllRow(bar: HTMLElement, allSelected: boolean, visible: FileStatus[]): void {
-        const selectRow = bar.createDiv({ cls: 'ssv-select-row' });
-        const cb = selectRow.createEl('input', { type: 'checkbox' });
-        cb.checked = allSelected;
-        cb.indeterminate = this.selectedFiles.size > 0 && !allSelected;
-        selectRow.createSpan({ cls: 'ssv-select-label', text: 'Select' });
-        cb.addEventListener('change', () => {
-            if (cb.checked) {
-                for (const s of visible) this.selectedFiles.add(s.path);
-            } else {
-                this.selectedFiles.clear();
-            }
-            this.renderView();
+        }, {
+            onRefresh:   () => void this.refreshAllStatuses(),
+            onSelectAll: (select) => {
+                if (select) { for (const s of visible) this.selectedFiles.add(s.path); }
+                else { this.selectedFiles.clear(); }
+                this.renderView();
+            },
+            onPush:   () => void this.pushSelected(),
+            onPull:   () => void this.pullSelected(),
+            onDelete: () => void this.deleteSelected(),
         });
     }
 
-    private renderActionButtons(bar: HTMLElement, canPush: number, canPull: number, canDelete: number): void {
-        this.renderLargeButton(bar, '↑', ` Push (${canPush})`, `Push ${canPush} files`, () => void this.pushSelected(), 'push', canPush === 0);
-        this.renderLargeButton(bar, '↓', ` Pull (${canPull})`, `Pull ${canPull} files`, () => void this.pullSelected(), 'pull', canPull === 0);
-        this.renderLargeButton(bar, '✕', ` Delete (${canDelete})`, `Delete ${canDelete} files`, () => void this.deleteSelected(), 'danger', canDelete === 0);
-    }
-
-    private renderLargeButton(container: HTMLElement, icon: string, label: string, tooltip: string, onClick: () => void, cls: string, disabled: boolean): void {
-        const btn = container.createEl('button', { cls: `ssv-btn ssv-btn-${cls}` });
-        btn.createSpan({ text: icon });
-        btn.createSpan({ cls: 'ssv-btn-label', text: label });
-        btn.disabled = disabled;
-        setTooltip(btn, tooltip);
-        btn.addEventListener('click', onClick);
-    }
+    // ── File list ──────────────────────────────────────────────────
 
     private renderFileList(container: HTMLElement): void {
         const all = Array.from(this.fileStatuses.values());
@@ -219,82 +164,22 @@ export class SyncStatusView extends ItemView {
             container.createDiv({ cls: 'ssv-empty', text: `No ${this.statusFilter} files` });
             return;
         }
-        for (const fs of statuses) this.renderFileItem(container, fs);
-    }
 
-    private renderFileItem(container: HTMLElement, fileStatus: FileStatus): void {
-        const { icon, label, iconCls, badgeCls, fileCls } = this.statusMeta(fileStatus.status);
-        const fileEl = container.createDiv({ cls: `ssv-file ${fileCls}` });
-
-        const row = fileEl.createDiv({ cls: 'ssv-file-row' });
-        this.renderFileCheckbox(row, fileStatus);
-
-        row.createSpan({ cls: `ssv-file-icon ${iconCls}`, text: icon });
-        row.createSpan({ cls: 'ssv-file-path', text: fileStatus.path });
-        row.createSpan({ cls: `ssv-status-badge ${badgeCls}`, text: label });
-
-        if (fileStatus.status !== 'synced' && fileStatus.status !== 'checking') {
-            this.renderFileActions(fileEl, fileStatus);
+        for (const fs of statuses) {
+            renderFileItem(container, fs, this.selectedFiles.has(fs.path), {
+                onSelect: (path, selected) => {
+                    if (selected) this.selectedFiles.add(path);
+                    else this.selectedFiles.delete(path);
+                    this.renderView();
+                },
+                onPush:   (fileStatus) => void this.runSingleFile(fileStatus, 'push'),
+                onPull:   (fileStatus) => void this.runSingleFile(fileStatus, 'pull'),
+                onDelete: (fileStatus) => void this.handleLocalDelete(fileStatus),
+            });
         }
     }
 
-    private renderFileCheckbox(row: HTMLElement, fileStatus: FileStatus): void {
-        const cb = row.createEl('input', { type: 'checkbox', cls: 'ssv-file-checkbox' });
-        cb.checked = this.selectedFiles.has(fileStatus.path);
-        cb.addEventListener('change', () => {
-            if (cb.checked) {
-                this.selectedFiles.add(fileStatus.path);
-            } else {
-                this.selectedFiles.delete(fileStatus.path);
-            }
-            this.renderView();
-        });
-    }
-
-    private renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus): void {
-        const actions = fileEl.createDiv({ cls: 'ssv-file-actions' });
-
-        if (fileStatus.status === 'modified' && fileStatus.diff) {
-            this.renderDiffToggleButton(actions, fileEl, fileStatus);
-        }
-
-        if ((fileStatus.status === 'modified' || fileStatus.status === 'unsynced') && fileStatus.file) {
-            this.renderActionButton(actions, '↑', ' Push', 'Push to remote', () => void this.runSingleFile(fileStatus, 'push'), 'push');
-        }
-
-        if (fileStatus.status === 'modified' || fileStatus.status === 'remote-only') {
-            this.renderActionButton(actions, '↓', ' Pull', 'Pull from remote', () => void this.runSingleFile(fileStatus, 'pull'), 'pull');
-        }
-
-        if (fileStatus.status === 'unsynced' && fileStatus.file) {
-            this.renderActionButton(actions, '✕', ' Remove', 'Delete local file', () => void this.handleLocalDelete(fileStatus), 'danger');
-        }
-    }
-
-    private renderDiffToggleButton(actions: HTMLElement, fileEl: HTMLElement, fileStatus: FileStatus): void {
-        const diffBtn = actions.createEl('button', { cls: 'ssv-action-btn diff' });
-        diffBtn.createSpan({ text: '≡' });
-        const btnLabel = diffBtn.createSpan({ cls: 'ssv-btn-label', text: ' Diff' });
-        const diffEl = this.renderDiffPanel(fileEl, fileStatus);
-        setTooltip(diffBtn, 'Toggle diff view');
-        diffBtn.addEventListener('click', () => {
-            const open = diffEl.hasClass('visible');
-            diffEl.toggleClass('visible', !open);
-            btnLabel.setText(open ? ' Diff' : ' Hide');
-            const firstChild = diffBtn.firstChild;
-            if (firstChild instanceof HTMLElement || firstChild instanceof Text) {
-                firstChild.textContent = open ? '≡' : '▴';
-            }
-        });
-    }
-
-    private renderActionButton(actions: HTMLElement, icon: string, label: string, tooltip: string, onClick: () => void, cls: string): void {
-        const btn = actions.createEl('button', { cls: `ssv-action-btn ${cls}` });
-        btn.createSpan({ text: icon });
-        btn.createSpan({ cls: 'ssv-btn-label', text: label });
-        setTooltip(btn, tooltip);
-        btn.addEventListener('click', onClick);
-    }
+    // ── Single-file operations ──────────────────────────────────────
 
     private async handleLocalDelete(fileStatus: FileStatus): Promise<void> {
         const confirmed = await this.showConfirmDialog(`Delete local file "${fileStatus.path}"?`);
@@ -324,7 +209,8 @@ export class SyncStatusView extends ItemView {
                 await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
             }
 
-            await new Promise(r => setTimeout(r, 500));
+            // eslint-disable-next-line no-undef
+            await new Promise(r => activeWindow.setTimeout(r, 500));
             await this.refreshFileStatus(fileStatus.file || fileStatus.path);
             this.renderView();
         } catch (e) {
@@ -334,196 +220,7 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    private statusMeta(status: FileStatus['status']) {
-        switch (status) {
-            case 'synced':      return { icon: '✓', label: 'Synced',     iconCls: 'ssv-icon-synced',   badgeCls: 'ssv-badge-synced',   fileCls: 'status-synced' };
-            case 'modified':    return { icon: '⚠', label: 'Changed',    iconCls: 'ssv-icon-modified', badgeCls: 'ssv-badge-modified', fileCls: 'status-modified' };
-            case 'unsynced':    return { icon: '↑', label: 'Local only', iconCls: 'ssv-icon-unsynced', badgeCls: 'ssv-badge-unsynced', fileCls: 'status-unsynced' };
-            case 'remote-only': return { icon: '↓', label: 'Remote',     iconCls: 'ssv-icon-remote',   badgeCls: 'ssv-badge-remote',   fileCls: 'status-remote' };
-            default:            return { icon: '⟳', label: 'Checking',   iconCls: 'ssv-icon-checking', badgeCls: 'ssv-badge-checking', fileCls: 'status-checking' };
-        }
-    }
-
-    // ── Side-by-side diff ─────────────────────────────────────────
-
-    private renderDiffPanel(fileEl: HTMLElement, fileStatus: FileStatus): HTMLElement {
-        const diffEl = fileEl.createDiv({ cls: 'ssv-diff' });
-        const rows = this.computeSideBySideDiff(fileStatus.remoteContent ?? '', fileStatus.localContent ?? '');
-
-        // Side-by-side (shown on wide containers via container query)
-        const splitEl = diffEl.createDiv({ cls: 'ssv-diff-split' });
-        const grid = splitEl.createDiv({ cls: 'ssv-diff-grid' });
-        grid.createDiv({ cls: 'ssv-diff-hd', text: 'Remote' });
-        grid.createDiv({ cls: 'ssv-diff-hd', text: 'Local' });
-        for (const row of rows) {
-            this.renderDiffCell(grid, row.left);
-            this.renderDiffCell(grid, row.right);
-        }
-
-        // Unified (shown on narrow containers / mobile via container query)
-        const unifiedEl = diffEl.createEl('pre', { cls: 'ssv-diff-unified' });
-        for (const row of rows) {
-            const { left, right } = row;
-            if (left.type === 'removed') {
-                unifiedEl.createSpan({ cls: 'ssv-u-line removed' }).textContent = `- ${left.content ?? ''}\n`;
-            }
-            if (right.type === 'added') {
-                unifiedEl.createSpan({ cls: 'ssv-u-line added' }).textContent = `+ ${right.content ?? ''}\n`;
-            }
-            if (left.type === 'unchanged') {
-                unifiedEl.createSpan({ cls: 'ssv-u-line unchanged' }).textContent = `  ${left.content ?? ''}\n`;
-            }
-        }
-
-        return diffEl;
-    }
-
-    private renderDiffCell(grid: HTMLElement, side: DiffSide): void {
-        const cell = grid.createDiv({ cls: `ssv-diff-cell ${side.type}` });
-        cell.createSpan({ cls: 'ssv-diff-ln' }).textContent = side.lineNum === null ? '' : String(side.lineNum);
-        if (side.content !== null) {
-            cell.createSpan({ cls: 'ssv-diff-code' }).textContent = side.content;
-        }
-    }
-
-    private computeSideBySideDiff(remote: string, local: string): DiffRow[] {
-        const L = this.normalizeContent(remote).split('\n');
-        const R = this.normalizeContent(local).split('\n');
-        const m = L.length, n = R.length;
-
-        if (m * n > 250_000 || (m + 1) * (n + 1) > 1_000_000) {
-            return this.simpleDiff(L, R);
-        }
-
-        const dp = this.buildDPMatrix(L, R, m, n);
-        const ops = this.tracePath(L, R, dp, m, n);
-        return this.pairDiffOps(ops, L, R);
-    }
-
-    private normalizeContent(s: string): string {
-        return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    }
-
-    private buildDPMatrix(L: string[], R: string[], m: number, n: number): Uint32Array {
-        const W = n + 1;
-        const dp = new Uint32Array((m + 1) * W);
-        for (let i = 1; i <= m; i++) {
-            for (let j = 1; j <= n; j++) {
-                dp[i * W + j] = L[i - 1] === R[j - 1]
-                    ? (dp[(i - 1) * W + (j - 1)]!) + 1
-                    : Math.max(dp[(i - 1) * W + j]!, dp[i * W + (j - 1)]!);
-            }
-        }
-        return dp;
-    }
-
-    private tracePath(L: string[], R: string[], dp: Uint32Array, m: number, n: number): DiffOp[] {
-        const W = n + 1;
-        const ops: DiffOp[] = [];
-        let i = m, j = n;
-        while (i > 0 || j > 0) {
-            const op = this.getNextDiffOp(L, R, dp, W, i, j);
-            ops.push(op);
-            [i, j] = this.updateIndices(op, i, j);
-        }
-        return ops.reverse();
-    }
-
-    private updateIndices(op: DiffOp, i: number, j: number): [number, number] {
-        if (op.type === 'unchanged') return [i - 1, j - 1];
-        if (op.type === 'added') return [i, j - 1];
-        return [i - 1, j];
-    }
-
-    private getNextDiffOp(L: string[], R: string[], dp: Uint32Array, W: number, i: number, j: number): DiffOp {
-        if (i > 0 && j > 0 && L[i - 1] === R[j - 1]) {
-            return { type: 'unchanged', li: i - 1, ri: j - 1 };
-        }
-        
-        const canAdd = j > 0;
-        const preferAdd = canAdd && (i === 0 || dp[i * W + (j - 1)]! >= dp[(i - 1) * W + j]!);
-
-        if (preferAdd) {
-            return { type: 'added', li: -1, ri: j - 1 };
-        }
-        return { type: 'removed', li: i - 1, ri: -1 };
-    }
-
-    private pairDiffOps(ops: DiffOp[], L: string[], R: string[]): DiffRow[] {
-        const rows: DiffRow[] = [];
-        let k = 0;
-        while (k < ops.length) {
-            const op = ops[k];
-            if (!op) break;
-
-            if (op.type === 'unchanged') {
-                rows.push(this.createUnchangedRow(op, L, R));
-                k++;
-            } else {
-                const batch = this.collectChangeBatch(ops, k);
-                rows.push(...this.createChangeRows(batch, L, R));
-                k += batch.length;
-            }
-        }
-        return rows;
-    }
-
-    private createUnchangedRow(op: DiffOp, L: string[], R: string[]): DiffRow {
-        return {
-            left:  { lineNum: op.li + 1, content: L[op.li] ?? null, type: 'unchanged' },
-            right: { lineNum: op.ri + 1, content: R[op.ri] ?? null, type: 'unchanged' },
-        };
-    }
-
-    private collectChangeBatch(ops: DiffOp[], startIdx: number): DiffOp[] {
-        const batch: DiffOp[] = [];
-        let k = startIdx;
-        while (k < ops.length) {
-            const item = ops[k];
-            if (!item || item.type === 'unchanged') break;
-            batch.push(item);
-            k++;
-        }
-        return batch;
-    }
-
-    private createChangeRows(batch: DiffOp[], L: string[], R: string[]): DiffRow[] {
-        const removedIdxs = batch.filter(o => o.type === 'removed').map(o => o.li);
-        const addedIdxs = batch.filter(o => o.type === 'added').map(o => o.ri);
-        const len = Math.max(removedIdxs.length, addedIdxs.length);
-        const rows: DiffRow[] = [];
-
-        for (let x = 0; x < len; x++) {
-            rows.push({
-                left: this.createDiffSide(removedIdxs[x], L, 'removed'),
-                right: this.createDiffSide(addedIdxs[x], R, 'added')
-            });
-        }
-        return rows;
-    }
-
-    private createDiffSide(idx: number | undefined, lines: string[], type: 'removed' | 'added'): DiffSide {
-        if (idx === undefined) {
-            return { lineNum: null, content: null, type: 'empty' };
-        }
-        return { lineNum: idx + 1, content: lines[idx] ?? null, type };
-    }
-
-    // Fallback for very large files (> 500×500 lines)
-    private simpleDiff(L: string[], R: string[]): DiffRow[] {
-        const rows: DiffRow[] = [];
-        const max = Math.max(L.length, R.length);
-        for (let i = 0; i < max; i++) {
-            const l = L[i], r = R[i];
-            if (l === undefined)      rows.push({ left: { lineNum: null,  content: null, type: 'empty'     }, right: { lineNum: i + 1, content: r ?? null, type: 'added'     } });
-            else if (r === undefined) rows.push({ left: { lineNum: i + 1, content: l,    type: 'removed'   }, right: { lineNum: null,  content: null,      type: 'empty'     } });
-            else if (l === r)         rows.push({ left: { lineNum: i + 1, content: l,    type: 'unchanged' }, right: { lineNum: i + 1, content: r,         type: 'unchanged' } });
-            else                      rows.push({ left: { lineNum: i + 1, content: l,    type: 'removed'   }, right: { lineNum: i + 1, content: r,         type: 'added'     } });
-        }
-        return rows;
-    }
-
-    // ── Batch / refresh operations (logic unchanged) ──────────────
+    // ── Batch / refresh operations ─────────────────────────────────
 
     async refreshAllStatuses(): Promise<void> {
         if (this.isRefreshing) {
@@ -565,8 +262,7 @@ export class SyncStatusView extends ItemView {
         const prog = listEl.createDiv({ cls: 'ssv-progress' });
         prog.createDiv({ cls: 'ssv-progress-text', text: 'Checking files…' });
         const bar = prog.createDiv({ cls: 'ssv-progress-bar' });
-        const fill = bar.createDiv({ cls: 'ssv-progress-fill' });
-        fill.setAttr('style', 'width: 0%');
+        bar.createDiv({ cls: 'ssv-progress-fill' }).setAttr('style', 'width: 0%');
     }
 
     private async discoverFiles() {
@@ -576,13 +272,13 @@ export class SyncStatusView extends ItemView {
 
         await this.plugin.gitignoreManager.loadGitignores();
         remote = remote.filter(p => !this.plugin.gitignoreManager.isIgnored(p));
-        local = local.filter(f => !this.plugin.gitignoreManager.isIgnored(f.path));
+        local  = local.filter(f => !this.plugin.gitignoreManager.isIgnored(f.path));
 
         return {
             local,
             remote,
             localMap: new Set(local.map(f => f.path)),
-            allMap: new Map<string, TFile>(allFiles.map(f => [f.path, f]))
+            allMap:   new Map<string, TFile>(allFiles.map(f => [f.path, f]))
         };
     }
 
@@ -623,8 +319,7 @@ export class SyncStatusView extends ItemView {
     }
 
     private getCheckableFiles(local: TFile[], extra: Array<TFile | string>) {
-        const combined: Array<TFile | string> = [...local, ...extra];
-        return combined.filter(f => {
+        return ([...local, ...extra] as Array<TFile | string>).filter(f => {
             const p = typeof f === 'string' ? f : f.path;
             return !this.plugin.gitignoreManager.isIgnored(p);
         });
@@ -634,9 +329,7 @@ export class SyncStatusView extends ItemView {
         const total = filesToCheck.length;
         for (let i = 0; i < total; i++) {
             const file = filesToCheck[i];
-            if (file) {
-                await this.refreshFileStatus(file);
-            }
+            if (file) await this.refreshFileStatus(file);
             this.updateRefreshProgress(i + 1, total);
         }
     }
@@ -703,21 +396,20 @@ export class SyncStatusView extends ItemView {
         return diff.join('\n');
     }
 
-    async pushAllModified(): Promise<void> {
-        await this.runBatchOperation('modified', 'push');
-    }
+    // ── Batch push/pull/delete ─────────────────────────────────────
 
-    async pullAllModified(): Promise<void> {
-        await this.runBatchOperation('modified', 'pull');
-    }
+    async pushAllModified(): Promise<void> { await this.runBatchOperation('modified', 'push'); }
+    async pullAllModified(): Promise<void> { await this.runBatchOperation('modified', 'pull'); }
+    async pushSelected():   Promise<void> { await this.runBatchOperation('selected', 'push'); }
+    async pullSelected():   Promise<void> { await this.runBatchOperation('selected', 'pull'); }
 
     private async runBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull'): Promise<void> {
-        const targets = Array.from(this.fileStatuses.values())
-            .filter(s => {
-                if (filter === 'selected' && !this.selectedFiles.has(s.path)) return false;
-                if (op === 'push') return s.status === 'modified' || s.status === 'unsynced';
-                return s.status === 'modified' || s.status === 'remote-only';
-            });
+        const targets = Array.from(this.fileStatuses.values()).filter(s => {
+            if (filter === 'selected' && !this.selectedFiles.has(s.path)) return false;
+            return op === 'push'
+                ? s.status === 'modified' || s.status === 'unsynced'
+                : s.status === 'modified' || s.status === 'remote-only';
+        });
 
         if (targets.length === 0) {
             new Notice(`No ${op}able files ${filter === 'selected' ? 'selected' : 'found'}.`);
@@ -726,7 +418,7 @@ export class SyncStatusView extends ItemView {
 
         const files = targets.map(s => s.file || s.path);
         const serviceName = getServiceName(this.plugin.settings);
-        const msg = op === 'push' 
+        const msg = op === 'push'
             ? `Push ${files.length} file(s) to ${serviceName}?`
             : `Pull ${files.length} file(s) from ${serviceName}? This will overwrite local changes.`;
 
@@ -739,9 +431,8 @@ export class SyncStatusView extends ItemView {
                 : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(`Pulling ${cur}/${total}: ${name}`));
 
             prog.hide();
-            if (results.errors.length > 0) console.error(`${op} errors:`, results.errors);
+            if (results.errors.length > 0) logger.error(`${op} errors:`, results.errors);
             if (filter === 'selected') this.selectedFiles.clear();
-            
             new Notice(`${op === 'push' ? 'Push' : 'Pull'} completed. Refreshing…`);
             await this.refreshAllStatuses();
         } catch (e) {
@@ -750,21 +441,12 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    async pushSelected(): Promise<void> {
-        await this.runBatchOperation('selected', 'push');
-    }
-
-    async pullSelected(): Promise<void> {
-        await this.runBatchOperation('selected', 'pull');
-    }
-
     async deleteSelected(): Promise<void> {
         const targets = this.getSelectedTargets();
         if (targets.length === 0) return;
 
         const { local, remote } = this.partitionTargets(targets);
         if (local.length === 0 && remote.length === 0) { new Notice('Nothing to delete'); return; }
-
         if (!await this.confirmDeletion(local.length, remote.length)) return;
 
         const total = local.length + remote.length;
@@ -775,7 +457,10 @@ export class SyncStatusView extends ItemView {
         await this.performRemoteDeletion(remote, total, local.length, prog, errors);
 
         prog.hide();
-        this.notifyDeletionResults(total, errors.length);
+        new Notice(errors.length > 0
+            ? `Deleted ${total - errors.length}/${total}. ${errors.length} failed.`
+            : `Deleted ${total} files`
+        );
         this.renderView();
     }
 
@@ -788,7 +473,7 @@ export class SyncStatusView extends ItemView {
 
     private partitionTargets(targets: FileStatus[]) {
         return {
-            local: targets.filter(s => s.status !== 'remote-only'),
+            local:  targets.filter(s => s.status !== 'remote-only'),
             remote: targets.filter(s => s.status === 'remote-only')
         };
     }
@@ -798,8 +483,7 @@ export class SyncStatusView extends ItemView {
         if (localCount > 0 && remoteCount > 0) msg = `Delete ${localCount} local + ${remoteCount} remote file(s)? Cannot be undone.`;
         else if (localCount > 0) msg = `Delete ${localCount} local file(s)? Cannot be undone.`;
         else msg = `Delete ${remoteCount} remote file(s)? Cannot be undone.`;
-
-        return await this.showConfirmDialog(msg);
+        return this.showConfirmDialog(msg);
     }
 
     private async performLocalDeletion(local: FileStatus[], total: number, prog: Notice, errors: string[]): Promise<void> {
@@ -829,25 +513,11 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    private notifyDeletionResults(total: number, errorCount: number): void {
-        new Notice(errorCount > 0
-            ? `Deleted ${total - errorCount}/${total}. ${errorCount} failed.`
-            : `Deleted ${total} files`
-        );
-    }
-
-    onClose(): Promise<void> {
-        return Promise.resolve();
-    }
+    onClose(): Promise<void> { return Promise.resolve(); }
 
     private showConfirmDialog(message: string): Promise<boolean> {
         return new Promise(resolve => {
-            new ConfirmModal(
-                this.app,
-                message,
-                () => resolve(true),
-                () => resolve(false)
-            ).open();
+            new ConfirmModal(this.app, message, () => resolve(true), () => resolve(false)).open();
         });
     }
 }

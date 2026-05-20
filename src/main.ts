@@ -6,6 +6,7 @@ import { GitServiceInterface } from './services/git-service-interface';
 import { SyncManager } from './logic/sync-manager';
 import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
 import { GitignoreManager } from './logic/gitignore-manager';
+import { logger } from './utils/logger';
 import { ConfirmModal } from './ui/ConfirmModal';
 
 export default class GitLabFilesPush extends Plugin {
@@ -171,11 +172,11 @@ export default class GitLabFilesPush extends Plugin {
 			progressNotice.hide();
 
 			if (results.errors.length > 0) {
-				console.error(`${op} errors:`, results.errors);
+				logger.error(`${op} errors:`, results.errors);
 			}
 		} catch (e) {
 			progressNotice.hide();
-			console.error(e);
+			logger.error(String(e));
 			new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
