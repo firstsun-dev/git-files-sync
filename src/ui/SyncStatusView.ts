@@ -5,7 +5,8 @@ import { ConfirmModal } from './ConfirmModal';
 import { logger } from '../utils/logger';
 import { type FileStatus, type FilterValue } from './types';
 import { renderActionBar } from './components/ActionBar';
-import { renderFileItem } from './components/FileListItem';
+import { renderFileItem, type FileItemCallbacks } from './components/FileListItem';
+import { isBinaryPath, contentsEqual } from '../utils/path';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
 
@@ -75,17 +76,9 @@ export class SyncStatusView extends ItemView {
             .filter(s => this.statusFilter === 'all' || s.status === this.statusFilter);
         if (checked.length === 0) return;
         const checkedList = container.createDiv({ cls: 'ssv-list-checked' });
+        const cb = this.fileItemCallbacks();
         for (const fs of checked) {
-            renderFileItem(checkedList, fs, this.selectedFiles.has(fs.path), {
-                onSelect: (path, selected) => {
-                    if (selected) this.selectedFiles.add(path);
-                    else this.selectedFiles.delete(path);
-                    this.renderView();
-                },
-                onPush:   (fileStatus) => void this.runSingleFile(fileStatus, 'push'),
-                onPull:   (fileStatus) => void this.runSingleFile(fileStatus, 'pull'),
-                onDelete: (fileStatus) => void this.handleLocalDelete(fileStatus),
-            });
+            renderFileItem(checkedList, fs, this.selectedFiles.has(fs.path), cb);
         }
     }
 
@@ -191,6 +184,19 @@ export class SyncStatusView extends ItemView {
 
     // ── File list ──────────────────────────────────────────────────
 
+    private fileItemCallbacks(): FileItemCallbacks {
+        return {
+            onSelect: (path, selected) => {
+                if (selected) this.selectedFiles.add(path);
+                else this.selectedFiles.delete(path);
+                this.renderView();
+            },
+            onPush:   (fs) => void this.runSingleFile(fs, 'push'),
+            onPull:   (fs) => void this.runSingleFile(fs, 'pull'),
+            onDelete: (fs) => void this.handleLocalDelete(fs),
+        };
+    }
+
     private renderFileList(container: HTMLElement): void {
         const all = Array.from(this.fileStatuses.values());
         const statuses = this.statusFilter === 'all'
@@ -202,17 +208,9 @@ export class SyncStatusView extends ItemView {
             return;
         }
 
+        const cb = this.fileItemCallbacks();
         for (const fs of statuses) {
-            renderFileItem(container, fs, this.selectedFiles.has(fs.path), {
-                onSelect: (path, selected) => {
-                    if (selected) this.selectedFiles.add(path);
-                    else this.selectedFiles.delete(path);
-                    this.renderView();
-                },
-                onPush:   (fileStatus) => void this.runSingleFile(fileStatus, 'push'),
-                onPull:   (fileStatus) => void this.runSingleFile(fileStatus, 'pull'),
-                onDelete: (fileStatus) => void this.handleLocalDelete(fileStatus),
-            });
+            renderFileItem(container, fs, this.selectedFiles.has(fs.path), cb);
         }
     }
 
@@ -487,31 +485,10 @@ export class SyncStatusView extends ItemView {
         return this.generateDiff(remoteContent, localContent);
     }
 
-    private isBinary(path: string): boolean {
-        const ext = path.split('.').pop()?.toLowerCase();
-        if (!ext) return false;
-        const BINARY_EXTENSIONS = new Set([
-            'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'pdf', 'zip', 'gz', '7z', 'rar',
-            'mp3', 'mp4', 'wav', 'ogg', 'webm', 'mov', 'avi', 'wmv',
-            'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'epub', 'exe', 'dll', 'so'
-        ]);
-        return BINARY_EXTENSIONS.has(ext);
-    }
+    private isBinary(path: string): boolean { return isBinaryPath(path); }
 
     private contentsEqual(a: string | ArrayBuffer, b: string | ArrayBuffer): boolean {
-        if (typeof a === 'string' && typeof b === 'string') return a === b;
-        if (typeof a !== typeof b) return false;
-        
-        const bufA = a as ArrayBuffer;
-        const bufB = b as ArrayBuffer;
-        if (bufA.byteLength !== bufB.byteLength) return false;
-        
-        const viewA = new Uint8Array(bufA);
-        const viewB = new Uint8Array(bufB);
-        for (let i = 0; i < viewA.length; i++) {
-            if (viewA[i] !== viewB[i]) return false;
-        }
-        return true;
+        return contentsEqual(a, b);
     }
 
     private generateDiff(oldContent: string, newContent: string): string {

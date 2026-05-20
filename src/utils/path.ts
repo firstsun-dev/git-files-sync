@@ -10,3 +10,17 @@ export function isBinaryPath(path: string): boolean {
     if (!ext) return false;
     return BINARY_EXTENSIONS.has(ext);
 }
+
+export function contentsEqual(a: string | ArrayBuffer, b: string | ArrayBuffer): boolean {
+    if (typeof a === 'string' && typeof b === 'string') return a === b;
+    if (typeof a !== typeof b) return false;
+    const bufA = a as ArrayBuffer;
+    const bufB = b as ArrayBuffer;
+    if (bufA.byteLength !== bufB.byteLength) return false;
+    const viewA = new Uint8Array(bufA);
+    const viewB = new Uint8Array(bufB);
+    for (let i = 0; i < viewA.length; i++) {
+        if (viewA[i] !== viewB[i]) return false;
+    }
+    return true;
+}
