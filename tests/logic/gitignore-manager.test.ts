@@ -18,6 +18,7 @@ describe('GitignoreManager', () => {
         const mockAdapter = {
             exists: vi.fn(),
             read: vi.fn(),
+            list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
         } as unknown as Mocked<DataAdapter>;
 
         mockApp = {
@@ -95,7 +96,7 @@ describe('GitignoreManager', () => {
             // .gitignore
             // sub/.gitignore
             vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue(['.gitignore', 'sub/.gitignore']);
-            
+
             const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
             vi.mocked(adapter.exists).mockResolvedValue(true);
             vi.mocked(adapter.read).mockImplementation((path) => {
@@ -114,6 +115,34 @@ describe('GitignoreManager', () => {
             expect(manager.isIgnored('root-ignored.txt')).toBe(true);
             // Should ignore sub/root-ignored.txt (root .gitignore applies to subfolders too)
             expect(manager.isIgnored('sub/root-ignored.txt')).toBe(true);
+        });
+
+        it('should pick up local-only subdirectory .gitignore not yet on remote', async () => {
+            // Remote only knows about root .gitignore; sub/.gitignore exists locally but not pushed yet
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue(['.gitignore']);
+
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.list).mockImplementation((dir: string) => {
+                if (dir === '' || dir === undefined) {
+                    return Promise.resolve({ files: ['.gitignore'], folders: ['sub'] });
+                }
+                if (dir === 'sub') {
+                    return Promise.resolve({ files: ['sub/.gitignore'], folders: [] });
+                }
+                return Promise.resolve({ files: [], folders: [] });
+            });
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockImplementation((path: string) => {
+                if (path === '.gitignore') return Promise.resolve('root-only.log');
+                if (path === 'sub/.gitignore') return Promise.resolve('local-only.tmp');
+                return Promise.resolve('');
+            });
+
+            await manager.loadGitignores();
+
+            expect(manager.isIgnored('sub/local-only.tmp')).toBe(true);
+            expect(manager.isIgnored('local-only.tmp')).toBe(false);
+            expect(manager.isIgnored('root-only.log')).toBe(true);
         });
     });
 

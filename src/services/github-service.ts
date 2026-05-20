@@ -29,7 +29,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
             const data = response.json as GitHubContentResponse;
             
             return {
-                content: this.decodeContent(data.content),
+                content: this.decodeContent(data.content, path),
                 sha: data.sha
             };
         } catch (e) {
@@ -37,7 +37,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         }
     }
 
-    async pushFile(path: string, content: string, branch: string, message: string, sha?: string): Promise<string> {
+    async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
         const url = this.getApiUrl(path);
         const body = {
             message,
@@ -47,11 +47,11 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         };
 
         const response = await this.safeRequest(url, 'PUT', body);
-        const data = response.json as { content: { path: string } };
-        return data.content.path;
+        const data = response.json as { content: { path: string, sha: string } };
+        return { path: data.content.path, sha: data.content.sha };
     }
 
-    async listFiles(branch: string): Promise<string[]> {
+    async listFiles(branch: string, useFilter = true): Promise<string[]> {
         const url = `https://api.github.com/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
         const response = await this.safeRequest(url, 'GET');
         const data = response.json as GitHubTreeResponse;
@@ -60,10 +60,17 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
             logger.warn('GitHub tree result is truncated. Some files might not be shown.');
         }
 
-        return data.tree
+        const files = data.tree
             .filter(item => item.type === 'blob')
-            .map(item => item.path)
-            .filter(p => !this.rootPath || p.startsWith(this.rootPath));
+            .map(item => item.path);
+
+        if (!useFilter) return files;
+
+        return files.filter(p => {
+            if (!this.rootPath) return true;
+            const cleanRoot = this.rootPath.endsWith('/') ? this.rootPath : `${this.rootPath}/`;
+            return p === this.rootPath || p.startsWith(cleanRoot);
+        });
     }
 
     async deleteFile(path: string, branch: string, message: string): Promise<void> {

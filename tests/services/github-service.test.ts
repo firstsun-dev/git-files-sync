@@ -38,6 +38,36 @@ describe('GitHubService', () => {
             expect(result.sha).toBe('');
         });
 
+        it('should bypass rootPath when path starts with / (absolute repo path)', async () => {
+            service.updateConfig(token, owner, repo, 'vault');
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 200,
+                json: { content: btoa('root content'), sha: 'root-sha' }
+            } as unknown as RequestUrlResponse);
+
+            await service.getFile('/.gitignore', 'main');
+
+            const call = vi.mocked(requestUrl).mock.calls[0]?.[0] as RequestUrlParam;
+            // URL should reference the repo root .gitignore, NOT vault/.gitignore
+            expect(call.url).toContain('/contents/.gitignore');
+            expect(call.url).not.toContain('/contents/vault/.gitignore');
+        });
+
+        it('should not double-prefix when path already starts with rootPath', async () => {
+            service.updateConfig(token, owner, repo, 'src/content');
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 200,
+                json: { content: btoa('hello'), sha: 'sha' }
+            } as unknown as RequestUrlResponse);
+
+            // Path already includes rootPath (e.g. came from listFiles when vault = repo root)
+            await service.getFile('src/content/index.md', 'main');
+
+            const call = vi.mocked(requestUrl).mock.calls[0]?.[0] as RequestUrlParam;
+            expect(call.url).toContain('/contents/src/content/index.md');
+            expect(call.url).not.toContain('/contents/src/content/src/content/index.md');
+        });
+
         it('should return sha correctly', async () => {
             const mockResponse = {
                 status: 200,
@@ -54,12 +84,12 @@ describe('GitHubService', () => {
             vi.mocked(requestUrl)
                 .mockResolvedValueOnce({ 
                     status: 201, 
-                    json: { content: { path: 'new.md' } } 
+                    json: { content: { path: 'new.md', sha: 'new-sha' } } 
                 } as unknown as RequestUrlResponse);
 
             const result = await service.pushFile('new.md', 'new content', 'main', 'create');
 
-            expect(result).toBe('new.md');
+            expect(result).toEqual({ path: 'new.md', sha: 'new-sha' });
             const calls = vi.mocked(requestUrl).mock.calls;
             const lastCallParams = calls[calls.length - 1];
             if (!lastCallParams) throw new Error('lastCall is undefined');
@@ -71,12 +101,12 @@ describe('GitHubService', () => {
         it('should update existing file correctly (sha provided)', async () => {
             vi.mocked(requestUrl).mockResolvedValue({
                 status: 200,
-                json: { content: { path: 'existing.md' } }
+                json: { content: { path: 'existing.md', sha: 'updated-sha' } }
             } as unknown as RequestUrlResponse);
 
             const result = await service.pushFile('existing.md', 'updated content', 'main', 'update', 'old-sha');
 
-            expect(result).toBe('existing.md');
+            expect(result).toEqual({ path: 'existing.md', sha: 'updated-sha' });
             const calls = vi.mocked(requestUrl).mock.calls;
             const lastCallParams = calls[calls.length - 1];
             if (!lastCallParams) throw new Error('lastCall is undefined');
@@ -117,6 +147,23 @@ describe('GitHubService', () => {
 
             const result = await service.listFiles('main');
             expect(result).toEqual(['vault/file1.md']);
+        });
+
+        it('should not match sibling paths with same prefix as rootPath', async () => {
+            service.updateConfig(token, owner, repo, 'src/content');
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 200,
+                json: {
+                    tree: [
+                        { path: 'src/content/index.md', type: 'blob' },
+                        { path: 'src/content.config.ts', type: 'blob' },
+                        { path: 'src/contentful.ts', type: 'blob' },
+                    ]
+                }
+            } as unknown as RequestUrlResponse);
+
+            const result = await service.listFiles('main');
+            expect(result).toEqual(['src/content/index.md']);
         });
     });
 

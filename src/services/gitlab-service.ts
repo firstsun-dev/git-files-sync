@@ -30,7 +30,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
             const data = response.json as GitLabFileResponse;
             
             return {
-                content: this.decodeContent(data.content),
+                content: this.decodeContent(data.content, path),
                 sha: data.last_commit_id
             };
         } catch (e) {
@@ -38,7 +38,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         }
     }
 
-    async pushFile(path: string, content: string, branch: string, message: string, sha?: string): Promise<string> {
+    async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
         const url = this.getApiUrl(path);
         const body = {
             branch,
@@ -51,10 +51,10 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         const method = sha ? 'PUT' : 'POST';
         const response = await this.safeRequest(url, method, body);
         const data = response.json as GitLabFileResponse;
-        return data.file_path;
+        return { path: data.file_path };
     }
 
-    async listFiles(branch: string): Promise<string[]> {
+    async listFiles(branch: string, useFilter = true): Promise<string[]> {
         const encodedProjectId = encodeURIComponent(this.projectId);
         let allPaths: string[] = [];
         let page = 1;
@@ -69,10 +69,18 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
             
             const paths = data
                 .filter(item => item.type === 'blob')
-                .map(item => item.path)
-                .filter(p => !this.rootPath || p.startsWith(this.rootPath));
+                .map(item => item.path);
             
-            allPaths = allPaths.concat(paths);
+            if (useFilter) {
+                const filtered = paths.filter(p => {
+                    if (!this.rootPath) return true;
+                    const cleanRoot = this.rootPath.endsWith('/') ? this.rootPath : `${this.rootPath}/`;
+                    return p === this.rootPath || p.startsWith(cleanRoot);
+                });
+                allPaths = allPaths.concat(filtered);
+            } else {
+                allPaths = allPaths.concat(paths);
+            }
             
             if (data.length < perPage) break;
             page++;
