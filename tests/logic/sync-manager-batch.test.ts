@@ -70,8 +70,8 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockApp.vault.read).mockResolvedValue('content2');
             vi.mocked(mockApp.vault.getFileByPath).mockReturnValue(mockFile);
             
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: 'old-sha' });
-            vi.mocked(mockGitService.pushFile).mockResolvedValue('path');
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'diff', sha: 'old-sha' });
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: 'path', sha: 'new-sha' });
 
             const results = await manager.pushAllFiles(files);
 
@@ -86,10 +86,10 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(adapter.exists).mockResolvedValue(true);
             vi.mocked(adapter.read).mockResolvedValue('content');
             
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: 'old-sha' });
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'diff', sha: 'old-sha' });
             
             vi.mocked(mockGitService.pushFile)
-                .mockResolvedValueOnce('path')
+                .mockResolvedValueOnce({ path: 'path', sha: 'new-sha' })
                 .mockRejectedValueOnce(new Error('Push failed'));
 
             const results = await manager.pushAllFiles(files);
@@ -138,8 +138,8 @@ describe('SyncManager Batch Operations', () => {
 
             vi.mocked(adapter.exists).mockResolvedValue(true);
             vi.mocked(adapter.read).mockResolvedValue('content');
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: 'sha' });
-            vi.mocked(mockGitService.pushFile).mockResolvedValue('path');
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'diff', sha: 'sha' });
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: 'path', sha: 'new' });
 
             const onProgress = vi.fn();
             await manager.pushAllFiles(files, onProgress);
@@ -163,7 +163,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockApp.vault.getFileByPath).mockImplementation(p => p === oldPath ? null : mockFile);
             vi.mocked(mockApp.vault.read).mockResolvedValue('content');
             vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
-            vi.mocked(mockGitService.pushFile).mockResolvedValue(newPath);
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: newPath, sha: 'new-sha' });
             vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'content', sha: 'new-sha' });
 
             const results = await manager.pushAllFiles([mockFile]);

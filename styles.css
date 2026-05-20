@@ -10,7 +10,6 @@
     container-type: inline-size;
 }
 
-.hidden { display: none !important; }
 
 /* ── Info strip ─────────────────────────────────────────────────── */
 .ssv-info {
@@ -141,10 +140,6 @@
 }
 
 /* ── Mobile specific overrides ─────────────────────────────────── */
-.is-mobile .ssv-btn-label,
-.is-mobile .ssv-tab-label { 
-    display: inline !important; 
-}
 
 .is-mobile .ssv-btn {
     padding: 8px 14px;
@@ -369,9 +364,6 @@
     min-height: 40px;
 }
 
-.is-mobile .ssv-action-btn .ssv-btn-label {
-    display: inline !important;
-}
 
 
 .ssv-action-btn:hover {
@@ -542,6 +534,16 @@
     .ssv-diff { padding-left: 0; }
 }
 
+/* Mobile label overrides — placed after container queries so source order wins */
+.is-mobile .ssv-btn-label,
+.is-mobile .ssv-tab-label {
+    display: inline;
+}
+
+.is-mobile .ssv-action-btn .ssv-btn-label {
+    display: inline;
+}
+
 /* ── Conflict Modal ─────────────────────────────────────────────── */
 .sync-conflict-modal { max-width: 900px; }
 
@@ -564,7 +566,7 @@
 
 .conflict-section h3,
 .conflict-diff-section h3 {
-    margin: 0 0 8px 0;
+    margin: 0 0 8px;
     font-size: 0.9em;
     font-weight: 600;
 }
@@ -597,7 +599,7 @@
 @media (max-width: 480px) {
     .conflict-buttons { justify-content: stretch; }
     .conflict-buttons .setting-item-control { flex: 1; display: flex; flex-direction: column; gap: 8px; }
-    .conflict-buttons button { width: 100%; margin: 0 !important; }
+    .sync-conflict-modal .conflict-buttons button { width: 100%; margin: 0; }
 }
 
 .conflict-buttons .setting-item {

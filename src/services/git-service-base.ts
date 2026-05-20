@@ -1,7 +1,8 @@
 import { requestUrl, RequestUrlResponse } from 'obsidian';
+import { logger } from '../utils/logger';
 
 export interface GitFile {
-    content: string;
+    content: string | ArrayBuffer;
     sha: string;
 }
 
@@ -40,7 +41,7 @@ export abstract class BaseGitService {
     /**
      * Safely wraps requestUrl to handle potential throws from Obsidian and provide better error messages.
      */
-    protected async safeRequest(url: string, method: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<RequestUrlResponse> {
+    protected async safeRequest(url: string, method: string, body?: unknown, extraHeaders?: Record<string, string>, silent = false): Promise<RequestUrlResponse> {
         try {
             const headers: Record<string, string> = {
                 ...extraHeaders,
@@ -60,12 +61,13 @@ export abstract class BaseGitService {
             
             if (response.status >= 400) {
                 const errorMsg = this.parseErrorResponse(response);
+                if (!silent) logger.error(`Git Service Request Failed (${response.status}): ${url}`, errorMsg);
                 throw new Error(`Git Service Error (${response.status}): ${errorMsg}`);
             }
 
             return response;
         } catch (error) {
-            console.error('Git Service Request Failed:', error);
+            if (!silent) logger.error('Git Service Request Failed:', error);
             if (error instanceof Error) throw error;
             throw new Error(`Network error or unexpected failure: ${String(error)}`);
         }
@@ -83,32 +85,56 @@ export abstract class BaseGitService {
     }
 
     protected getFullPath(path: string): string {
+        // Leading / = absolute repo path; skip rootPath prefix entirely
+        if (path.startsWith('/')) return path.slice(1);
         if (!this.rootPath) return path;
         const cleanRoot = this.rootPath.endsWith('/') ? this.rootPath : `${this.rootPath}/`;
-        const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-        return cleanRoot + cleanPath;
+        // Already contains rootPath prefix (path came from listFiles or vault IS repo root)
+        if (path.startsWith(cleanRoot)) return path;
+        return cleanRoot + path;
     }
 
-    protected encodeContent(content: string): string {
-        const bytes = new TextEncoder().encode(content);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-            const byte = bytes[i];
-            if (byte !== undefined) {
-                binary += String.fromCodePoint(byte);
+    protected isBinary(path: string): boolean {
+        const ext = path.split('.').pop()?.toLowerCase();
+        if (!ext) return false;
+        const BINARY_EXTENSIONS = new Set([
+            'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'pdf', 'zip', 'gz', '7z', 'rar',
+            'mp3', 'mp4', 'wav', 'ogg', 'webm', 'mov', 'avi', 'wmv', 'webp',
+            'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'epub', 'exe', 'dll', 'so',
+            'ttf', 'woff', 'woff2', 'eot', 'wasm', 'dmg', 'iso'
+        ]);
+        return BINARY_EXTENSIONS.has(ext);
+    }
+
+    protected encodeContent(content: string | ArrayBuffer): string {
+        if (typeof content === 'string') {
+            const bytes = new TextEncoder().encode(content);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+                const byte = bytes[i];
+                if (byte !== undefined) binary += String.fromCodePoint(byte);
             }
+            return btoa(binary);
+        } else {
+            const bytes = new Uint8Array(content);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+                const byte = bytes[i];
+                if (byte !== undefined) binary += String.fromCodePoint(byte);
+            }
+            return btoa(binary);
         }
-        return btoa(binary);
     }
 
-    protected decodeContent(base64: string): string {
+    protected decodeContent(base64: string, path: string): string | ArrayBuffer {
         const binary = atob(base64.replace(/\s/g, ''));
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) {
             const cp = binary.codePointAt(i);
             bytes[i] = cp !== undefined ? cp : 0;
         }
-        return new TextDecoder().decode(bytes);
+
+        return this.isBinary(path) ? bytes.buffer : new TextDecoder().decode(bytes);
     }
 
     protected handleFileNotFound(e: unknown): GitFile {
@@ -119,13 +145,17 @@ export abstract class BaseGitService {
     }
 
     async getRepoGitignores(branch: string): Promise<string[]> {
-        const allFiles = await this.listFiles(branch);
-        return allFiles.filter(p => p.endsWith('.gitignore'));
+        try {
+            const allFiles = await this.listFiles(branch, false); // Fetch ALL files to find gitignores
+            return allFiles.filter(p => p.endsWith('.gitignore'));
+        } catch {
+            return [];
+        }
     }
 
     abstract getFile(path: string, branch: string): Promise<GitFile>;
-    abstract pushFile(path: string, content: string, branch: string, message: string, sha?: string): Promise<string>;
-    abstract listFiles(branch: string): Promise<string[]>;
+    abstract pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }>;
+    abstract listFiles(branch: string, useFilter?: boolean): Promise<string[]>;
     abstract deleteFile(path: string, branch: string, message: string): Promise<void>;
     abstract testConnection(): Promise<boolean>;
 }
