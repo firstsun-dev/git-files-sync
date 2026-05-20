@@ -65,7 +65,7 @@ describe('GitLabService', () => {
 
             const result = await service.pushFile('test.md', 'new content', 'main', 'initial commit');
 
-            expect(result).toBe('test.md');
+            expect(result).toEqual({ path: 'test.md' });
             const calls = vi.mocked(requestUrl).mock.calls;
             const lastCallParams = calls[calls.length - 1];
             if (!lastCallParams) throw new Error('requestUrl was not called');
@@ -79,7 +79,7 @@ describe('GitLabService', () => {
 
             const result = await service.pushFile('test.md', 'updated content', 'main', 'update', 'old-sha');
 
-            expect(result).toBe('test.md');
+            expect(result).toEqual({ path: 'test.md' });
             const calls = vi.mocked(requestUrl).mock.calls;
             const lastCallParams = calls[calls.length - 1];
             if (!lastCallParams) throw new Error('requestUrl was not called');
@@ -116,6 +116,21 @@ describe('GitLabService', () => {
 
             const result = await service.listFiles('main');
             expect(result).toEqual(['vault/file1.md']);
+        });
+
+        it('should not match sibling paths with same prefix as rootPath', async () => {
+            service.updateConfig(baseUrl, token, projectId, 'src/content');
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 200,
+                json: [
+                    { path: 'src/content/index.md', type: 'blob' },
+                    { path: 'src/content.config.ts', type: 'blob' },
+                    { path: 'src/contentful.ts', type: 'blob' },
+                ]
+            } as unknown as RequestUrlResponse);
+
+            const result = await service.listFiles('main');
+            expect(result).toEqual(['src/content/index.md']);
         });
     });
 
