@@ -13,6 +13,7 @@ export class SyncStatusView extends ItemView {
     plugin: GitLabFilesPush;
     private readonly fileStatuses: Map<string, FileStatus> = new Map();
     private isRefreshing = false;
+    private refreshProgress = { current: 0, total: 0 };
     private statusFilter: FilterValue = 'all';
     private readonly selectedFiles: Set<string> = new Set();
     private lastSyncTime: number = 0;
@@ -45,10 +46,46 @@ export class SyncStatusView extends ItemView {
         this.renderActionBarSection(container);
 
         const listEl = container.createDiv({ cls: 'ssv-list' });
-        if (this.fileStatuses.size === 0) {
+
+        if (this.isRefreshing) {
+            this.renderProgressBar(listEl);
+            this.renderCheckedFilesDuringRefresh(listEl);
+        } else if (this.fileStatuses.size === 0) {
             listEl.createDiv({ cls: 'ssv-empty', text: 'Click "Refresh" to check sync status' });
         } else {
             this.renderFileList(listEl);
+        }
+    }
+
+    private renderProgressBar(container: HTMLElement): void {
+        const { current, total } = this.refreshProgress;
+        const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+        const prog = container.createDiv({ cls: 'ssv-progress' });
+        prog.createDiv({
+            cls: 'ssv-progress-text',
+            text: total > 0 ? `Checking files… ${current}/${total} (${pct}%)` : 'Checking files…'
+        });
+        const bar = prog.createDiv({ cls: 'ssv-progress-bar' });
+        bar.createDiv({ cls: 'ssv-progress-fill' }).setAttr('style', `width: ${pct}%`);
+    }
+
+    private renderCheckedFilesDuringRefresh(container: HTMLElement): void {
+        const checked = Array.from(this.fileStatuses.values())
+            .filter(s => s.status !== 'checking')
+            .filter(s => this.statusFilter === 'all' || s.status === this.statusFilter);
+        if (checked.length === 0) return;
+        const checkedList = container.createDiv({ cls: 'ssv-list-checked' });
+        for (const fs of checked) {
+            renderFileItem(checkedList, fs, this.selectedFiles.has(fs.path), {
+                onSelect: (path, selected) => {
+                    if (selected) this.selectedFiles.add(path);
+                    else this.selectedFiles.delete(path);
+                    this.renderView();
+                },
+                onPush:   (fileStatus) => void this.runSingleFile(fileStatus, 'push'),
+                onPull:   (fileStatus) => void this.runSingleFile(fileStatus, 'pull'),
+                onDelete: (fileStatus) => void this.handleLocalDelete(fileStatus),
+            });
         }
     }
 
@@ -136,9 +173,9 @@ export class SyncStatusView extends ItemView {
             hasFiles:      this.fileStatuses.size > 0,
             allSelected,
             indeterminate: this.selectedFiles.size > 0 && !allSelected,
-            canPush:   selected.filter(s => s.file && (s.status === 'modified' || s.status === 'unsynced')).length,
+            canPush:   selected.filter(s => s.status === 'modified' || s.status === 'unsynced').length,
             canPull:   selected.filter(s => s.status === 'modified' || s.status === 'remote-only').length,
-            canDelete: selected.filter(s => s.file || s.status === 'remote-only').length,
+            canDelete: selected.length,
         }, {
             onRefresh:   () => void this.refreshAllStatuses(),
             onSelectAll: (select) => {
@@ -230,56 +267,108 @@ export class SyncStatusView extends ItemView {
 
         this.isRefreshing = true;
         this.fileStatuses.clear();
-        this.showProgressIndicator();
+        this.renderView(); // Show initial progress state
 
         try {
             const files = await this.discoverFiles();
             this.initializeFileStatuses(files.local);
-            const extra = await this.identifyExtraFiles(files.remote, files.localMap, files.allMap);
+            for (const hiddenPath of files.hiddenLocalPaths) {
+                this.fileStatuses.set(hiddenPath, { path: hiddenPath, status: 'checking' });
+            }
+            const extra = await this.identifyExtraFiles(files.remoteMap, files.localMap, files.allMap);
             this.addExtraToStatuses(extra);
 
+            // Re-render info/tabs but keep progress bar (renderView handles this)
             this.renderView();
 
-            const filesToCheck = this.getCheckableFiles(files.local, extra);
+            const filesToCheck = this.getCheckableFiles(files.local, extra, files.hiddenLocalPaths);
             await this.performStatusCheck(filesToCheck);
 
             this.lastSyncTime = Date.now();
+            this.isRefreshing = false; // Set to false BEFORE final renderView
             this.renderView();
-            new Notice(`Checked ${files.local.length} local + ${files.remote.length} remote files`);
+            new Notice(`Checked ${files.local.length + files.hiddenLocalPaths.size} local + ${files.remoteMap.size} remote files`);
         } catch (e) {
-            new Notice(`Failed to refresh: ${e instanceof Error ? e.message : String(e)}`);
-        } finally {
             this.isRefreshing = false;
+            this.renderView();
+            new Notice(`Failed to refresh: ${e instanceof Error ? e.message : String(e)}`);
         }
-    }
-
-    private showProgressIndicator(): void {
-        const container = this.containerEl.children[1];
-        if (!container) return;
-        const listEl = container.querySelector('.ssv-list');
-        if (!listEl) return;
-        listEl.empty();
-        const prog = listEl.createDiv({ cls: 'ssv-progress' });
-        prog.createDiv({ cls: 'ssv-progress-text', text: 'Checking files…' });
-        const bar = prog.createDiv({ cls: 'ssv-progress-bar' });
-        bar.createDiv({ cls: 'ssv-progress-fill' }).setAttr('style', 'width: 0%');
     }
 
     private async discoverFiles() {
         const allFiles = this.app.vault.getFiles();
         let local = this.plugin.filterFilesByVaultFolder(allFiles);
-        let remote = await this.plugin.gitService.listFiles(this.plugin.settings.branch);
+        const remoteFullPaths = await this.plugin.gitService.listFiles(this.plugin.settings.branch);
 
         await this.plugin.gitignoreManager.loadGitignores();
-        remote = remote.filter(p => !this.plugin.gitignoreManager.isIgnored(p));
-        local  = local.filter(f => !this.plugin.gitignoreManager.isIgnored(f.path));
+        
+        // Map remote paths to vault paths
+        const remoteMap = new Map<string, string>(); // vaultPath -> remoteFullPath
+        for (const remotePath of remoteFullPaths) {
+            const normalized = this.getNormalizedRemotePath(remotePath);
+            if (normalized === null) continue; // Not under rootPath
+            
+            const vaultPath = this.plugin.getVaultPath(normalized);
+            if (!this.plugin.gitignoreManager.isIgnored(normalized)) {
+                remoteMap.set(vaultPath, remotePath);
+            }
+        }
+
+        local = local.filter(f => !this.plugin.gitignoreManager.isIgnored(this.plugin.getNormalizedPath(f.path)));
+
+        // vault.getFiles() skips hidden dirs; scan them via adapter
+        const hiddenLocalPaths = await this.discoverHiddenLocalFiles();
+        const filteredHiddenPaths = new Set(
+            hiddenLocalPaths
+                .filter(p => this.plugin.filterPathByVaultFolder(p))
+                .filter(p => !this.plugin.gitignoreManager.isIgnored(this.plugin.getNormalizedPath(p)))
+        );
 
         return {
             local,
-            remote,
-            localMap: new Set(local.map(f => f.path)),
-            allMap:   new Map<string, TFile>(allFiles.map(f => [f.path, f]))
+            remoteMap,
+            localMap: new Set([...local.map(f => f.path), ...filteredHiddenPaths]),
+            allMap:   new Map<string, TFile>(allFiles.map(f => [f.path, f])),
+            hiddenLocalPaths: filteredHiddenPaths
         };
+    }
+
+    private getNormalizedRemotePath(remotePath: string): string | null {
+        const rootPath = this.plugin.settings.rootPath;
+        if (!rootPath) return remotePath;
+        
+        const cleanRoot = rootPath.endsWith('/') ? rootPath : `${rootPath}/`;
+        if (remotePath.startsWith(cleanRoot)) {
+            return remotePath.substring(cleanRoot.length);
+        }
+        if (remotePath === rootPath) return '';
+        return null;
+    }
+
+    private async discoverHiddenLocalFiles(): Promise<string[]> {
+        const result: string[] = [];
+        const vaultFolder = this.plugin.settings.vaultFolder || '';
+        await this.recursiveScan(vaultFolder, result);
+        return result;
+    }
+
+    private async recursiveScan(folderPath: string, result: string[]): Promise<void> {
+        try {
+            const listing = await this.app.vault.adapter.list(folderPath);
+            for (const file of listing.files) {
+                if (this.isHidden(file)) {
+                    result.push(file);
+                }
+            }
+            for (const folder of listing.folders) {
+                if (folder === '.git' || folder.endsWith('/.git')) continue;
+                await this.recursiveScan(folder, result);
+            }
+        } catch { /* adapter may not support listing */ }
+    }
+
+    private isHidden(path: string): boolean {
+        return path.split('/').some(part => part.startsWith('.'));
     }
 
     private initializeFileStatuses(localFiles: TFile[]): void {
@@ -288,23 +377,23 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    private async identifyExtraFiles(remoteFiles: string[], localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>) {
+    private async identifyExtraFiles(remoteMap: Map<string, string>, localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>) {
         const extra: Array<TFile | string> = [];
-        for (const remotePath of remoteFiles) {
-            if (localFilePaths.has(remotePath)) continue;
+        for (const [vaultPath] of remoteMap.entries()) {
+            if (localFilePaths.has(vaultPath)) continue;
 
-            let localFile = allLocalFileMap.get(remotePath);
+            let localFile = allLocalFileMap.get(vaultPath);
             if (!localFile) {
-                const abs = this.app.vault.getAbstractFileByPath(remotePath);
+                const abs = this.app.vault.getAbstractFileByPath(vaultPath);
                 if (abs instanceof TFile) localFile = abs;
             }
 
             if (localFile) {
                 extra.push(localFile);
-            } else if (await this.app.vault.adapter.exists(remotePath)) {
-                extra.push(remotePath);
+            } else if (await this.app.vault.adapter.exists(vaultPath)) {
+                extra.push(vaultPath);
             } else {
-                this.fileStatuses.set(remotePath, { path: remotePath, status: 'remote-only' });
+                this.fileStatuses.set(vaultPath, { path: vaultPath, status: 'remote-only' });
             }
         }
         return extra;
@@ -318,31 +407,24 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    private getCheckableFiles(local: TFile[], extra: Array<TFile | string>) {
-        return ([...local, ...extra] as Array<TFile | string>).filter(f => {
+    private getCheckableFiles(local: TFile[], extra: Array<TFile | string>, hiddenLocalPaths: Set<string> = new Set()): Array<TFile | string> {
+        const extraPaths = new Set(extra.map(f => typeof f === 'string' ? f : f.path));
+        // Hidden local files already in localMap won't appear in extra; add them directly
+        const hiddenToAdd = [...hiddenLocalPaths].filter(p => !extraPaths.has(p));
+        return ([...local, ...extra, ...hiddenToAdd] as Array<TFile | string>).filter(f => {
             const p = typeof f === 'string' ? f : f.path;
-            return !this.plugin.gitignoreManager.isIgnored(p);
+            return !this.plugin.gitignoreManager.isIgnored(this.plugin.getNormalizedPath(p));
         });
     }
 
     private async performStatusCheck(filesToCheck: Array<TFile | string>): Promise<void> {
         const total = filesToCheck.length;
+        this.refreshProgress = { current: 0, total };
         for (let i = 0; i < total; i++) {
             const file = filesToCheck[i];
             if (file) await this.refreshFileStatus(file);
-            this.updateRefreshProgress(i + 1, total);
-        }
-    }
-
-    private updateRefreshProgress(current: number, total: number): void {
-        const c = this.containerEl.children[1];
-        if (!c) return;
-        const fill = c.querySelector('.ssv-progress-fill');
-        const text = c.querySelector('.ssv-progress-text');
-        if (fill && text) {
-            const pct = Math.round((current / total) * 100);
-            fill.setAttr('style', `width: ${pct}%`);
-            text.textContent = `Checking files… ${current}/${total} (${pct}%)`;
+            this.refreshProgress.current = i + 1;
+            this.renderView();
         }
     }
 
@@ -352,23 +434,14 @@ export class SyncStatusView extends ItemView {
             const path = isStr ? fileOrPath : fileOrPath.path;
             const file = isStr ? undefined : fileOrPath;
 
-            const localContent = isStr
-                ? await this.app.vault.adapter.read(fileOrPath)
-                : await this.app.vault.read(fileOrPath);
+            const binary = this.isBinary(path);
+            const localContent = await this.readFileContent(fileOrPath, binary, isStr);
 
-            const remote = await this.plugin.gitService.getFile(path, this.plugin.settings.branch);
+            // Important: Use SyncManager's logic which handles rootPath/vaultFolder mapping
+            const repoPath = this.plugin.getNormalizedPath(path);
+            const remote = await this.plugin.gitService.getFile(repoPath, this.plugin.settings.branch);
 
-            let status: FileStatus['status'];
-            let diff: string | undefined;
-
-            if (!remote.sha) {
-                status = 'unsynced';
-            } else if (localContent === remote.content) {
-                status = 'synced';
-            } else {
-                status = 'modified';
-                diff = this.generateDiff(remote.content, localContent);
-            }
+            const { status, diff } = this.determineFileStatus(binary, localContent, remote);
 
             this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha, diff });
         } catch {
@@ -379,6 +452,66 @@ export class SyncStatusView extends ItemView {
                 status: 'unsynced'
             });
         }
+    }
+
+    private async readFileContent(fileOrPath: TFile | string, binary: boolean, isStr: boolean): Promise<string | ArrayBuffer> {
+        if (isStr) {
+            return binary
+                ? await this.app.vault.adapter.readBinary(fileOrPath as string)
+                : await this.app.vault.adapter.read(fileOrPath as string);
+        }
+        if (fileOrPath instanceof TFile) {
+            return binary
+                ? await this.app.vault.readBinary(fileOrPath)
+                : await this.app.vault.read(fileOrPath);
+        }
+        // This should not happen if isStr is false and fileOrPath is TFile
+        throw new Error('Expected TFile when isStr is false');
+    }
+
+    private determineFileStatus(binary: boolean, localContent: string | ArrayBuffer, remote: { sha?: string; content?: string | ArrayBuffer }): { status: FileStatus['status']; diff?: string } {
+        if (!remote.sha) {
+            return { status: 'unsynced' };
+        }
+        if (remote.content && this.contentsEqual(localContent, remote.content)) {
+            return { status: 'synced' };
+        }
+        const diff = this.computeDiff(binary, localContent, remote.content || '');
+        return { status: 'modified', diff };
+    }
+
+    private computeDiff(binary: boolean, localContent: string | ArrayBuffer, remoteContent: string | ArrayBuffer): string {
+        if (binary || typeof localContent !== 'string' || typeof remoteContent !== 'string') {
+            return 'Binary file changed';
+        }
+        return this.generateDiff(remoteContent, localContent);
+    }
+
+    private isBinary(path: string): boolean {
+        const ext = path.split('.').pop()?.toLowerCase();
+        if (!ext) return false;
+        const BINARY_EXTENSIONS = new Set([
+            'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'pdf', 'zip', 'gz', '7z', 'rar',
+            'mp3', 'mp4', 'wav', 'ogg', 'webm', 'mov', 'avi', 'wmv',
+            'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'epub', 'exe', 'dll', 'so'
+        ]);
+        return BINARY_EXTENSIONS.has(ext);
+    }
+
+    private contentsEqual(a: string | ArrayBuffer, b: string | ArrayBuffer): boolean {
+        if (typeof a === 'string' && typeof b === 'string') return a === b;
+        if (typeof a !== typeof b) return false;
+        
+        const bufA = a as ArrayBuffer;
+        const bufB = b as ArrayBuffer;
+        if (bufA.byteLength !== bufB.byteLength) return false;
+        
+        const viewA = new Uint8Array(bufA);
+        const viewB = new Uint8Array(bufB);
+        for (let i = 0; i < viewA.length; i++) {
+            if (viewA[i] !== viewB[i]) return false;
+        }
+        return true;
     }
 
     private generateDiff(oldContent: string, newContent: string): string {
