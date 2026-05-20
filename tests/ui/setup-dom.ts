@@ -19,7 +19,7 @@ export function setupObsidianDOM(): void {
         Text:             window.Text,
     });
 
-    const proto = window.HTMLElement.prototype as HTMLElement;
+    const proto = window.HTMLElement.prototype;
     if ('createEl' in proto) return;
 
     type DomOpts = { cls?: string; text?: string; type?: string };
@@ -28,7 +28,7 @@ export function setupObsidianDOM(): void {
     function applyOpts(el: Element, o: DomOpts): void {
         if (o.cls) el.className = o.cls;
         if (o.text) el.textContent = o.text;
-        if (o.type && el instanceof window.HTMLInputElement) (el as HTMLInputElement).type = o.type;
+        if (o.type && el instanceof window.HTMLInputElement) el.type = o.type;
     }
 
     Object.assign(proto, {
