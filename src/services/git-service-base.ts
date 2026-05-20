@@ -1,4 +1,5 @@
 import { requestUrl, RequestUrlResponse } from 'obsidian';
+import { logger } from '../utils/logger';
 
 export interface GitFile {
     content: string;
@@ -65,7 +66,7 @@ export abstract class BaseGitService {
 
             return response;
         } catch (error) {
-            console.error('Git Service Request Failed:', error);
+            logger.error('Git Service Request Failed:', error);
             if (error instanceof Error) throw error;
             throw new Error(`Network error or unexpected failure: ${String(error)}`);
         }

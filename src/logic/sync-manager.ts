@@ -2,6 +2,7 @@ import { TFile, App, Notice } from 'obsidian';
 import { GitServiceInterface } from '../services/git-service-interface';
 import { GitLabFilesPushSettings, getServiceName } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
+import { logger } from '../utils/logger';
 
 export class SyncManager {
     private readonly app: App;
@@ -228,7 +229,7 @@ export class SyncManager {
     }
 
     private handleError(message: string, error: unknown): void {
-        console.error(message, error);
+        logger.error(message, error);
         const detail = error instanceof Error ? error.message : String(error);
         new Notice(`${message}: ${detail}`);
     }
@@ -263,7 +264,7 @@ export class SyncManager {
                 }
                 results.success++;
             } catch (e) {
-                console.error(`Failed to ${op} ${path}:`, e);
+                logger.error(`Failed to ${op} ${path}:`, e);
                 results.failed++;
                 results.errors.push({ file: path, error: e instanceof Error ? e.message : String(e) });
             }
