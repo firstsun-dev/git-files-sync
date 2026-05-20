@@ -3,6 +3,7 @@ import { GitServiceInterface } from '../services/git-service-interface';
 import { GitLabFilesPushSettings, getServiceName } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
 import { logger } from '../utils/logger';
+import { isBinaryPath, contentsEqual } from '../utils/path';
 
 export class SyncManager {
     private readonly app: App;
@@ -222,30 +223,11 @@ export class SyncManager {
     }
 
     private contentsEqual(a: string | ArrayBuffer, b: string | ArrayBuffer): boolean {
-        if (typeof a === 'string' && typeof b === 'string') return a === b;
-        if (typeof a !== typeof b) return false;
-        
-        const bufA = a as ArrayBuffer;
-        const bufB = b as ArrayBuffer;
-        if (bufA.byteLength !== bufB.byteLength) return false;
-        
-        const viewA = new Uint8Array(bufA);
-        const viewB = new Uint8Array(bufB);
-        for (let i = 0; i < viewA.length; i++) {
-            if (viewA[i] !== viewB[i]) return false;
-        }
-        return true;
+        return contentsEqual(a, b);
     }
 
     private isBinary(path: string): boolean {
-        const ext = path.split('.').pop()?.toLowerCase();
-        if (!ext) return false;
-        const BINARY_EXTENSIONS = new Set([
-            'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'pdf', 'zip', 'gz', '7z', 'rar',
-            'mp3', 'mp4', 'wav', 'ogg', 'webm', 'mov', 'avi', 'wmv',
-            'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'epub', 'exe', 'dll', 'so'
-        ]);
-        return BINARY_EXTENSIONS.has(ext);
+        return isBinaryPath(path);
     }
 
     private async performPull(file: TFile | {path: string, name: string}, remoteContent: string | ArrayBuffer, remoteSha: string, silent = false) {
