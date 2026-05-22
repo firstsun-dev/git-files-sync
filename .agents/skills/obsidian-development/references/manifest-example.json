@@ -1,0 +1,10 @@
+{
+  "id": "my-plugin-id",
+  "name": "My Plugin Name",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "A concise description under 250 characters that explains exactly what this plugin does for the user.",
+  "author": "Your Name",
+  "authorUrl": "https://your-website.com",
+  "isDesktopOnly": false
+}
