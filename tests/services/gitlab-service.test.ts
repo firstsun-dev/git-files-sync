@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitLabService } from '../../src/services/gitlab-service';
+import { RequestUrlResponse, requestUrl } from 'obsidian';
 import { getLastRequestCall, mockRequest, sharedTestConnection, sharedGetFileErrorHandling, sharedGetRepoGitignores } from './service-test-helpers';
 
 describe('GitLabService', () => {
@@ -86,6 +87,42 @@ describe('GitLabService', () => {
                 { path: 'src/contentful.ts', type: 'blob' },
             ] });
             expect(await service.listFiles('main')).toEqual(['src/content/index.md']);
+        });
+
+        it('should fetch all pages when first page is exactly full (100 items)', async () => {
+            const page1 = Array.from({ length: 100 }, (_, i) => ({ path: `file${i}.md`, type: 'blob' }));
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: page1 } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: [] } as unknown as RequestUrlResponse);
+
+            const result = await service.listFiles('main');
+            expect(result).toHaveLength(100);
+            expect(vi.mocked(requestUrl)).toHaveBeenCalledTimes(2);
+        });
+
+        it('should fetch all pages across multiple full pages (200 items)', async () => {
+            const page1 = Array.from({ length: 100 }, (_, i) => ({ path: `a/file${i}.md`, type: 'blob' }));
+            const page2 = Array.from({ length: 100 }, (_, i) => ({ path: `b/file${i}.md`, type: 'blob' }));
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: page1 } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: page2 } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: [] } as unknown as RequestUrlResponse);
+
+            const result = await service.listFiles('main');
+            expect(result).toHaveLength(200);
+            expect(vi.mocked(requestUrl)).toHaveBeenCalledTimes(3);
+        });
+
+        it('should stop pagination when page has fewer than 100 items', async () => {
+            const page1 = Array.from({ length: 100 }, (_, i) => ({ path: `file${i}.md`, type: 'blob' }));
+            const page2 = Array.from({ length: 42 }, (_, i) => ({ path: `extra/file${i}.md`, type: 'blob' }));
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: page1 } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: page2 } as unknown as RequestUrlResponse);
+
+            const result = await service.listFiles('main');
+            expect(result).toHaveLength(142);
+            expect(vi.mocked(requestUrl)).toHaveBeenCalledTimes(2);
         });
     });
 
