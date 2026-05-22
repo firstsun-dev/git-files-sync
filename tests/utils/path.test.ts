@@ -157,22 +157,18 @@ describe('contentsEqual', () => {
     });
 
     describe('ArrayBuffer comparison', () => {
+        const buf123 = new Uint8Array([1, 2, 3]).buffer;
+
         it('returns true for identical buffers', () => {
-            const bufA = new Uint8Array([1, 2, 3]).buffer;
-            const bufB = new Uint8Array([1, 2, 3]).buffer;
-            expect(contentsEqual(bufA, bufB)).toBe(true);
+            expect(contentsEqual(buf123, new Uint8Array([1, 2, 3]).buffer)).toBe(true);
         });
 
         it('returns false for different buffers', () => {
-            const bufA = new Uint8Array([1, 2, 3]).buffer;
-            const bufB = new Uint8Array([1, 2, 4]).buffer;
-            expect(contentsEqual(bufA, bufB)).toBe(false);
+            expect(contentsEqual(buf123, new Uint8Array([1, 2, 4]).buffer)).toBe(false);
         });
 
         it('returns false for buffers of different length', () => {
-            const bufA = new Uint8Array([1, 2, 3]).buffer;
-            const bufB = new Uint8Array([1, 2]).buffer;
-            expect(contentsEqual(bufA, bufB)).toBe(false);
+            expect(contentsEqual(buf123, new Uint8Array([1, 2]).buffer)).toBe(false);
         });
 
         it('returns true for two empty buffers', () => {
@@ -181,13 +177,13 @@ describe('contentsEqual', () => {
     });
 
     describe('mixed type comparison', () => {
+        const buf = new Uint8Array([1, 2, 3]).buffer;
+
         it('returns false when comparing string with ArrayBuffer', () => {
-            const buf = new Uint8Array([1, 2, 3]).buffer;
             expect(contentsEqual('hello', buf)).toBe(false);
         });
 
         it('returns false when comparing ArrayBuffer with string', () => {
-            const buf = new Uint8Array([1, 2, 3]).buffer;
             expect(contentsEqual(buf, 'hello')).toBe(false);
         });
     });
