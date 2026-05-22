@@ -260,12 +260,10 @@ export class SyncManager {
         let cur = '';
         for (let i = 0; i < parts.length - 1; i++) {
             cur += (i > 0 ? '/' : '') + parts[i];
-            if (!this.app.vault.getAbstractFileByPath(cur)) {
-                try {
-                    await this.app.vault.createFolder(cur);
-                } catch {
-                    // already exists or failed
-                }
+            try {
+                await this.app.vault.adapter.mkdir(cur);
+            } catch {
+                // already exists or failed
             }
         }
     }
