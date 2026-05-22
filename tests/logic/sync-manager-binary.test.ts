@@ -1,72 +1,20 @@
 /* eslint-disable @typescript-eslint/unbound-method */
-import { describe, it, expect, vi, beforeEach, Mocked } from 'vitest';
-import { SyncManager } from '../../src/logic/sync-manager';
-import { App, DataAdapter } from 'obsidian';
-import { GitLabFilesPushSettings } from '../../src/settings';
-import { GitServiceInterface } from '../../src/services/git-service-interface';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createSyncManagerMocks, makeBuf, SyncManagerMocks } from './sync-manager-test-helpers';
 
 vi.mock('obsidian');
 
 describe('SyncManager – binary file handling', () => {
-    let manager: SyncManager;
-    let mockApp: Mocked<App>;
-    let mockGitService: Mocked<GitServiceInterface>;
-    let mockAdapter: Mocked<DataAdapter>;
-    let mockSettings: GitLabFilesPushSettings;
-
-    const makeBuf = (bytes: number[]) => new Uint8Array(bytes).buffer;
+    let mocks: SyncManagerMocks;
 
     beforeEach(() => {
         vi.clearAllMocks();
-
-        mockAdapter = {
-            exists: vi.fn(),
-            read: vi.fn(),
-            write: vi.fn(),
-            readBinary: vi.fn(),
-            writeBinary: vi.fn(),
-            mkdir: vi.fn().mockResolvedValue(undefined),
-        } as unknown as Mocked<DataAdapter>;
-
-        mockApp = {
-            vault: {
-                read: vi.fn(),
-                readBinary: vi.fn(),
-                modify: vi.fn(),
-                modifyBinary: vi.fn(),
-                getFileByPath: vi.fn().mockReturnValue(null),
-                adapter: mockAdapter,
-            },
-        } as unknown as Mocked<App>;
-
-        mockGitService = {
-            pushFile: vi.fn(),
-            getFile: vi.fn(),
-            testConnection: vi.fn(),
-            listFiles: vi.fn(),
-            deleteFile: vi.fn(),
-            getRepoGitignores: vi.fn(),
-            updateConfig: vi.fn(),
-        } as unknown as Mocked<GitServiceInterface>;
-
-        mockSettings = {
-            serviceType: 'github',
-            githubToken: 'token',
-            githubOwner: 'owner',
-            githubRepo: 'repo',
-            branch: 'main',
-            syncMetadata: {},
-            vaultFolder: '',
-            rootPath: '',
-        } as unknown as GitLabFilesPushSettings;
-
-        manager = new SyncManager(mockApp, mockGitService, mockSettings);
-        // @ts-ignore
-        manager.saveSettings = vi.fn().mockResolvedValue(undefined);
+        mocks = createSyncManagerMocks();
     });
 
     describe('pushFile with binary path (string)', () => {
         it('reads via adapter.readBinary for binary extensions', async () => {
+            const { manager, mockAdapter, mockGitService } = mocks;
             const buf = makeBuf([137, 80, 78, 71]);
             vi.mocked(mockAdapter.exists).mockResolvedValue(true);
             vi.mocked(mockAdapter.readBinary).mockResolvedValue(buf);
@@ -83,6 +31,7 @@ describe('SyncManager – binary file handling', () => {
         });
 
         it('skips push when binary content is already in sync', async () => {
+            const { manager, mockAdapter, mockGitService } = mocks;
             const buf = makeBuf([1, 2, 3, 4]);
             vi.mocked(mockAdapter.exists).mockResolvedValue(true);
             vi.mocked(mockAdapter.readBinary).mockResolvedValue(buf);
@@ -94,6 +43,7 @@ describe('SyncManager – binary file handling', () => {
         });
 
         it('updates metadata when binary is already in sync', async () => {
+            const { manager, mockAdapter, mockGitService, mockSettings } = mocks;
             const buf = makeBuf([1, 2, 3]);
             vi.mocked(mockAdapter.exists).mockResolvedValue(true);
             vi.mocked(mockAdapter.readBinary).mockResolvedValue(buf);
@@ -109,6 +59,7 @@ describe('SyncManager – binary file handling', () => {
 
     describe('pullFile with binary content', () => {
         it('writes via adapter.writeBinary when remote content is ArrayBuffer', async () => {
+            const { manager, mockAdapter, mockGitService } = mocks;
             const buf = makeBuf([137, 80, 78, 71]);
             vi.mocked(mockGitService.getFile).mockResolvedValue({ sha: 'bin-sha', content: buf });
             vi.mocked(mockAdapter.exists).mockResolvedValue(false);
@@ -120,6 +71,7 @@ describe('SyncManager – binary file handling', () => {
         });
 
         it('creates parent directory before writing binary', async () => {
+            const { manager, mockAdapter, mockGitService } = mocks;
             const buf = makeBuf([255, 216, 255]);
             vi.mocked(mockGitService.getFile).mockResolvedValue({ sha: 'bin-sha', content: buf });
             vi.mocked(mockAdapter.exists).mockResolvedValue(false);
@@ -131,6 +83,7 @@ describe('SyncManager – binary file handling', () => {
         });
 
         it('skips pull when binary content is already in sync', async () => {
+            const { manager, mockAdapter, mockGitService, mockSettings } = mocks;
             const buf = makeBuf([1, 2, 3]);
             vi.mocked(mockGitService.getFile).mockResolvedValue({ sha: 'bin-sha', content: buf });
             vi.mocked(mockAdapter.exists).mockResolvedValue(true);
@@ -143,6 +96,7 @@ describe('SyncManager – binary file handling', () => {
         });
 
         it('updates metadata after pulling binary file', async () => {
+            const { manager, mockAdapter, mockGitService, mockSettings } = mocks;
             const buf = makeBuf([0, 1, 2]);
             vi.mocked(mockGitService.getFile).mockResolvedValue({ sha: 'bin-sha', content: buf });
             vi.mocked(mockAdapter.exists).mockResolvedValue(false);
