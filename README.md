@@ -1,9 +1,12 @@
 # Git File Sync
 
+[![CI](https://img.shields.io/github/actions/workflow/status/firstsun-dev/git-files-sync/ci.yml?branch=main&style=flat-square)](https://github.com/firstsun-dev/git-files-sync/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/firstsun-dev/git-files-sync?style=flat-square)](https://github.com/firstsun-dev/git-files-sync/releases)
 [![Downloads](https://img.shields.io/github/downloads/firstsun-dev/git-files-sync/total?style=flat-square)](https://github.com/firstsun-dev/git-files-sync/releases)
-[![License](https://img.shields.io/github/license/firstsun-dev/git-files-sync?style=flat-square)](LICENSE)
 [![Obsidian](https://img.shields.io/badge/Obsidian-v0.15.0+-purple?style=flat-square)](https://obsidian.md)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg?style=flat-square)](https://conventionalcommits.org)
+[![License](https://img.shields.io/github/license/firstsun-dev/git-files-sync?style=flat-square)](LICENSE)
 
 **Git File Sync** is a powerful Obsidian plugin that enables seamless synchronization of individual notes with GitLab or GitHub repositories. Unlike full-vault sync solutions, it gives you granular control over what gets pushed and pulled, making it perfect for shared projects, selective backups, and cross-platform workflows.
 
