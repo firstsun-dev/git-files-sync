@@ -223,4 +223,54 @@ describe('GitignoreManager', () => {
             expect(manager.isIgnored('a/temp/foo')).toBe(true);
         });
     });
+
+    describe('hidden file and directory filtering', () => {
+        let adapter: Mocked<DataAdapter>;
+
+        beforeEach(async () => {
+            adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue(['.gitignore']);
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+        });
+
+        async function loadWith(rules: string) {
+            vi.mocked(adapter.read).mockResolvedValue(rules);
+            await manager.loadGitignores();
+        }
+
+        it('should ignore hidden directory when listed in .gitignore', async () => {
+            await loadWith('.private/\n.trash/');
+            expect(manager.isIgnored('.private/secrets.md')).toBe(true);
+            expect(manager.isIgnored('.trash/note.md')).toBe(true);
+        });
+
+        it('should not ignore hidden directory absent from .gitignore', async () => {
+            await loadWith('node_modules/\n*.log');
+            expect(manager.isIgnored('.claude/settings.json')).toBe(false);
+            expect(manager.isIgnored('.claude/CLAUDE.md')).toBe(false);
+        });
+
+        it('should ignore .claude/ when explicitly added to .gitignore', async () => {
+            await loadWith('.claude/');
+            expect(manager.isIgnored('.claude/settings.json')).toBe(true);
+            expect(manager.isIgnored('.claude/memory/user.md')).toBe(true);
+        });
+
+        it('should still pass normal files when only hidden dirs are ignored', async () => {
+            await loadWith('.private/');
+            expect(manager.isIgnored('notes/my-note.md')).toBe(false);
+            expect(manager.isIgnored('projects/work.md')).toBe(false);
+        });
+
+        it('should find .gitignore inside a hidden directory via scanDir', async () => {
+            vi.mocked(adapter.list)
+                .mockResolvedValueOnce({ files: ['.gitignore'], folders: ['.claude'] })
+                .mockResolvedValueOnce({ files: ['.claude/.gitignore'], folders: [] });
+            vi.mocked(adapter.read).mockResolvedValue('*.secret');
+            await manager.loadGitignores();
+
+            expect(adapter.list).toHaveBeenCalledWith('');
+            expect(adapter.list).toHaveBeenCalledWith('.claude');
+        });
+    });
 });

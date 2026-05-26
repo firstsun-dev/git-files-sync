@@ -1,0 +1,20 @@
+name: CI/CD
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+on:
+  push:
+    branches: [main, master, '**']
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  CI:
+    uses: firstsun-dev/.github/.github/workflows/obsidian-plugin-ci.yml@main
+    with:
+      plugin-id: "watermark-image-bucket-uploader"
+    secrets:
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}

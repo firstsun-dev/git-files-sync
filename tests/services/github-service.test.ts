@@ -110,6 +110,17 @@ describe('GitHubService', () => {
             ] } });
             expect(await service.listFiles('main')).toEqual(['src/content/index.md']);
         });
+
+        it('should return files and log warning when result is truncated', async () => {
+            mockRequest({ status: 200, json: { truncated: true, tree: [
+                { path: 'file1.md', type: 'blob' },
+                { path: 'file2.md', type: 'blob' },
+            ] } });
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const result = await service.listFiles('main');
+            expect(result).toEqual(['file1.md', 'file2.md']);
+            warnSpy.mockRestore();
+        });
     });
 
     describe('deleteFile', () => {

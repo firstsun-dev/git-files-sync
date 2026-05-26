@@ -173,6 +173,19 @@ describe('SyncManager', () => {
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('remote-sha');
     });
 
+    it('should update metadata even when file is already in sync (contentsEqual)', async () => {
+        const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
+        mockSettings.syncMetadata = {};
+
+        vi.spyOn(mockApp.vault, 'read').mockResolvedValue('same content');
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: 'same content', sha: 'remote-sha' });
+
+        await manager.pushFile(mockFile);
+
+        expect(mockGitLab.pushFile).not.toHaveBeenCalled();
+        expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('remote-sha');
+    });
+
     it('should update metadata after successful push', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
         mockSettings.syncMetadata = {};
