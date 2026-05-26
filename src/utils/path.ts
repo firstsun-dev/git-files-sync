@@ -1,8 +1,25 @@
 export const BINARY_EXTENSIONS = new Set([
-    'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'pdf', 'zip', 'gz', '7z', 'rar',
-    'mp3', 'mp4', 'wav', 'ogg', 'webm', 'mov', 'avi', 'wmv', 'webp',
-    'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'epub', 'exe', 'dll', 'so',
-    'ttf', 'woff', 'woff2', 'eot', 'wasm', 'dmg', 'iso'
+    // Images
+    'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp',
+    'tif', 'tiff', 'heic', 'heif', 'avif', 'jxl',
+    // Documents
+    'pdf', 'epub',
+    'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+    'odt', 'ods', 'odp',
+    // Archives
+    'zip', 'gz', 'tar', 'bz2', 'xz', 'zst', '7z', 'rar',
+    // Audio
+    'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'opus', 'aiff',
+    // Video
+    'mp4', 'webm', 'mov', 'avi', 'wmv', 'mkv', 'flv', 'm4v',
+    // Fonts
+    'ttf', 'otf', 'woff', 'woff2', 'eot',
+    // Executables & binaries
+    'exe', 'dll', 'so', 'wasm', 'dmg', 'iso', 'apk', 'deb', 'rpm',
+    // Databases
+    'sqlite', 'db',
+    // Design
+    'psd', 'sketch', 'fig',
 ]);
 
 export function isBinaryPath(path: string): boolean {

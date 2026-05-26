@@ -138,13 +138,26 @@ export default class GitLabFilesPush extends Plugin {
 		await this.runAllFiles('pull');
 	}
 
+	private async listAllFilesFromAdapter(dirPath: string): Promise<string[]> {
+		const results: string[] = [];
+		try {
+			const { files, folders } = await this.app.vault.adapter.list(dirPath || '');
+			results.push(...files);
+			for (const folder of folders) {
+				const sub = await this.listAllFilesFromAdapter(folder);
+				results.push(...sub);
+			}
+		} catch { /* ignore inaccessible dirs */ }
+		return results;
+	}
+
 	private async runAllFiles(op: 'push' | 'pull'): Promise<void> {
-		const allFiles = this.app.vault.getFiles();
-		let files = this.filterFilesByVaultFolder(allFiles);
+		const startPath = this.settings.vaultFolder || '';
+		const allPaths = await this.listAllFilesFromAdapter(startPath);
 
 		await this.gitService.listFiles(this.settings.branch);
 		await this.gitignoreManager.loadGitignores();
-		files = files.filter(f => !this.gitignoreManager.isIgnored(this.getNormalizedPath(f.path)));
+		const files = allPaths.filter(p => !this.gitignoreManager.isIgnored(this.getNormalizedPath(p)));
 
 		if (files.length === 0) {
 			new Notice(`No files to ${op} in the configured vault folder`);

@@ -36,6 +36,7 @@ export default tseslint.config(
 		"versions.json",
 		"main.js",
 		".claude/**",
+		".agents/**",
 		"coverage/**",
 	]),
 );

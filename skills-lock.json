@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "obsidian-development": {
+      "source": "firstsun-dev/skills",
+      "sourceType": "github",
+      "skillPath": "custom/obsidian/obsidian-development/SKILL.md",
+      "computedHash": "087f548b82f8c150fcc2879488109bdda5d21c91fc4c9e379765150a4acbff82"
+    }
+  }
+}
