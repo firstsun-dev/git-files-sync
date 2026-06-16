@@ -1,3 +1,19 @@
+## [1.1.0](https://github.com/firstsun-dev/git-files-sync/compare/1.0.6...1.1.0) (2026-06-16)
+
+### Features
+
+* support hidden file sync and expand binary extension list ([649d732](https://github.com/firstsun-dev/git-files-sync/commit/649d7327818f3349b475c57098015eda0a6073ed))
+
+### Documentation
+
+* remove SonarCloud quality gate badge from README ([d907baf](https://github.com/firstsun-dev/git-files-sync/commit/d907baf229adaa6d34d6c67c75c8d4825a4751ed))
+* update README badges ([7cd9e38](https://github.com/firstsun-dev/git-files-sync/commit/7cd9e38e65ee98c4c4d9854db7f7209a5c1cef61))
+
+### Code Refactoring
+
+* **test:** eliminate duplicate code flagged by SonarCloud ([f49600e](https://github.com/firstsun-dev/git-files-sync/commit/f49600eb667f917d445dda450dffb3e4d0128324))
+* **test:** extract shared SyncManager mock setup to reduce duplication ([1f71a43](https://github.com/firstsun-dev/git-files-sync/commit/1f71a43980cc01b547896a068c4944e692776847))
+
 ## [1.0.6](https://github.com/firstsun-dev/git-files-sync/compare/1.0.5...1.0.6) (2026-05-20)
 
 ### Bug Fixes
