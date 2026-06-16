@@ -5,7 +5,10 @@
 	"main": "main.js",
 	"type": "module",
 	"author": "ClaudiaFang",
-	"repository": "github:firstsun-dev/git-files-sync",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/firstsun-dev/git-files-sync.git"
+	},
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
