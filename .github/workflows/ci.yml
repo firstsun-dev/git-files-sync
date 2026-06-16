@@ -38,9 +38,16 @@ jobs:
 
       - run: npm run build
 
+      - name: Set artifact name
+        id: artifact
+        run: |
+          BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "name=plugin-${BRANCH}-${SHA}" >> $GITHUB_OUTPUT
+
       - uses: actions/upload-artifact@v4
         with:
-          name: plugin-${{ github.ref_name }}-${{ github.sha }}
+          name: ${{ steps.artifact.outputs.name }}
           path: |
             main.js
             manifest.json
