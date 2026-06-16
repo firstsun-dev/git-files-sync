@@ -21,3 +21,28 @@ jobs:
       skip-sonar: true
     secrets:
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  build-artifact:
+    name: Upload build artifact
+    runs-on: ubuntu-latest
+    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-${{ github.ref_name }}-${{ github.sha }}
+          path: |
+            main.js
+            manifest.json
+            styles.css
+          retention-days: 7
