@@ -18,6 +18,7 @@
           { "type": "build", "release": false },
           { "type": "ci", "release": false },
           { "type": "chore", "scope": "deps", "release": "patch" },
+          { "type": "chore", "scope": "deps-dev", "release": "patch" },
           { "type": "chore", "release": false },
           { "breaking": true, "release": "major" }
         ]
