@@ -55,15 +55,22 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
     }
 
     async listFiles(branch: string, useFilter = true): Promise<string[]> {
-        const url = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
-        const response = await this.safeRequest(url, 'GET');
-        const data = response.json as GitHubTreeResponse;
+        // Resolve branch name to commit SHA first for compatibility with all Gitea versions,
+        // since the git/trees endpoint requires a SHA (not a ref name) on older instances.
+        const branchUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/branches/${branch}`;
+        const branchResponse = await this.safeRequest(branchUrl, 'GET');
+        const branchData = branchResponse.json as { commit: { id: string } };
+        const commitSha = branchData.commit.id;
 
-        if (data.truncated) {
+        const treeUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/git/trees/${commitSha}?recursive=1`;
+        const treeResponse = await this.safeRequest(treeUrl, 'GET');
+        const treeData = treeResponse.json as GitHubTreeResponse;
+
+        if (treeData.truncated) {
             logger.warn('Gitea tree result is truncated. Some files might not be shown.');
         }
 
-        const files = data.tree
+        const files = treeData.tree
             .filter(item => item.type === 'blob')
             .map(item => item.path);
 
