@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GiteaService } from '../../src/services/gitea-service';
 import { requestUrl, RequestUrlResponse, RequestUrlParam } from 'obsidian';
-import { getLastRequestCall, mockRequest, sharedTestConnection, sharedGetFileErrorHandling, sharedGetRepoGitignores } from './service-test-helpers';
+import { getLastRequestCall, mockRequest, sharedTestConnection, sharedGetFileErrorHandling } from './service-test-helpers';
 
 describe('GiteaService', () => {
     let service: GiteaService;
@@ -118,54 +118,62 @@ describe('GiteaService', () => {
     });
 
     describe('listFiles', () => {
-        it('should call the correct git trees URL with branch', async () => {
-            mockRequest({ status: 200, json: { tree: [], truncated: false } });
+        const commitSha = 'abc123commit';
+
+        function mockListFiles(treeItems: { path: string; type: string }[], truncated = false): void {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { commit: { id: commitSha } } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { tree: treeItems, truncated } } as unknown as RequestUrlResponse);
+        }
+
+        it('should first resolve branch to commit SHA then fetch tree', async () => {
+            mockListFiles([]);
             await service.listFiles('main');
-            const call = getLastRequestCall();
-            expect(call.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/trees/main?recursive=1`);
+            const calls = vi.mocked(requestUrl).mock.calls;
+            expect(calls).toHaveLength(2);
+            expect((calls[0]?.[0] as RequestUrlParam).url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/branches/main`);
+            expect((calls[1]?.[0] as RequestUrlParam).url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/trees/${commitSha}?recursive=1`);
         });
 
         it('should return only blob files from tree', async () => {
-            mockRequest({ status: 200, json: { tree: [
+            mockListFiles([
                 { path: 'file1.md', type: 'blob' },
                 { path: 'dir/file2.md', type: 'blob' },
                 { path: 'subdir', type: 'tree' },
-            ], truncated: false } });
+            ]);
             expect(await service.listFiles('main')).toEqual(['file1.md', 'dir/file2.md']);
         });
 
         it('should filter by rootPath when set', async () => {
             service.updateConfig(baseUrl, token, owner, repo, 'vault');
-            mockRequest({ status: 200, json: { tree: [
+            mockListFiles([
                 { path: 'vault/file1.md', type: 'blob' },
                 { path: 'other/file2.md', type: 'blob' },
-            ], truncated: false } });
+            ]);
             expect(await service.listFiles('main')).toEqual(['vault/file1.md']);
         });
 
         it('should not match sibling paths with same prefix as rootPath', async () => {
             service.updateConfig(baseUrl, token, owner, repo, 'src/content');
-            mockRequest({ status: 200, json: { tree: [
+            mockListFiles([
                 { path: 'src/content/index.md', type: 'blob' },
                 { path: 'src/content.config.ts', type: 'blob' },
                 { path: 'src/contentful.ts', type: 'blob' },
-            ], truncated: false } });
+            ]);
             expect(await service.listFiles('main')).toEqual(['src/content/index.md']);
         });
 
         it('should return all files when useFilter is false regardless of rootPath', async () => {
             service.updateConfig(baseUrl, token, owner, repo, 'vault');
-            mockRequest({ status: 200, json: { tree: [
+            mockListFiles([
                 { path: 'vault/file1.md', type: 'blob' },
                 { path: 'other/file2.md', type: 'blob' },
-            ], truncated: false } });
+            ]);
             expect(await service.listFiles('main', false)).toEqual(['vault/file1.md', 'other/file2.md']);
         });
 
         it('should log warning and return files when result is truncated', async () => {
-            mockRequest({ status: 200, json: { tree: [
-                { path: 'file1.md', type: 'blob' },
-            ], truncated: true } });
+            mockListFiles([{ path: 'file1.md', type: 'blob' }], true);
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             const result = await service.listFiles('main');
             expect(result).toEqual(['file1.md']);
@@ -215,7 +223,17 @@ describe('GiteaService', () => {
     });
 
     describe('getRepoGitignores', () => {
-        sharedGetRepoGitignores(() => service, 'tree');
+        it('should return only .gitignore paths from file list', async () => {
+            const items = [
+                { path: '.gitignore', type: 'blob' },
+                { path: 'src/main.ts', type: 'blob' },
+                { path: 'sub/.gitignore', type: 'blob' },
+            ];
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { commit: { id: 'sha123' } } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { tree: items, truncated: false } } as unknown as RequestUrlResponse);
+            expect(await service.getRepoGitignores('main')).toEqual(['.gitignore', 'sub/.gitignore']);
+        });
     });
 
     describe('getFile error handling', () => {
