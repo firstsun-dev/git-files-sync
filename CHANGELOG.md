@@ -1,3 +1,9 @@
+## [1.1.1](https://github.com/firstsun-dev/git-files-sync/compare/1.1.0...1.1.1) (2026-06-16)
+
+### Bug Fixes
+
+* **ci:** switch to shared workflow v1 and fix repository url ([3a0f99e](https://github.com/firstsun-dev/git-files-sync/commit/3a0f99e3832e5e288ad586ed856252f829a828ec))
+
 ## [1.1.0](https://github.com/firstsun-dev/git-files-sync/compare/1.0.6...1.1.0) (2026-06-16)
 
 ### Features

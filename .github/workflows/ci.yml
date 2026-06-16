@@ -15,7 +15,7 @@ on:
 
 jobs:
   CI:
-    uses: firstsun-dev/.github/.github/workflows/obsidian-plugin-ci.yml@main
+    uses: firstsun-dev/.github/.github/workflows/obsidian-plugin-ci.yml@v1
     with:
       plugin-id: "git-file-sync"
       skip-sonar: ${{ vars.ENABLE_CI_SONAR != 'true' }}
