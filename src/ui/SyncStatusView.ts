@@ -244,8 +244,7 @@ export class SyncStatusView extends ItemView {
                 await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
             }
 
-            // eslint-disable-next-line no-undef
-            await new Promise(r => activeWindow.setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 500));
             await this.refreshFileStatus(fileStatus.file || fileStatus.path);
             this.renderView();
         } catch (e) {
