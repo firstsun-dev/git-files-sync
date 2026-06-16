@@ -2,6 +2,7 @@ import { Plugin, TFile, MarkdownView, Notice, Platform } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getServiceName } from "./settings";
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
+import { GiteaService } from './services/gitea-service';
 import { GitServiceInterface } from './services/git-service-interface';
 import { SyncManager } from './logic/sync-manager';
 import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
@@ -232,6 +233,16 @@ export default class GitLabFilesPush extends Plugin {
 				this.settings.gitlabBaseUrl,
 				this.settings.gitlabToken,
 				this.settings.projectId,
+				this.settings.rootPath
+			);
+			this.gitService = service;
+		} else if (this.settings.serviceType === 'gitea') {
+			const service = new GiteaService();
+			service.updateConfig(
+				this.settings.giteaBaseUrl,
+				this.settings.giteaToken,
+				this.settings.giteaOwner,
+				this.settings.giteaRepo,
 				this.settings.rootPath
 			);
 			this.gitService = service;
