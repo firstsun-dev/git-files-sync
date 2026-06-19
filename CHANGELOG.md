@@ -1,3 +1,9 @@
+## [1.1.2](https://github.com/firstsun-dev/git-files-sync/compare/1.1.1...1.1.2) (2026-06-16)
+
+### Bug Fixes
+
+* **lint:** replace activeWindow.setTimeout with setTimeout ([4099f44](https://github.com/firstsun-dev/git-files-sync/commit/4099f44fa5643ce5799eef74fb23f41fae0da991))
+
 ## [1.1.1](https://github.com/firstsun-dev/git-files-sync/compare/1.1.0...1.1.1) (2026-06-16)
 
 ### Bug Fixes
