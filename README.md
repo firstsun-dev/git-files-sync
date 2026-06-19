@@ -12,7 +12,7 @@
 
 [繁體中文使用說明](USAGE_zh.md)
 
-<video src="imgs/git-file-sync-en.webm" width="100%" controls autoplay loop muted playsinline></video>
+[git-file-sync](https://github.com/user-attachments/assets/78f383be-e8a4-4c9c-8845-1f46d06ea661)
 
 ![sync-status](imgs/sync-status.png)
 *The Sync Status View provides a clear overview of your files, allowing you to selectively push, pull, or view diffs for modified files.*
