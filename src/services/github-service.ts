@@ -39,12 +39,15 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
 
     async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
         const url = this.getApiUrl(path);
-        const body = {
+        const body: { message: string; content: string; branch: string; sha?: string } = {
             message,
             content: this.encodeContent(content),
             branch,
-            sha
         };
+        // GitHub's Contents API rejects a blank sha with HTTP 422. Only include
+        // it when updating an existing file; a 404 lookup yields sha === '' for
+        // new files, which must be created without a sha.
+        if (sha) body.sha = sha;
 
         const response = await this.safeRequest(url, 'PUT', body);
         const data = this.parseJson<{ content: { path: string, sha: string } }>(response);
