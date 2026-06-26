@@ -50,6 +50,14 @@ describe('GitLabService', () => {
             expect(call.body).toContain(btoa('new content'));
         });
 
+        it('should treat a blank sha as a new file (POST, no last_commit_id)', async () => {
+            mockRequest({ status: 201, json: { file_path: 'test.md' } });
+            await service.pushFile('test.md', 'new content', 'main', 'initial commit', '');
+            const call = getLastRequestCall();
+            expect(call.method).toBe('POST');
+            expect(call.body).not.toContain('last_commit_id');
+        });
+
         it('should push file content correctly (PUT for existing file)', async () => {
             mockRequest({ status: 200, json: { file_path: 'test.md' } });
             const result = await service.pushFile('test.md', 'updated content', 'main', 'update', 'old-sha');

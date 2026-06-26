@@ -40,13 +40,14 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
     async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
         const url = this.getApiUrl(path);
-        const body = {
+        const body: { branch: string; content: string; encoding: string; commit_message: string; last_commit_id?: string } = {
             branch,
             content: this.encodeContent(content),
             encoding: 'base64',
             commit_message: message,
-            last_commit_id: sha
         };
+        // A blank sha means the file is new: create it (POST) without last_commit_id.
+        if (sha) body.last_commit_id = sha;
 
         const method = sha ? 'PUT' : 'POST';
         const response = await this.safeRequest(url, method, body);
