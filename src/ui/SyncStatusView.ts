@@ -1,11 +1,12 @@
-import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setTooltip } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setIcon, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
 import { getServiceName } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
 import { logger } from '../utils/logger';
 import { type FileStatus, type FilterValue } from './types';
 import { renderActionBar } from './components/ActionBar';
-import { renderFileItem, type FileItemCallbacks } from './components/FileListItem';
+import { renderFileItem, statusMeta, type FileItemCallbacks } from './components/FileListItem';
+import { ICONS } from './components/icons';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
@@ -92,12 +93,16 @@ export class SyncStatusView extends ItemView {
 
         if (!Platform.isMobile) {
             el.createSpan({ cls: 'ssv-info-sep', text: '·' });
-            el.createSpan({ cls: 'ssv-info-item' }).textContent = `⎇ ${this.plugin.settings.branch}`;
+            const branchItem = el.createSpan({ cls: 'ssv-info-item' });
+            setIcon(branchItem.createSpan({ cls: 'ssv-info-icon' }), ICONS.branch);
+            branchItem.createSpan({ text: ` ${this.plugin.settings.branch}` });
         }
 
         if (this.plugin.settings.vaultFolder) {
             el.createSpan({ cls: 'ssv-info-sep', text: '·' });
-            el.createSpan({ cls: 'ssv-info-item', text: `📁 ${this.plugin.settings.vaultFolder}` });
+            const folderItem = el.createSpan({ cls: 'ssv-info-item' });
+            setIcon(folderItem.createSpan({ cls: 'ssv-info-icon' }), ICONS.folder);
+            folderItem.createSpan({ text: ` ${this.plugin.settings.vaultFolder}` });
         }
 
         if (this.lastSyncTime > 0) {
@@ -123,12 +128,12 @@ export class SyncStatusView extends ItemView {
             'remote-only': all.filter(s => s.status === 'remote-only').length,
         };
 
-        const tabs: Array<{ value: FilterValue; label: string; icon: string }> = [
-            { value: 'all',         label: 'All',        icon: '' },
-            { value: 'synced',      label: 'Synced',     icon: '✓' },
-            { value: 'modified',    label: 'Changed',    icon: '⚠' },
-            { value: 'unsynced',    label: 'Local only', icon: '↑' },
-            { value: 'remote-only', label: 'Remote',     icon: '↓' },
+        const tabs: Array<{ value: FilterValue; label: string }> = [
+            { value: 'all',         label: 'All' },
+            { value: 'synced',      label: 'Synced' },
+            { value: 'modified',    label: 'Changed' },
+            { value: 'unsynced',    label: 'Local only' },
+            { value: 'remote-only', label: 'Remote' },
         ];
 
         const tabsEl = container.createDiv({ cls: 'ssv-tabs' });
@@ -136,7 +141,10 @@ export class SyncStatusView extends ItemView {
             const btn = tabsEl.createEl('button', {
                 cls: `ssv-tab${this.statusFilter === tab.value ? ' active' : ''}`
             });
-            if (tab.icon) btn.createSpan({ text: tab.icon });
+            // Share the status icon set with the file list so tabs never drift.
+            if (tab.value !== 'all') {
+                setIcon(btn.createSpan(), statusMeta(tab.value as FileStatus['status']).icon);
+            }
             btn.createSpan({ cls: 'ssv-tab-label', text: ` ${tab.label}` });
             const count = counts[tab.value];
             if (tab.value === 'all' || count > 0) {
