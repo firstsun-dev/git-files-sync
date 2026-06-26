@@ -449,8 +449,9 @@ export class SyncStatusView extends ItemView {
             const { status, diff } = this.determineFileStatus(binary, localContent, remote);
 
             this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha, diff });
-        } catch {
+        } catch (e) {
             const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
+            logger.warn(`Failed to determine sync status for ${path}`, e);
             this.fileStatuses.set(path, {
                 file: typeof fileOrPath === 'string' ? undefined : fileOrPath,
                 path,
@@ -466,9 +467,18 @@ export class SyncStatusView extends ItemView {
                 : await this.app.vault.adapter.read(fileOrPath as string);
         }
         if (fileOrPath instanceof TFile) {
-            return binary
-                ? await this.app.vault.readBinary(fileOrPath)
-                : await this.app.vault.read(fileOrPath);
+            try {
+                return binary
+                    ? await this.app.vault.readBinary(fileOrPath)
+                    : await this.app.vault.read(fileOrPath);
+            } catch (e) {
+                // Obsidian's cached vault.read can fail for symlinked files
+                // (notably on mobile); fall back to reading the path directly.
+                logger.warn(`vault.read failed for ${fileOrPath.path}; falling back to adapter`, e);
+                return binary
+                    ? await this.app.vault.adapter.readBinary(fileOrPath.path)
+                    : await this.app.vault.adapter.read(fileOrPath.path);
+            }
         }
         // This should not happen if isStr is false and fileOrPath is TFile
         throw new Error('Expected TFile when isStr is false');
