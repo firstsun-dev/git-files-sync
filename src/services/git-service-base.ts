@@ -75,12 +75,47 @@ export abstract class BaseGitService {
 
     protected abstract addAuthHeader(headers: Record<string, string>): void;
 
+    /**
+     * Safely parses a response body as JSON.
+     *
+     * Some servers/proxies return a 2xx (or redirect) response whose body is an
+     * HTML page — a login screen, an SSO redirect, or a proxy/error page — rather
+     * than JSON. Accessing `response.json` directly then throws a cryptic
+     * "Unexpected token '<', \"<!DOCTYPE ...\" is not valid JSON" error. This helper
+     * detects that case and throws a clear, actionable message instead.
+     */
+    protected parseJson<T>(response: RequestUrlResponse): T {
+        const contentType = (response.headers?.['content-type'] ?? response.headers?.['Content-Type'] ?? '').toLowerCase();
+        const bodyText = (response.text ?? '').trimStart();
+        const looksLikeHtml = bodyText.startsWith('<') || contentType.includes('html');
+
+        try {
+            const data = response.json as T;
+            if (data === undefined && looksLikeHtml) throw new Error('non-JSON response');
+            return data;
+        } catch (e) {
+            if (looksLikeHtml) {
+                throw new Error(
+                    'Expected a JSON response from the Git server but received an HTML page ' +
+                    '(likely a login, SSO redirect, or proxy/error page). ' +
+                    'Please check the server URL, your access token, and any network proxy or firewall.'
+                );
+            }
+            throw new Error(`Failed to parse the Git server response as JSON: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    }
+
     protected parseErrorResponse(response: RequestUrlResponse): string {
         try {
             const data = response.json as { message?: string; error?: string };
             return data.message || data.error || JSON.stringify(data);
         } catch {
-            return response.text || 'Unknown error';
+            const bodyText = (response.text ?? '').trim();
+            const contentType = (response.headers?.['content-type'] ?? response.headers?.['Content-Type'] ?? '').toLowerCase();
+            if (bodyText.startsWith('<') || contentType.includes('html')) {
+                return 'Received an HTML page instead of a JSON error (likely a login, redirect, or proxy/error page). Check the server URL, access token, and network proxy.';
+            }
+            return bodyText || 'Unknown error';
         }
     }
 

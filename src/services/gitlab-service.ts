@@ -27,7 +27,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         try {
             const url = `${this.getApiUrl(path)}?ref=${branch}`;
             const response = await this.safeRequest(url, 'GET');
-            const data = response.json as GitLabFileResponse;
+            const data = this.parseJson<GitLabFileResponse>(response);
             
             return {
                 content: this.decodeContent(data.content, path),
@@ -50,7 +50,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
         const method = sha ? 'PUT' : 'POST';
         const response = await this.safeRequest(url, method, body);
-        const data = response.json as GitLabFileResponse;
+        const data = this.parseJson<GitLabFileResponse>(response);
         return { path: data.file_path };
     }
 
@@ -63,7 +63,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         while (true) {
             const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/tree?ref=${branch}&recursive=true&per_page=${perPage}&page=${page}`;
             const response = await this.safeRequest(url, 'GET');
-            const data = response.json as GitLabTreeItem[];
+            const data = this.parseJson<GitLabTreeItem[]>(response);
             
             if (!data || data.length === 0) break;
             

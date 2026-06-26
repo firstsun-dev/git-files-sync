@@ -26,7 +26,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         try {
             const url = `${this.getApiUrl(path)}?ref=${branch}`;
             const response = await this.safeRequest(url, 'GET');
-            const data = response.json as GitHubContentResponse;
+            const data = this.parseJson<GitHubContentResponse>(response);
             
             return {
                 content: this.decodeContent(data.content, path),
@@ -47,14 +47,14 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         };
 
         const response = await this.safeRequest(url, 'PUT', body);
-        const data = response.json as { content: { path: string, sha: string } };
+        const data = this.parseJson<{ content: { path: string, sha: string } }>(response);
         return { path: data.content.path, sha: data.content.sha };
     }
 
     async listFiles(branch: string, useFilter = true): Promise<string[]> {
         const url = `https://api.github.com/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
         const response = await this.safeRequest(url, 'GET');
-        const data = response.json as GitHubTreeResponse;
+        const data = this.parseJson<GitHubTreeResponse>(response);
         
         if (data.truncated) {
             logger.warn('GitHub tree result is truncated. Some files might not be shown.');
