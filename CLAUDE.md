@@ -8,13 +8,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Lint: `npm run lint` (runs eslint check)
 - Test: `npm run test` (runs vitest suite)
 - Version bump: `npm run version` (updates manifest.json and versions.json via script)
-- **CI/CD Monitoring**: After pushing changes, task a Haiku subagent to monitor the pipeline and report results as "Success: N stages, Failure: X stages".
-- **Cost Optimization**: Always use a Haiku subagent for running tests, linting, and final commits. Report as "Success: N items, Failure: X items".
 
 ## Code Architecture
-- **Type**: Obsidian Plugin (TypeScript)
-- **Entry Point**: `src/main.ts` contains the main `MyPlugin` class extending `Plugin`.
-- **Settings**: `src/settings.ts` defines `MyPluginSettings` interface, `DEFAULT_SETTINGS` object, and `SampleSettingTab` for the Obsidian UI.
+- **Type**: Obsidian Plugin (TypeScript) that syncs vault files with a GitLab or GitHub repository.
+- **Entry Point**: `src/main.ts` contains the main `GitLabFilesPush` class extending `Plugin`.
+- **Settings**: `src/settings.ts` defines `GitLabFilesPushSettings` interface, `DEFAULT_SETTINGS` object, and `GitLabSyncSettingTab` for the Obsidian UI.
+- **Services**: `src/services/` abstracts the git provider behind `GitServiceInterface`, with `GitHubService` and `GitLabService` implementations sharing common logic via `BaseGitService`.
+- **Sync logic**: `src/logic/sync-manager.ts` handles push/pull, conflict detection, and rename detection; `src/logic/gitignore-manager.ts` merges local and remote `.gitignore` rules.
+- **UI**: `src/ui/SyncStatusView.ts` renders the sync status side panel; `src/ui/components/` holds its sub-views.
 - **Bundling**: Uses `esbuild.config.mjs` for compilation from TypeScript to a single `main.js` file.
 - **Deployment**: Relies on `manifest.json` for plugin metadata and `versions.json` for version mapping/compatibility.
 
