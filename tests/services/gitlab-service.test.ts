@@ -87,6 +87,17 @@ describe('GitLabService', () => {
             expect(await service.listFiles('main')).toEqual(['vault/file1.md']);
         });
 
+        it('listFilesDetailed flags symlinks (mode 120000)', async () => {
+            mockRequest({ status: 200, json: [
+                { path: 'real.md', type: 'blob', mode: '100644' },
+                { path: 'link.md', type: 'blob', mode: '120000' },
+            ] });
+            expect(await service.listFilesDetailed('main')).toEqual([
+                { path: 'real.md', symlink: false },
+                { path: 'link.md', symlink: true },
+            ]);
+        });
+
         it('should not match sibling paths with same prefix as rootPath', async () => {
             service.updateConfig(baseUrl, token, projectId, 'src/content');
             mockRequest({ status: 200, json: [

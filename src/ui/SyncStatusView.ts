@@ -303,19 +303,21 @@ export class SyncStatusView extends ItemView {
     private async discoverFiles() {
         const allFiles = this.app.vault.getFiles();
         let local = this.plugin.filterFilesByVaultFolder(allFiles);
-        const remoteFullPaths = await this.plugin.gitService.listFiles(this.plugin.settings.branch);
+        const remoteEntries = await this.plugin.gitService.listFilesDetailed(this.plugin.settings.branch);
 
         await this.plugin.gitignoreManager.loadGitignores();
-        
+
         // Map remote paths to vault paths
         const remoteMap = new Map<string, string>(); // vaultPath -> remoteFullPath
-        for (const remotePath of remoteFullPaths) {
-            const normalized = this.getNormalizedRemotePath(remotePath);
+        const skipSymlinks = this.plugin.settings.symlinkHandling === 'skip';
+        for (const entry of remoteEntries) {
+            if (entry.symlink && skipSymlinks) continue; // Symlink handling: skip
+            const normalized = this.getNormalizedRemotePath(entry.path);
             if (normalized === null) continue; // Not under rootPath
-            
+
             const vaultPath = this.plugin.getVaultPath(normalized);
             if (!this.plugin.gitignoreManager.isIgnored(normalized)) {
-                remoteMap.set(vaultPath, remotePath);
+                remoteMap.set(vaultPath, entry.path);
             }
         }
 

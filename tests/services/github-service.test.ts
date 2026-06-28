@@ -116,6 +116,18 @@ describe('GitHubService', () => {
             expect(await service.listFiles('main')).toEqual(['vault/file1.md']);
         });
 
+        it('listFilesDetailed flags symlinks (mode 120000)', async () => {
+            mockRequest({ status: 200, json: { tree: [
+                { path: 'real.md', type: 'blob', mode: '100644' },
+                { path: 'link.md', type: 'blob', mode: '120000' },
+                { path: 'dir', type: 'tree', mode: '040000' },
+            ] } });
+            expect(await service.listFilesDetailed('main')).toEqual([
+                { path: 'real.md', symlink: false },
+                { path: 'link.md', symlink: true },
+            ]);
+        });
+
         it('should not match sibling paths with same prefix as rootPath', async () => {
             service.updateConfig(token, owner, repo, 'src/content');
             mockRequest({ status: 200, json: { tree: [
