@@ -1,5 +1,5 @@
-import { GitServiceInterface } from './git-service-interface';
-import { BaseGitService, GitFile, GitHubContentResponse, GitHubTreeResponse } from './git-service-base';
+import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
+import { BaseGitService, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
 import { logger } from '../utils/logger';
 
 export class GiteaService extends BaseGitService implements GitServiceInterface {
@@ -28,7 +28,7 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         try {
             const url = `${this.getApiUrl(path)}?ref=${branch}`;
             const response = await this.safeRequest(url, 'GET');
-            const data = response.json as GitHubContentResponse;
+            const data = this.parseJson<GitHubContentResponse>(response);
 
             return {
                 content: this.decodeContent(data.content, path),
@@ -41,45 +41,46 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
 
     async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
         const url = this.getApiUrl(path);
-        const body = {
+        const body: { message: string; content: string; branch: string; sha?: string } = {
             message,
             content: this.encodeContent(content),
             branch,
-            sha
         };
+        // Only send sha when updating an existing file; a blank sha is rejected.
+        if (sha) body.sha = sha;
 
         const method = sha ? 'PUT' : 'POST';
         const response = await this.safeRequest(url, method, body);
-        const data = response.json as { content: { path: string, sha: string } };
+        const data = this.parseJson<{ content: { path: string, sha: string } }>(response);
         return { path: data.content.path, sha: data.content.sha };
     }
 
-    async listFiles(branch: string, useFilter = true): Promise<string[]> {
+    async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
         // Resolve branch name to commit SHA first for compatibility with all Gitea versions,
         // since the git/trees endpoint requires a SHA (not a ref name) on older instances.
         const branchUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/branches/${branch}`;
         const branchResponse = await this.safeRequest(branchUrl, 'GET');
-        const branchData = branchResponse.json as { commit: { id: string } };
+        const branchData = this.parseJson<{ commit: { id: string } }>(branchResponse);
         const commitSha = branchData.commit.id;
 
         const treeUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/git/trees/${commitSha}?recursive=1`;
         const treeResponse = await this.safeRequest(treeUrl, 'GET');
-        const treeData = treeResponse.json as GitHubTreeResponse;
+        const treeData = this.parseJson<GitHubTreeResponse>(treeResponse);
 
         if (treeData.truncated) {
             logger.warn('Gitea tree result is truncated. Some files might not be shown.');
         }
 
-        const files = treeData.tree
+        const entries = treeData.tree
             .filter(item => item.type === 'blob')
-            .map(item => item.path);
+            .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE }));
 
-        if (!useFilter) return files;
+        if (!useFilter) return entries;
 
-        return files.filter(p => {
+        return entries.filter(e => {
             if (!this.rootPath) return true;
             const cleanRoot = this.rootPath.endsWith('/') ? this.rootPath : `${this.rootPath}/`;
-            return p === this.rootPath || p.startsWith(cleanRoot);
+            return e.path === this.rootPath || e.path.startsWith(cleanRoot);
         });
     }
 

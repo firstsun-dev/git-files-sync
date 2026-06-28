@@ -1,5 +1,5 @@
-import { GitServiceInterface } from './git-service-interface';
-import { BaseGitService, GitFile, GitHubContentResponse, GitHubTreeResponse } from './git-service-base';
+import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
+import { BaseGitService, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
 import { logger } from '../utils/logger';
 
 export class GitHubService extends BaseGitService implements GitServiceInterface {
@@ -26,7 +26,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         try {
             const url = `${this.getApiUrl(path)}?ref=${branch}`;
             const response = await this.safeRequest(url, 'GET');
-            const data = response.json as GitHubContentResponse;
+            const data = this.parseJson<GitHubContentResponse>(response);
             
             return {
                 content: this.decodeContent(data.content, path),
@@ -39,37 +39,40 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
 
     async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
         const url = this.getApiUrl(path);
-        const body = {
+        const body: { message: string; content: string; branch: string; sha?: string } = {
             message,
             content: this.encodeContent(content),
             branch,
-            sha
         };
+        // GitHub's Contents API rejects a blank sha with HTTP 422. Only include
+        // it when updating an existing file; a 404 lookup yields sha === '' for
+        // new files, which must be created without a sha.
+        if (sha) body.sha = sha;
 
         const response = await this.safeRequest(url, 'PUT', body);
-        const data = response.json as { content: { path: string, sha: string } };
+        const data = this.parseJson<{ content: { path: string, sha: string } }>(response);
         return { path: data.content.path, sha: data.content.sha };
     }
 
-    async listFiles(branch: string, useFilter = true): Promise<string[]> {
+    async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
         const url = `https://api.github.com/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
         const response = await this.safeRequest(url, 'GET');
-        const data = response.json as GitHubTreeResponse;
-        
+        const data = this.parseJson<GitHubTreeResponse>(response);
+
         if (data.truncated) {
             logger.warn('GitHub tree result is truncated. Some files might not be shown.');
         }
 
-        const files = data.tree
+        const entries = data.tree
             .filter(item => item.type === 'blob')
-            .map(item => item.path);
+            .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE }));
 
-        if (!useFilter) return files;
+        if (!useFilter) return entries;
 
-        return files.filter(p => {
+        return entries.filter(e => {
             if (!this.rootPath) return true;
             const cleanRoot = this.rootPath.endsWith('/') ? this.rootPath : `${this.rootPath}/`;
-            return p === this.rootPath || p.startsWith(cleanRoot);
+            return e.path === this.rootPath || e.path.startsWith(cleanRoot);
         });
     }
 

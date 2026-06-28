@@ -25,7 +25,7 @@ export default class GitLabFilesPush extends Plugin {
 			(leaf) => new SyncStatusView(leaf, this)
 		);
 
-		this.addRibbonIcon('list-checks', 'Open sync status', async () => {
+		this.addRibbonIcon('git-compare', 'Open sync status', async () => {
 			await this.activateSyncStatusView();
 		});
 

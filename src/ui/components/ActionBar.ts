@@ -1,4 +1,5 @@
-import { setTooltip } from 'obsidian';
+import { setIcon, setTooltip } from 'obsidian';
+import { ICONS } from './icons';
 
 export interface ActionBarProps {
     hasFiles:     boolean;
@@ -24,15 +25,15 @@ export function renderActionBar(container: HTMLElement, props: ActionBarProps, c
     if (props.hasFiles) {
         bar.createDiv({ cls: 'ssv-bar-spacer' });
         renderSelectAllRow(bar, props.allSelected, props.indeterminate, callbacks.onSelectAll);
-        renderLargeButton(bar, '↑', ` Push (${props.canPush})`,   `Push ${props.canPush} files`,   callbacks.onPush,   'push',   props.canPush === 0);
-        renderLargeButton(bar, '↓', ` Pull (${props.canPull})`,   `Pull ${props.canPull} files`,   callbacks.onPull,   'pull',   props.canPull === 0);
-        renderLargeButton(bar, '✕', ` Delete (${props.canDelete})`, `Delete ${props.canDelete} files`, callbacks.onDelete, 'danger', props.canDelete === 0);
+        renderLargeButton(bar, ICONS.push,   ` Push (${props.canPush})`,   `Push ${props.canPush} files`,   callbacks.onPush,   'push',   props.canPush === 0);
+        renderLargeButton(bar, ICONS.pull,   ` Pull (${props.canPull})`,   `Pull ${props.canPull} files`,   callbacks.onPull,   'pull',   props.canPull === 0);
+        renderLargeButton(bar, ICONS.delete, ` Delete (${props.canDelete})`, `Delete ${props.canDelete} files`, callbacks.onDelete, 'danger', props.canDelete === 0);
     }
 }
 
 function renderRefreshButton(bar: HTMLElement, onRefresh: () => void): void {
     const btn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-refresh' });
-    btn.createSpan({ text: '↻' });
+    setIcon(btn.createSpan(), ICONS.refresh);
     btn.createSpan({ cls: 'ssv-btn-label', text: ' Refresh' });
     setTooltip(btn, 'Refresh all statuses');
     btn.addEventListener('click', onRefresh);
@@ -49,7 +50,7 @@ function renderSelectAllRow(bar: HTMLElement, allSelected: boolean, indeterminat
 
 function renderLargeButton(container: HTMLElement, icon: string, label: string, tooltip: string, onClick: () => void, cls: string, disabled: boolean): void {
     const btn = container.createEl('button', { cls: `ssv-btn ssv-btn-${cls}` });
-    btn.createSpan({ text: icon });
+    setIcon(btn.createSpan(), icon);
     btn.createSpan({ cls: 'ssv-btn-label', text: label });
     btn.disabled = disabled;
     setTooltip(btn, tooltip);

@@ -30,6 +30,42 @@ describe('BaseGitService', () => {
         });
     });
 
+    describe('safeRequest 404 handling', () => {
+        it('getFile returns empty and does not log an error on 404 (e.g. missing .gitignore)', async () => {
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 404,
+                text: 'Not Found',
+                json: { message: 'Not Found' },
+            } as unknown as RequestUrlResponse);
+
+            const result = await service.getFile('missing/.gitignore', 'main');
+
+            expect(result).toEqual({ content: '', sha: '' });
+            // A 404 is an expected "does not exist" probe: never logged as an error…
+            expect(errorSpy).not.toHaveBeenCalled();
+            // …and logged at most once at debug level (no double-logging).
+            expect(debugSpy).toHaveBeenCalledTimes(1);
+
+            errorSpy.mockRestore();
+            debugSpy.mockRestore();
+        });
+
+        it('still logs non-404 failures as errors', async () => {
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 500,
+                text: 'Internal Server Error',
+                json: { message: 'Internal Server Error' },
+            } as unknown as RequestUrlResponse);
+
+            await expect(service.listFiles('main')).rejects.toThrow('500');
+            expect(errorSpy).toHaveBeenCalledTimes(1);
+            errorSpy.mockRestore();
+        });
+    });
+
     describe('safeRequest with non-Error exception', () => {
         it('should wrap non-Error throws in a new Error', async () => {
             // Throw a plain string (not an Error instance) from requestUrl
@@ -38,6 +74,71 @@ describe('BaseGitService', () => {
             await expect(service.getFile('test.md', 'main')).rejects.toThrow(
                 'Network error or unexpected failure: plain string error'
             );
+        });
+    });
+
+    describe('parseJson with non-JSON (HTML) responses', () => {
+        // Simulates Obsidian's real RequestUrlResponse.json getter, which throws
+        // SyntaxError when the body is not valid JSON (e.g. an HTML page).
+        function htmlResponse(status = 200): RequestUrlResponse {
+            return {
+                status,
+                headers: { 'content-type': 'text/html; charset=utf-8' },
+                text: '<!DOCTYPE html><html><body>Login</body></html>',
+                get json(): unknown {
+                    throw new SyntaxError('Unexpected token \'<\', "<!DOCTYPE "... is not valid JSON');
+                },
+            } as unknown as RequestUrlResponse;
+        }
+
+        it('getFile: throws a clear error when the server returns an HTML page (2xx)', async () => {
+            vi.mocked(requestUrl).mockResolvedValue(htmlResponse(200));
+            await expect(service.getFile('test.md', 'main')).rejects.toThrow(/received an HTML page/);
+            // The cryptic JSON parse error must not leak through.
+            await expect(service.getFile('test.md', 'main')).rejects.not.toThrow(/Unexpected token/);
+        });
+
+        it('listFiles: throws a clear error when the server returns an HTML page (2xx)', async () => {
+            vi.mocked(requestUrl).mockResolvedValue(htmlResponse(200));
+            await expect(service.listFiles('main')).rejects.toThrow(/received an HTML page/);
+        });
+
+        it('detects HTML by leading "<" even without an html content-type', async () => {
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 200,
+                headers: {},
+                text: '  <!DOCTYPE html>...',
+                get json(): unknown {
+                    throw new SyntaxError("Unexpected token '<'");
+                },
+            } as unknown as RequestUrlResponse);
+            await expect(service.listFiles('main')).rejects.toThrow(/received an HTML page/);
+        });
+
+        it('reports a generic JSON parse failure for malformed (non-HTML) JSON', async () => {
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+                text: '{ "tree": [',
+                get json(): unknown {
+                    throw new SyntaxError('Unexpected end of JSON input');
+                },
+            } as unknown as RequestUrlResponse);
+            await expect(service.listFiles('main')).rejects.toThrow(/Failed to parse the Git server response as JSON/);
+        });
+
+        it('parseErrorResponse: surfaces a clear message for an HTML error page (>=400)', async () => {
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 502,
+                headers: { 'content-type': 'text/html' },
+                text: '<!DOCTYPE html><html><body>Bad Gateway</body></html>',
+                get json(): unknown {
+                    throw new SyntaxError("Unexpected token '<'");
+                },
+            } as unknown as RequestUrlResponse);
+            await expect(service.listFiles('main')).rejects.toThrow(/Received an HTML page instead of a JSON error/);
+            // The raw HTML document must not be dumped into the message.
+            await expect(service.listFiles('main')).rejects.not.toThrow(/DOCTYPE/);
         });
     });
 
