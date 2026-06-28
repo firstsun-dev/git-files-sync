@@ -70,6 +70,21 @@ describe('GitHubService', () => {
             expect(call.body).not.toContain('"sha":');
         });
 
+        it('should omit blank sha so creating a new file does not 422', async () => {
+            // A 404 lookup yields sha === '' for new files; an empty sha sent to
+            // GitHub causes HTTP 422, so it must be dropped from the request body.
+            vi.mocked(requestUrl).mockResolvedValueOnce({
+                status: 201,
+                json: { content: { path: 'new.md', sha: 'new-sha' } }
+            } as unknown as RequestUrlResponse);
+
+            const result = await service.pushFile('new.md', 'content', 'main', 'create', '');
+
+            expect(result).toEqual({ path: 'new.md', sha: 'new-sha' });
+            const call = getLastRequestCall();
+            expect(call.body).not.toContain('"sha":');
+        });
+
         it('should update existing file correctly (sha provided)', async () => {
             mockRequest({ status: 200, json: { content: { path: 'existing.md', sha: 'updated-sha' } } });
 
@@ -99,6 +114,18 @@ describe('GitHubService', () => {
                 { path: 'other/file2.md', type: 'blob' },
             ] } });
             expect(await service.listFiles('main')).toEqual(['vault/file1.md']);
+        });
+
+        it('listFilesDetailed flags symlinks (mode 120000)', async () => {
+            mockRequest({ status: 200, json: { tree: [
+                { path: 'real.md', type: 'blob', mode: '100644' },
+                { path: 'link.md', type: 'blob', mode: '120000' },
+                { path: 'dir', type: 'tree', mode: '040000' },
+            ] } });
+            expect(await service.listFilesDetailed('main')).toEqual([
+                { path: 'real.md', symlink: false },
+                { path: 'link.md', symlink: true },
+            ]);
         });
 
         it('should not match sibling paths with same prefix as rootPath', async () => {

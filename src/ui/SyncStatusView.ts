@@ -1,11 +1,12 @@
-import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setTooltip } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setIcon, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
 import { getServiceName } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
 import { logger } from '../utils/logger';
 import { type FileStatus, type FilterValue } from './types';
 import { renderActionBar } from './components/ActionBar';
-import { renderFileItem, type FileItemCallbacks } from './components/FileListItem';
+import { renderFileItem, statusMeta, type FileItemCallbacks } from './components/FileListItem';
+import { ICONS } from './components/icons';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
@@ -92,12 +93,16 @@ export class SyncStatusView extends ItemView {
 
         if (!Platform.isMobile) {
             el.createSpan({ cls: 'ssv-info-sep', text: '·' });
-            el.createSpan({ cls: 'ssv-info-item' }).textContent = `⎇ ${this.plugin.settings.branch}`;
+            const branchItem = el.createSpan({ cls: 'ssv-info-item' });
+            setIcon(branchItem.createSpan({ cls: 'ssv-info-icon' }), ICONS.branch);
+            branchItem.createSpan({ text: ` ${this.plugin.settings.branch}` });
         }
 
         if (this.plugin.settings.vaultFolder) {
             el.createSpan({ cls: 'ssv-info-sep', text: '·' });
-            el.createSpan({ cls: 'ssv-info-item', text: `📁 ${this.plugin.settings.vaultFolder}` });
+            const folderItem = el.createSpan({ cls: 'ssv-info-item' });
+            setIcon(folderItem.createSpan({ cls: 'ssv-info-icon' }), ICONS.folder);
+            folderItem.createSpan({ text: ` ${this.plugin.settings.vaultFolder}` });
         }
 
         if (this.lastSyncTime > 0) {
@@ -123,12 +128,12 @@ export class SyncStatusView extends ItemView {
             'remote-only': all.filter(s => s.status === 'remote-only').length,
         };
 
-        const tabs: Array<{ value: FilterValue; label: string; icon: string }> = [
-            { value: 'all',         label: 'All',        icon: '' },
-            { value: 'synced',      label: 'Synced',     icon: '✓' },
-            { value: 'modified',    label: 'Changed',    icon: '⚠' },
-            { value: 'unsynced',    label: 'Local only', icon: '↑' },
-            { value: 'remote-only', label: 'Remote',     icon: '↓' },
+        const tabs: Array<{ value: FilterValue; label: string }> = [
+            { value: 'all',         label: 'All' },
+            { value: 'synced',      label: 'Synced' },
+            { value: 'modified',    label: 'Changed' },
+            { value: 'unsynced',    label: 'Local only' },
+            { value: 'remote-only', label: 'Remote' },
         ];
 
         const tabsEl = container.createDiv({ cls: 'ssv-tabs' });
@@ -136,7 +141,10 @@ export class SyncStatusView extends ItemView {
             const btn = tabsEl.createEl('button', {
                 cls: `ssv-tab${this.statusFilter === tab.value ? ' active' : ''}`
             });
-            if (tab.icon) btn.createSpan({ text: tab.icon });
+            // Share the status icon set with the file list so tabs never drift.
+            if (tab.value !== 'all') {
+                setIcon(btn.createSpan(), statusMeta(tab.value as FileStatus['status']).icon);
+            }
             btn.createSpan({ cls: 'ssv-tab-label', text: ` ${tab.label}` });
             const count = counts[tab.value];
             if (tab.value === 'all' || count > 0) {
@@ -244,8 +252,7 @@ export class SyncStatusView extends ItemView {
                 await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
             }
 
-            // eslint-disable-next-line no-undef
-            await new Promise(r => activeWindow.setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 500));
             await this.refreshFileStatus(fileStatus.file || fileStatus.path);
             this.renderView();
         } catch (e) {
@@ -296,19 +303,21 @@ export class SyncStatusView extends ItemView {
     private async discoverFiles() {
         const allFiles = this.app.vault.getFiles();
         let local = this.plugin.filterFilesByVaultFolder(allFiles);
-        const remoteFullPaths = await this.plugin.gitService.listFiles(this.plugin.settings.branch);
+        const remoteEntries = await this.plugin.gitService.listFilesDetailed(this.plugin.settings.branch);
 
         await this.plugin.gitignoreManager.loadGitignores();
-        
+
         // Map remote paths to vault paths
         const remoteMap = new Map<string, string>(); // vaultPath -> remoteFullPath
-        for (const remotePath of remoteFullPaths) {
-            const normalized = this.getNormalizedRemotePath(remotePath);
+        const skipSymlinks = this.plugin.settings.symlinkHandling === 'skip';
+        for (const entry of remoteEntries) {
+            if (entry.symlink && skipSymlinks) continue; // Symlink handling: skip
+            const normalized = this.getNormalizedRemotePath(entry.path);
             if (normalized === null) continue; // Not under rootPath
-            
+
             const vaultPath = this.plugin.getVaultPath(normalized);
             if (!this.plugin.gitignoreManager.isIgnored(normalized)) {
-                remoteMap.set(vaultPath, remotePath);
+                remoteMap.set(vaultPath, entry.path);
             }
         }
 
@@ -442,8 +451,9 @@ export class SyncStatusView extends ItemView {
             const { status, diff } = this.determineFileStatus(binary, localContent, remote);
 
             this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha, diff });
-        } catch {
+        } catch (e) {
             const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
+            logger.warn(`Failed to determine sync status for ${path}`, e);
             this.fileStatuses.set(path, {
                 file: typeof fileOrPath === 'string' ? undefined : fileOrPath,
                 path,
@@ -459,9 +469,18 @@ export class SyncStatusView extends ItemView {
                 : await this.app.vault.adapter.read(fileOrPath as string);
         }
         if (fileOrPath instanceof TFile) {
-            return binary
-                ? await this.app.vault.readBinary(fileOrPath)
-                : await this.app.vault.read(fileOrPath);
+            try {
+                return binary
+                    ? await this.app.vault.readBinary(fileOrPath)
+                    : await this.app.vault.read(fileOrPath);
+            } catch (e) {
+                // Obsidian's cached vault.read can fail for symlinked files
+                // (notably on mobile); fall back to reading the path directly.
+                logger.warn(`vault.read failed for ${fileOrPath.path}; falling back to adapter`, e);
+                return binary
+                    ? await this.app.vault.adapter.readBinary(fileOrPath.path)
+                    : await this.app.vault.adapter.read(fileOrPath.path);
+            }
         }
         // This should not happen if isStr is false and fileOrPath is TFile
         throw new Error('Expected TFile when isStr is false');

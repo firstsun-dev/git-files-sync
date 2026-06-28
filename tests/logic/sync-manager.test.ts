@@ -58,7 +58,8 @@ const mockSettings: GitLabFilesPushSettings = {
     branch: 'main',
     rootPath: '',
     syncMetadata: {},
-    vaultFolder: ''
+    vaultFolder: '',
+    symlinkHandling: 'real'
 };
 
 describe('SyncManager', () => {
@@ -88,6 +89,26 @@ describe('SyncManager', () => {
             'local content',
             'main',
             'Update test.md from Obsidian',
+            'old-sha'
+        );
+    });
+
+    it('falls back to the adapter when vault.read fails (e.g. symlinked file)', async () => {
+        const mockFile = Object.assign(new TFile(), { path: 'link.md', name: 'link.md' });
+        const readSpy = vi.spyOn(mockApp.vault, 'read').mockRejectedValue(new Error('EINVAL: symlink'));
+        const adapterReadSpy = vi.spyOn(mockApp.vault.adapter, 'read').mockResolvedValue('linked content');
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'different content', sha: 'old-sha' });
+        const pushSpy = vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'link.md', sha: 'new-sha' });
+
+        await manager.pushFile(mockFile);
+
+        expect(readSpy).toHaveBeenCalledWith(mockFile);
+        expect(adapterReadSpy).toHaveBeenCalledWith('link.md');
+        expect(pushSpy).toHaveBeenCalledWith(
+            'link.md',
+            'linked content',
+            'main',
+            'Update link.md from Obsidian',
             'old-sha'
         );
     });

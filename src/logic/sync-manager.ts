@@ -352,13 +352,22 @@ export class SyncManager {
         const binary = this.isBinary(path);
 
         if (typeof fileOrPath === 'string') {
-            return binary 
+            return binary
                 ? await this.app.vault.adapter.readBinary(fileOrPath)
                 : await this.app.vault.adapter.read(fileOrPath);
         }
-        return binary
-            ? await this.app.vault.readBinary(fileOrPath)
-            : await this.app.vault.read(fileOrPath);
+        try {
+            return binary
+                ? await this.app.vault.readBinary(fileOrPath)
+                : await this.app.vault.read(fileOrPath);
+        } catch (e) {
+            // Obsidian's cached vault.read can fail for symlinked files (notably
+            // on mobile); fall back to reading the path directly via the adapter.
+            logger.warn(`vault.read failed for ${path}; falling back to adapter`, e);
+            return binary
+                ? await this.app.vault.adapter.readBinary(path)
+                : await this.app.vault.adapter.read(path);
+        }
     }
 
     private async processSingleBatchPush(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<boolean> {

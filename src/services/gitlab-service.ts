@@ -1,5 +1,5 @@
-import { GitServiceInterface } from './git-service-interface';
-import { BaseGitService, GitFile, GitLabFileResponse, GitLabTreeItem } from './git-service-base';
+import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
+import { BaseGitService, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
 
 export class GitLabService extends BaseGitService implements GitServiceInterface {
     private baseUrl: string = 'https://gitlab.com';
@@ -27,7 +27,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         try {
             const url = `${this.getApiUrl(path)}?ref=${branch}`;
             const response = await this.safeRequest(url, 'GET');
-            const data = response.json as GitLabFileResponse;
+            const data = this.parseJson<GitLabFileResponse>(response);
             
             return {
                 content: this.decodeContent(data.content, path),
@@ -40,53 +40,54 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
     async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
         const url = this.getApiUrl(path);
-        const body = {
+        const body: { branch: string; content: string; encoding: string; commit_message: string; last_commit_id?: string } = {
             branch,
             content: this.encodeContent(content),
             encoding: 'base64',
             commit_message: message,
-            last_commit_id: sha
         };
+        // A blank sha means the file is new: create it (POST) without last_commit_id.
+        if (sha) body.last_commit_id = sha;
 
         const method = sha ? 'PUT' : 'POST';
         const response = await this.safeRequest(url, method, body);
-        const data = response.json as GitLabFileResponse;
+        const data = this.parseJson<GitLabFileResponse>(response);
         return { path: data.file_path };
     }
 
-    async listFiles(branch: string, useFilter = true): Promise<string[]> {
+    async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
         const encodedProjectId = encodeURIComponent(this.projectId);
-        let allPaths: string[] = [];
+        let allEntries: GitTreeEntry[] = [];
         let page = 1;
         const perPage = 100;
-        
+
         while (true) {
             const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/tree?ref=${branch}&recursive=true&per_page=${perPage}&page=${page}`;
             const response = await this.safeRequest(url, 'GET');
-            const data = response.json as GitLabTreeItem[];
-            
+            const data = this.parseJson<GitLabTreeItem[]>(response);
+
             if (!data || data.length === 0) break;
-            
-            const paths = data
+
+            const entries = data
                 .filter(item => item.type === 'blob')
-                .map(item => item.path);
-            
+                .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE }));
+
             if (useFilter) {
-                const filtered = paths.filter(p => {
+                const filtered = entries.filter(e => {
                     if (!this.rootPath) return true;
                     const cleanRoot = this.rootPath.endsWith('/') ? this.rootPath : `${this.rootPath}/`;
-                    return p === this.rootPath || p.startsWith(cleanRoot);
+                    return e.path === this.rootPath || e.path.startsWith(cleanRoot);
                 });
-                allPaths = allPaths.concat(filtered);
+                allEntries = allEntries.concat(filtered);
             } else {
-                allPaths = allPaths.concat(paths);
+                allEntries = allEntries.concat(entries);
             }
-            
+
             if (data.length < perPage) break;
             page++;
         }
-        
-        return allPaths;
+
+        return allEntries;
     }
 
     async deleteFile(path: string, branch: string, message: string): Promise<void> {
