@@ -1,5 +1,5 @@
-import { GitServiceInterface } from './git-service-interface';
-import { BaseGitService, GitFile, GitHubContentResponse, GitHubTreeResponse } from './git-service-base';
+import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
+import { BaseGitService, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
 import { logger } from '../utils/logger';
 
 export class GitHubService extends BaseGitService implements GitServiceInterface {
@@ -54,25 +54,25 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         return { path: data.content.path, sha: data.content.sha };
     }
 
-    async listFiles(branch: string, useFilter = true): Promise<string[]> {
+    async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
         const url = `https://api.github.com/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
         const response = await this.safeRequest(url, 'GET');
         const data = this.parseJson<GitHubTreeResponse>(response);
-        
+
         if (data.truncated) {
             logger.warn('GitHub tree result is truncated. Some files might not be shown.');
         }
 
-        const files = data.tree
+        const entries = data.tree
             .filter(item => item.type === 'blob')
-            .map(item => item.path);
+            .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE }));
 
-        if (!useFilter) return files;
+        if (!useFilter) return entries;
 
-        return files.filter(p => {
+        return entries.filter(e => {
             if (!this.rootPath) return true;
             const cleanRoot = this.rootPath.endsWith('/') ? this.rootPath : `${this.rootPath}/`;
-            return p === this.rootPath || p.startsWith(cleanRoot);
+            return e.path === this.rootPath || e.path.startsWith(cleanRoot);
         });
     }
 

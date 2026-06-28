@@ -9,6 +9,15 @@ export interface SyncMetadata {
 
 export type GitServiceType = 'gitlab' | 'github';
 
+/**
+ * How symbolic links (Git blobs with mode 120000) are synced:
+ * - 'real':   recreate a real OS symlink on desktop; on mobile (no symlink API)
+ *             fall back to syncing the link target's content as a normal file.
+ * - 'follow': always sync the target file's content as a normal file.
+ * - 'skip':   ignore symlinks entirely.
+ */
+export type SymlinkHandling = 'real' | 'follow' | 'skip';
+
 export interface GitLabFilesPushSettings {
 	serviceType: GitServiceType;
 	gitlabToken: string;
@@ -21,6 +30,7 @@ export interface GitLabFilesPushSettings {
 	syncMetadata: Record<string, SyncMetadata>;
     rootPath: string;
     vaultFolder: string;
+    symlinkHandling: SymlinkHandling;
 }
 
 export function getServiceName(settings: GitLabFilesPushSettings): string {
@@ -38,7 +48,8 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
     rootPath: "",
 	branch: 'main',
 	syncMetadata: {},
-	vaultFolder: ''
+	vaultFolder: '',
+	symlinkHandling: 'real'
 }
 
 export class GitLabSyncSettingTab extends PluginSettingTab {
@@ -107,6 +118,19 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.vaultFolder)
 				.onChange((value) => {
 					this.plugin.settings.vaultFolder = value.replace(/^\/|\/$/g, '');
+					void this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Symbolic links')
+			.setDesc('How to sync symlinks: "real" recreates the link on desktop and falls back to the target content on mobile, "follow" always syncs the target content, and "skip" ignores symlinks.')
+			.addDropdown(dropdown => dropdown
+				.addOption('real', 'Real symlink (recommended)')
+				.addOption('follow', 'Follow (sync target content)')
+				.addOption('skip', 'Skip')
+				.setValue(this.plugin.settings.symlinkHandling)
+				.onChange((value: string) => {
+					this.plugin.settings.symlinkHandling = value as SymlinkHandling;
 					void this.plugin.saveSettings();
 				}));
 

@@ -1,10 +1,15 @@
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { logger } from '../utils/logger';
+import { GitTreeEntry } from './git-service-interface';
 
 export interface GitFile {
     content: string | ArrayBuffer;
     sha: string;
 }
+
+// Git file mode for a symbolic link. Symlinks are stored as blobs whose content
+// is the link target path, so they need special handling during sync.
+export const GIT_SYMLINK_MODE = '120000';
 
 export interface GitHubContentResponse {
     content: string;
@@ -15,6 +20,7 @@ export interface GitHubContentResponse {
 export interface GitHubTreeItem {
     path: string;
     type: string;
+    mode?: string;
 }
 
 export interface GitHubTreeResponse {
@@ -32,6 +38,7 @@ export interface GitLabFileResponse {
 export interface GitLabTreeItem {
     path: string;
     type: string;
+    mode?: string;
 }
 
 export abstract class BaseGitService {
@@ -197,9 +204,14 @@ export abstract class BaseGitService {
         }
     }
 
+    async listFiles(branch: string, useFilter = true): Promise<string[]> {
+        const entries = await this.listFilesDetailed(branch, useFilter);
+        return entries.map(e => e.path);
+    }
+
     abstract getFile(path: string, branch: string): Promise<GitFile>;
     abstract pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }>;
-    abstract listFiles(branch: string, useFilter?: boolean): Promise<string[]>;
+    abstract listFilesDetailed(branch: string, useFilter?: boolean): Promise<GitTreeEntry[]>;
     abstract deleteFile(path: string, branch: string, message: string): Promise<void>;
     abstract testConnection(): Promise<boolean>;
 }
