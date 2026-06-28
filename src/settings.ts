@@ -7,7 +7,7 @@ export interface SyncMetadata {
 	lastKnownPath?: string;
 }
 
-export type GitServiceType = 'gitlab' | 'github';
+export type GitServiceType = 'gitlab' | 'github' | 'gitea';
 
 /**
  * How symbolic links (Git blobs with mode 120000) are synced:
@@ -26,6 +26,10 @@ export interface GitLabFilesPushSettings {
 	githubToken: string;
 	githubOwner: string;
 	githubRepo: string;
+	giteaToken: string;
+	giteaBaseUrl: string;
+	giteaOwner: string;
+	giteaRepo: string;
 	branch: string;
 	syncMetadata: Record<string, SyncMetadata>;
     rootPath: string;
@@ -34,7 +38,9 @@ export interface GitLabFilesPushSettings {
 }
 
 export function getServiceName(settings: GitLabFilesPushSettings): string {
-    return settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+    if (settings.serviceType === 'gitlab') return 'GitLab';
+    if (settings.serviceType === 'gitea') return 'Gitea';
+    return 'GitHub';
 }
 
 export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
@@ -45,6 +51,10 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	githubToken: '',
 	githubOwner: '',
 	githubRepo: '',
+	giteaToken: '',
+	giteaBaseUrl: '',
+	giteaOwner: '',
+	giteaRepo: '',
     rootPath: "",
 	branch: 'main',
 	syncMetadata: {},
@@ -67,10 +77,11 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Git service')
-			.setDesc('Choose between GitLab or GitHub')
+			.setDesc('Choose your Git hosting service')
 			.addDropdown(dropdown => dropdown
 				.addOption('gitlab', 'GitLab')
 				.addOption('github', 'GitHub')
+				.addOption('gitea', 'Gitea')
 				.setValue(this.plugin.settings.serviceType)
 				.onChange((value: string) => {
 					this.plugin.settings.serviceType = value as GitServiceType;
@@ -83,6 +94,8 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 
 		if (this.plugin.settings.serviceType === 'gitlab') {
 			this.displayGitLabSettings(containerEl);
+		} else if (this.plugin.settings.serviceType === 'gitea') {
+			this.displayGiteaSettings(containerEl);
 		} else {
 			this.displayGitHubSettings(containerEl);
 		}
@@ -183,6 +196,56 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.projectId)
 				.onChange((value) => {
 					this.plugin.settings.projectId = value;
+					void this.plugin.saveSettings();
+					this.plugin.initializeGitService();
+				}));
+	}
+
+	private displayGiteaSettings(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName('Gitea personal access token')
+			.setDesc('Create a token in user settings > applications > access tokens')
+			.addText(text => text
+				.setPlaceholder('Enter your token')
+				.setValue(this.plugin.settings.giteaToken)
+				.onChange((value) => {
+					this.plugin.settings.giteaToken = value;
+					void this.plugin.saveSettings();
+					this.plugin.initializeGitService();
+				}));
+
+		new Setting(containerEl)
+			.setName('Gitea base URL')
+			.setDesc('URL of your Gitea instance (e.g. https://gitea.example.com)')
+			.addText(text => text
+				.setPlaceholder('https://gitea.example.com')
+				.setValue(this.plugin.settings.giteaBaseUrl)
+				.onChange((value) => {
+					this.plugin.settings.giteaBaseUrl = value;
+					void this.plugin.saveSettings();
+					this.plugin.initializeGitService();
+				}));
+
+		new Setting(containerEl)
+			.setName('Repository owner')
+			.setDesc('Gitea username or organization name')
+			.addText(text => text
+				.setPlaceholder('Username')
+				.setValue(this.plugin.settings.giteaOwner)
+				.onChange((value) => {
+					this.plugin.settings.giteaOwner = value;
+					void this.plugin.saveSettings();
+					this.plugin.initializeGitService();
+				}));
+
+		new Setting(containerEl)
+			.setName('Repository name')
+			.setDesc('Name of the repository')
+			.addText(text => text
+				.setPlaceholder('My notes')
+				.setValue(this.plugin.settings.giteaRepo)
+				.onChange((value) => {
+					this.plugin.settings.giteaRepo = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
 				}));

@@ -8,7 +8,7 @@
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg?style=flat-square)](https://conventionalcommits.org)
 [![License](https://img.shields.io/github/license/firstsun-dev/git-files-sync?style=flat-square)](LICENSE)
 
-**Git File Sync** is a powerful Obsidian plugin that enables seamless synchronization of individual notes with GitLab or GitHub repositories. Unlike full-vault sync solutions, it gives you granular control over what gets pushed and pulled, making it perfect for shared projects, selective backups, and cross-platform workflows.
+**Git File Sync** is a powerful Obsidian plugin that enables seamless synchronization of individual notes with GitLab, GitHub, or self-hosted Gitea repositories. Unlike full-vault sync solutions, it gives you granular control over what gets pushed and pulled, making it perfect for shared projects, selective backups, and cross-platform workflows.
 
 [繁體中文使用說明](USAGE_zh.md)
 
@@ -22,6 +22,22 @@
 
 ---
 
+## Supported Providers
+
+<img src="https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub" height="28"> &nbsp;
+<img src="https://img.shields.io/badge/GitLab-FC6D26?style=for-the-badge&logo=gitlab&logoColor=white" alt="GitLab" height="28"> &nbsp;
+<img src="https://img.shields.io/badge/Gitea-609926?style=for-the-badge&logo=gitea&logoColor=white" alt="Gitea" height="28">
+
+| Provider | Hosting | Min. Version |
+| :--- | :--- | :--- |
+| <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub"> | github.com · GitHub Enterprise | — |
+| <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab"> | gitlab.com · self-hosted | GitLab 13.0+ |
+| <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea"> | self-hosted | Gitea 1.12+ |
+
+> **Gitea compatibility note**: The plugin uses the Gitea API v1 (`/api/v1`). It resolves branch names to commit SHAs before fetching the file tree, which ensures compatibility with Gitea 1.12 and later. Versions before 1.12 are not supported.
+
+---
+
 ## Key Features
 
 ### Selective Synchronization
@@ -31,7 +47,7 @@ Don't sync your whole vault. Selectively push or pull individual notes, or use b
 A comprehensive dashboard provides a bird's-eye view of your vault's status:
 - **Status Filtering**: Instantly see what's modified, new, or missing.
 - **Visual Diffs**: Compare local and remote changes line-by-line before syncing.
-- **Remote-Only Detection**: Identify files existing on GitLab/GitHub that aren't in your vault yet.
+- **Remote-Only Detection**: Identify files existing on GitLab/GitHub/Gitea that aren't in your vault yet.
 
 ### Intelligent Conflict Resolution
 When versions clash, Git File Sync provides a dedicated diff viewer to help you resolve conflicts manually. Choose the local version, the remote version, or merge them with confidence.
@@ -62,13 +78,21 @@ Full support for Obsidian Mobile. Push and pull your notes on the go with a resp
 *Configure the plugin by selecting your preferred Git service and providing the necessary credentials.*
 
 ### 1. Choose Your Service
-Go to **Settings** > **Git File Sync** and select either **GitLab** or **GitHub**.
+Go to **Settings** > **Git File Sync** and select **GitLab**, **GitHub**, or **Gitea** from the dropdown.
 
 ### 2. Provider Setup
-| Service | Required Info | Scope Needed |
-| :--- | :--- | :--- |
-| **GitLab** | Personal Access Token, Project ID, Base URL | `api` |
-| **GitHub** | Personal Access Token, Owner, Repo Name | `repo` |
+
+| | Provider | Required Info | Token Scope |
+| :---: | :--- | :--- | :--- |
+| <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub"> | **GitHub** | Personal Access Token, Owner, Repo Name | `repo` |
+| <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab"> | **GitLab** | Personal Access Token, Project ID, Base URL | `api` |
+| <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea"> | **Gitea** | Personal Access Token, Base URL, Owner, Repo Name | (all) |
+
+**GitHub token**: Settings → Developer settings → Personal access tokens → `repo` scope.
+
+**GitLab token**: User settings → Access tokens → `api` scope. The Base URL defaults to `https://gitlab.com`; change it for self-hosted instances.
+
+**Gitea token**: User settings → Applications → Access tokens. Set the Base URL to your Gitea instance (e.g. `https://gitea.example.com`).
 
 ### 3. Common Settings
 - **Branch**: Specify the target branch (default: `main`).
@@ -87,9 +111,9 @@ Once configured, you should perform an initial status check:
 
 ### Daily Workflow: Pushing Changes
 When you finish editing a note and want to save it to Git:
-- **Current Note**: Use the cloud icon in the ribbon or the command `Push current file to GitLab/GitHub`.
+- **Current Note**: Use the cloud icon in the ribbon or the command `Push current file to GitLab/GitHub/Gitea`.
 - **Multiple Notes**: Open the Sync Status View, use the **Modified** filter, select the files you want to sync, and click **Push selected**.
-- **Context Menu**: Right-click any file in the File Explorer and select `Push to GitLab/GitHub`.
+- **Context Menu**: Right-click any file in the File Explorer and select `Push to GitLab/GitHub/Gitea`.
 
 ### Daily Workflow: Pulling Changes
 To get the latest updates from other devices:
@@ -115,7 +139,7 @@ On mobile devices:
 
 ## Privacy and Security
 
-- **Local Storage**: Your Personal Access Tokens (PAT) are stored locally in the plugin's data folder within your vault. They are never sent to any server other than GitLab/GitHub.
+- **Local Storage**: Your Personal Access Tokens (PAT) are stored locally in the plugin's data folder within your vault. They are never sent to any server other than your configured Git provider.
 - **No Telemetry**: This plugin does not collect any data or usage analytics.
 
 ---
