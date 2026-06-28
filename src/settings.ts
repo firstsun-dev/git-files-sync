@@ -43,6 +43,19 @@ export function getServiceName(settings: GitLabFilesPushSettings): string {
     return 'GitHub';
 }
 
+/**
+ * Resolves the symlink behavior that actually applies. Only GitHub can create or
+ * push real symlinks (it has the Git Data API); on other providers "real" is not
+ * possible, so it is treated as "skip" to avoid silently turning links into
+ * ordinary files.
+ */
+export function getEffectiveSymlinkHandling(settings: GitLabFilesPushSettings): SymlinkHandling {
+    if (settings.symlinkHandling === 'real' && settings.serviceType !== 'github') {
+        return 'skip';
+    }
+    return settings.symlinkHandling;
+}
+
 export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	serviceType: 'gitlab',
 	gitlabToken: '',
@@ -134,18 +147,25 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					void this.plugin.saveSettings();
 				}));
 
+		// "Real symlink" needs the Git Data API, which only GitHub offers. For
+		// other providers, offer follow/skip only so the option can't mislead.
+		const supportsRealSymlink = this.plugin.settings.serviceType === 'github';
 		new Setting(containerEl)
 			.setName('Symbolic links')
-			.setDesc('How to sync symlinks: "real" recreates the link on desktop and falls back to the target content on mobile, "follow" always syncs the target content, and "skip" ignores symlinks.')
-			.addDropdown(dropdown => dropdown
-				.addOption('real', 'Real symlink (recommended)')
-				.addOption('follow', 'Follow (sync target content)')
-				.addOption('skip', 'Skip')
-				.setValue(this.plugin.settings.symlinkHandling)
-				.onChange((value: string) => {
-					this.plugin.settings.symlinkHandling = value as SymlinkHandling;
-					void this.plugin.saveSettings();
-				}));
+			.setDesc(supportsRealSymlink
+				? 'How to sync symlinks: "real" recreates the link on desktop and falls back to the target content on mobile, "follow" always syncs the target content, and "skip" ignores symlinks.'
+				: 'How to sync symlinks: "follow" syncs the target content as a normal file, "skip" ignores symlinks. Real symlinks require GitHub.')
+			.addDropdown(dropdown => {
+				if (supportsRealSymlink) dropdown.addOption('real', 'Real symlink (recommended)');
+				dropdown
+					.addOption('follow', 'Follow (sync target content)')
+					.addOption('skip', 'Skip')
+					.setValue(getEffectiveSymlinkHandling(this.plugin.settings))
+					.onChange((value: string) => {
+						this.plugin.settings.symlinkHandling = value as SymlinkHandling;
+						void this.plugin.saveSettings();
+					});
+			});
 
 		new Setting(containerEl)
 			.setName('Test connection')

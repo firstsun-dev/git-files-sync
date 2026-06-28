@@ -55,6 +55,49 @@ describe('GitHubService', () => {
         });
     });
 
+    describe('getFile symlink detection', () => {
+        it('flags a symlink response and returns its target', async () => {
+            mockRequest({ status: 200, json: { type: 'symlink', target: '../shared/note.md', sha: 'link-sha' } });
+            const result = await service.getFile('link.md', 'main');
+            expect(result).toEqual({ content: '', sha: 'link-sha', isSymlink: true, symlinkTarget: '../shared/note.md' });
+        });
+
+        it('treats a normal file response as non-symlink', async () => {
+            mockRequest({ status: 200, json: { content: btoa('hello'), sha: 'sha', type: 'file' } });
+            const result = await service.getFile('note.md', 'main');
+            expect(result.isSymlink).toBeUndefined();
+            expect(result.content).toBe('hello');
+        });
+    });
+
+    describe('pushSymlink (Git Data API)', () => {
+        it('creates a blob, tree (mode 120000), commit, and moves the ref', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse) // get ref
+                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)      // get commit
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob1' } } as unknown as RequestUrlResponse)               // create blob
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)               // create tree
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)             // create commit
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                            // update ref
+
+            const result = await service.pushSymlink('link.md', '../target.md', 'main', 'add link');
+
+            expect(result).toEqual({ path: 'link.md', sha: 'blob1' });
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            expect(calls).toHaveLength(6);
+            // blob carries the target as utf-8
+            const blobBody = JSON.parse(calls[2]?.body as string) as { content: string; encoding: string };
+            expect(blobBody).toEqual({ content: '../target.md', encoding: 'utf-8' });
+            // tree entry uses symlink mode 120000
+            const treeBody = JSON.parse(calls[3]?.body as string) as { base_tree: string; tree: Array<{ path: string; mode: string; type: string; sha: string }> };
+            expect(treeBody.base_tree).toBe('tree1');
+            expect(treeBody.tree[0]).toEqual({ path: 'link.md', mode: '120000', type: 'blob', sha: 'blob1' });
+            // ref update points at the new commit
+            expect(calls[5]?.method).toBe('PATCH');
+            expect(JSON.parse(calls[5]?.body as string)).toEqual({ sha: 'commit2' });
+        });
+    });
+
     describe('pushFile', () => {
         it('should push new file correctly (no sha provided)', async () => {
             vi.mocked(requestUrl).mockResolvedValueOnce({

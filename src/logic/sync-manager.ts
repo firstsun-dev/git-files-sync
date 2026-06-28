@@ -1,9 +1,10 @@
 import { TFile, App, Notice } from 'obsidian';
 import { GitServiceInterface } from '../services/git-service-interface';
-import { GitLabFilesPushSettings, getServiceName } from '../settings';
+import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
 import { logger } from '../utils/logger';
 import { isBinaryPath, contentsEqual } from '../utils/path';
+import { readLocalSymlinkTarget, createLocalSymlink } from '../utils/symlink';
 
 export class SyncManager {
     private readonly app: App;
@@ -54,8 +55,15 @@ export class SyncManager {
             return;
         }
 
-        const content = await this.getFileContent(fileOrPath);
         try {
+            // Symbolic link handling: real → push as a symlink (GitHub), skip → ignore.
+            const symlinkTarget = readLocalSymlinkTarget(this.app, path);
+            if (symlinkTarget !== null && await this.handleSymlinkPush({ path, name }, symlinkTarget)) {
+                return;
+            }
+
+            const content = await this.getFileContent(fileOrPath);
+
             // Check if this is a renamed file
             if (!isString && fileOrPath instanceof TFile) {
                 const renamedFrom = this.detectRename(fileOrPath);
@@ -67,7 +75,14 @@ export class SyncManager {
 
             // Conflict detection & equality check
             const remote = await this.gitService.getFile(repoPath, this.settings.branch);
-            
+
+            // "follow" must not silently convert a remote symlink into a regular
+            // file. If the remote is a symlink, leave it untouched.
+            if (remote.isSymlink) {
+                new Notice(`${name} is a symlink on the remote; not overwriting (use "real" symlink mode to manage links).`);
+                return;
+            }
+
             if (remote.sha && this.contentsEqual(content, remote.content)) {
                 await this.updateMetadata(path, remote.sha);
                 new Notice(`${name} is already up to date.`);
@@ -84,7 +99,7 @@ export class SyncManager {
                             if (choice === 'local') {
                                 await this.performPush({ path, name }, content, remote.sha);
                             } else {
-                                await this.performPull(fileRep, remote.content, remote.sha);
+                                await this.performPull(fileRep, remote.content, remote.sha, false, this.symlinkPullTarget(remote));
                             }
                         } catch (e) {
                             this.handleError(`Failed to resolve conflict for ${name}`, e);
@@ -170,8 +185,35 @@ export class SyncManager {
         }
 
         if (newSha) await this.updateMetadata(file.path, newSha);
-        
+
         if (!silent) new Notice(`Pushed ${file.name} to ${this.serviceName}`);
+    }
+
+    /**
+     * Handles pushing a local symbolic link per the configured behavior.
+     * Returns true if the link was handled (pushed as a symlink, or intentionally
+     * skipped); returns false to let the caller fall through to a normal content
+     * push ("follow", which reads through the link).
+     */
+    private async handleSymlinkPush(file: {path: string, name: string}, target: string, silent = false): Promise<boolean> {
+        const mode = getEffectiveSymlinkHandling(this.settings);
+        if (mode === 'skip') {
+            if (!silent) new Notice(`Skipped symlink ${file.name}.`);
+            return true;
+        }
+        if (mode === 'real' && this.gitService.pushSymlink) {
+            const repoPath = this.getNormalizedPath(file.path);
+            const result = await this.gitService.pushSymlink(repoPath, target, this.settings.branch, `Update ${file.name} from Obsidian`);
+            if (result.sha) await this.updateMetadata(file.path, result.sha);
+            if (!silent) new Notice(`Pushed symlink ${file.name} to ${this.serviceName}`);
+            return true;
+        }
+        return false;
+    }
+
+    /** The symlink target to recreate on pull, or undefined when the remote isn't a symlink. */
+    private symlinkPullTarget(remote: { isSymlink?: boolean; symlinkTarget?: string }): string | undefined {
+        return remote.isSymlink ? remote.symlinkTarget ?? '' : undefined;
     }
 
     async pullFile(fileOrPath: TFile | string) {
@@ -205,7 +247,7 @@ export class SyncManager {
                             if (choice === 'local') {
                                 await this.performPush(fileRep, localContent || '', remote.sha);
                             } else {
-                                await this.performPull(fileRep, remote.content, remote.sha);
+                                await this.performPull(fileRep, remote.content, remote.sha, false, this.symlinkPullTarget(remote));
                             }
                         } catch (e) {
                             this.handleError(`Failed to resolve conflict for ${name}`, e);
@@ -230,29 +272,38 @@ export class SyncManager {
         return isBinaryPath(path);
     }
 
-    private async performPull(file: TFile | {path: string, name: string}, remoteContent: string | ArrayBuffer, remoteSha: string, silent = false) {
+    private async performPull(file: TFile | {path: string, name: string}, remoteContent: string | ArrayBuffer, remoteSha: string, silent = false, symlinkTarget?: string) {
         await this.ensureParentDirs(file.path);
 
+        if (symlinkTarget !== undefined) {
+            // Remote blob is a symbolic link. Recreate a real OS link when the
+            // setting is "real" and the platform supports it…
+            if (getEffectiveSymlinkHandling(this.settings) === 'real' && createLocalSymlink(this.app, file.path, symlinkTarget)) {
+                await this.updateMetadata(file.path, remoteSha);
+                if (!silent) new Notice(`Pulled symlink ${file.name} from ${this.serviceName}`);
+                return;
+            }
+            // …otherwise record where it pointed by writing the target as content.
+            remoteContent = symlinkTarget;
+        }
+
+        await this.writePulledContent(file, remoteContent);
+        await this.updateMetadata(file.path, remoteSha);
+        if (!silent) new Notice(`Pulled ${file.name} from ${this.serviceName}`);
+    }
+
+    private async writePulledContent(file: TFile | {path: string, name: string}, remoteContent: string | ArrayBuffer): Promise<void> {
         if (typeof remoteContent !== 'string') {
-            // remoteContent is ArrayBuffer
             if (file instanceof TFile) {
                 await this.app.vault.modifyBinary(file, remoteContent);
             } else {
                 await this.app.vault.adapter.writeBinary(file.path, remoteContent);
             }
+        } else if (file instanceof TFile) {
+            await this.app.vault.modify(file, remoteContent);
         } else {
-            // remoteContent is string
-            if (file instanceof TFile) {
-                await this.app.vault.modify(file, remoteContent);
-            } else {
-                await this.app.vault.adapter.write(file.path, remoteContent);
-            }
+            await this.app.vault.adapter.write(file.path, remoteContent);
         }
-
-        // Update metadata
-        await this.updateMetadata(file.path, remoteSha);
-
-        if (!silent) new Notice(`Pulled ${file.name} from ${this.serviceName}`);
     }
 
     private async ensureParentDirs(filePath: string): Promise<void> {
@@ -372,6 +423,13 @@ export class SyncManager {
 
     private async processSingleBatchPush(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<boolean> {
         if (!await this.checkFileExists(path, isString)) throw new Error('File no longer exists');
+
+        // Symbolic link handling: real → push as a symlink (GitHub), skip → ignore.
+        const symlinkTarget = readLocalSymlinkTarget(this.app, path);
+        if (symlinkTarget !== null && await this.handleSymlinkPush({ path, name }, symlinkTarget, true)) {
+            return getEffectiveSymlinkHandling(this.settings) !== 'skip';
+        }
+
         const content = await this.getFileContent(fileOrPath);
         const repoPath = this.getNormalizedPath(path);
 
@@ -385,7 +443,10 @@ export class SyncManager {
         }
 
         const remote = await this.gitService.getFile(repoPath, this.settings.branch);
-        
+
+        // Don't convert a remote symlink into a regular file.
+        if (remote.isSymlink) return false;
+
         // Skip if already in sync
         if (remote.sha && this.contentsEqual(content, remote.content)) {
             await this.updateMetadata(path, remote.sha);
@@ -411,7 +472,7 @@ export class SyncManager {
         }
 
         const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
-        await this.performPull(fileRep, remote.content, remote.sha, true);
+        await this.performPull(fileRep, remote.content, remote.sha, true, this.symlinkPullTarget(remote));
         return true;
     }
 }

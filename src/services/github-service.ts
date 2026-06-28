@@ -26,8 +26,15 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         try {
             const url = `${this.getApiUrl(path)}?ref=${branch}`;
             const response = await this.safeRequest(url, 'GET');
-            const data = this.parseJson<GitHubContentResponse>(response);
-            
+            const data = this.parseJson<GitHubContentResponse & { type?: string; target?: string }>(response);
+
+            // An unresolved symlink is returned as type 'symlink' with the literal
+            // target. (Links whose target is a normal in-repo file are followed by
+            // the Contents API and come back as ordinary file content.)
+            if (data.type === 'symlink') {
+                return { content: '', sha: data.sha, isSymlink: true, symlinkTarget: data.target };
+            }
+
             return {
                 content: this.decodeContent(data.content, path),
                 sha: data.sha
@@ -52,6 +59,40 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         const response = await this.safeRequest(url, 'PUT', body);
         const data = this.parseJson<{ content: { path: string, sha: string } }>(response);
         return { path: data.content.path, sha: data.content.sha };
+    }
+
+    async pushSymlink(path: string, target: string, branch: string, message: string): Promise<{ path: string, sha?: string }> {
+        // The Contents API can only create regular (100644) files, so symlinks
+        // (mode 120000) must be committed through the lower-level Git Data API:
+        // blob -> tree (with the symlink mode) -> commit -> move the branch ref.
+        const fullPath = this.getFullPath(path);
+        const base = `https://api.github.com/repos/${this.owner}/${this.repo}`;
+
+        const refResp = await this.safeRequest(`${base}/git/ref/heads/${branch}`, 'GET');
+        const latestCommitSha = this.parseJson<{ object: { sha: string } }>(refResp).object.sha;
+
+        const commitResp = await this.safeRequest(`${base}/git/commits/${latestCommitSha}`, 'GET');
+        const baseTreeSha = this.parseJson<{ tree: { sha: string } }>(commitResp).tree.sha;
+
+        const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', { content: target, encoding: 'utf-8' });
+        const blobSha = this.parseJson<{ sha: string }>(blobResp).sha;
+
+        const treeResp = await this.safeRequest(`${base}/git/trees`, 'POST', {
+            base_tree: baseTreeSha,
+            tree: [{ path: fullPath, mode: GIT_SYMLINK_MODE, type: 'blob', sha: blobSha }],
+        });
+        const newTreeSha = this.parseJson<{ sha: string }>(treeResp).sha;
+
+        const newCommitResp = await this.safeRequest(`${base}/git/commits`, 'POST', {
+            message,
+            tree: newTreeSha,
+            parents: [latestCommitSha],
+        });
+        const newCommitSha = this.parseJson<{ sha: string }>(newCommitResp).sha;
+
+        await this.safeRequest(`${base}/git/refs/heads/${branch}`, 'PATCH', { sha: newCommitSha });
+
+        return { path: fullPath, sha: blobSha };
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
