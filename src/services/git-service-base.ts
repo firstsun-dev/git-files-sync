@@ -42,6 +42,7 @@ export abstract class BaseGitService {
      * Safely wraps requestUrl to handle potential throws from Obsidian and provide better error messages.
      */
     protected async safeRequest(url: string, method: string, body?: unknown, extraHeaders?: Record<string, string>, silent = false): Promise<RequestUrlResponse> {
+        let response: RequestUrlResponse;
         try {
             const headers: Record<string, string> = {
                 ...extraHeaders,
@@ -57,20 +58,28 @@ export abstract class BaseGitService {
                 throw: false
             };
 
-            const response = await requestUrl(options);
-            
-            if (response.status >= 400) {
-                const errorMsg = this.parseErrorResponse(response);
-                if (!silent) logger.error(`Git Service Request Failed (${response.status}): ${url}`, errorMsg);
-                throw new Error(`Git Service Error (${response.status}): ${errorMsg}`);
-            }
-
-            return response;
+            response = await requestUrl(options);
         } catch (error) {
+            // Network-level failure (DNS, offline, TLS, etc.)
             if (!silent) logger.error('Git Service Request Failed:', error);
             if (error instanceof Error) throw error;
             throw new Error(`Network error or unexpected failure: ${String(error)}`);
         }
+
+        if (response.status >= 400) {
+            const errorMsg = this.parseErrorResponse(response);
+            // 404 is routinely an expected "does not exist" probe (getFile treats
+            // it as an empty file, gitignore lookups ignore it). Log it at debug
+            // level so it doesn't surface as a failure, but still throw so callers
+            // can handle it. Other statuses are genuine errors.
+            if (!silent) {
+                if (response.status === 404) logger.debug(`Git Service 404 (not found): ${url}`);
+                else logger.error(`Git Service Request Failed (${response.status}): ${url}`, errorMsg);
+            }
+            throw new Error(`Git Service Error (${response.status}): ${errorMsg}`);
+        }
+
+        return response;
     }
 
     protected abstract addAuthHeader(headers: Record<string, string>): void;

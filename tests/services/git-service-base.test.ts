@@ -30,6 +30,42 @@ describe('BaseGitService', () => {
         });
     });
 
+    describe('safeRequest 404 handling', () => {
+        it('getFile returns empty and does not log an error on 404 (e.g. missing .gitignore)', async () => {
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 404,
+                text: 'Not Found',
+                json: { message: 'Not Found' },
+            } as unknown as RequestUrlResponse);
+
+            const result = await service.getFile('missing/.gitignore', 'main');
+
+            expect(result).toEqual({ content: '', sha: '' });
+            // A 404 is an expected "does not exist" probe: never logged as an error…
+            expect(errorSpy).not.toHaveBeenCalled();
+            // …and logged at most once at debug level (no double-logging).
+            expect(debugSpy).toHaveBeenCalledTimes(1);
+
+            errorSpy.mockRestore();
+            debugSpy.mockRestore();
+        });
+
+        it('still logs non-404 failures as errors', async () => {
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 500,
+                text: 'Internal Server Error',
+                json: { message: 'Internal Server Error' },
+            } as unknown as RequestUrlResponse);
+
+            await expect(service.listFiles('main')).rejects.toThrow('500');
+            expect(errorSpy).toHaveBeenCalledTimes(1);
+            errorSpy.mockRestore();
+        });
+    });
+
     describe('safeRequest with non-Error exception', () => {
         it('should wrap non-Error throws in a new Error', async () => {
             // Throw a plain string (not an Error instance) from requestUrl
