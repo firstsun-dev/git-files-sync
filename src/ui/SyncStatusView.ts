@@ -424,15 +424,38 @@ export class SyncStatusView extends ItemView {
         });
     }
 
+    // Checks run with bounded concurrency (each file is an independent network
+    // request) and the view is re-rendered on a throttle rather than once per
+    // file, so a large vault refreshes far faster.
+    private static readonly STATUS_CHECK_CONCURRENCY = 8;
+    private static readonly RENDER_THROTTLE_MS = 150;
+
     private async performStatusCheck(filesToCheck: Array<TFile | string>): Promise<void> {
         const total = filesToCheck.length;
         this.refreshProgress = { current: 0, total };
-        for (let i = 0; i < total; i++) {
-            const file = filesToCheck[i];
-            if (file) await this.refreshFileStatus(file);
-            this.refreshProgress.current = i + 1;
-            this.renderView();
-        }
+
+        let next = 0;
+        let lastRender = 0;
+        const maybeRender = (force = false): void => {
+            const now = Date.now();
+            if (force || now - lastRender >= SyncStatusView.RENDER_THROTTLE_MS) {
+                lastRender = now;
+                this.renderView();
+            }
+        };
+
+        const worker = async (): Promise<void> => {
+            while (next < total) {
+                const file = filesToCheck[next++];
+                if (file) await this.refreshFileStatus(file);
+                this.refreshProgress.current++;
+                maybeRender();
+            }
+        };
+
+        const workerCount = Math.min(SyncStatusView.STATUS_CHECK_CONCURRENCY, total);
+        await Promise.all(Array.from({ length: workerCount }, () => worker()));
+        maybeRender(true);
     }
 
     private async refreshFileStatus(fileOrPath: TFile | string): Promise<void> {
