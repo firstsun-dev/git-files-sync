@@ -5,6 +5,8 @@ import { GitTreeEntry } from './git-service-interface';
 export interface GitFile {
     content: string | ArrayBuffer;
     sha: string;
+    isSymlink?: boolean;
+    symlinkTarget?: string;
 }
 
 // Git file mode for a symbolic link. Symlinks are stored as blobs whose content

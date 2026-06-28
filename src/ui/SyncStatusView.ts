@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setIcon, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
-import { getServiceName } from '../settings';
+import { getServiceName, getEffectiveSymlinkHandling } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
 import { logger } from '../utils/logger';
 import { type FileStatus, type FilterValue } from './types';
@@ -309,7 +309,7 @@ export class SyncStatusView extends ItemView {
 
         // Map remote paths to vault paths
         const remoteMap = new Map<string, string>(); // vaultPath -> remoteFullPath
-        const skipSymlinks = this.plugin.settings.symlinkHandling === 'skip';
+        const skipSymlinks = getEffectiveSymlinkHandling(this.plugin.settings) === 'skip';
         for (const entry of remoteEntries) {
             if (entry.symlink && skipSymlinks) continue; // Symlink handling: skip
             const normalized = this.getNormalizedRemotePath(entry.path);

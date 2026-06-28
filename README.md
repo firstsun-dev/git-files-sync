@@ -98,6 +98,7 @@ Go to **Settings** > **Git File Sync** and select **GitLab**, **GitHub**, or **G
 - **Branch**: Specify the target branch (default: `main`).
 - **Root Path**: Prefix for files in the repository (e.g., `notes/`).
 - **Vault Folder**: Limit sync to a specific folder in your vault.
+- **Symbolic links**: Choose how symlinks are synced — *real* (recreate the link, GitHub only), *follow* (sync the target's content), or *skip*. See [Symbolic link handling](docs/symlink-handling.md).
 
 ---
 

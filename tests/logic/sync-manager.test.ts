@@ -113,6 +113,18 @@ describe('SyncManager', () => {
         );
     });
 
+    it('does not overwrite a remote symlink on push (follow mode safety)', async () => {
+        const mockFile = Object.assign(new TFile(), { path: 'link.md', name: 'link.md' });
+        vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: 'link-sha', isSymlink: true, symlinkTarget: '../x.md' });
+        const pushSpy = vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'link.md', sha: 'new' });
+
+        await manager.pushFile(mockFile);
+
+        // The remote symlink must be left untouched.
+        expect(pushSpy).not.toHaveBeenCalled();
+    });
+
     it('should detect conflict when remote SHA differs from last synced SHA', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
 
