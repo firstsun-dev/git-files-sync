@@ -220,14 +220,72 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockApp.vault.read).mockResolvedValue('content');
             vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: newPath, sha: 'new-sha' });
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'content', sha: 'new-sha' });
+            vi.mocked(mockGitService.getFile).mockImplementation(async (path) => {
+                // Remote still has the old path with matching content: confirms a real rename.
+                if (path === oldPath) return { content: 'content', sha: 'sha' };
+                // New path does not exist on the remote yet.
+                return { content: '', sha: '' };
+            });
 
             const results = await manager.pushAllFiles([mockFile]);
 
             expect(results.success).toBe(1);
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
-                newPath, 'content', 'main', `Rename ${oldPath} to ${newPath}`, undefined
+                newPath, 'content', 'main', `Rename ${oldPath} to ${newPath}`, ''
             );
+        });
+
+        it('should send existing sha when rename target already exists remotely (avoids 422)', async () => {
+            const oldPath = 'old.md';
+            const newPath = 'new.md';
+            const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
+            mockSettings.syncMetadata = {
+                [oldPath]: { lastSyncedSha: 'sha', lastSyncedAt: 0, lastKnownPath: oldPath }
+            };
+
+            vi.mocked(mockApp.vault.getFileByPath).mockImplementation(p => p === oldPath ? null : mockFile);
+            vi.mocked(mockApp.vault.read).mockResolvedValue('content');
+            vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            vi.mocked(mockGitService.getFile).mockImplementation(async (path) => {
+                // Remote still has the old path with matching content: confirms a real rename.
+                if (path === oldPath) return { content: 'content', sha: 'sha' };
+                // A file already exists on the remote at the new path.
+                return { content: 'old remote content', sha: 'remote-existing-sha' };
+            });
+
+            const results = await manager.pushAllFiles([mockFile]);
+
+            expect(results.success).toBe(1);
+            expect(mockGitService.pushFile).toHaveBeenCalledWith(
+                newPath, 'content', 'main', `Rename ${oldPath} to ${newPath}`, 'remote-existing-sha'
+            );
+        });
+
+        it('does not misclassify an unrelated push as a rename just because an orphaned metadata entry exists', async () => {
+            const orphanedPath = 'deleted-unrelated-note.md';
+            const pushedPath = 'unrelated.md';
+            const mockFile = Object.assign(new TFile(), { path: pushedPath, name: 'unrelated.md' });
+            mockSettings.syncMetadata = {
+                [orphanedPath]: { lastSyncedSha: 'orphaned-sha', lastSyncedAt: 0, lastKnownPath: orphanedPath }
+            };
+
+            vi.mocked(mockApp.vault.getFileByPath).mockImplementation(p => p === orphanedPath ? null : mockFile);
+            vi.mocked(mockApp.vault.read).mockResolvedValue('unrelated content');
+            vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: pushedPath, sha: 'new-sha' });
+            vi.mocked(mockGitService.getFile).mockImplementation(async (path) => {
+                if (path === orphanedPath) return { content: 'totally different content', sha: 'orphaned-sha' };
+                return { content: 'old content', sha: 'remote-sha' };
+            });
+
+            const results = await manager.pushAllFiles([mockFile]);
+
+            expect(results.success).toBe(1);
+            expect(mockGitService.pushFile).toHaveBeenCalledWith(
+                pushedPath, 'unrelated content', 'main', `Update ${mockFile.name} from Obsidian`, 'remote-sha'
+            );
+            expect(mockSettings.syncMetadata[orphanedPath]).toBeDefined();
         });
     });
 });
