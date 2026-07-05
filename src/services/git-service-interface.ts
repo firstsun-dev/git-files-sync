@@ -1,3 +1,5 @@
+import { ConnectionTestResult } from './git-service-base';
+
 export interface GitFile {
     content: string | ArrayBuffer;
     sha: string;
@@ -17,7 +19,8 @@ export interface GitServiceInterface {
     updateConfig(...args: unknown[]): void;
     getFile(path: string, branch: string): Promise<GitFile>;
     pushFile(path: string, content: string | ArrayBuffer, branch: string, commitMessage: string, existingSha?: string): Promise<{ path: string, sha?: string }>;
-    testConnection(): Promise<boolean>;
+    /** Checks the repository is reachable and the given branch exists. */
+    testConnection(branch: string): Promise<ConnectionTestResult>;
     listFiles(branch: string, useFilter?: boolean): Promise<string[]>;
     /** Like listFiles but also reports which entries are symbolic links (mode 120000). */
     listFilesDetailed(branch: string, useFilter?: boolean): Promise<GitTreeEntry[]>;

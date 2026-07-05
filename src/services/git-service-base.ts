@@ -43,6 +43,15 @@ export interface GitLabTreeItem {
     mode?: string;
 }
 
+export interface ConnectionTestResult {
+    /** Whether the repository/project itself was reachable with the given credentials. */
+    repoOk: boolean;
+    /** Whether the configured branch was found. Only meaningful when repoOk is true. */
+    branchOk: boolean;
+    /** Populated when repoOk is false, describing the repo-level failure. */
+    error?: string;
+}
+
 export abstract class BaseGitService {
     protected token: string = '';
     protected rootPath: string = '';
@@ -197,6 +206,22 @@ export abstract class BaseGitService {
         throw e;
     }
 
+    /**
+     * Rethrows a branch-resolution failure (e.g. the "resolve branch to a commit"
+     * request in listFilesDetailed) with a message that names the branch, since a
+     * bare "404" gives no clue that the configured Branch setting is the problem.
+     */
+    protected branchNotFoundError(e: unknown, branch: string): Error {
+        if (e instanceof Error && e.message.includes('404')) {
+            return new Error(
+                `Branch "${branch}" was not found in the repository. Check the Branch setting, ` +
+                'or confirm the repository actually has a branch with this name (its default branch ' +
+                'might be "master" instead of "main", or the repository may have no commits yet).'
+            );
+        }
+        return e instanceof Error ? e : new Error(String(e));
+    }
+
     async getRepoGitignores(branch: string): Promise<string[]> {
         try {
             const allFiles = await this.listFiles(branch, false); // Fetch ALL files to find gitignores
@@ -215,5 +240,5 @@ export abstract class BaseGitService {
     abstract pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }>;
     abstract listFilesDetailed(branch: string, useFilter?: boolean): Promise<GitTreeEntry[]>;
     abstract deleteFile(path: string, branch: string, message: string): Promise<void>;
-    abstract testConnection(): Promise<boolean>;
+    abstract testConnection(branch: string): Promise<ConnectionTestResult>;
 }

@@ -1,5 +1,5 @@
 import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
-import { BaseGitService, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
+import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
 import { logger } from '../utils/logger';
 
 export class GitHubService extends BaseGitService implements GitServiceInterface {
@@ -97,8 +97,13 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
         const url = `https://api.github.com/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
-        const response = await this.safeRequest(url, 'GET');
-        const data = this.parseJson<GitHubTreeResponse>(response);
+        let data: GitHubTreeResponse;
+        try {
+            const response = await this.safeRequest(url, 'GET');
+            data = this.parseJson<GitHubTreeResponse>(response);
+        } catch (e) {
+            throw this.branchNotFoundError(e, branch);
+        }
 
         if (data.truncated) {
             logger.warn('GitHub tree result is truncated. Some files might not be shown.');
@@ -129,13 +134,20 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         await this.safeRequest(url, 'DELETE', body);
     }
 
-    async testConnection(): Promise<boolean> {
+    async testConnection(branch: string): Promise<ConnectionTestResult> {
         try {
             const url = `https://api.github.com/repos/${this.owner}/${this.repo}`;
             await this.safeRequest(url, 'GET');
-            return true;
+        } catch (e) {
+            return { repoOk: false, branchOk: false, error: e instanceof Error ? e.message : String(e) };
+        }
+
+        try {
+            const branchUrl = `https://api.github.com/repos/${this.owner}/${this.repo}/branches/${branch}`;
+            await this.safeRequest(branchUrl, 'GET', undefined, undefined, true);
+            return { repoOk: true, branchOk: true };
         } catch {
-            return false;
+            return { repoOk: true, branchOk: false };
         }
     }
 

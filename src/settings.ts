@@ -174,8 +174,18 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.setButtonText('Test connection')
 				.onClick(async () => {
 					try {
-						await this.plugin.gitService.testConnection();
-						new Notice(`${getServiceName(this.plugin.settings)} connection successful!`);
+						const result = await this.plugin.gitService.testConnection(this.plugin.settings.branch);
+						if (!result.repoOk) {
+							new Notice(`Connection failed: ${result.error ?? 'could not reach the repository'}`);
+						} else if (!result.branchOk) {
+							new Notice(
+								`Connected, but branch "${this.plugin.settings.branch}" was not found. ` +
+								'Check the Branch setting, or confirm the repository has a branch with this name.',
+								8000
+							);
+						} else {
+							new Notice(`${getServiceName(this.plugin.settings)} connection successful!`);
+						}
 					} catch (e: unknown) {
 						const message = e instanceof Error ? e.message : String(e);
 						new Notice(`Connection failed: ${message}`);

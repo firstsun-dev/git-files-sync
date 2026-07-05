@@ -179,6 +179,11 @@ describe('GiteaService', () => {
             expect(result).toEqual(['file1.md']);
             warnSpy.mockRestore();
         });
+
+        it('should throw a message naming the branch when the branch is not found', async () => {
+            mockRequest({ status: 404, json: { message: 'branch does not exist' }, text: 'branch does not exist' });
+            await expect(service.listFiles('missing-branch')).rejects.toThrow(/Branch "missing-branch" was not found/);
+        });
     });
 
     describe('deleteFile', () => {
@@ -216,9 +221,18 @@ describe('GiteaService', () => {
 
         it('should call the correct repo API URL', async () => {
             mockRequest({ status: 200, json: {} });
-            await service.testConnection();
-            const call = getLastRequestCall();
-            expect(call.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}`);
+            await service.testConnection('main');
+            const calls = vi.mocked(requestUrl).mock.calls;
+            const firstCall = calls[0]?.[0] as RequestUrlParam;
+            expect(firstCall.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}`);
+        });
+
+        it('should report branchOk: false when the branch is not found', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 404, json: { message: 'not found' }, text: 'not found' } as unknown as RequestUrlResponse);
+            const result = await service.testConnection('missing-branch');
+            expect(result).toEqual({ repoOk: true, branchOk: false });
         });
     });
 

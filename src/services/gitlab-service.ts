@@ -1,5 +1,5 @@
 import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
-import { BaseGitService, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
+import { BaseGitService, ConnectionTestResult, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
 
 export class GitLabService extends BaseGitService implements GitServiceInterface {
     private baseUrl: string = 'https://gitlab.com';
@@ -63,8 +63,13 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
         while (true) {
             const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/tree?ref=${branch}&recursive=true&per_page=${perPage}&page=${page}`;
-            const response = await this.safeRequest(url, 'GET');
-            const data = this.parseJson<GitLabTreeItem[]>(response);
+            let data: GitLabTreeItem[];
+            try {
+                const response = await this.safeRequest(url, 'GET');
+                data = this.parseJson<GitLabTreeItem[]>(response);
+            } catch (e) {
+                throw this.branchNotFoundError(e, branch);
+            }
 
             if (!data || data.length === 0) break;
 
@@ -100,14 +105,22 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         await this.safeRequest(url, 'DELETE', body);
     }
 
-    async testConnection(): Promise<boolean> {
+    async testConnection(branch: string): Promise<ConnectionTestResult> {
+        const encodedProjectId = encodeURIComponent(this.projectId);
         try {
-            const encodedProjectId = encodeURIComponent(this.projectId);
             const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}`;
             await this.safeRequest(url, 'GET');
-            return true;
+        } catch (e) {
+            return { repoOk: false, branchOk: false, error: e instanceof Error ? e.message : String(e) };
+        }
+
+        try {
+            const encodedBranch = encodeURIComponent(branch);
+            const branchUrl = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/branches/${encodedBranch}`;
+            await this.safeRequest(branchUrl, 'GET', undefined, undefined, true);
+            return { repoOk: true, branchOk: true };
         } catch {
-            return false;
+            return { repoOk: true, branchOk: false };
         }
     }
 
