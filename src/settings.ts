@@ -1,4 +1,4 @@
-import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
+import {App, PluginSettingTab, Setting, Notice, TextComponent, SettingDefinitionItem} from 'obsidian';
 import GitLabFilesPush from "./main";
 
 export interface SyncMetadata {
@@ -83,9 +83,30 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	// Kept as a fallback for Obsidian < 1.13.0 (this plugin's minAppVersion),
+	// which don't know about getSettingDefinitions() and always call display().
 	display(): void {
-		const {containerEl} = this;
+		this.renderSettings(this.containerEl);
+	}
 
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [{
+			name: '',
+			render: (_setting, group) => {
+				this.renderSettings(group.listEl);
+			}
+		}];
+	}
+
+	private refresh(): void {
+		if (typeof this.update === 'function') {
+			this.update();
+		} else {
+			this.renderSettings(this.containerEl);
+		}
+	}
+
+	private renderSettings(containerEl: HTMLElement): void {
 		containerEl.empty();
 
 		new Setting(containerEl)
@@ -100,7 +121,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.serviceType = value as GitServiceType;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
-					this.display();
+					this.refresh();
 				}));
 
 		new Setting(containerEl).setName('').setHeading();
