@@ -48,6 +48,6 @@
 	},
 	"dependencies": {
 		"ignore": "^7.0.5",
-		"obsidian": "latest"
+		"obsidian": "^1.13.1"
 	}
 }
