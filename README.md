@@ -8,6 +8,11 @@
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg?style=flat-square)](https://conventionalcommits.org)
 [![License](https://img.shields.io/github/license/firstsun-dev/git-files-sync?style=flat-square)](LICENSE)
 
+**Supports:**
+<img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub" height="20">
+<img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab" height="20">
+<img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea" height="20">
+
 **Git File Sync** is a powerful Obsidian plugin that enables seamless synchronization of individual notes with GitLab, GitHub, or self-hosted Gitea repositories. Unlike full-vault sync solutions, it gives you granular control over what gets pushed and pulled, making it perfect for shared projects, selective backups, and cross-platform workflows.
 
 [繁體中文使用說明](USAGE_zh.md)

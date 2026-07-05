@@ -143,7 +143,7 @@ export class SyncStatusView extends ItemView {
             });
             // Share the status icon set with the file list so tabs never drift.
             if (tab.value !== 'all') {
-                setIcon(btn.createSpan(), statusMeta(tab.value as FileStatus['status']).icon);
+                setIcon(btn.createSpan(), statusMeta(tab.value).icon);
             }
             btn.createSpan({ cls: 'ssv-tab-label', text: ` ${tab.label}` });
             const count = counts[tab.value];
@@ -252,7 +252,7 @@ export class SyncStatusView extends ItemView {
                 await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
             }
 
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => window.setTimeout(r, 500));
             await this.refreshFileStatus(fileStatus.file || fileStatus.path);
             this.renderView();
         } catch (e) {
