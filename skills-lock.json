@@ -1,6 +1,24 @@
 {
   "version": 1,
   "skills": {
+    "clean-code": {
+      "source": "firstsun-dev/skills",
+      "sourceType": "github",
+      "skillPath": "external/develop/code-quality/clean-code/SKILL.md",
+      "computedHash": "3f3c09033d11ce887e64d99c3639faf011355cb73c5d6891da05efe8004956f2"
+    },
+    "design-taste-frontend": {
+      "source": "firstsun-dev/skills",
+      "sourceType": "github",
+      "skillPath": "external/develop/frontend/design-taste-frontend/SKILL.md",
+      "computedHash": "6d838b246d0e35d0b53f4f23f98ba7a1dd561937e64f7d0c7553b0928e376c3e"
+    },
+    "frontend-design": {
+      "source": "firstsun-dev/skills",
+      "sourceType": "github",
+      "skillPath": "external/develop/frontend/frontend-design/SKILL.md",
+      "computedHash": "4eabc66183767153e404b39d1b839b1c37f2d82d86f0a0d7e880a579d8d62336"
+    },
     "obsidian-development": {
       "source": "firstsun-dev/skills",
       "sourceType": "github",
