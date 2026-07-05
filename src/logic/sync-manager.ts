@@ -6,6 +6,9 @@ import { logger } from '../utils/logger';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 import { readLocalSymlinkTarget, createLocalSymlink } from '../utils/symlink';
 
+/** Result of syncing one file within a batch push/pull. */
+type BatchOutcome = 'done' | 'unchanged' | 'conflict';
+
 export class SyncManager {
     private readonly app: App;
     private gitService: GitServiceInterface;
@@ -331,11 +334,11 @@ export class SyncManager {
         new Notice(`${message}: ${detail}`);
     }
 
-    async pushAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
+    async pushAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
         return this.processBatch(files, 'push', onProgress);
     }
 
-    async pullAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
+    async pullAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
         return this.processBatch(files, 'pull', onProgress);
     }
 
@@ -343,8 +346,8 @@ export class SyncManager {
         files: (TFile | string)[],
         op: 'push' | 'pull',
         onProgress?: (current: number, total: number, fileName: string) => void
-    ): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
-        const results = { success: 0, failed: 0, errors: [] as Array<{ file: string; error: string }> };
+    ): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
+        const results = { success: 0, failed: 0, conflicts: 0, errors: [] as Array<{ file: string; error: string }> };
 
         for (let i = 0; i < files.length; i++) {
             const fileOrPath = files[i];
@@ -354,13 +357,12 @@ export class SyncManager {
             onProgress?.(i + 1, files.length, name);
 
             try {
-                let performed = false;
-                if (op === 'push') {
-                    performed = await this.processSingleBatchPush(fileOrPath, path, name, isString);
-                } else {
-                    performed = await this.processSingleBatchPull(fileOrPath, path, name, isString);
-                }
-                if (performed) results.success++;
+                const outcome = op === 'push'
+                    ? await this.processSingleBatchPush(fileOrPath, path, name, isString)
+                    : await this.processSingleBatchPull(fileOrPath, path, name, isString);
+
+                if (outcome === 'done') results.success++;
+                else if (outcome === 'conflict') results.conflicts++;
             } catch (e) {
                 logger.error(`Failed to ${op} ${path}:`, e);
                 results.failed++;
@@ -369,15 +371,18 @@ export class SyncManager {
         }
 
         await this.saveSettings();
-        this.notifyBatchResult(op, results.success, results.failed);
+        this.notifyBatchResult(op, results.success, results.failed, results.conflicts);
 
         return results;
     }
 
-    private notifyBatchResult(op: 'push' | 'pull', success: number, failed: number): void {
+    private notifyBatchResult(op: 'push' | 'pull', success: number, failed: number, conflicts: number): void {
         const opName = op === 'push' ? 'Pushed' : 'Pulled';
         if (success > 0) {
             new Notice(`${opName} ${success} file(s) to ${this.serviceName}`);
+        }
+        if (conflicts > 0) {
+            new Notice(`Skipped ${conflicts} file(s) with conflicting changes on both sides. Push or pull each one individually to resolve.`, 8000);
         }
         if (failed > 0) {
             new Notice(`Failed to ${op} ${failed} file(s). Check console for details.`);
@@ -421,13 +426,13 @@ export class SyncManager {
         }
     }
 
-    private async processSingleBatchPush(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<boolean> {
+    private async processSingleBatchPush(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<BatchOutcome> {
         if (!await this.checkFileExists(path, isString)) throw new Error('File no longer exists');
 
         // Symbolic link handling: real → push as a symlink (GitHub), skip → ignore.
         const symlinkTarget = readLocalSymlinkTarget(this.app, path);
         if (symlinkTarget !== null && await this.handleSymlinkPush({ path, name }, symlinkTarget, true)) {
-            return getEffectiveSymlinkHandling(this.settings) !== 'skip';
+            return getEffectiveSymlinkHandling(this.settings) !== 'skip' ? 'done' : 'unchanged';
         }
 
         const content = await this.getFileContent(fileOrPath);
@@ -438,26 +443,36 @@ export class SyncManager {
             const renamedFrom = this.detectRename(fileOrPath);
             if (renamedFrom) {
                 await this.handleRename(fileOrPath, renamedFrom, content);
-                return true;
+                return 'done';
             }
         }
 
         const remote = await this.gitService.getFile(repoPath, this.settings.branch);
 
         // Don't convert a remote symlink into a regular file.
-        if (remote.isSymlink) return false;
+        if (remote.isSymlink) return 'unchanged';
 
         // Skip if already in sync
         if (remote.sha && this.contentsEqual(content, remote.content)) {
             await this.updateMetadata(path, remote.sha);
-            return false;
+            return 'unchanged';
+        }
+
+        // Same conflict check as the single-file flow: if the remote has moved on
+        // from what we last synced, overwriting it here would silently discard
+        // whatever changed on the remote. Skip it instead of force-pushing so the
+        // batch action can't quietly clobber changes the way a single push would
+        // stop and ask about via SyncConflictModal.
+        const lastSynced = this.settings.syncMetadata[path];
+        if (remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
+            return 'conflict';
         }
 
         await this.performPush({ path, name }, content, remote.sha || undefined, true);
-        return true;
+        return 'done';
     }
 
-    private async processSingleBatchPull(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<boolean> {
+    private async processSingleBatchPull(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<BatchOutcome> {
         const repoPath = this.getNormalizedPath(path);
         const remote = await this.gitService.getFile(repoPath, this.settings.branch);
         if (!remote.sha) throw new Error('File not found in remote');
@@ -467,12 +482,18 @@ export class SyncManager {
             const localContent = await this.getFileContent(fileOrPath);
             if (this.contentsEqual(localContent, remote.content)) {
                 await this.updateMetadata(path, remote.sha);
-                return false;
+                return 'unchanged';
+            }
+
+            // Same conflict check as the single-file flow (see processSingleBatchPush).
+            const lastSynced = this.settings.syncMetadata[path];
+            if (lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
+                return 'conflict';
             }
         }
 
         const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
         await this.performPull(fileRep, remote.content, remote.sha, true, this.symlinkPullTarget(remote));
-        return true;
+        return 'done';
     }
 }

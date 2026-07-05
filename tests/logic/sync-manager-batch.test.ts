@@ -151,6 +151,62 @@ describe('SyncManager Batch Operations', () => {
         });
     });
 
+    describe('batch conflict detection', () => {
+        it('should skip (not overwrite) a push when the remote has moved on since last sync', async () => {
+            const path = 'conflicted.md';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'sha-at-last-sync', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('local edit');
+            // Remote sha differs from what we last synced, and content differs too.
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote edit', sha: 'sha-changed-on-remote' });
+
+            const results = await manager.pushAllFiles([path]);
+
+            expect(results.success).toBe(0);
+            expect(results.conflicts).toBe(1);
+            expect(results.failed).toBe(0);
+            expect(mockGitService.pushFile).not.toHaveBeenCalled();
+        });
+
+        it('should skip (not overwrite) a pull when the local file has diverged since last sync', async () => {
+            const path = 'conflicted.md';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'sha-at-last-sync', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('local edit');
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote edit', sha: 'sha-changed-on-remote' });
+
+            const results = await manager.pullAllFiles([path]);
+
+            expect(results.success).toBe(0);
+            expect(results.conflicts).toBe(1);
+            expect(results.failed).toBe(0);
+            expect(mockApp.vault.adapter.write).not.toHaveBeenCalled();
+        });
+
+        it('should still push normally when there is no prior sync metadata (not a conflict)', async () => {
+            const path = 'new-file.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('local content');
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote content', sha: 'some-sha' });
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path, sha: 'new-sha' });
+
+            const results = await manager.pushAllFiles([path]);
+
+            expect(results.success).toBe(1);
+            expect(results.conflicts).toBe(0);
+        });
+    });
+
     describe('batch push with rename detection', () => {
         it('should detect and handle rename during batch push', async () => {
             const oldPath = 'old.md';
