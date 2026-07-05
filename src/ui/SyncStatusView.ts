@@ -225,7 +225,7 @@ export class SyncStatusView extends ItemView {
     // ── Single-file operations ──────────────────────────────────────
 
     private async handleLocalDelete(fileStatus: FileStatus): Promise<void> {
-        const confirmed = await this.showConfirmDialog(`Delete local file "${fileStatus.path}"?`);
+        const confirmed = await this.showConfirmDialog(`Delete local file "${fileStatus.path}"? Handled per your vault's "Deleted files" setting.`);
         if (!confirmed) return;
         try {
             if (fileStatus.file) {
@@ -631,10 +631,19 @@ export class SyncStatusView extends ItemView {
     }
 
     private async confirmDeletion(localCount: number, remoteCount: number): Promise<boolean> {
+        // Local deletes go through Obsidian's own trash handling, whose actual
+        // destination (vault .trash/, OS trash, or permanent) depends on the
+        // user's "Deleted files" setting — not something this plugin can read.
+        // So local wording defers to that setting rather than promising
+        // recoverability; remote deletes are unconditionally permanent.
         let msg = '';
-        if (localCount > 0 && remoteCount > 0) msg = `Delete ${localCount} local + ${remoteCount} remote file(s)? Cannot be undone.`;
-        else if (localCount > 0) msg = `Delete ${localCount} local file(s)? Cannot be undone.`;
-        else msg = `Delete ${remoteCount} remote file(s)? Cannot be undone.`;
+        if (localCount > 0 && remoteCount > 0) {
+            msg = `Delete ${localCount} local file(s) (per your vault's trash setting) and ${remoteCount} remote file(s) (cannot be undone)?`;
+        } else if (localCount > 0) {
+            msg = `Delete ${localCount} local file(s)? They'll be handled per your vault's "Deleted files" setting.`;
+        } else {
+            msg = `Delete ${remoteCount} remote file(s)? This cannot be undone.`;
+        }
         return this.showConfirmDialog(msg);
     }
 
