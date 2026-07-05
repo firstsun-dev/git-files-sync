@@ -51,10 +51,15 @@ const mockSettings: GitLabFilesPushSettings = {
     githubToken: '',
     githubOwner: '',
     githubRepo: '',
+    giteaToken: '',
+    giteaBaseUrl: '',
+    giteaOwner: '',
+    giteaRepo: '',
     branch: 'main',
     rootPath: '',
     syncMetadata: {},
-    vaultFolder: ''
+    vaultFolder: '',
+    symlinkHandling: 'real'
 };
 
 describe('SyncManager', () => {
@@ -86,6 +91,38 @@ describe('SyncManager', () => {
             'Update test.md from Obsidian',
             'old-sha'
         );
+    });
+
+    it('falls back to the adapter when vault.read fails (e.g. symlinked file)', async () => {
+        const mockFile = Object.assign(new TFile(), { path: 'link.md', name: 'link.md' });
+        const readSpy = vi.spyOn(mockApp.vault, 'read').mockRejectedValue(new Error('EINVAL: symlink'));
+        const adapterReadSpy = vi.spyOn(mockApp.vault.adapter, 'read').mockResolvedValue('linked content');
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'different content', sha: 'old-sha' });
+        const pushSpy = vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'link.md', sha: 'new-sha' });
+
+        await manager.pushFile(mockFile);
+
+        expect(readSpy).toHaveBeenCalledWith(mockFile);
+        expect(adapterReadSpy).toHaveBeenCalledWith('link.md');
+        expect(pushSpy).toHaveBeenCalledWith(
+            'link.md',
+            'linked content',
+            'main',
+            'Update link.md from Obsidian',
+            'old-sha'
+        );
+    });
+
+    it('does not overwrite a remote symlink on push (follow mode safety)', async () => {
+        const mockFile = Object.assign(new TFile(), { path: 'link.md', name: 'link.md' });
+        vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: 'link-sha', isSymlink: true, symlinkTarget: '../x.md' });
+        const pushSpy = vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'link.md', sha: 'new' });
+
+        await manager.pushFile(mockFile);
+
+        // The remote symlink must be left untouched.
+        expect(pushSpy).not.toHaveBeenCalled();
     });
 
     it('should detect conflict when remote SHA differs from last synced SHA', async () => {
@@ -271,6 +308,12 @@ describe('SyncManager', () => {
             });
 
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
+            vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
+                // Remote still has the old path with the same content: confirms a real rename.
+                if (path === oldPath) return { content: 'content', sha: 'old-sha' };
+                // New path does not exist on the remote yet.
+                return { content: '', sha: '' };
+            });
             vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
 
             await manager.pushFile(mockFile);
@@ -280,10 +323,94 @@ describe('SyncManager', () => {
                 'content',
                 'main',
                 `Rename ${oldPath} to ${newPath}`,
-                undefined
+                ''
             );
             expect(mockSettings.syncMetadata[oldPath]).toBeUndefined();
             expect(mockSettings.syncMetadata[newPath]?.lastSyncedSha).toBe('new-sha');
+        });
+
+        it('should send the existing sha when the renamed-to path already exists remotely (avoids 422 "file already exists")', async () => {
+            const oldPath = 'old.md';
+            const newPath = 'new.md';
+            const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
+
+            mockSettings.syncMetadata[oldPath] = {
+                lastSyncedSha: 'old-sha',
+                lastSyncedAt: Date.now(),
+                lastKnownPath: oldPath
+            };
+
+            vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation((path) => {
+                if (path === oldPath) return null;
+                if (path === newPath) return mockFile;
+                return null;
+            });
+
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
+            vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
+                // Remote still has the old path with matching content: confirms a real rename.
+                if (path === oldPath) return { content: 'content', sha: 'old-sha' };
+                // A file already exists on the remote at the new path (e.g. from a prior push).
+                return { content: 'old remote content', sha: 'remote-existing-sha' };
+            });
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
+
+            await manager.pushFile(mockFile);
+
+            expect(mockGitLab.pushFile).toHaveBeenCalledWith(
+                newPath,
+                'content',
+                'main',
+                `Rename ${oldPath} to ${newPath}`,
+                'remote-existing-sha'
+            );
+            expect(mockSettings.syncMetadata[oldPath]).toBeUndefined();
+            expect(mockSettings.syncMetadata[newPath]?.lastSyncedSha).toBe('new-sha');
+        });
+
+        it('does not misclassify an unrelated push as a rename just because an orphaned metadata entry exists', async () => {
+            // Regression test: a local delete that never cleared its syncMetadata entry
+            // used to make detectRename treat ANY later, unrelated push as "renamed from"
+            // that orphaned path -- because it only checked "does the old path's file no
+            // longer exist in the vault", without verifying the content actually matches.
+            const orphanedPath = 'deleted-unrelated-note.md';
+            const pushedPath = 'shinyi-muyu-tutorial.md';
+            const mockFile = Object.assign(new TFile(), { path: pushedPath, name: 'shinyi-muyu-tutorial.md' });
+
+            mockSettings.syncMetadata[orphanedPath] = {
+                lastSyncedSha: 'orphaned-sha',
+                lastSyncedAt: Date.now(),
+                lastKnownPath: orphanedPath
+            };
+
+            // The orphaned file is gone from the vault (it was deleted, not renamed).
+            vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation((path) => {
+                if (path === orphanedPath) return null;
+                if (path === pushedPath) return mockFile;
+                return null;
+            });
+
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('unrelated content');
+            vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
+                // The orphaned path's remote content is unrelated to what's being pushed now.
+                if (path === orphanedPath) return { content: 'totally different content', sha: 'orphaned-sha' };
+                // Normal push target: already exists remotely with older content.
+                return { content: 'old content', sha: 'remote-sha' };
+            });
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: pushedPath, sha: 'new-sha' });
+
+            await manager.pushFile(mockFile);
+
+            // Must be treated as a normal update, not a rename from the orphaned path.
+            expect(mockGitLab.pushFile).toHaveBeenCalledWith(
+                pushedPath,
+                'unrelated content',
+                'main',
+                `Update ${mockFile.name} from Obsidian`,
+                'remote-sha'
+            );
+            // The orphaned entry must be left alone -- it wasn't the source of this push.
+            expect(mockSettings.syncMetadata[orphanedPath]).toBeDefined();
         });
     });
 
@@ -309,6 +436,11 @@ describe('SyncManager', () => {
             
             vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation(p => p === oldPath ? null : mockFile);
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('c');
+            vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
+                // Remote still has the old path with matching content: confirms a real rename.
+                if (path === oldPath) return { content: 'c', sha: 's' };
+                return { content: '', sha: '' };
+            });
             vi.spyOn(mockGitLab, 'pushFile').mockRejectedValue(new Error('Rename failed'));
 
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

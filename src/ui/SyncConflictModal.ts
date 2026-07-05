@@ -55,7 +55,7 @@ export class SyncConflictModal extends Modal {
             .addButton(btn => btn
                 .setButtonText('Keep remote')
                 .setTooltip('Overwrite local with remote content')
-                .setWarning()
+                .setDestructive()
                 .onClick(() => {
                     this.onChoose('remote');
                     this.close();

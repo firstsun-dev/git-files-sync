@@ -18,7 +18,37 @@ jobs:
     uses: firstsun-dev/.github/.github/workflows/obsidian-plugin-ci.yml@v1
     with:
       plugin-id: "git-file-sync"
-      skip-sonar: ${{ vars.ENABLE_CI_SONAR != 'true' }}
     secrets:
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  build-artifact:
+    name: Upload build artifact
+    runs-on: ubuntu-latest
+    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Set artifact name
+        id: artifact
+        run: |
+          BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "name=plugin-${BRANCH}-${SHA}" >> $GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: |
+            main.js
+            manifest.json
+            styles.css
+          retention-days: 7

@@ -55,6 +55,49 @@ describe('GitHubService', () => {
         });
     });
 
+    describe('getFile symlink detection', () => {
+        it('flags a symlink response and returns its target', async () => {
+            mockRequest({ status: 200, json: { type: 'symlink', target: '../shared/note.md', sha: 'link-sha' } });
+            const result = await service.getFile('link.md', 'main');
+            expect(result).toEqual({ content: '', sha: 'link-sha', isSymlink: true, symlinkTarget: '../shared/note.md' });
+        });
+
+        it('treats a normal file response as non-symlink', async () => {
+            mockRequest({ status: 200, json: { content: btoa('hello'), sha: 'sha', type: 'file' } });
+            const result = await service.getFile('note.md', 'main');
+            expect(result.isSymlink).toBeUndefined();
+            expect(result.content).toBe('hello');
+        });
+    });
+
+    describe('pushSymlink (Git Data API)', () => {
+        it('creates a blob, tree (mode 120000), commit, and moves the ref', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse) // get ref
+                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)      // get commit
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob1' } } as unknown as RequestUrlResponse)               // create blob
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)               // create tree
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)             // create commit
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                            // update ref
+
+            const result = await service.pushSymlink('link.md', '../target.md', 'main', 'add link');
+
+            expect(result).toEqual({ path: 'link.md', sha: 'blob1' });
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            expect(calls).toHaveLength(6);
+            // blob carries the target as utf-8
+            const blobBody = JSON.parse(calls[2]?.body as string) as { content: string; encoding: string };
+            expect(blobBody).toEqual({ content: '../target.md', encoding: 'utf-8' });
+            // tree entry uses symlink mode 120000
+            const treeBody = JSON.parse(calls[3]?.body as string) as { base_tree: string; tree: Array<{ path: string; mode: string; type: string; sha: string }> };
+            expect(treeBody.base_tree).toBe('tree1');
+            expect(treeBody.tree[0]).toEqual({ path: 'link.md', mode: '120000', type: 'blob', sha: 'blob1' });
+            // ref update points at the new commit
+            expect(calls[5]?.method).toBe('PATCH');
+            expect(JSON.parse(calls[5]?.body as string)).toEqual({ sha: 'commit2' });
+        });
+    });
+
     describe('pushFile', () => {
         it('should push new file correctly (no sha provided)', async () => {
             vi.mocked(requestUrl).mockResolvedValueOnce({
@@ -67,6 +110,21 @@ describe('GitHubService', () => {
             expect(result).toEqual({ path: 'new.md', sha: 'new-sha' });
             const call = getLastRequestCall();
             expect(call.method).toBe('PUT');
+            expect(call.body).not.toContain('"sha":');
+        });
+
+        it('should omit blank sha so creating a new file does not 422', async () => {
+            // A 404 lookup yields sha === '' for new files; an empty sha sent to
+            // GitHub causes HTTP 422, so it must be dropped from the request body.
+            vi.mocked(requestUrl).mockResolvedValueOnce({
+                status: 201,
+                json: { content: { path: 'new.md', sha: 'new-sha' } }
+            } as unknown as RequestUrlResponse);
+
+            const result = await service.pushFile('new.md', 'content', 'main', 'create', '');
+
+            expect(result).toEqual({ path: 'new.md', sha: 'new-sha' });
+            const call = getLastRequestCall();
             expect(call.body).not.toContain('"sha":');
         });
 
@@ -101,6 +159,18 @@ describe('GitHubService', () => {
             expect(await service.listFiles('main')).toEqual(['vault/file1.md']);
         });
 
+        it('listFilesDetailed flags symlinks (mode 120000)', async () => {
+            mockRequest({ status: 200, json: { tree: [
+                { path: 'real.md', type: 'blob', mode: '100644' },
+                { path: 'link.md', type: 'blob', mode: '120000' },
+                { path: 'dir', type: 'tree', mode: '040000' },
+            ] } });
+            expect(await service.listFilesDetailed('main')).toEqual([
+                { path: 'real.md', symlink: false },
+                { path: 'link.md', symlink: true },
+            ]);
+        });
+
         it('should not match sibling paths with same prefix as rootPath', async () => {
             service.updateConfig(token, owner, repo, 'src/content');
             mockRequest({ status: 200, json: { tree: [
@@ -120,6 +190,11 @@ describe('GitHubService', () => {
             const result = await service.listFiles('main');
             expect(result).toEqual(['file1.md', 'file2.md']);
             warnSpy.mockRestore();
+        });
+
+        it('should throw a message naming the branch when the branch is not found', async () => {
+            mockRequest({ status: 404, json: { message: 'Not Found' }, text: 'Not Found' });
+            await expect(service.listFiles('missing-branch')).rejects.toThrow(/Branch "missing-branch" was not found/);
         });
     });
 
@@ -141,6 +216,14 @@ describe('GitHubService', () => {
 
     describe('testConnection', () => {
         sharedTestConnection(() => service);
+
+        it('should report branchOk: false when the branch is not found', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 404, json: { message: 'Not Found' }, text: 'Not Found' } as unknown as RequestUrlResponse);
+            const result = await service.testConnection('missing-branch');
+            expect(result).toEqual({ repoOk: true, branchOk: false });
+        });
     });
 
     describe('getRepoGitignores', () => {

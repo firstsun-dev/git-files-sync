@@ -50,6 +50,14 @@ describe('GitLabService', () => {
             expect(call.body).toContain(btoa('new content'));
         });
 
+        it('should treat a blank sha as a new file (POST, no last_commit_id)', async () => {
+            mockRequest({ status: 201, json: { file_path: 'test.md' } });
+            await service.pushFile('test.md', 'new content', 'main', 'initial commit', '');
+            const call = getLastRequestCall();
+            expect(call.method).toBe('POST');
+            expect(call.body).not.toContain('last_commit_id');
+        });
+
         it('should push file content correctly (PUT for existing file)', async () => {
             mockRequest({ status: 200, json: { file_path: 'test.md' } });
             const result = await service.pushFile('test.md', 'updated content', 'main', 'update', 'old-sha');
@@ -77,6 +85,17 @@ describe('GitLabService', () => {
                 { path: 'other/file2.md', type: 'blob' },
             ] });
             expect(await service.listFiles('main')).toEqual(['vault/file1.md']);
+        });
+
+        it('listFilesDetailed flags symlinks (mode 120000)', async () => {
+            mockRequest({ status: 200, json: [
+                { path: 'real.md', type: 'blob', mode: '100644' },
+                { path: 'link.md', type: 'blob', mode: '120000' },
+            ] });
+            expect(await service.listFilesDetailed('main')).toEqual([
+                { path: 'real.md', symlink: false },
+                { path: 'link.md', symlink: true },
+            ]);
         });
 
         it('should not match sibling paths with same prefix as rootPath', async () => {
@@ -124,6 +143,11 @@ describe('GitLabService', () => {
             expect(result).toHaveLength(142);
             expect(vi.mocked(requestUrl)).toHaveBeenCalledTimes(2);
         });
+
+        it('should throw a message naming the branch when the branch is not found', async () => {
+            mockRequest({ status: 404, json: { message: '404 Branch Not Found' }, text: '404 Branch Not Found' });
+            await expect(service.listFiles('missing-branch')).rejects.toThrow(/Branch "missing-branch" was not found/);
+        });
     });
 
     describe('deleteFile', () => {
@@ -138,6 +162,14 @@ describe('GitLabService', () => {
 
     describe('testConnection', () => {
         sharedTestConnection(() => service);
+
+        it('should report branchOk: false when the branch is not found', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 404, json: { message: 'Branch Not Found' }, text: 'Branch Not Found' } as unknown as RequestUrlResponse);
+            const result = await service.testConnection('missing-branch');
+            expect(result).toEqual({ repoOk: true, branchOk: false });
+        });
     });
 
     describe('getRepoGitignores', () => {

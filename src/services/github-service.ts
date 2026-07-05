@@ -1,5 +1,5 @@
-import { GitServiceInterface } from './git-service-interface';
-import { BaseGitService, GitFile, GitHubContentResponse, GitHubTreeResponse } from './git-service-base';
+import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
+import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
 import { logger } from '../utils/logger';
 
 export class GitHubService extends BaseGitService implements GitServiceInterface {
@@ -26,8 +26,15 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         try {
             const url = `${this.getApiUrl(path)}?ref=${branch}`;
             const response = await this.safeRequest(url, 'GET');
-            const data = response.json as GitHubContentResponse;
-            
+            const data = this.parseJson<GitHubContentResponse & { type?: string; target?: string }>(response);
+
+            // An unresolved symlink is returned as type 'symlink' with the literal
+            // target. (Links whose target is a normal in-repo file are followed by
+            // the Contents API and come back as ordinary file content.)
+            if (data.type === 'symlink') {
+                return { content: '', sha: data.sha, isSymlink: true, symlinkTarget: data.target };
+            }
+
             return {
                 content: this.decodeContent(data.content, path),
                 sha: data.sha
@@ -39,37 +46,79 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
 
     async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
         const url = this.getApiUrl(path);
-        const body = {
+        const body: { message: string; content: string; branch: string; sha?: string } = {
             message,
             content: this.encodeContent(content),
             branch,
-            sha
         };
+        // GitHub's Contents API rejects a blank sha with HTTP 422. Only include
+        // it when updating an existing file; a 404 lookup yields sha === '' for
+        // new files, which must be created without a sha.
+        if (sha) body.sha = sha;
 
         const response = await this.safeRequest(url, 'PUT', body);
-        const data = response.json as { content: { path: string, sha: string } };
+        const data = this.parseJson<{ content: { path: string, sha: string } }>(response);
         return { path: data.content.path, sha: data.content.sha };
     }
 
-    async listFiles(branch: string, useFilter = true): Promise<string[]> {
+    async pushSymlink(path: string, target: string, branch: string, message: string): Promise<{ path: string, sha?: string }> {
+        // The Contents API can only create regular (100644) files, so symlinks
+        // (mode 120000) must be committed through the lower-level Git Data API:
+        // blob -> tree (with the symlink mode) -> commit -> move the branch ref.
+        const fullPath = this.getFullPath(path);
+        const base = `https://api.github.com/repos/${this.owner}/${this.repo}`;
+
+        const refResp = await this.safeRequest(`${base}/git/ref/heads/${branch}`, 'GET');
+        const latestCommitSha = this.parseJson<{ object: { sha: string } }>(refResp).object.sha;
+
+        const commitResp = await this.safeRequest(`${base}/git/commits/${latestCommitSha}`, 'GET');
+        const baseTreeSha = this.parseJson<{ tree: { sha: string } }>(commitResp).tree.sha;
+
+        const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', { content: target, encoding: 'utf-8' });
+        const blobSha = this.parseJson<{ sha: string }>(blobResp).sha;
+
+        const treeResp = await this.safeRequest(`${base}/git/trees`, 'POST', {
+            base_tree: baseTreeSha,
+            tree: [{ path: fullPath, mode: GIT_SYMLINK_MODE, type: 'blob', sha: blobSha }],
+        });
+        const newTreeSha = this.parseJson<{ sha: string }>(treeResp).sha;
+
+        const newCommitResp = await this.safeRequest(`${base}/git/commits`, 'POST', {
+            message,
+            tree: newTreeSha,
+            parents: [latestCommitSha],
+        });
+        const newCommitSha = this.parseJson<{ sha: string }>(newCommitResp).sha;
+
+        await this.safeRequest(`${base}/git/refs/heads/${branch}`, 'PATCH', { sha: newCommitSha });
+
+        return { path: fullPath, sha: blobSha };
+    }
+
+    async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
         const url = `https://api.github.com/repos/${this.owner}/${this.repo}/git/trees/${branch}?recursive=1`;
-        const response = await this.safeRequest(url, 'GET');
-        const data = response.json as GitHubTreeResponse;
-        
+        let data: GitHubTreeResponse;
+        try {
+            const response = await this.safeRequest(url, 'GET');
+            data = this.parseJson<GitHubTreeResponse>(response);
+        } catch (e) {
+            throw this.branchNotFoundError(e, branch);
+        }
+
         if (data.truncated) {
             logger.warn('GitHub tree result is truncated. Some files might not be shown.');
         }
 
-        const files = data.tree
+        const entries = data.tree
             .filter(item => item.type === 'blob')
-            .map(item => item.path);
+            .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE }));
 
-        if (!useFilter) return files;
+        if (!useFilter) return entries;
 
-        return files.filter(p => {
+        return entries.filter(e => {
             if (!this.rootPath) return true;
             const cleanRoot = this.rootPath.endsWith('/') ? this.rootPath : `${this.rootPath}/`;
-            return p === this.rootPath || p.startsWith(cleanRoot);
+            return e.path === this.rootPath || e.path.startsWith(cleanRoot);
         });
     }
 
@@ -85,13 +134,20 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         await this.safeRequest(url, 'DELETE', body);
     }
 
-    async testConnection(): Promise<boolean> {
+    async testConnection(branch: string): Promise<ConnectionTestResult> {
         try {
             const url = `https://api.github.com/repos/${this.owner}/${this.repo}`;
             await this.safeRequest(url, 'GET');
-            return true;
+        } catch (e) {
+            return { repoOk: false, branchOk: false, error: e instanceof Error ? e.message : String(e) };
+        }
+
+        try {
+            const branchUrl = `https://api.github.com/repos/${this.owner}/${this.repo}/branches/${branch}`;
+            await this.safeRequest(branchUrl, 'GET', undefined, undefined, true);
+            return { repoOk: true, branchOk: true };
         } catch {
-            return false;
+            return { repoOk: true, branchOk: false };
         }
     }
 

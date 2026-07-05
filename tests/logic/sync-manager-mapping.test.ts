@@ -44,10 +44,15 @@ const mockSettings: GitLabFilesPushSettings = {
     githubToken: '',
     githubOwner: '',
     githubRepo: '',
+    giteaToken: '',
+    giteaBaseUrl: '',
+    giteaOwner: '',
+    giteaRepo: '',
     branch: 'main',
     rootPath: 'notes',
     vaultFolder: 'Work',
     syncMetadata: {},
+    symlinkHandling: 'real',
 };
 
 describe('SyncManager Mapping', () => {

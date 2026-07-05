@@ -295,11 +295,11 @@
 }
 
 .ssv-file-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 18px;
-    text-align: center;
     flex-shrink: 0;
-    font-size: 0.95em;
-    font-weight: 600;
 }
 
 .ssv-icon-synced   { color: var(--color-green); }
@@ -346,6 +346,9 @@
 }
 
 .ssv-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 4px 10px;
     font-size: 0.76em;
     border-radius: 4px;
@@ -356,6 +359,29 @@
     white-space: nowrap;
     min-height: 26px;
     transition: background 0.1s, opacity 0.1s;
+}
+
+/* Consistent sizing for all Lucide icons used in the view */
+.ssv-file-icon .svg-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.ssv-btn .svg-icon,
+.ssv-tab .svg-icon,
+.ssv-action-btn .svg-icon {
+    width: 15px;
+    height: 15px;
+}
+
+.ssv-info-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+.ssv-info-icon .svg-icon {
+    width: 13px;
+    height: 13px;
 }
 
 .is-mobile .ssv-action-btn {
