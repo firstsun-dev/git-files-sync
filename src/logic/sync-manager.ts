@@ -35,6 +35,13 @@ export class SyncManager {
         await this.saveSettings();
     }
 
+    /** Drop sync metadata for a path that's been deleted, so it can't be mistaken for a rename source later. */
+    public async clearMetadata(path: string): Promise<void> {
+        if (!(path in this.settings.syncMetadata)) return;
+        delete this.settings.syncMetadata[path];
+        await this.saveSettings();
+    }
+
     private getNormalizedPath(path: string): string {
         if (!this.settings.vaultFolder) return path;
         const folderPath = this.settings.vaultFolder + '/';
@@ -69,7 +76,7 @@ export class SyncManager {
 
             // Check if this is a renamed file
             if (!isString && fileOrPath instanceof TFile) {
-                const renamedFrom = this.detectRename(fileOrPath);
+                const renamedFrom = await this.detectRename(fileOrPath, content);
                 if (renamedFrom) {
                     await this.handleRename(fileOrPath, renamedFrom, content);
                     return;
@@ -118,19 +125,24 @@ export class SyncManager {
         }
     }
 
-    private detectRename(file: TFile): string | null {
-        // Check if there's a metadata entry with the same SHA but different path
+    /**
+     * A missing local file at a tracked path is only weak evidence of a rename —
+     * any orphaned metadata entry (e.g. from a local delete) matches it too. Only
+     * report a rename once the remote content at the old path still matches the
+     * content being pushed now, confirming it's really the same file that moved.
+     */
+    private async detectRename(file: TFile, content: string | ArrayBuffer): Promise<string | null> {
         const metadataEntries = Object.keys(this.settings.syncMetadata);
         for (const oldPath of metadataEntries) {
             const metadata = this.settings.syncMetadata[oldPath];
             if (!metadata) continue;
+            if (oldPath === file.path || metadata.lastKnownPath !== oldPath) continue;
+            if (this.app.vault.getFileByPath(oldPath)) continue;
 
-            if (oldPath !== file.path && metadata.lastKnownPath === oldPath) {
-                // Check if the old file no longer exists
-                if (!this.app.vault.getFileByPath(oldPath)) {
-                    // This might be a rename
-                    return oldPath;
-                }
+            const oldRepoPath = this.getNormalizedPath(oldPath);
+            const remoteAtOldPath = await this.gitService.getFile(oldRepoPath, this.settings.branch);
+            if (remoteAtOldPath.sha && this.contentsEqual(content, remoteAtOldPath.content)) {
+                return oldPath;
             }
         }
         return null;
@@ -141,13 +153,18 @@ export class SyncManager {
             const repoPath = this.getNormalizedPath(file.path);
             const oldRepoPath = this.getNormalizedPath(oldPath);
 
+            // The new path may already exist on the remote (e.g. a prior push, or a
+            // stale rename match); if so we must send its sha or the API rejects the
+            // request as a duplicate create.
+            const existingAtNewPath = await this.gitService.getFile(repoPath, this.settings.branch);
+
             // Push the file to the new location
             const result = await this.gitService.pushFile(
                 repoPath,
                 content,
                 this.settings.branch,
                 `Rename ${oldRepoPath} to ${repoPath}`,
-                undefined
+                existingAtNewPath.sha
             );
 
             // Update metadata
@@ -440,7 +457,7 @@ export class SyncManager {
 
         // Rename detection
         if (!isString && fileOrPath instanceof TFile) {
-            const renamedFrom = this.detectRename(fileOrPath);
+            const renamedFrom = await this.detectRename(fileOrPath, content);
             if (renamedFrom) {
                 await this.handleRename(fileOrPath, renamedFrom, content);
                 return 'done';

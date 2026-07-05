@@ -233,6 +233,7 @@ export class SyncStatusView extends ItemView {
             } else {
                 await this.app.vault.adapter.remove(fileStatus.path);
             }
+            await this.plugin.sync.clearMetadata(fileStatus.path);
             new Notice(`Deleted ${fileStatus.path}`);
             this.fileStatuses.delete(fileStatus.path);
             this.renderView();
@@ -655,6 +656,7 @@ export class SyncStatusView extends ItemView {
             try {
                 if (s.file) await this.app.fileManager.trashFile(s.file);
                 else await this.app.vault.adapter.remove(s.path);
+                await this.plugin.sync.clearMetadata(s.path);
                 this.fileStatuses.delete(s.path);
                 this.selectedFiles.delete(s.path);
             } catch { errors.push(s.path); }
