@@ -1,3 +1,43 @@
+## [1.2.0](https://github.com/firstsun-dev/git-files-sync/compare/1.1.2...1.2.0) (2026-07-05)
+
+### Features
+
+* add Gitea support as third-party Git provider ([130bd93](https://github.com/firstsun-dev/git-files-sync/commit/130bd93f84161086bdf7f3574098250ef0950c4b)), closes [#26](https://github.com/firstsun-dev/git-files-sync/issues/26)
+* **sync:** detect symbolic links and add a configurable handling setting ([62b475d](https://github.com/firstsun-dev/git-files-sync/commit/62b475d6326c0705cc5120c77ba88719b8454e39))
+* **sync:** real symbolic link support (GitHub) with configurable handling ([9bcaed6](https://github.com/firstsun-dev/git-files-sync/commit/9bcaed65f434a4c1596b5403f66df41a9887243b))
+
+### Bug Fixes
+
+* **deprecations:** migrate off deprecated Obsidian APIs ([5c64b96](https://github.com/firstsun-dev/git-files-sync/commit/5c64b96c084430cffefc6fab47fb98b411a18c55))
+* **deps:** resolve Dependabot security alerts in dev dependencies ([a47cfcb](https://github.com/firstsun-dev/git-files-sync/commit/a47cfcb708d20d852018ea4de4bfd8eb250cfd6a))
+* **lint:** resolve Obsidian plugin linter warnings ([d11ca94](https://github.com/firstsun-dev/git-files-sync/commit/d11ca94073d7a36bac673ceb76c2d1815eebcd0a))
+* **services:** clear error when Git API returns HTML instead of JSON ([bcc5cda](https://github.com/firstsun-dev/git-files-sync/commit/bcc5cda69ca7e4fa63474d0221f52f910a13076b))
+* **services:** omit blank sha so creating a new file doesn't 422 ([339d5cb](https://github.com/firstsun-dev/git-files-sync/commit/339d5cbe775bc27ea4cca3e6d474366fdc017048))
+* **services:** stop logging expected 404s as errors during refresh ([c474a7e](https://github.com/firstsun-dev/git-files-sync/commit/c474a7e6c4da02fe44770b6d2e914f962a3455f3))
+* **settings:** mask personal access token fields ([235d9e0](https://github.com/firstsun-dev/git-files-sync/commit/235d9e09766db0e3426e98b78385f6ab4d5f1c54))
+* **sync:** clearer branch-not-found errors and connection test ([2f6859a](https://github.com/firstsun-dev/git-files-sync/commit/2f6859a2f1cfb01fcce04f5dcd9a94df5989ffd3))
+* **sync:** fall back to adapter read for symlinked files ([76405cf](https://github.com/firstsun-dev/git-files-sync/commit/76405cf2f796a18651dcae86a188c86a51f69270))
+* **sync:** stop batch push/pull from silently overwriting conflicts ([1364b94](https://github.com/firstsun-dev/git-files-sync/commit/1364b94f0a4063c84649c278990ed7116f95196a))
+* **sync:** stop false-positive rename detection and 422 on rename push ([06953e1](https://github.com/firstsun-dev/git-files-sync/commit/06953e1b12e4b4380658b443ce505a6a14fe1b4b))
+* **ui:** keep ribbon/command labels in sync with configured Git service ([acebafd](https://github.com/firstsun-dev/git-files-sync/commit/acebafd94a434e574686ad61878ce66f8173d1c1))
+* **ui:** match Open sync status ribbon icon to the view icon ([9bc8ab7](https://github.com/firstsun-dev/git-files-sync/commit/9bc8ab7d082a933adca973c2de59337166dc940f))
+* use two-step branch→SHA resolution in GiteaService.listFiles ([7648eef](https://github.com/firstsun-dev/git-files-sync/commit/7648eef279ed63a61561f217f206abf892995964))
+
+### Performance Improvements
+
+* **ui:** parallelize refresh status checks and throttle re-renders ([1e21061](https://github.com/firstsun-dev/git-files-sync/commit/1e21061aa84f49b708326cc6ea7046c12579d2d0))
+
+### Documentation
+
+* add video ([#30](https://github.com/firstsun-dev/git-files-sync/issues/30)) ([49bfe9f](https://github.com/firstsun-dev/git-files-sync/commit/49bfe9f4c26aede711b0aff011127fbcbf678593))
+* fix CLAUDE.md to match actual codebase and remove subagent delegation directives ([#32](https://github.com/firstsun-dev/git-files-sync/issues/32)) ([85bcaba](https://github.com/firstsun-dev/git-files-sync/commit/85bcaba81f56bf82ffde890f7027e39afb3aaae8))
+* update intro video with refreshed content ([df44a96](https://github.com/firstsun-dev/git-files-sync/commit/df44a96c9bc2cc53d58592616b2cb6c614eb5fde))
+* update USAGE_zh.md with Gitea support and provider compatibility table ([615819c](https://github.com/firstsun-dev/git-files-sync/commit/615819c39ebbaafe07c20634b191b11202683c3e))
+
+### Code Refactoring
+
+* **ui:** unify Sync Status icons via Lucide setIcon ([d8d6f9d](https://github.com/firstsun-dev/git-files-sync/commit/d8d6f9dcb11f01918be90b68ea697e283313de64))
+
 ## [1.1.2](https://github.com/firstsun-dev/git-files-sync/compare/1.1.1...1.1.2) (2026-06-16)
 
 ### Bug Fixes
