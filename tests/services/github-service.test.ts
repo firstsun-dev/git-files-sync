@@ -191,6 +191,11 @@ describe('GitHubService', () => {
             expect(result).toEqual(['file1.md', 'file2.md']);
             warnSpy.mockRestore();
         });
+
+        it('should throw a message naming the branch when the branch is not found', async () => {
+            mockRequest({ status: 404, json: { message: 'Not Found' }, text: 'Not Found' });
+            await expect(service.listFiles('missing-branch')).rejects.toThrow(/Branch "missing-branch" was not found/);
+        });
     });
 
     describe('deleteFile', () => {
@@ -211,6 +216,14 @@ describe('GitHubService', () => {
 
     describe('testConnection', () => {
         sharedTestConnection(() => service);
+
+        it('should report branchOk: false when the branch is not found', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 404, json: { message: 'Not Found' }, text: 'Not Found' } as unknown as RequestUrlResponse);
+            const result = await service.testConnection('missing-branch');
+            expect(result).toEqual({ repoOk: true, branchOk: false });
+        });
     });
 
     describe('getRepoGitignores', () => {

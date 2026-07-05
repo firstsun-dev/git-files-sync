@@ -1,5 +1,5 @@
 import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
-import { BaseGitService, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
+import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
 import { logger } from '../utils/logger';
 
 export class GiteaService extends BaseGitService implements GitServiceInterface {
@@ -59,9 +59,13 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         // Resolve branch name to commit SHA first for compatibility with all Gitea versions,
         // since the git/trees endpoint requires a SHA (not a ref name) on older instances.
         const branchUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/branches/${branch}`;
-        const branchResponse = await this.safeRequest(branchUrl, 'GET');
-        const branchData = this.parseJson<{ commit: { id: string } }>(branchResponse);
-        const commitSha = branchData.commit.id;
+        let commitSha: string;
+        try {
+            const branchResponse = await this.safeRequest(branchUrl, 'GET');
+            commitSha = this.parseJson<{ commit: { id: string } }>(branchResponse).commit.id;
+        } catch (e) {
+            throw this.branchNotFoundError(e, branch);
+        }
 
         const treeUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/git/trees/${commitSha}?recursive=1`;
         const treeResponse = await this.safeRequest(treeUrl, 'GET');
@@ -96,13 +100,20 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         await this.safeRequest(url, 'DELETE', body);
     }
 
-    async testConnection(): Promise<boolean> {
+    async testConnection(branch: string): Promise<ConnectionTestResult> {
         try {
             const url = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}`;
             await this.safeRequest(url, 'GET');
-            return true;
+        } catch (e) {
+            return { repoOk: false, branchOk: false, error: e instanceof Error ? e.message : String(e) };
+        }
+
+        try {
+            const branchUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/branches/${branch}`;
+            await this.safeRequest(branchUrl, 'GET', undefined, undefined, true);
+            return { repoOk: true, branchOk: true };
         } catch {
-            return false;
+            return { repoOk: true, branchOk: false };
         }
     }
 }
