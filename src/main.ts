@@ -1,7 +1,8 @@
-import { Plugin, TFile, MarkdownView, Notice, Platform } from 'obsidian';
+import { Plugin, TFile, MarkdownView, Notice, Platform, setTooltip } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getServiceName } from "./settings";
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
+import { GiteaService } from './services/gitea-service';
 import { GitServiceInterface } from './services/git-service-interface';
 import { SyncManager } from './logic/sync-manager';
 import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
@@ -14,6 +15,7 @@ export default class GitLabFilesPush extends Plugin {
 	gitService: GitServiceInterface;
 	sync: SyncManager;
 	gitignoreManager: GitignoreManager;
+	private pushRibbonEl: HTMLElement;
 
 	async onload() {
 		await this.loadSettings();
@@ -24,7 +26,7 @@ export default class GitLabFilesPush extends Plugin {
 			(leaf) => new SyncStatusView(leaf, this)
 		);
 
-		this.addRibbonIcon('list-checks', 'Open sync status', async () => {
+		this.addRibbonIcon('git-compare', 'Open sync status', async () => {
 			await this.activateSyncStatusView();
 		});
 
@@ -40,7 +42,7 @@ export default class GitLabFilesPush extends Plugin {
 		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath, this.settings.vaultFolder);
 		this.sync = new SyncManager(this.app, this.gitService, this.settings, this.saveSettings.bind(this));
 
-		this.addRibbonIcon('upload-cloud', Platform.isMobile ? `Push` : `Push to ${this.serviceName}`, async () => {
+		this.pushRibbonEl = this.addRibbonIcon('upload-cloud', this.pushRibbonLabel(), async () => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView && activeView.file instanceof TFile) {
 				await this.sync.pushFile(activeView.file);
@@ -49,9 +51,13 @@ export default class GitLabFilesPush extends Plugin {
 			}
 		});
 
+		// Command names are set once at registration and Obsidian has no API to
+		// rename them later, so they stay generic rather than embedding the
+		// configured service — otherwise switching service in Settings would
+		// leave a stale name in the Command Palette until Obsidian reloads.
 		this.addCommand({
 			id: 'push-current-file',
-			name: `Push current file to ${this.serviceName}`,
+			name: 'Push current file',
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
@@ -62,7 +68,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'pull-current-file',
-			name: `Pull current file from ${this.serviceName}`,
+			name: 'Pull current file',
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
@@ -107,6 +113,17 @@ export default class GitLabFilesPush extends Plugin {
 
 	private get serviceName(): string {
 		return getServiceName(this.settings);
+	}
+
+	private pushRibbonLabel(): string {
+		return Platform.isMobile ? 'Push' : `Push to ${this.serviceName}`;
+	}
+
+	// The ribbon icon's tooltip is set once when addRibbonIcon runs, so it goes
+	// stale if the user switches Git service afterwards without reloading the
+	// plugin. Re-apply it whenever settings are saved to keep it in sync.
+	private updateRibbonTooltip(): void {
+		if (this.pushRibbonEl) setTooltip(this.pushRibbonEl, this.pushRibbonLabel());
 	}
 
 	async activateSyncStatusView(): Promise<void> {
@@ -235,6 +252,16 @@ export default class GitLabFilesPush extends Plugin {
 				this.settings.rootPath
 			);
 			this.gitService = service;
+		} else if (this.settings.serviceType === 'gitea') {
+			const service = new GiteaService();
+			service.updateConfig(
+				this.settings.giteaBaseUrl,
+				this.settings.giteaToken,
+				this.settings.giteaOwner,
+				this.settings.giteaRepo,
+				this.settings.rootPath
+			);
+			this.gitService = service;
 		} else {
 			const service = new GitHubService();
 			service.updateConfig(
@@ -273,5 +300,6 @@ export default class GitLabFilesPush extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.initializeGitService();
+		this.updateRibbonTooltip();
 	}
 }

@@ -1,9 +1,13 @@
 import { TFile, App, Notice } from 'obsidian';
 import { GitServiceInterface } from '../services/git-service-interface';
-import { GitLabFilesPushSettings, getServiceName } from '../settings';
+import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
 import { logger } from '../utils/logger';
 import { isBinaryPath, contentsEqual } from '../utils/path';
+import { readLocalSymlinkTarget, createLocalSymlink } from '../utils/symlink';
+
+/** Result of syncing one file within a batch push/pull. */
+type BatchOutcome = 'done' | 'unchanged' | 'conflict';
 
 export class SyncManager {
     private readonly app: App;
@@ -31,6 +35,13 @@ export class SyncManager {
         await this.saveSettings();
     }
 
+    /** Drop sync metadata for a path that's been deleted, so it can't be mistaken for a rename source later. */
+    public async clearMetadata(path: string): Promise<void> {
+        if (!(path in this.settings.syncMetadata)) return;
+        delete this.settings.syncMetadata[path];
+        await this.saveSettings();
+    }
+
     private getNormalizedPath(path: string): string {
         if (!this.settings.vaultFolder) return path;
         const folderPath = this.settings.vaultFolder + '/';
@@ -54,11 +65,18 @@ export class SyncManager {
             return;
         }
 
-        const content = await this.getFileContent(fileOrPath);
         try {
+            // Symbolic link handling: real → push as a symlink (GitHub), skip → ignore.
+            const symlinkTarget = readLocalSymlinkTarget(this.app, path);
+            if (symlinkTarget !== null && await this.handleSymlinkPush({ path, name }, symlinkTarget)) {
+                return;
+            }
+
+            const content = await this.getFileContent(fileOrPath);
+
             // Check if this is a renamed file
             if (!isString && fileOrPath instanceof TFile) {
-                const renamedFrom = this.detectRename(fileOrPath);
+                const renamedFrom = await this.detectRename(fileOrPath, content);
                 if (renamedFrom) {
                     await this.handleRename(fileOrPath, renamedFrom, content);
                     return;
@@ -67,7 +85,14 @@ export class SyncManager {
 
             // Conflict detection & equality check
             const remote = await this.gitService.getFile(repoPath, this.settings.branch);
-            
+
+            // "follow" must not silently convert a remote symlink into a regular
+            // file. If the remote is a symlink, leave it untouched.
+            if (remote.isSymlink) {
+                new Notice(`${name} is a symlink on the remote; not overwriting (use "real" symlink mode to manage links).`);
+                return;
+            }
+
             if (remote.sha && this.contentsEqual(content, remote.content)) {
                 await this.updateMetadata(path, remote.sha);
                 new Notice(`${name} is already up to date.`);
@@ -84,7 +109,7 @@ export class SyncManager {
                             if (choice === 'local') {
                                 await this.performPush({ path, name }, content, remote.sha);
                             } else {
-                                await this.performPull(fileRep, remote.content, remote.sha);
+                                await this.performPull(fileRep, remote.content, remote.sha, false, this.symlinkPullTarget(remote));
                             }
                         } catch (e) {
                             this.handleError(`Failed to resolve conflict for ${name}`, e);
@@ -100,19 +125,24 @@ export class SyncManager {
         }
     }
 
-    private detectRename(file: TFile): string | null {
-        // Check if there's a metadata entry with the same SHA but different path
+    /**
+     * A missing local file at a tracked path is only weak evidence of a rename —
+     * any orphaned metadata entry (e.g. from a local delete) matches it too. Only
+     * report a rename once the remote content at the old path still matches the
+     * content being pushed now, confirming it's really the same file that moved.
+     */
+    private async detectRename(file: TFile, content: string | ArrayBuffer): Promise<string | null> {
         const metadataEntries = Object.keys(this.settings.syncMetadata);
         for (const oldPath of metadataEntries) {
             const metadata = this.settings.syncMetadata[oldPath];
             if (!metadata) continue;
+            if (oldPath === file.path || metadata.lastKnownPath !== oldPath) continue;
+            if (this.app.vault.getFileByPath(oldPath)) continue;
 
-            if (oldPath !== file.path && metadata.lastKnownPath === oldPath) {
-                // Check if the old file no longer exists
-                if (!this.app.vault.getFileByPath(oldPath)) {
-                    // This might be a rename
-                    return oldPath;
-                }
+            const oldRepoPath = this.getNormalizedPath(oldPath);
+            const remoteAtOldPath = await this.gitService.getFile(oldRepoPath, this.settings.branch);
+            if (remoteAtOldPath.sha && this.contentsEqual(content, remoteAtOldPath.content)) {
+                return oldPath;
             }
         }
         return null;
@@ -123,13 +153,18 @@ export class SyncManager {
             const repoPath = this.getNormalizedPath(file.path);
             const oldRepoPath = this.getNormalizedPath(oldPath);
 
+            // The new path may already exist on the remote (e.g. a prior push, or a
+            // stale rename match); if so we must send its sha or the API rejects the
+            // request as a duplicate create.
+            const existingAtNewPath = await this.gitService.getFile(repoPath, this.settings.branch);
+
             // Push the file to the new location
             const result = await this.gitService.pushFile(
                 repoPath,
                 content,
                 this.settings.branch,
                 `Rename ${oldRepoPath} to ${repoPath}`,
-                undefined
+                existingAtNewPath.sha
             );
 
             // Update metadata
@@ -170,8 +205,35 @@ export class SyncManager {
         }
 
         if (newSha) await this.updateMetadata(file.path, newSha);
-        
+
         if (!silent) new Notice(`Pushed ${file.name} to ${this.serviceName}`);
+    }
+
+    /**
+     * Handles pushing a local symbolic link per the configured behavior.
+     * Returns true if the link was handled (pushed as a symlink, or intentionally
+     * skipped); returns false to let the caller fall through to a normal content
+     * push ("follow", which reads through the link).
+     */
+    private async handleSymlinkPush(file: {path: string, name: string}, target: string, silent = false): Promise<boolean> {
+        const mode = getEffectiveSymlinkHandling(this.settings);
+        if (mode === 'skip') {
+            if (!silent) new Notice(`Skipped symlink ${file.name}.`);
+            return true;
+        }
+        if (mode === 'real' && this.gitService.pushSymlink) {
+            const repoPath = this.getNormalizedPath(file.path);
+            const result = await this.gitService.pushSymlink(repoPath, target, this.settings.branch, `Update ${file.name} from Obsidian`);
+            if (result.sha) await this.updateMetadata(file.path, result.sha);
+            if (!silent) new Notice(`Pushed symlink ${file.name} to ${this.serviceName}`);
+            return true;
+        }
+        return false;
+    }
+
+    /** The symlink target to recreate on pull, or undefined when the remote isn't a symlink. */
+    private symlinkPullTarget(remote: { isSymlink?: boolean; symlinkTarget?: string }): string | undefined {
+        return remote.isSymlink ? remote.symlinkTarget ?? '' : undefined;
     }
 
     async pullFile(fileOrPath: TFile | string) {
@@ -205,7 +267,7 @@ export class SyncManager {
                             if (choice === 'local') {
                                 await this.performPush(fileRep, localContent || '', remote.sha);
                             } else {
-                                await this.performPull(fileRep, remote.content, remote.sha);
+                                await this.performPull(fileRep, remote.content, remote.sha, false, this.symlinkPullTarget(remote));
                             }
                         } catch (e) {
                             this.handleError(`Failed to resolve conflict for ${name}`, e);
@@ -230,29 +292,38 @@ export class SyncManager {
         return isBinaryPath(path);
     }
 
-    private async performPull(file: TFile | {path: string, name: string}, remoteContent: string | ArrayBuffer, remoteSha: string, silent = false) {
+    private async performPull(file: TFile | {path: string, name: string}, remoteContent: string | ArrayBuffer, remoteSha: string, silent = false, symlinkTarget?: string) {
         await this.ensureParentDirs(file.path);
 
+        if (symlinkTarget !== undefined) {
+            // Remote blob is a symbolic link. Recreate a real OS link when the
+            // setting is "real" and the platform supports it…
+            if (getEffectiveSymlinkHandling(this.settings) === 'real' && createLocalSymlink(this.app, file.path, symlinkTarget)) {
+                await this.updateMetadata(file.path, remoteSha);
+                if (!silent) new Notice(`Pulled symlink ${file.name} from ${this.serviceName}`);
+                return;
+            }
+            // …otherwise record where it pointed by writing the target as content.
+            remoteContent = symlinkTarget;
+        }
+
+        await this.writePulledContent(file, remoteContent);
+        await this.updateMetadata(file.path, remoteSha);
+        if (!silent) new Notice(`Pulled ${file.name} from ${this.serviceName}`);
+    }
+
+    private async writePulledContent(file: TFile | {path: string, name: string}, remoteContent: string | ArrayBuffer): Promise<void> {
         if (typeof remoteContent !== 'string') {
-            // remoteContent is ArrayBuffer
             if (file instanceof TFile) {
                 await this.app.vault.modifyBinary(file, remoteContent);
             } else {
                 await this.app.vault.adapter.writeBinary(file.path, remoteContent);
             }
+        } else if (file instanceof TFile) {
+            await this.app.vault.modify(file, remoteContent);
         } else {
-            // remoteContent is string
-            if (file instanceof TFile) {
-                await this.app.vault.modify(file, remoteContent);
-            } else {
-                await this.app.vault.adapter.write(file.path, remoteContent);
-            }
+            await this.app.vault.adapter.write(file.path, remoteContent);
         }
-
-        // Update metadata
-        await this.updateMetadata(file.path, remoteSha);
-
-        if (!silent) new Notice(`Pulled ${file.name} from ${this.serviceName}`);
     }
 
     private async ensureParentDirs(filePath: string): Promise<void> {
@@ -280,11 +351,11 @@ export class SyncManager {
         new Notice(`${message}: ${detail}`);
     }
 
-    async pushAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
+    async pushAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
         return this.processBatch(files, 'push', onProgress);
     }
 
-    async pullAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
+    async pullAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
         return this.processBatch(files, 'pull', onProgress);
     }
 
@@ -292,8 +363,8 @@ export class SyncManager {
         files: (TFile | string)[],
         op: 'push' | 'pull',
         onProgress?: (current: number, total: number, fileName: string) => void
-    ): Promise<{ success: number; failed: number; errors: Array<{ file: string; error: string }> }> {
-        const results = { success: 0, failed: 0, errors: [] as Array<{ file: string; error: string }> };
+    ): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
+        const results = { success: 0, failed: 0, conflicts: 0, errors: [] as Array<{ file: string; error: string }> };
 
         for (let i = 0; i < files.length; i++) {
             const fileOrPath = files[i];
@@ -303,13 +374,12 @@ export class SyncManager {
             onProgress?.(i + 1, files.length, name);
 
             try {
-                let performed = false;
-                if (op === 'push') {
-                    performed = await this.processSingleBatchPush(fileOrPath, path, name, isString);
-                } else {
-                    performed = await this.processSingleBatchPull(fileOrPath, path, name, isString);
-                }
-                if (performed) results.success++;
+                const outcome = op === 'push'
+                    ? await this.processSingleBatchPush(fileOrPath, path, name, isString)
+                    : await this.processSingleBatchPull(fileOrPath, path, name, isString);
+
+                if (outcome === 'done') results.success++;
+                else if (outcome === 'conflict') results.conflicts++;
             } catch (e) {
                 logger.error(`Failed to ${op} ${path}:`, e);
                 results.failed++;
@@ -318,15 +388,18 @@ export class SyncManager {
         }
 
         await this.saveSettings();
-        this.notifyBatchResult(op, results.success, results.failed);
+        this.notifyBatchResult(op, results.success, results.failed, results.conflicts);
 
         return results;
     }
 
-    private notifyBatchResult(op: 'push' | 'pull', success: number, failed: number): void {
+    private notifyBatchResult(op: 'push' | 'pull', success: number, failed: number, conflicts: number): void {
         const opName = op === 'push' ? 'Pushed' : 'Pulled';
         if (success > 0) {
             new Notice(`${opName} ${success} file(s) to ${this.serviceName}`);
+        }
+        if (conflicts > 0) {
+            new Notice(`Skipped ${conflicts} file(s) with conflicting changes on both sides. Push or pull each one individually to resolve.`, 8000);
         }
         if (failed > 0) {
             new Notice(`Failed to ${op} ${failed} file(s). Check console for details.`);
@@ -352,42 +425,71 @@ export class SyncManager {
         const binary = this.isBinary(path);
 
         if (typeof fileOrPath === 'string') {
-            return binary 
+            return binary
                 ? await this.app.vault.adapter.readBinary(fileOrPath)
                 : await this.app.vault.adapter.read(fileOrPath);
         }
-        return binary
-            ? await this.app.vault.readBinary(fileOrPath)
-            : await this.app.vault.read(fileOrPath);
+        try {
+            return binary
+                ? await this.app.vault.readBinary(fileOrPath)
+                : await this.app.vault.read(fileOrPath);
+        } catch (e) {
+            // Obsidian's cached vault.read can fail for symlinked files (notably
+            // on mobile); fall back to reading the path directly via the adapter.
+            logger.warn(`vault.read failed for ${path}; falling back to adapter`, e);
+            return binary
+                ? await this.app.vault.adapter.readBinary(path)
+                : await this.app.vault.adapter.read(path);
+        }
     }
 
-    private async processSingleBatchPush(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<boolean> {
+    private async processSingleBatchPush(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<BatchOutcome> {
         if (!await this.checkFileExists(path, isString)) throw new Error('File no longer exists');
+
+        // Symbolic link handling: real → push as a symlink (GitHub), skip → ignore.
+        const symlinkTarget = readLocalSymlinkTarget(this.app, path);
+        if (symlinkTarget !== null && await this.handleSymlinkPush({ path, name }, symlinkTarget, true)) {
+            return getEffectiveSymlinkHandling(this.settings) !== 'skip' ? 'done' : 'unchanged';
+        }
+
         const content = await this.getFileContent(fileOrPath);
         const repoPath = this.getNormalizedPath(path);
 
         // Rename detection
         if (!isString && fileOrPath instanceof TFile) {
-            const renamedFrom = this.detectRename(fileOrPath);
+            const renamedFrom = await this.detectRename(fileOrPath, content);
             if (renamedFrom) {
                 await this.handleRename(fileOrPath, renamedFrom, content);
-                return true;
+                return 'done';
             }
         }
 
         const remote = await this.gitService.getFile(repoPath, this.settings.branch);
-        
+
+        // Don't convert a remote symlink into a regular file.
+        if (remote.isSymlink) return 'unchanged';
+
         // Skip if already in sync
         if (remote.sha && this.contentsEqual(content, remote.content)) {
             await this.updateMetadata(path, remote.sha);
-            return false;
+            return 'unchanged';
+        }
+
+        // Same conflict check as the single-file flow: if the remote has moved on
+        // from what we last synced, overwriting it here would silently discard
+        // whatever changed on the remote. Skip it instead of force-pushing so the
+        // batch action can't quietly clobber changes the way a single push would
+        // stop and ask about via SyncConflictModal.
+        const lastSynced = this.settings.syncMetadata[path];
+        if (remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
+            return 'conflict';
         }
 
         await this.performPush({ path, name }, content, remote.sha || undefined, true);
-        return true;
+        return 'done';
     }
 
-    private async processSingleBatchPull(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<boolean> {
+    private async processSingleBatchPull(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<BatchOutcome> {
         const repoPath = this.getNormalizedPath(path);
         const remote = await this.gitService.getFile(repoPath, this.settings.branch);
         if (!remote.sha) throw new Error('File not found in remote');
@@ -397,12 +499,18 @@ export class SyncManager {
             const localContent = await this.getFileContent(fileOrPath);
             if (this.contentsEqual(localContent, remote.content)) {
                 await this.updateMetadata(path, remote.sha);
-                return false;
+                return 'unchanged';
+            }
+
+            // Same conflict check as the single-file flow (see processSingleBatchPush).
+            const lastSynced = this.settings.syncMetadata[path];
+            if (lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
+                return 'conflict';
             }
         }
 
         const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
-        await this.performPull(fileRep, remote.content, remote.sha, true);
-        return true;
+        await this.performPull(fileRep, remote.content, remote.sha, true, this.symlinkPullTarget(remote));
+        return 'done';
     }
 }

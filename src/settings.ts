@@ -1,4 +1,4 @@
-import {App, PluginSettingTab, Setting, Notice} from 'obsidian';
+import {App, PluginSettingTab, Setting, Notice, TextComponent, SettingDefinitionItem} from 'obsidian';
 import GitLabFilesPush from "./main";
 
 export interface SyncMetadata {
@@ -7,7 +7,16 @@ export interface SyncMetadata {
 	lastKnownPath?: string;
 }
 
-export type GitServiceType = 'gitlab' | 'github';
+export type GitServiceType = 'gitlab' | 'github' | 'gitea';
+
+/**
+ * How symbolic links (Git blobs with mode 120000) are synced:
+ * - 'real':   recreate a real OS symlink on desktop; on mobile (no symlink API)
+ *             fall back to syncing the link target's content as a normal file.
+ * - 'follow': always sync the target file's content as a normal file.
+ * - 'skip':   ignore symlinks entirely.
+ */
+export type SymlinkHandling = 'real' | 'follow' | 'skip';
 
 export interface GitLabFilesPushSettings {
 	serviceType: GitServiceType;
@@ -17,14 +26,34 @@ export interface GitLabFilesPushSettings {
 	githubToken: string;
 	githubOwner: string;
 	githubRepo: string;
+	giteaToken: string;
+	giteaBaseUrl: string;
+	giteaOwner: string;
+	giteaRepo: string;
 	branch: string;
 	syncMetadata: Record<string, SyncMetadata>;
     rootPath: string;
     vaultFolder: string;
+    symlinkHandling: SymlinkHandling;
 }
 
 export function getServiceName(settings: GitLabFilesPushSettings): string {
-    return settings.serviceType === 'gitlab' ? 'GitLab' : 'GitHub';
+    if (settings.serviceType === 'gitlab') return 'GitLab';
+    if (settings.serviceType === 'gitea') return 'Gitea';
+    return 'GitHub';
+}
+
+/**
+ * Resolves the symlink behavior that actually applies. Only GitHub can create or
+ * push real symlinks (it has the Git Data API); on other providers "real" is not
+ * possible, so it is treated as "skip" to avoid silently turning links into
+ * ordinary files.
+ */
+export function getEffectiveSymlinkHandling(settings: GitLabFilesPushSettings): SymlinkHandling {
+    if (settings.symlinkHandling === 'real' && settings.serviceType !== 'github') {
+        return 'skip';
+    }
+    return settings.symlinkHandling;
 }
 
 export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
@@ -35,10 +64,15 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	githubToken: '',
 	githubOwner: '',
 	githubRepo: '',
+	giteaToken: '',
+	giteaBaseUrl: '',
+	giteaOwner: '',
+	giteaRepo: '',
     rootPath: "",
 	branch: 'main',
 	syncMetadata: {},
-	vaultFolder: ''
+	vaultFolder: '',
+	symlinkHandling: 'real'
 }
 
 export class GitLabSyncSettingTab extends PluginSettingTab {
@@ -49,29 +83,53 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	// Kept as a fallback for Obsidian < 1.13.0 (this plugin's minAppVersion),
+	// which don't know about getSettingDefinitions() and always call display().
 	display(): void {
-		const {containerEl} = this;
+		this.renderSettings(this.containerEl);
+	}
 
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [{
+			name: '',
+			render: (_setting, group) => {
+				this.renderSettings(group.listEl);
+			}
+		}];
+	}
+
+	private refresh(): void {
+		if (typeof this.update === 'function') {
+			this.update();
+		} else {
+			this.renderSettings(this.containerEl);
+		}
+	}
+
+	private renderSettings(containerEl: HTMLElement): void {
 		containerEl.empty();
 
 		new Setting(containerEl)
 			.setName('Git service')
-			.setDesc('Choose between GitLab or GitHub')
+			.setDesc('Choose your Git hosting service')
 			.addDropdown(dropdown => dropdown
 				.addOption('gitlab', 'GitLab')
 				.addOption('github', 'GitHub')
+				.addOption('gitea', 'Gitea')
 				.setValue(this.plugin.settings.serviceType)
 				.onChange((value: string) => {
 					this.plugin.settings.serviceType = value as GitServiceType;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
-					this.display();
+					this.refresh();
 				}));
 
 		new Setting(containerEl).setName('').setHeading();
 
 		if (this.plugin.settings.serviceType === 'gitlab') {
 			this.displayGitLabSettings(containerEl);
+		} else if (this.plugin.settings.serviceType === 'gitea') {
+			this.displayGiteaSettings(containerEl);
 		} else {
 			this.displayGitHubSettings(containerEl);
 		}
@@ -110,6 +168,26 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					void this.plugin.saveSettings();
 				}));
 
+		// "Real symlink" needs the Git Data API, which only GitHub offers. For
+		// other providers, offer follow/skip only so the option can't mislead.
+		const supportsRealSymlink = this.plugin.settings.serviceType === 'github';
+		new Setting(containerEl)
+			.setName('Symbolic links')
+			.setDesc(supportsRealSymlink
+				? 'How to sync symlinks: "real" recreates the link on desktop and falls back to the target content on mobile, "follow" always syncs the target content, and "skip" ignores symlinks.'
+				: 'How to sync symlinks: "follow" syncs the target content as a normal file, "skip" ignores symlinks. Real symlinks require GitHub.')
+			.addDropdown(dropdown => {
+				if (supportsRealSymlink) dropdown.addOption('real', 'Real symlink (recommended)');
+				dropdown
+					.addOption('follow', 'Follow (sync target content)')
+					.addOption('skip', 'Skip')
+					.setValue(getEffectiveSymlinkHandling(this.plugin.settings))
+					.onChange((value: string) => {
+						this.plugin.settings.symlinkHandling = value as SymlinkHandling;
+						void this.plugin.saveSettings();
+					});
+			});
+
 		new Setting(containerEl)
 			.setName('Test connection')
 			.setDesc(`Verify your ${getServiceName(this.plugin.settings)} settings`)
@@ -117,8 +195,18 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.setButtonText('Test connection')
 				.onClick(async () => {
 					try {
-						await this.plugin.gitService.testConnection();
-						new Notice(`${getServiceName(this.plugin.settings)} connection successful!`);
+						const result = await this.plugin.gitService.testConnection(this.plugin.settings.branch);
+						if (!result.repoOk) {
+							new Notice(`Connection failed: ${result.error ?? 'could not reach the repository'}`);
+						} else if (!result.branchOk) {
+							new Notice(
+								`Connected, but branch "${this.plugin.settings.branch}" was not found. ` +
+								'Check the Branch setting, or confirm the repository has a branch with this name.',
+								8000
+							);
+						} else {
+							new Notice(`${getServiceName(this.plugin.settings)} connection successful!`);
+						}
 					} catch (e: unknown) {
 						const message = e instanceof Error ? e.message : String(e);
 						new Notice(`Connection failed: ${message}`);
@@ -126,18 +214,45 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				}));
 	}
 
-	private displayGitLabSettings(containerEl: HTMLElement): void {
+	// Token fields are masked like a password input (with a toggle to reveal
+	// them) since they're secrets that shouldn't sit in plaintext on screen
+	// during screen shares, recordings, or shared machines.
+	private addTokenSetting(containerEl: HTMLElement, name: string, desc: string, getValue: () => string, onChange: (value: string) => void): void {
+		let textComponent: TextComponent;
 		new Setting(containerEl)
-			.setName('GitLab personal access token')
-			.setDesc('Create a token in GitLab user settings > access tokens with "API" scope')
-			.addText(text => text
-				.setPlaceholder('Enter your token')
-				.setValue(this.plugin.settings.gitlabToken)
-				.onChange((value) => {
-					this.plugin.settings.gitlabToken = value;
-					void this.plugin.saveSettings();
-					this.plugin.initializeGitService();
-				}));
+			.setName(name)
+			.setDesc(desc)
+			.addText(text => {
+				textComponent = text;
+				text.inputEl.type = 'password';
+				text.setPlaceholder('Enter your token')
+					.setValue(getValue())
+					.onChange(onChange);
+			})
+			.addExtraButton(btn => {
+				btn.setIcon('eye')
+					.setTooltip('Show token')
+					.onClick(() => {
+						const revealing = textComponent.inputEl.type === 'password';
+						textComponent.inputEl.type = revealing ? 'text' : 'password';
+						btn.setIcon(revealing ? 'eye-off' : 'eye');
+						btn.setTooltip(revealing ? 'Hide token' : 'Show token');
+					});
+			});
+	}
+
+	private displayGitLabSettings(containerEl: HTMLElement): void {
+		this.addTokenSetting(
+			containerEl,
+			'GitLab personal access token',
+			'Create a token in GitLab user settings > access tokens with "API" scope',
+			() => this.plugin.settings.gitlabToken,
+			(value) => {
+				this.plugin.settings.gitlabToken = value;
+				void this.plugin.saveSettings();
+				this.plugin.initializeGitService();
+			}
+		);
 
 		new Setting(containerEl)
 			.setName('GitLab base URL')
@@ -164,18 +279,68 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				}));
 	}
 
-	private displayGitHubSettings(containerEl: HTMLElement): void {
+	private displayGiteaSettings(containerEl: HTMLElement): void {
+		this.addTokenSetting(
+			containerEl,
+			'Gitea personal access token',
+			'Create a token in user settings > applications > access tokens',
+			() => this.plugin.settings.giteaToken,
+			(value) => {
+				this.plugin.settings.giteaToken = value;
+				void this.plugin.saveSettings();
+				this.plugin.initializeGitService();
+			}
+		);
+
 		new Setting(containerEl)
-			.setName('GitHub personal access token')
-			.setDesc('Create a token in GitHub settings > developer settings > personal access tokens with "repo" scope')
+			.setName('Gitea base URL')
+			.setDesc('URL of your Gitea instance (e.g. https://gitea.example.com)')
 			.addText(text => text
-				.setPlaceholder('Enter your token')
-				.setValue(this.plugin.settings.githubToken)
+				.setPlaceholder('https://gitea.example.com')
+				.setValue(this.plugin.settings.giteaBaseUrl)
 				.onChange((value) => {
-					this.plugin.settings.githubToken = value;
+					this.plugin.settings.giteaBaseUrl = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
 				}));
+
+		new Setting(containerEl)
+			.setName('Repository owner')
+			.setDesc('Gitea username or organization name')
+			.addText(text => text
+				.setPlaceholder('Username')
+				.setValue(this.plugin.settings.giteaOwner)
+				.onChange((value) => {
+					this.plugin.settings.giteaOwner = value;
+					void this.plugin.saveSettings();
+					this.plugin.initializeGitService();
+				}));
+
+		new Setting(containerEl)
+			.setName('Repository name')
+			.setDesc('Name of the repository')
+			.addText(text => text
+				.setPlaceholder('My notes')
+				.setValue(this.plugin.settings.giteaRepo)
+				.onChange((value) => {
+					this.plugin.settings.giteaRepo = value;
+					void this.plugin.saveSettings();
+					this.plugin.initializeGitService();
+				}));
+	}
+
+	private displayGitHubSettings(containerEl: HTMLElement): void {
+		this.addTokenSetting(
+			containerEl,
+			'GitHub personal access token',
+			'Create a token in GitHub settings > developer settings > personal access tokens with "repo" scope',
+			() => this.plugin.settings.githubToken,
+			(value) => {
+				this.plugin.settings.githubToken = value;
+				void this.plugin.saveSettings();
+				this.plugin.initializeGitService();
+			}
+		);
 
 		new Setting(containerEl)
 			.setName('Repository owner')

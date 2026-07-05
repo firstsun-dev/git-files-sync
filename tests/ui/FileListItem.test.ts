@@ -14,11 +14,11 @@ function makeFileStatus(status: FileStatus['status'], overrides?: Partial<FileSt
 
 describe('statusMeta', () => {
     it.each([
-        ['synced',      '✓', 'Synced',     'status-synced'],
-        ['modified',    '⚠', 'Changed',    'status-modified'],
-        ['unsynced',    '↑', 'Local only', 'status-unsynced'],
-        ['remote-only', '↓', 'Remote',     'status-remote'],
-        ['checking',    '⟳', 'Checking',   'status-checking'],
+        ['synced',      'check',      'Synced',     'status-synced'],
+        ['modified',    'pencil',     'Changed',    'status-modified'],
+        ['unsynced',    'arrow-up',   'Local only', 'status-unsynced'],
+        ['remote-only', 'arrow-down', 'Remote',     'status-remote'],
+        ['checking',    'refresh-cw', 'Checking',   'status-checking'],
     ] as const)('%s: returns correct icon, label, and fileCls', (status, icon, label, fileCls) => {
         const meta = statusMeta(status);
         expect(meta.icon).toBe(icon);

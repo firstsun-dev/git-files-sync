@@ -14,14 +14,16 @@ export function mockRequest(response: Partial<RequestUrlResponse>): void {
 }
 
 export function sharedTestConnection(getService: () => GitServiceInterface): void {
-    it('should return true on successful connection', async () => {
+    it('should report repoOk and branchOk on successful connection', async () => {
         mockRequest({ status: 200, json: {} });
-        expect(await getService().testConnection()).toBe(true);
+        expect(await getService().testConnection('main')).toEqual({ repoOk: true, branchOk: true });
     });
 
-    it('should return false on failed connection', async () => {
+    it('should report repoOk: false on failed connection', async () => {
         mockRequest({ status: 401, json: { message: 'Unauthorized' }, text: 'Unauthorized' });
-        expect(await getService().testConnection()).toBe(false);
+        const result = await getService().testConnection('main');
+        expect(result.repoOk).toBe(false);
+        expect(result.branchOk).toBe(false);
     });
 }
 
