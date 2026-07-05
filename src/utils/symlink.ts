@@ -36,7 +36,7 @@ export function canUseRealSymlinks(app: App): boolean {
 // Electron exposes a CommonJS `require` on the global object on desktop; it is
 // absent on mobile. Resolving it dynamically avoids a static node import.
 function nodeModules(): { fs: NodeFs; path: NodePath } | null {
-    const req = (globalThis as unknown as { require?: NodeRequire }).require;
+    const req = (window as unknown as { require?: NodeRequire }).require;
     if (typeof req !== 'function') return null;
     try {
         return { fs: req('fs') as NodeFs, path: req('path') as NodePath };
