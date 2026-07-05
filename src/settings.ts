@@ -1,4 +1,4 @@
-import {App, PluginSettingTab, Setting, Notice} from 'obsidian';
+import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
 import GitLabFilesPush from "./main";
 
 export interface SyncMetadata {
@@ -193,18 +193,45 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				}));
 	}
 
-	private displayGitLabSettings(containerEl: HTMLElement): void {
+	// Token fields are masked like a password input (with a toggle to reveal
+	// them) since they're secrets that shouldn't sit in plaintext on screen
+	// during screen shares, recordings, or shared machines.
+	private addTokenSetting(containerEl: HTMLElement, name: string, desc: string, getValue: () => string, onChange: (value: string) => void): void {
+		let textComponent: TextComponent;
 		new Setting(containerEl)
-			.setName('GitLab personal access token')
-			.setDesc('Create a token in GitLab user settings > access tokens with "API" scope')
-			.addText(text => text
-				.setPlaceholder('Enter your token')
-				.setValue(this.plugin.settings.gitlabToken)
-				.onChange((value) => {
-					this.plugin.settings.gitlabToken = value;
-					void this.plugin.saveSettings();
-					this.plugin.initializeGitService();
-				}));
+			.setName(name)
+			.setDesc(desc)
+			.addText(text => {
+				textComponent = text;
+				text.inputEl.type = 'password';
+				text.setPlaceholder('Enter your token')
+					.setValue(getValue())
+					.onChange(onChange);
+			})
+			.addExtraButton(btn => {
+				btn.setIcon('eye')
+					.setTooltip('Show token')
+					.onClick(() => {
+						const revealing = textComponent.inputEl.type === 'password';
+						textComponent.inputEl.type = revealing ? 'text' : 'password';
+						btn.setIcon(revealing ? 'eye-off' : 'eye');
+						btn.setTooltip(revealing ? 'Hide token' : 'Show token');
+					});
+			});
+	}
+
+	private displayGitLabSettings(containerEl: HTMLElement): void {
+		this.addTokenSetting(
+			containerEl,
+			'GitLab personal access token',
+			'Create a token in GitLab user settings > access tokens with "API" scope',
+			() => this.plugin.settings.gitlabToken,
+			(value) => {
+				this.plugin.settings.gitlabToken = value;
+				void this.plugin.saveSettings();
+				this.plugin.initializeGitService();
+			}
+		);
 
 		new Setting(containerEl)
 			.setName('GitLab base URL')
@@ -232,17 +259,17 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	}
 
 	private displayGiteaSettings(containerEl: HTMLElement): void {
-		new Setting(containerEl)
-			.setName('Gitea personal access token')
-			.setDesc('Create a token in user settings > applications > access tokens')
-			.addText(text => text
-				.setPlaceholder('Enter your token')
-				.setValue(this.plugin.settings.giteaToken)
-				.onChange((value) => {
-					this.plugin.settings.giteaToken = value;
-					void this.plugin.saveSettings();
-					this.plugin.initializeGitService();
-				}));
+		this.addTokenSetting(
+			containerEl,
+			'Gitea personal access token',
+			'Create a token in user settings > applications > access tokens',
+			() => this.plugin.settings.giteaToken,
+			(value) => {
+				this.plugin.settings.giteaToken = value;
+				void this.plugin.saveSettings();
+				this.plugin.initializeGitService();
+			}
+		);
 
 		new Setting(containerEl)
 			.setName('Gitea base URL')
@@ -282,17 +309,17 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	}
 
 	private displayGitHubSettings(containerEl: HTMLElement): void {
-		new Setting(containerEl)
-			.setName('GitHub personal access token')
-			.setDesc('Create a token in GitHub settings > developer settings > personal access tokens with "repo" scope')
-			.addText(text => text
-				.setPlaceholder('Enter your token')
-				.setValue(this.plugin.settings.githubToken)
-				.onChange((value) => {
-					this.plugin.settings.githubToken = value;
-					void this.plugin.saveSettings();
-					this.plugin.initializeGitService();
-				}));
+		this.addTokenSetting(
+			containerEl,
+			'GitHub personal access token',
+			'Create a token in GitHub settings > developer settings > personal access tokens with "repo" scope',
+			() => this.plugin.settings.githubToken,
+			(value) => {
+				this.plugin.settings.githubToken = value;
+				void this.plugin.saveSettings();
+				this.plugin.initializeGitService();
+			}
+		);
 
 		new Setting(containerEl)
 			.setName('Repository owner')
