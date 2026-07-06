@@ -1,5 +1,20 @@
 import { App, Modal, Setting } from 'obsidian';
 
+/**
+ * Apply the "destructive" button style, but only when the running Obsidian
+ * supports it. ButtonComponent.setDestructive() was added in Obsidian 1.13; on
+ * older versions (down to this plugin's minAppVersion, 1.11.0) the method is
+ * absent, so we skip it instead of throwing "setDestructive is not a function".
+ * Returns the same button so it can be chained.
+ */
+export function applyDestructiveStyle<T extends object>(btn: T): T {
+    const setDestructive = (btn as { setDestructive?: () => unknown }).setDestructive;
+    if (typeof setDestructive === 'function') {
+        setDestructive.call(btn);
+    }
+    return btn;
+}
+
 export class SyncConflictModal extends Modal {
     private readonly fileName: string;
     private readonly localContent: string;
@@ -52,10 +67,9 @@ export class SyncConflictModal extends Modal {
                     this.onChoose('local');
                     this.close();
                 }))
-            .addButton(btn => btn
+            .addButton(btn => applyDestructiveStyle(btn)
                 .setButtonText('Keep remote')
                 .setTooltip('Overwrite local with remote content')
-                .setDestructive()
                 .onClick(() => {
                     this.onChoose('remote');
                     this.close();
