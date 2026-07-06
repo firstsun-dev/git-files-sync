@@ -16,6 +16,8 @@ Push, pull, diff, and resolve conflicts — file by file, not whole-vault. Unlik
 
 <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub" height="20"> <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab" height="20"> <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea" height="20">
 
+<video src="https://blog-assets.firstsun.org/obsidian/plugins/git-file-sync/git-file-sync-en.webm" autoplay loop muted playsinline width="600"></video>
+
 ![sync-status](imgs/sync-status.png)
 *The Sync Status View gives a bird's-eye view of your vault, letting you selectively push, pull, or diff modified files.*
 
