@@ -1,6 +1,6 @@
 {
 	"name": "git-file-sync",
-	"version": "1.2.0",
+	"version": "1.2.1",
 	"description": "Selectively sync individual notes with GitLab or GitHub. Push, pull, diff, and resolve conflicts — file by file, on mobile and desktop.",
 	"main": "main.js",
 	"type": "module",
@@ -12,6 +12,7 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"typecheck:compat": "tsc -p tsconfig.compat.json",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
 		"test": "vitest run",
@@ -40,6 +41,7 @@
 		"husky": "^9.1.7",
 		"jiti": "2.6.1",
 		"jsdom": "^29.1.1",
+		"obsidian-1_11": "npm:obsidian@^1.11.0",
 		"semantic-release": "^25.0.5",
 		"tslib": "2.4.0",
 		"typescript": "^5.8.3",
