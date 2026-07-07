@@ -1,3 +1,13 @@
+## [1.2.1](https://github.com/firstsun-dev/git-files-sync/compare/1.2.0...1.2.1) (2026-07-07)
+
+### Bug Fixes
+
+* **compat:** support Obsidian down to 1.11.0 ([d896015](https://github.com/firstsun-dev/git-files-sync/commit/d8960157655e57e61e897483c493edd6a852bd45))
+
+### Documentation
+
+* restyle README, host demo videos on R2, use official download stats ([#44](https://github.com/firstsun-dev/git-files-sync/issues/44)) ([0a4cff5](https://github.com/firstsun-dev/git-files-sync/commit/0a4cff5a46467a7719b123dfebd9afadc26856b3))
+
 ## [1.2.0](https://github.com/firstsun-dev/git-files-sync/compare/1.1.2...1.2.0) (2026-07-05)
 
 ### Features
