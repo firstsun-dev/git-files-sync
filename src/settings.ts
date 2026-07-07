@@ -1,5 +1,14 @@
-import {App, PluginSettingTab, Setting, Notice, TextComponent, SettingDefinitionItem} from 'obsidian';
+import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
 import GitLabFilesPush from "./main";
+
+// Minimal shape of Obsidian >= 1.13's SettingDefinitionItem. Declared locally so
+// the plugin still type-checks against older Obsidian typings (minAppVersion
+// 1.11.0), where this type does not exist. Obsidian only calls
+// getSettingDefinitions() on versions that understand it.
+interface SettingDefinitionItem {
+	name: string;
+	render: (setting: unknown, group: { listEl: HTMLElement }) => void;
+}
 
 export interface SyncMetadata {
 	lastSyncedSha: string;
@@ -83,8 +92,9 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	// Kept as a fallback for Obsidian < 1.13.0 (this plugin's minAppVersion),
-	// which don't know about getSettingDefinitions() and always call display().
+	// Kept as a fallback for Obsidian < 1.13.0 (older than 1.13, down to
+	// minAppVersion 1.11.0), which don't know about getSettingDefinitions()
+	// and always call display().
 	display(): void {
 		this.renderSettings(this.containerEl);
 	}
@@ -99,8 +109,12 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	}
 
 	private refresh(): void {
-		if (typeof this.update === 'function') {
-			this.update();
+		// update() only exists on Obsidian >= 1.13. On older versions (down to
+		// minAppVersion 1.11.0) re-render manually instead. Accessed via a cast
+		// so this compiles against the 1.11 typings, which lack update().
+		const maybeUpdate = (this as { update?: () => void }).update;
+		if (typeof maybeUpdate === 'function') {
+			maybeUpdate.call(this);
 		} else {
 			this.renderSettings(this.containerEl);
 		}
