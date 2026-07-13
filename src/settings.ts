@@ -1,5 +1,6 @@
 import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
 import GitLabFilesPush from "./main";
+import {FolderSuggest} from "./ui/FolderSuggest";
 
 // Minimal shape of Obsidian >= 1.13's SettingDefinitionItem. Declared locally so
 // the plugin still type-checks against older Obsidian typings (minAppVersion
@@ -162,25 +163,29 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Root path')
 			.setDesc('Optional: subfolder in repository (e.g. "notes")')
-			.addText(text => text
-				.setPlaceholder('Enter subfolder path')
-				.setValue(this.plugin.settings.rootPath)
-				.onChange((value) => {
-					this.plugin.settings.rootPath = value.replace(/^\/|\/$/g, '');
-					void this.plugin.saveSettings();
-					this.plugin.initializeGitService();
-				}));
+			.addText(text => {
+				text.setPlaceholder('Enter subfolder path')
+					.setValue(this.plugin.settings.rootPath)
+					.onChange((value) => {
+						this.plugin.settings.rootPath = value.replace(/^\/|\/$/g, '');
+						void this.plugin.saveSettings();
+						this.plugin.initializeGitService();
+					});
+				FolderSuggest.attach(this.app, text.inputEl);
+			});
 
 		new Setting(containerEl)
 			.setName('Vault folder')
 			.setDesc('Optional: only sync files in this vault folder (e.g. "sync" to only sync files in the sync folder)')
-			.addText(text => text
-				.setPlaceholder('Leave empty to sync all files')
-				.setValue(this.plugin.settings.vaultFolder)
-				.onChange((value) => {
-					this.plugin.settings.vaultFolder = value.replace(/^\/|\/$/g, '');
-					void this.plugin.saveSettings();
-				}));
+			.addText(text => {
+				text.setPlaceholder('Leave empty to sync all files')
+					.setValue(this.plugin.settings.vaultFolder)
+					.onChange((value) => {
+						this.plugin.settings.vaultFolder = value.replace(/^\/|\/$/g, '');
+						void this.plugin.saveSettings();
+					});
+				FolderSuggest.attach(this.app, text.inputEl);
+			});
 
 		// "Real symlink" needs the Git Data API, which only GitHub offers. For
 		// other providers, offer follow/skip only so the option can't mislead.
