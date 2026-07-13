@@ -54,6 +54,7 @@ const mockSettings: GitLabFilesPushSettings = {
     syncMetadata: {},
     symlinkHandling: 'real',
     ignorePatterns: '',
+    lastSeenVersion: '',
 };
 
 describe('SyncManager Mapping', () => {

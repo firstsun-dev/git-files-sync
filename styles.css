@@ -719,3 +719,12 @@
     display: flex;
     gap: 10px;
 }
+
+.ssv-whats-new-list {
+    margin: 0 0 12px;
+    padding-left: 20px;
+}
+
+.ssv-whats-new-notable {
+    font-weight: 600;
+}

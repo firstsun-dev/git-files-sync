@@ -48,6 +48,8 @@ export interface GitLabFilesPushSettings {
     symlinkHandling: SymlinkHandling;
     /** Multi-line, .gitignore-style patterns applied locally, in addition to the remote repo's .gitignore rules. */
     ignorePatterns: string;
+    /** Plugin version last seen by this vault, used to show a "what's new" tip after an update. */
+    lastSeenVersion: string;
 }
 
 export function getServiceName(settings: GitLabFilesPushSettings): string {
@@ -86,7 +88,8 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	syncMetadata: {},
 	vaultFolder: '',
 	symlinkHandling: 'real',
-	ignorePatterns: ''
+	ignorePatterns: '',
+	lastSeenVersion: ''
 }
 
 type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
