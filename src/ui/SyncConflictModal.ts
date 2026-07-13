@@ -1,5 +1,7 @@
 import { App, Modal, Setting } from 'obsidian';
 
+type ConflictPanelName = 'diff' | 'local' | 'remote';
+
 /**
  * Apply the "destructive" button style, but only when the running Obsidian
  * supports it. ButtonComponent.setDestructive() was added in Obsidian 1.13; on
@@ -39,22 +41,47 @@ export class SyncConflictModal extends Modal {
             cls: 'conflict-description'
         });
 
-        const diffContainer = contentEl.createDiv({ cls: 'conflict-diff-container' });
+        const panels = {} as Record<ConflictPanelName, HTMLElement>;
+        const tabs = {} as Record<ConflictPanelName, HTMLElement>;
 
-        const localSection = diffContainer.createDiv({ cls: 'conflict-section' });
+        const setActivePanel = (name: ConflictPanelName) => {
+            (Object.keys(panels) as ConflictPanelName[]).forEach(key => {
+                panels[key].toggleClass('is-active', key === name);
+                tabs[key].toggleClass('is-active', key === name);
+            });
+        };
+
+        const tabsContainer = contentEl.createDiv({ cls: 'conflict-tabs' });
+        const tabLabels: Record<ConflictPanelName, string> = { diff: 'Diff', local: 'Local', remote: 'Remote' };
+        (['diff', 'local', 'remote'] as const).forEach(name => {
+            const tab = tabsContainer.createEl('button', { text: tabLabels[name], cls: 'conflict-tab' });
+            tab.addEventListener('click', () => setActivePanel(name));
+            tabs[name] = tab;
+        });
+
+        const contentArea = contentEl.createDiv({ cls: 'conflict-content-area' });
+
+        const diffContainer = contentArea.createDiv({ cls: 'conflict-diff-container' });
+
+        const localSection = diffContainer.createDiv({ cls: 'conflict-section conflict-panel' });
         localSection.createEl('h3', { text: 'Local version' });
         const localPre = localSection.createEl('pre', { cls: 'conflict-content' });
         localPre.createEl('code', { text: this.localContent });
+        panels.local = localSection;
 
-        const remoteSection = diffContainer.createDiv({ cls: 'conflict-section' });
+        const remoteSection = diffContainer.createDiv({ cls: 'conflict-section conflict-panel' });
         remoteSection.createEl('h3', { text: 'Remote version' });
         const remotePre = remoteSection.createEl('pre', { cls: 'conflict-content' });
         remotePre.createEl('code', { text: this.remoteContent });
+        panels.remote = remoteSection;
 
-        const diffSection = contentEl.createDiv({ cls: 'conflict-diff-section' });
+        const diffSection = contentArea.createDiv({ cls: 'conflict-diff-section conflict-panel' });
         diffSection.createEl('h3', { text: 'Differences' });
         const diffPre = diffSection.createEl('pre', { cls: 'conflict-diff' });
         this.renderDiff(diffPre);
+        panels.diff = diffSection;
+
+        setActivePanel('diff');
 
         const buttonContainer = contentEl.createDiv({ cls: 'conflict-buttons' });
 
