@@ -7,7 +7,8 @@ export interface FileStatus {
     localContent?: string | ArrayBuffer;
     remoteContent?: string | ArrayBuffer;
     remoteSha?: string;
-    diff?: string;
+    /** True when the remote blob is a symbolic link (mode 120000). */
+    isSymlink?: boolean;
 }
 
 export type FilterValue = 'all' | 'synced' | 'modified' | 'unsynced' | 'remote-only';

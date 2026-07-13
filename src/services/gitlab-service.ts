@@ -75,7 +75,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
             const entries = data
                 .filter(item => item.type === 'blob')
-                .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE }));
+                .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE, sha: item.id }));
 
             if (useFilter) {
                 const filtered = entries.filter(e => {
@@ -93,6 +93,16 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         }
 
         return allEntries;
+    }
+
+    async getBlob(sha: string, path: string): Promise<GitFile> {
+        // Unlike GitHub/Gitea's base64-JSON blob endpoint, GitLab's raw blob
+        // endpoint returns the file's actual bytes directly.
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/blobs/${sha}/raw`;
+        const response = await this.safeRequest(url, 'GET');
+        const content = this.isBinary(path) ? response.arrayBuffer : response.text;
+        return { content, sha };
     }
 
     async deleteFile(path: string, branch: string, message: string): Promise<void> {

@@ -13,6 +13,13 @@ export interface GitFile {
 export interface GitTreeEntry {
     path: string;
     symlink: boolean;
+    /**
+     * The blob's git SHA, when the provider's tree listing includes it. Lets a
+     * refresh classify sync status by comparing a locally-computed blob SHA
+     * against this, instead of fetching full file content per entry. Absent
+     * entries fall back to a content-based comparison via getFile.
+     */
+    sha?: string;
 }
 
 export interface GitServiceInterface {
@@ -32,4 +39,11 @@ export interface GitServiceInterface {
     pushSymlink?(path: string, target: string, branch: string, commitMessage: string): Promise<{ path: string, sha?: string }>;
     deleteFile(path: string, branch: string, commitMessage: string): Promise<void>;
     getRepoGitignores(branch: string): Promise<string[]>;
+    /**
+     * Fetches a blob's content directly by its git SHA (from a GitTreeEntry),
+     * bypassing the path/ref-based Contents API. Used to lazily load a modified
+     * file's remote content (e.g. to render a diff) once a SHA-based refresh has
+     * already determined it differs from the local copy.
+     */
+    getBlob(sha: string, path: string): Promise<GitFile>;
 }

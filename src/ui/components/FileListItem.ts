@@ -8,6 +8,13 @@ export interface FileItemCallbacks {
     onPush:   (fileStatus: FileStatus) => void;
     onPull:   (fileStatus: FileStatus) => void;
     onDelete: (fileStatus: FileStatus) => void;
+    /**
+     * Called the first time a modified file's diff is expanded and its remote
+     * content hasn't been fetched yet. Must fetch the content, mutate the
+     * fileStatus object in place (remoteContent, localContent as needed), and
+     * resolve once it's ready to render.
+     */
+    onExpandDiff: (fileStatus: FileStatus) => Promise<void>;
 }
 
 // `icon` is a Lucide icon id (rendered via Obsidian's setIcon) so every status
@@ -48,8 +55,8 @@ export function renderFileItem(
 function renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus, callbacks: FileItemCallbacks): void {
     const actions = fileEl.createDiv({ cls: 'ssv-file-actions' });
 
-    if (fileStatus.status === 'modified' && fileStatus.diff) {
-        renderDiffToggleButton(actions, fileEl, fileStatus);
+    if (fileStatus.status === 'modified') {
+        renderDiffToggleButton(actions, fileEl, fileStatus, callbacks);
     }
 
     if (fileStatus.status === 'modified' || fileStatus.status === 'unsynced') {
@@ -65,27 +72,44 @@ function renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus, callback
     }
 }
 
-function renderDiffToggleButton(actions: HTMLElement, fileEl: HTMLElement, fileStatus: FileStatus): void {
+function renderDiffToggleButton(actions: HTMLElement, fileEl: HTMLElement, fileStatus: FileStatus, callbacks: FileItemCallbacks): void {
     const diffBtn = actions.createEl('button', { cls: 'ssv-action-btn diff' });
     const iconEl = diffBtn.createSpan();
     setIcon(iconEl, ICONS.diff);
     const btnLabel = diffBtn.createSpan({ cls: 'ssv-btn-label', text: ' Diff' });
-    
-    let diffEl: HTMLElement;
-    if (typeof fileStatus.remoteContent === 'string' && typeof fileStatus.localContent === 'string') {
-        diffEl = renderDiffPanel(fileEl, fileStatus.remoteContent, fileStatus.localContent);
-    } else {
-        diffEl = fileEl.createDiv({ cls: 'ssv-diff' });
-        diffEl.createDiv({ cls: 'ssv-diff-binary', text: 'Binary file changed' });
-    }
-    
+
+    const diffEl = fileEl.createDiv({ cls: 'ssv-diff' });
+    renderDiffBody(diffEl, fileStatus);
+
     setTooltip(diffBtn, 'Toggle diff view');
     diffBtn.addEventListener('click', () => {
         const open = diffEl.hasClass('visible');
+        if (!open && needsContentFetch(fileStatus)) {
+            diffEl.empty();
+            diffEl.createDiv({ cls: 'ssv-diff-loading', text: 'Loading diff…' });
+            void callbacks.onExpandDiff(fileStatus).then(() => renderDiffBody(diffEl, fileStatus));
+        }
         diffEl.toggleClass('visible', !open);
         btnLabel.setText(open ? ' Diff' : ' Hide');
         setIcon(iconEl, open ? ICONS.diff : ICONS.diffOpen);
     });
+}
+
+function needsContentFetch(fileStatus: FileStatus): boolean {
+    return !fileStatus.isSymlink && fileStatus.remoteContent === undefined;
+}
+
+function renderDiffBody(diffEl: HTMLElement, fileStatus: FileStatus): void {
+    diffEl.empty();
+    if (fileStatus.isSymlink) {
+        diffEl.createDiv({ cls: 'ssv-diff-binary', text: 'Symlink target changed' });
+    } else if (typeof fileStatus.remoteContent === 'string' && typeof fileStatus.localContent === 'string') {
+        renderDiffPanel(diffEl, fileStatus.remoteContent, fileStatus.localContent);
+    } else if (fileStatus.remoteContent === undefined) {
+        diffEl.createDiv({ cls: 'ssv-diff-loading', text: 'Click Diff to load…' });
+    } else {
+        diffEl.createDiv({ cls: 'ssv-diff-binary', text: 'Binary file changed' });
+    }
 }
 
 function renderActionBtn(actions: HTMLElement, icon: string, label: string, tooltip: string, onClick: () => void, cls: string): void {

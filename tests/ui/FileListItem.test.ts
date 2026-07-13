@@ -44,6 +44,7 @@ describe('renderFileItem', () => {
             onPush:   vi.fn(),
             onPull:   vi.fn(),
             onDelete: vi.fn(),
+            onExpandDiff: vi.fn().mockResolvedValue(undefined),
         };
     });
 
@@ -119,33 +120,27 @@ describe('renderFileItem', () => {
             expect(callbacks.onPull).toHaveBeenCalledWith(fs);
         });
 
-        it('renders diff toggle button when diff content is present', () => {
-            const fs = makeFileStatus('modified', { diff: 'some diff', localContent: 'b', remoteContent: 'a' });
+        it('renders diff toggle button for any modified file, even without preloaded content', () => {
+            const fs = makeFileStatus('modified', { file: mockFile });
             renderFileItem(container, fs, false, callbacks);
             expect(container.querySelector('.ssv-action-btn.diff')).not.toBeNull();
         });
 
-        it('does not render diff toggle when no diff', () => {
-            const fs = makeFileStatus('modified', { file: mockFile });
-            renderFileItem(container, fs, false, callbacks);
-            expect(container.querySelector('.ssv-action-btn.diff')).toBeNull();
-        });
-
         it('diff panel is not visible before toggle', () => {
-            const fs = makeFileStatus('modified', { diff: 'd', localContent: 'b', remoteContent: 'a' });
+            const fs = makeFileStatus('modified', { localContent: 'b', remoteContent: 'a' });
             renderFileItem(container, fs, false, callbacks);
             expect(container.querySelector('.ssv-diff')?.classList.contains('visible')).toBe(false);
         });
 
         it('diff panel becomes visible on first click', () => {
-            const fs = makeFileStatus('modified', { diff: 'd', localContent: 'b', remoteContent: 'a' });
+            const fs = makeFileStatus('modified', { localContent: 'b', remoteContent: 'a' });
             renderFileItem(container, fs, false, callbacks);
             (container.querySelector('.ssv-action-btn.diff') as HTMLButtonElement).click();
             expect(container.querySelector('.ssv-diff')?.classList.contains('visible')).toBe(true);
         });
 
         it('diff panel hides on second click', () => {
-            const fs = makeFileStatus('modified', { diff: 'd', localContent: 'b', remoteContent: 'a' });
+            const fs = makeFileStatus('modified', { localContent: 'b', remoteContent: 'a' });
             renderFileItem(container, fs, false, callbacks);
             const btn = container.querySelector('.ssv-action-btn.diff') as HTMLButtonElement;
             btn.click();
@@ -154,7 +149,7 @@ describe('renderFileItem', () => {
         });
 
         it('diff button label toggles between " Diff" and " Hide"', () => {
-            const fs = makeFileStatus('modified', { diff: 'd', localContent: 'b', remoteContent: 'a' });
+            const fs = makeFileStatus('modified', { localContent: 'b', remoteContent: 'a' });
             renderFileItem(container, fs, false, callbacks);
             const btn = container.querySelector('.ssv-action-btn.diff') as HTMLButtonElement;
             const label = btn.querySelector('.ssv-btn-label') as HTMLElement;
@@ -163,6 +158,29 @@ describe('renderFileItem', () => {
             expect(label.textContent).toBe(' Hide');
             btn.click();
             expect(label.textContent).toBe(' Diff');
+        });
+
+        it('renders preloaded diff content immediately without fetching', () => {
+            const fs = makeFileStatus('modified', { localContent: 'b', remoteContent: 'a' });
+            renderFileItem(container, fs, false, callbacks);
+            (container.querySelector('.ssv-action-btn.diff') as HTMLButtonElement).click();
+            expect(container.querySelector('.ssv-diff-grid')).not.toBeNull();
+            expect(callbacks.onExpandDiff).not.toHaveBeenCalled();
+        });
+
+        it('shows a loading placeholder and fetches content on demand when not preloaded', () => {
+            const fs = makeFileStatus('modified', { file: mockFile, remoteSha: 'abc123' });
+            renderFileItem(container, fs, false, callbacks);
+            (container.querySelector('.ssv-action-btn.diff') as HTMLButtonElement).click();
+            expect(callbacks.onExpandDiff).toHaveBeenCalledWith(fs);
+        });
+
+        it('shows a symlink message instead of a text diff for symlink entries', async () => {
+            const fs = makeFileStatus('modified', { file: mockFile, remoteSha: 'abc123', isSymlink: true });
+            renderFileItem(container, fs, false, callbacks);
+            (container.querySelector('.ssv-action-btn.diff') as HTMLButtonElement).click();
+            expect(container.querySelector('.ssv-diff-binary')?.textContent).toBe('Symlink target changed');
+            expect(callbacks.onExpandDiff).not.toHaveBeenCalled();
         });
     });
 

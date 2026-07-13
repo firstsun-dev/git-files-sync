@@ -11,9 +11,9 @@ describe('renderDiffPanel', () => {
         container = createContainer();
     });
 
-    it('returns the diff element with ssv-diff class', () => {
-        const el = renderDiffPanel(container, '', '');
-        expect(el.classList.contains('ssv-diff')).toBe(true);
+    it('renders the diff grid into the given container', () => {
+        renderDiffPanel(container, '', '');
+        expect(container.querySelector('.ssv-diff-grid')).not.toBeNull();
     });
 
     it('renders Remote and Local column headers', () => {

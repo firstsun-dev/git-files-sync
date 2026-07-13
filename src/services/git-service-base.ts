@@ -23,6 +23,7 @@ export interface GitHubTreeItem {
     path: string;
     type: string;
     mode?: string;
+    sha?: string;
 }
 
 export interface GitHubTreeResponse {
@@ -41,6 +42,8 @@ export interface GitLabTreeItem {
     path: string;
     type: string;
     mode?: string;
+    /** GitLab's tree API calls the blob SHA "id", not "sha". */
+    id?: string;
 }
 
 export interface ConnectionTestResult {
@@ -197,6 +200,16 @@ export abstract class BaseGitService {
         }
 
         return this.isBinary(path) ? bytes.buffer : new TextDecoder().decode(bytes);
+    }
+
+    /**
+     * Fetches a blob by SHA from a GitHub-shaped git data API (GitHub and Gitea
+     * both expose `GET .../git/blobs/{sha}` returning base64 `content`).
+     */
+    protected async fetchGitHubStyleBlob(url: string, path: string): Promise<GitFile> {
+        const response = await this.safeRequest(url, 'GET');
+        const data = this.parseJson<{ content: string; encoding: string; sha: string }>(response);
+        return { content: this.decodeContent(data.content, path), sha: data.sha };
     }
 
     protected handleFileNotFound(e: unknown): GitFile {
