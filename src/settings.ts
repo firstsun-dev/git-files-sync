@@ -1,6 +1,7 @@
 import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
 import GitLabFilesPush from "./main";
 import {FolderSuggest} from "./ui/FolderSuggest";
+import { ConnectionTestResult } from "./services/git-service-base";
 
 // Minimal shape of Obsidian >= 1.13's SettingDefinitionItem. Declared locally so
 // the plugin still type-checks against older Obsidian typings (minAppVersion
@@ -45,6 +46,8 @@ export interface GitLabFilesPushSettings {
     rootPath: string;
     vaultFolder: string;
     symlinkHandling: SymlinkHandling;
+    /** Multi-line, .gitignore-style patterns applied locally, in addition to the remote repo's .gitignore rules. */
+    ignorePatterns: string;
 }
 
 export function getServiceName(settings: GitLabFilesPushSettings): string {
@@ -82,11 +85,19 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	branch: 'main',
 	syncMetadata: {},
 	vaultFolder: '',
-	symlinkHandling: 'real'
+	symlinkHandling: 'real',
+	ignorePatterns: ''
 }
+
+type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
+
+const CONNECTION_TEST_DEBOUNCE_MS = 800;
 
 export class GitLabSyncSettingTab extends PluginSettingTab {
 	plugin: GitLabFilesPush;
+	private statusBadgeEl: HTMLElement | null = null;
+	private connectionTestTimer: ReturnType<typeof setTimeout> | null = null;
+	private connectionTestSeq = 0;
 
 	constructor(app: App, plugin: GitLabFilesPush) {
 		super(app, plugin);
@@ -121,8 +132,74 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		}
 	}
 
+	// Rebuilding the whole settings tab (renderSettings) to refresh the badge
+	// would empty and recreate every field, stealing focus mid-typing. The
+	// badge element is instead created once per renderSettings pass and
+	// updated in place by setStatusBadge().
+	private renderConnectionStatus(containerEl: HTMLElement): void {
+		this.statusBadgeEl = containerEl.createDiv({ cls: 'gfs-connection-status' });
+		this.setStatusBadge('checking');
+	}
+
+	private setStatusBadge(state: ConnectionStatusState, detail?: string): void {
+		const badge = this.statusBadgeEl;
+		if (!badge) return;
+
+		badge.removeClass('is-checking');
+		badge.removeClass('is-connected');
+		badge.removeClass('is-disconnected');
+		badge.addClass(`is-${state}`);
+
+		const labels: Record<ConnectionStatusState, string> = {
+			checking: 'Checking…',
+			connected: 'Connected',
+			disconnected: 'Not connected'
+		};
+		const label = labels[state];
+		badge.setText(detail ? `${label} — ${detail}` : label);
+	}
+
+	// Debounced so token/branch fields (which call this on every keystroke)
+	// don't hit the remote API on every character typed.
+	private scheduleConnectionTest(): void {
+		if (this.connectionTestTimer) {
+			clearTimeout(this.connectionTestTimer);
+		}
+		this.connectionTestTimer = setTimeout(() => {
+			this.connectionTestTimer = null;
+			void this.testConnectionSilently();
+		}, CONNECTION_TEST_DEBOUNCE_MS);
+	}
+
+	private async testConnectionSilently(): Promise<ConnectionTestResult> {
+		const seq = ++this.connectionTestSeq;
+		this.setStatusBadge('checking');
+
+		try {
+			const result = await this.plugin.gitService.testConnection(this.plugin.settings.branch);
+			if (seq !== this.connectionTestSeq) return result;
+
+			if (!result.repoOk) {
+				this.setStatusBadge('disconnected', result.error ?? 'could not reach the repository');
+			} else if (!result.branchOk) {
+				this.setStatusBadge('disconnected', `branch "${this.plugin.settings.branch}" not found`);
+			} else {
+				this.setStatusBadge('connected');
+			}
+			return result;
+		} catch (e: unknown) {
+			if (seq === this.connectionTestSeq) {
+				const message = e instanceof Error ? e.message : String(e);
+				this.setStatusBadge('disconnected', message);
+			}
+			throw e;
+		}
+	}
+
 	private renderSettings(containerEl: HTMLElement): void {
 		containerEl.empty();
+
+		this.renderConnectionStatus(containerEl);
 
 		new Setting(containerEl)
 			.setName('Git service')
@@ -158,6 +235,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.onChange((value) => {
 					this.plugin.settings.branch = value || 'main';
 					void this.plugin.saveSettings();
+					this.scheduleConnectionTest();
 				}));
 
 		new Setting(containerEl)
@@ -187,6 +265,19 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				FolderSuggest.attach(this.app, text.inputEl);
 			});
 
+		new Setting(containerEl)
+			.setName('Ignore patterns')
+			.setDesc('Optional: .gitignore-style patterns (one per line) to exclude local files from sync, in addition to the repository\'s own .gitignore.')
+			.addTextArea(text => {
+				text.setPlaceholder(`${this.app.vault.configDir}/\n*.tmp`)
+					.setValue(this.plugin.settings.ignorePatterns)
+					.onChange((value) => {
+						this.plugin.settings.ignorePatterns = value;
+						void this.plugin.saveSettings();
+					});
+				text.inputEl.rows = 4;
+			});
+
 		// "Real symlink" needs the Git Data API, which only GitHub offers. For
 		// other providers, offer follow/skip only so the option can't mislead.
 		const supportsRealSymlink = this.plugin.settings.serviceType === 'github';
@@ -214,7 +305,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.setButtonText('Test connection')
 				.onClick(async () => {
 					try {
-						const result = await this.plugin.gitService.testConnection(this.plugin.settings.branch);
+						const result = await this.testConnectionSilently();
 						if (!result.repoOk) {
 							new Notice(`Connection failed: ${result.error ?? 'could not reach the repository'}`);
 						} else if (!result.branchOk) {
@@ -231,6 +322,8 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 						new Notice(`Connection failed: ${message}`);
 					}
 				}));
+
+		this.scheduleConnectionTest();
 	}
 
 	// Token fields are masked like a password input (with a toggle to reveal
@@ -270,6 +363,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				this.plugin.settings.gitlabToken = value;
 				void this.plugin.saveSettings();
 				this.plugin.initializeGitService();
+				this.scheduleConnectionTest();
 			}
 		);
 
@@ -283,6 +377,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.gitlabBaseUrl = value || 'https://gitlab.com';
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 
 		new Setting(containerEl)
@@ -295,6 +390,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.projectId = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 	}
 
@@ -308,6 +404,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				this.plugin.settings.giteaToken = value;
 				void this.plugin.saveSettings();
 				this.plugin.initializeGitService();
+				this.scheduleConnectionTest();
 			}
 		);
 
@@ -321,6 +418,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.giteaBaseUrl = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 
 		new Setting(containerEl)
@@ -333,6 +431,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.giteaOwner = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 
 		new Setting(containerEl)
@@ -345,6 +444,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.giteaRepo = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 	}
 
@@ -358,6 +458,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				this.plugin.settings.githubToken = value;
 				void this.plugin.saveSettings();
 				this.plugin.initializeGitService();
+				this.scheduleConnectionTest();
 			}
 		);
 
@@ -371,6 +472,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.githubOwner = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 
 		new Setting(containerEl)
@@ -383,6 +485,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.githubRepo = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 	}
 }

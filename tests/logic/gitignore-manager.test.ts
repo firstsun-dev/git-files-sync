@@ -190,6 +190,58 @@ describe('GitignoreManager', () => {
         });
     });
 
+    describe('local ignorePatterns setting', () => {
+        it('ignores files matching a local pattern even with no remote/local .gitignore', async () => {
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue([]);
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+
+            const localManager = new GitignoreManager(mockApp, mockGitService, branch, '', '', 'secrets/\n*.private');
+            await localManager.loadGitignores();
+
+            expect(localManager.isIgnored('secrets/key.txt')).toBe(true);
+            expect(localManager.isIgnored('note.private')).toBe(true);
+            expect(localManager.isIgnored('note.md')).toBe(false);
+        });
+
+        it('applies local patterns in addition to remote .gitignore, not instead of it', async () => {
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue(['.gitignore']);
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('*.log');
+
+            const localManager = new GitignoreManager(mockApp, mockGitService, branch, '', '', '*.tmp');
+            await localManager.loadGitignores();
+
+            expect(localManager.isIgnored('test.log')).toBe(true);
+            expect(localManager.isIgnored('test.tmp')).toBe(true);
+            expect(localManager.isIgnored('test.md')).toBe(false);
+        });
+
+        it('ignores blank ignorePatterns without throwing', async () => {
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue([]);
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+
+            const localManager = new GitignoreManager(mockApp, mockGitService, branch, '', '', '   \n  ');
+            await localManager.loadGitignores();
+
+            expect(localManager.isIgnored('note.md')).toBe(false);
+        });
+
+        it('respects comments and negation in local patterns', async () => {
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue([]);
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+
+            const localManager = new GitignoreManager(mockApp, mockGitService, branch, '', '', '# comment\ndraft/*\n!draft/keep.md');
+            await localManager.loadGitignores();
+
+            expect(localManager.isIgnored('draft/scratch.md')).toBe(true);
+            expect(localManager.isIgnored('draft/keep.md')).toBe(false);
+        });
+    });
+
     describe('complex patterns', () => {
         beforeEach(async () => {
             vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue(['.gitignore']);
