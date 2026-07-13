@@ -1,5 +1,6 @@
 import { setIcon, setTooltip } from 'obsidian';
 import { ICONS } from './icons';
+import { t } from '../../i18n';
 
 export interface ActionBarProps {
     hasFiles:     boolean;
@@ -25,17 +26,17 @@ export function renderActionBar(container: HTMLElement, props: ActionBarProps, c
     if (props.hasFiles) {
         bar.createDiv({ cls: 'ssv-bar-spacer' });
         renderSelectAllRow(bar, props.allSelected, props.indeterminate, callbacks.onSelectAll);
-        renderLargeButton(bar, ICONS.push,   ` Push (${props.canPush})`,   `Push ${props.canPush} files`,   callbacks.onPush,   'push',   props.canPush === 0);
-        renderLargeButton(bar, ICONS.pull,   ` Pull (${props.canPull})`,   `Pull ${props.canPull} files`,   callbacks.onPull,   'pull',   props.canPull === 0);
-        renderLargeButton(bar, ICONS.delete, ` Delete (${props.canDelete})`, `Delete ${props.canDelete} files`, callbacks.onDelete, 'danger', props.canDelete === 0);
+        renderLargeButton(bar, ICONS.push,   t('actionBar.pushCount', { count: props.canPush }),     t('actionBar.pushFiles', { count: props.canPush }),     callbacks.onPush,   'push',   props.canPush === 0);
+        renderLargeButton(bar, ICONS.pull,   t('actionBar.pullCount', { count: props.canPull }),     t('actionBar.pullFiles', { count: props.canPull }),     callbacks.onPull,   'pull',   props.canPull === 0);
+        renderLargeButton(bar, ICONS.delete, t('actionBar.deleteCount', { count: props.canDelete }), t('actionBar.deleteFiles', { count: props.canDelete }), callbacks.onDelete, 'danger', props.canDelete === 0);
     }
 }
 
 function renderRefreshButton(bar: HTMLElement, onRefresh: () => void): void {
     const btn = bar.createEl('button', { cls: 'ssv-btn ssv-btn-refresh' });
     setIcon(btn.createSpan(), ICONS.refresh);
-    btn.createSpan({ cls: 'ssv-btn-label', text: ' Refresh' });
-    setTooltip(btn, 'Refresh all statuses');
+    btn.createSpan({ cls: 'ssv-btn-label', text: t('actionBar.refresh') });
+    setTooltip(btn, t('actionBar.refreshAll'));
     btn.addEventListener('click', onRefresh);
 }
 
@@ -44,7 +45,7 @@ function renderSelectAllRow(bar: HTMLElement, allSelected: boolean, indeterminat
     const cb = selectRow.createEl('input', { type: 'checkbox' });
     cb.checked = allSelected;
     cb.indeterminate = indeterminate;
-    selectRow.createSpan({ cls: 'ssv-select-label', text: 'Select' });
+    selectRow.createSpan({ cls: 'ssv-select-label', text: t('actionBar.select') });
     cb.addEventListener('change', () => onSelectAll(cb.checked));
 }
 
