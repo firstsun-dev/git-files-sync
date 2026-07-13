@@ -12,57 +12,55 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-07-13 14:20
-**Session ID:** (this session)
-**Active Feature:** feat-006 - i18n (multi-language) support (issue #38)
+**Last Updated:** 2026-07-13 14:35
+**Session ID:** (this session, merged with session_01YYCTyZw7gUmJ7oh1VTmAqh's parallel work)
+**Active Feature:** none — feat-001 through feat-009 are all done; feat-010 (Bitbucket, #37) is next up but not started
 
 ## Status
 
 ### What's Done
 
-- [x] feat-001 - Project Setup verified (see archive/2026-07.md)
-- [x] feat-002 - Settings UX bundle (see archive/2026-07.md); this branch's history already contains it (merged upstream of `claude/fix-directory-symlink-pull-260713`)
-- [x] feat-006 implementation - i18n core (`src/i18n/index.ts`, `locales/en.ts`, `locales/zh-tw.ts`), ~130 strings extracted across settings.ts, main.ts, and 7 `ui/` files, tests added, lint/build/test all clean
+- [x] feat-001..008 (project setup, settings UX bundle, folder picker, symlink pull fix, tree-SHA refresh, HTML-response error clarity, what's-new modal) — see archive/2026-07.md
+- [x] feat-009 - i18n / multi-language support (issue #38): `src/i18n/{index,locales/en,locales/zh-tw}.ts` (159 keys, en + zh-tw, full parity), ~130 hardcoded strings replaced across `settings.ts`, `main.ts`, and 7 `ui/` files, `tests/i18n/index.test.ts` added (6 cases)
+- All consolidated onto branch `claude/fix-directory-symlink-pull-260713` → **PR #51**, per the user's explicit request to keep the PR count down rather than one PR per issue.
 
 ### What's In Progress
 
-- [ ] feat-006 - push branch `claude/i18n-support-260713` and open a PR (or fold it back into `claude/fix-directory-symlink-pull-260713` per the user's stated intent)
-  - Details: worked in a separate branch/worktree because `claude/fix-directory-symlink-pull-260713` was already checked out elsewhere in this repo's other worktree (main checkout at `/home/tianyao/git-files-sync`), so git wouldn't allow checking out the same branch twice
-  - Blockers: none technically; needs the user's go-ahead on push/merge direction
+- Nothing actively in progress. feat-009 landed as a separate commit (`144eb28`, from a temporary branch `claude/i18n-support-260713`) merged into this branch and pushed to origin as part of PR #51.
 
 ### What's Next
 
-1. Confirm with user whether to push `claude/i18n-support-260713` and open a PR, or merge it locally into `claude/fix-directory-symlink-pull-260713`
-2. Re-sync this file's backlog (feat-003..005) against `gh issue list --repo firstsun-dev/git-files-sync --state open`
+1. Issue #37 (Bitbucket provider support, feat-010) — large, was deferred until #38 landed (agreed order: 39→38→37). Now unblocked.
+2. Re-sync against `gh issue list --repo firstsun-dev/git-files-sync --state open`. Remaining genuinely-unstarted issues as of this session: #47 (regex ignore lists), #45 (SonarQube findings), #37 (Bitbucket), #28 (non-engineering: community visibility).
+3. PR #51 is large (7 issues' worth of changes now). If the user wants to review/merge it before more work piles on, flag this rather than continuing to add commits indefinitely.
 
 ## Blockers / Risks
 
-- None currently.
+- None currently. (Earlier in this session, feat-009 was recorded as "blocked, awaiting scope decision" by a parallel session working in the main checkout — that scope question was resolved directly with the user in this session instead: flat key-value dict, `window.moment.locale()` detection with English fallback, cover settings.ts + all Notices now. No longer blocked.)
 
 ## Decisions Made
 
-- **Worked on a new branch instead of the pre-existing `claude/fix-directory-symlink-pull-260713`**: that branch was already checked out in another worktree (the main repo checkout), and git disallows the same branch in two worktrees. Created `claude/i18n-support-260713` off `origin/claude/fix-directory-symlink-pull-260713` instead, per the user's choice.
+- **All work goes into one PR (#51)**: user explicitly said "不要那麼多pr merge" (don't want so many PRs). Any further issue work should commit directly onto `claude/fix-directory-symlink-pull-260713`, not a new branch — the i18n work below was an exception only because that branch was already checked out in another worktree when the session started; it was merged back in immediately rather than left as a standing separate branch/PR.
+- **feat-009 scope**: settings.ts + all Notice() messages, done in one pass rather than split into infra-first/settings-only phases — a half-migrated i18n system (some strings extracted, most not) would be worse than finishing it.
 - **Flat key-value i18n dict, not nested namespaces**: matches this plugin's small scale; simpler `t(key, vars)` lookup, no external i18n library dependency.
-- **Locale detection via `window.moment.locale()`**: per issue #38's suggested approach; unknown/unmapped locales fall back to English. A bare `zh` locale code is mapped to `zh-tw` since that's the only Chinese variant shipped.
+- **Locale detection via `window.moment.locale()`**: per issue #38's suggested approach; unresolvable/unsupported locales fall back to English. A bare `zh` locale code maps to `zh-tw`, the only Chinese variant shipped.
 - **Diff-format markers, changelog release-note text, and proper nouns (GitHub/GitLab/Gitea) were left untranslated** — out of scope for UI-chrome i18n.
+- **`src/changelog.ts` is hand-curated, separate from the auto-generated `CHANGELOG.md`**: semantic-release already maintains `CHANGELOG.md` from Conventional Commit messages, but it's commit-log-level detail (too granular for an end-user popup) and isn't shipped in the release assets. The what's-new modal needs a small, hand-written, user-facing "highlights" list instead.
+- **Fixed two duplication regressions mid-session** (SonarCloud gate is 3% on new code, learned the hard way on PR #49 earlier): deduped `TextComponent`/`TextAreaComponent` test mocks, and deduped the GitHub/Gitea `getBlob()` bodies into a shared `fetchGitHubStyleBlob()` base helper.
 
 ## Files Modified This Session
 
-- `src/i18n/index.ts` (new) - `t(key, vars?)` helper, locale detection/resolution
-- `src/i18n/locales/en.ts`, `src/i18n/locales/zh-tw.ts` (new) - 159 keys each, full parity
-- `src/settings.ts`, `src/main.ts` - all hardcoded UI strings replaced with `t()` calls
-- `src/ui/SyncStatusView.ts`, `src/ui/SyncConflictModal.ts`, `src/ui/WhatsNewModal.ts`, `src/ui/ConfirmModal.ts` - same
-- `src/ui/components/ActionBar.ts`, `FileListItem.ts`, `DiffPanel.ts` - same
-- `tests/i18n/index.test.ts` (new) - 6 test cases covering fallback, locale resolution, interpolation
+- feat-009 (i18n): `src/i18n/index.ts`, `src/i18n/locales/en.ts`, `src/i18n/locales/zh-tw.ts`, `tests/i18n/index.test.ts` (all new); `src/settings.ts`, `src/main.ts`, `src/ui/SyncStatusView.ts`, `src/ui/SyncConflictModal.ts`, `src/ui/WhatsNewModal.ts`, `src/ui/ConfirmModal.ts`, `src/ui/components/ActionBar.ts`, `FileListItem.ts`, `DiffPanel.ts` (modified)
+- See archive/2026-07.md entries feat-003/005/006/007/008 for the earlier features' file lists.
 
 ## Evidence of Completion
 
-- [x] Tests pass: `npx vitest run` → 308/308 passed (302 pre-existing + 6 new i18n tests)
+- [x] Tests pass: `npx vitest run` → 308/308 passed
 - [x] Type check clean: `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) → clean
 - [x] Lint clean: `npx eslint .` → 0 errors
-- [ ] Manual verification in Obsidian: not done (no Obsidian instance available in this environment)
+- [ ] Manual verification in Obsidian: not done (no Obsidian instance available in this environment) for any feature this session
 
 ## Notes for Next Session
 
-- Branch `claude/i18n-support-260713` has uncommitted working-tree changes as of this session's end — not yet committed or pushed.
-- `feature_list.json`'s backlog (feat-003..005) is a snapshot from 2026-07-13; re-check `gh issue list` before trusting it.
+- Working branch for all further commits: `claude/fix-directory-symlink-pull-260713` (PR #51). Do not open a new branch/PR for the next issue unless the user says otherwise.
+- `feature_list.json`'s backlog is a snapshot from this session — re-check `gh issue list` before trusting it.
