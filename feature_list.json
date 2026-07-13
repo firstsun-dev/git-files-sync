@@ -1,0 +1,46 @@
+{
+  "_note": "GitHub Issues (firstsun-dev/git-files-sync, Project #6) is the source of truth for the full backlog and priority/estimate fields. This file mirrors only the active feature and the next few candidates so an agent session has a local, offline checkpoint — sync it against `gh issue list --repo firstsun-dev/git-files-sync --state open` at the start of a session rather than treating it as authoritative.",
+  "features": [
+    {
+      "id": "feat-001",
+      "name": "Project Setup",
+      "description": "Confirm the project can install dependencies, run verification, and start from a clean checkout",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "Commit 28f4f8e - npm install/lint/build/test all pass from a clean checkout"
+    },
+    {
+      "id": "feat-002",
+      "name": "Settings UX bundle (issues #40, #41, #42)",
+      "description": "Local ignore-pattern sync setting (#40), persistent connection status badge in settings (#41), and resized/tabbed conflict resolution modal (#42)",
+      "dependencies": ["feat-001"],
+      "status": "in-review",
+      "evidence": "Commit 28f4f8e on branch claude/settings-ux-improvements-260713 - lint/build/test pass (254 tests); pushed to origin, PR not yet opened"
+    },
+    {
+      "id": "feat-003",
+      "name": "fix: symbolic link pull fails (issue #33)",
+      "description": "Bug report with screenshot; needs repro/investigation before a fix can be scoped",
+      "dependencies": [],
+      "status": "not-started",
+      "evidence": ""
+    },
+    {
+      "id": "feat-004",
+      "name": "fix: resolve sonarqube issues (issue #45)",
+      "description": "Review current SonarQube findings and fix code smells/bugs/security hotspots where applicable",
+      "dependencies": [],
+      "status": "not-started",
+      "evidence": ""
+    },
+    {
+      "id": "feat-005",
+      "name": "feat(settings): folder picker for root path / vault folder (issue #48)",
+      "description": "Searchable folder suggester for the Root path and Vault folder settings fields, replacing free-text entry",
+      "dependencies": [],
+      "status": "not-started",
+      "evidence": ""
+    }
+  ],
+  "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."
+}
