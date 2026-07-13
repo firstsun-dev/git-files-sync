@@ -81,8 +81,20 @@ export abstract class BaseGitService {
 
             response = await requestUrl(options);
         } catch (error) {
-            // Network-level failure (DNS, offline, TLS, etc.)
+            // Network-level failure (DNS, offline, TLS, etc.) — but some Obsidian
+            // versions eagerly parse the response body as JSON inside requestUrl()
+            // itself, before `throw: false` or our own status check ever run. If a
+            // proxy/login page returns HTML instead of JSON, that eager parse
+            // throws here as a raw "Unexpected token '<' ... is not valid JSON"
+            // error rather than surfacing as a normal response we could inspect.
             if (!silent) logger.error('Git Service Request Failed:', error);
+            if (this.looksLikeJsonParseOfHtmlError(error)) {
+                throw new Error(
+                    'Expected a JSON response from the Git server but received an HTML page ' +
+                    '(likely a login, SSO redirect, or proxy/error page). ' +
+                    'Please check the server URL, your access token, and any network proxy or firewall.'
+                );
+            }
             if (error instanceof Error) throw error;
             throw new Error(`Network error or unexpected failure: ${String(error)}`);
         }
@@ -104,6 +116,17 @@ export abstract class BaseGitService {
     }
 
     protected abstract addAuthHeader(headers: Record<string, string>): void;
+
+    /**
+     * Detects V8's JSON.parse error for a response starting with '<' (an HTML
+     * page), across its known message phrasings, e.g.:
+     *   "Unexpected token '<', "<!DOCTYPE "... is not valid JSON"
+     *   "Unexpected token < in JSON at position 0"
+     */
+    private looksLikeJsonParseOfHtmlError(error: unknown): boolean {
+        if (!(error instanceof Error)) return false;
+        return /unexpected token/i.test(error.message) && /json/i.test(error.message) && error.message.includes('<');
+    }
 
     /**
      * Safely parses a response body as JSON.
