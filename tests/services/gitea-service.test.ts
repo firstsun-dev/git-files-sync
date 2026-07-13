@@ -184,6 +184,33 @@ describe('GiteaService', () => {
             mockRequest({ status: 404, json: { message: 'branch does not exist' }, text: 'branch does not exist' });
             await expect(service.listFiles('missing-branch')).rejects.toThrow(/Branch "missing-branch" was not found/);
         });
+
+        it('listFilesDetailed includes each blob\'s sha', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { commit: { id: commitSha } } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { tree: [
+                    { path: 'file1.md', type: 'blob', sha: 'sha-1' },
+                ] } } as unknown as RequestUrlResponse);
+            expect(await service.listFilesDetailed('main')).toEqual([
+                { path: 'file1.md', symlink: false, sha: 'sha-1' },
+            ]);
+        });
+    });
+
+    describe('getBlob', () => {
+        it('decodes base64 blob content by sha', async () => {
+            mockRequest({ status: 200, json: { content: btoa('hello world'), encoding: 'base64', sha: 'blob-sha' } });
+            const result = await service.getBlob('blob-sha', 'test.md');
+            expect(result.content).toBe('hello world');
+            expect(result.sha).toBe('blob-sha');
+        });
+
+        it('requests the blob endpoint by sha, not path', async () => {
+            mockRequest({ status: 200, json: { content: btoa('x'), sha: 'abc123' } });
+            await service.getBlob('abc123', 'test.md');
+            const call = getLastRequestCall();
+            expect(call.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/blobs/abc123`);
+        });
     });
 
     describe('deleteFile', () => {

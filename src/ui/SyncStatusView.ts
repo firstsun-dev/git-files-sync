@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setIcon, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
-import { getServiceName, getEffectiveSymlinkHandling } from '../settings';
+import { getServiceName, getEffectiveSymlinkHandling, type SymlinkHandling } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
 import { logger } from '../utils/logger';
 import { type FileStatus, type FilterValue } from './types';
@@ -9,6 +9,8 @@ import { renderFileItem, statusMeta, type FileItemCallbacks } from './components
 import { ICONS } from './components/icons';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 import { readLocalSymlinkTarget } from '../utils/symlink';
+import { gitBlobSha } from '../utils/git-blob-sha';
+import { type GitTreeEntry } from '../services/git-service-interface';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
 
@@ -203,7 +205,24 @@ export class SyncStatusView extends ItemView {
             onPush:   (fs) => void this.runSingleFile(fs, 'push'),
             onPull:   (fs) => void this.runSingleFile(fs, 'pull'),
             onDelete: (fs) => void this.handleLocalDelete(fs),
+            onExpandDiff: (fs) => this.loadDiffContent(fs),
         };
+    }
+
+    /**
+     * Lazily fetches a modified file's remote content by SHA (Phase 2 of the
+     * SHA-based refresh) so the diff panel has something to render. Mutates
+     * the FileStatus object in place, caching the result on the same instance
+     * held in this.fileStatuses so re-expanding doesn't refetch.
+     */
+    private async loadDiffContent(fileStatus: FileStatus): Promise<void> {
+        if (fileStatus.remoteContent !== undefined || !fileStatus.remoteSha) return;
+        try {
+            const blob = await this.plugin.gitService.getBlob(fileStatus.remoteSha, fileStatus.path);
+            fileStatus.remoteContent = blob.content;
+        } catch (e) {
+            logger.warn(`Failed to load diff content for ${fileStatus.path}`, e);
+        }
     }
 
     private renderFileList(container: HTMLElement): void {
@@ -255,11 +274,11 @@ export class SyncStatusView extends ItemView {
             }
 
             await new Promise(r => window.setTimeout(r, 500));
-            await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+            await this.refreshFileStatus(fileStatus.file || fileStatus.path, undefined);
             this.renderView();
         } catch (e) {
             new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
-            await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+            await this.refreshFileStatus(fileStatus.file || fileStatus.path, undefined);
             this.renderView();
         }
     }
@@ -289,7 +308,7 @@ export class SyncStatusView extends ItemView {
             this.renderView();
 
             const filesToCheck = this.getCheckableFiles(files.local, extra, files.hiddenLocalPaths);
-            await this.performStatusCheck(filesToCheck);
+            await this.performStatusCheck(filesToCheck, files.remoteMap);
 
             this.lastSyncTime = Date.now();
             this.isRefreshing = false; // Set to false BEFORE final renderView
@@ -310,7 +329,7 @@ export class SyncStatusView extends ItemView {
         await this.plugin.gitignoreManager.loadGitignores();
 
         // Map remote paths to vault paths
-        const remoteMap = new Map<string, string>(); // vaultPath -> remoteFullPath
+        const remoteMap = new Map<string, GitTreeEntry>(); // vaultPath -> tree entry (path, symlink, sha)
         const skipSymlinks = getEffectiveSymlinkHandling(this.plugin.settings) === 'skip';
         for (const entry of remoteEntries) {
             if (entry.symlink && skipSymlinks) continue; // Symlink handling: skip
@@ -319,7 +338,7 @@ export class SyncStatusView extends ItemView {
 
             const vaultPath = this.plugin.getVaultPath(normalized);
             if (!this.plugin.gitignoreManager.isIgnored(normalized)) {
-                remoteMap.set(vaultPath, entry.path);
+                remoteMap.set(vaultPath, entry);
             }
         }
 
@@ -394,7 +413,7 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    private async identifyExtraFiles(remoteMap: Map<string, string>, localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>) {
+    private async identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>) {
         const extra: Array<TFile | string> = [];
         for (const [vaultPath] of remoteMap.entries()) {
             if (localFilePaths.has(vaultPath)) continue;
@@ -440,7 +459,7 @@ export class SyncStatusView extends ItemView {
     private static readonly STATUS_CHECK_CONCURRENCY = 8;
     private static readonly RENDER_THROTTLE_MS = 150;
 
-    private async performStatusCheck(filesToCheck: Array<TFile | string>): Promise<void> {
+    private async performStatusCheck(filesToCheck: Array<TFile | string>, remoteMap: Map<string, GitTreeEntry>): Promise<void> {
         const total = filesToCheck.length;
         this.refreshProgress = { current: 0, total };
 
@@ -457,7 +476,10 @@ export class SyncStatusView extends ItemView {
         const worker = async (): Promise<void> => {
             while (next < total) {
                 const file = filesToCheck[next++];
-                if (file) await this.refreshFileStatus(file);
+                if (file) {
+                    const path = typeof file === 'string' ? file : file.path;
+                    await this.refreshFileStatus(file, remoteMap.get(path));
+                }
                 this.refreshProgress.current++;
                 maybeRender();
             }
@@ -468,22 +490,20 @@ export class SyncStatusView extends ItemView {
         maybeRender(true);
     }
 
-    private async refreshFileStatus(fileOrPath: TFile | string): Promise<void> {
+    /**
+     * Classifies a file's sync status. When the remote tree entry carries a git
+     * blob SHA (the common case), this is a single local hash + comparison with
+     * no network request (Phase 1 of the SHA-based refresh). Falls back to the
+     * previous full-content comparison via getFile() when a tree entry is
+     * missing a SHA, or wasn't found on the remote at all (new local file).
+     */
+    private async refreshFileStatus(fileOrPath: TFile | string, remoteEntry: GitTreeEntry | undefined): Promise<void> {
         try {
-            const isStr = typeof fileOrPath === 'string';
-            const path = isStr ? fileOrPath : fileOrPath.path;
-            const file = isStr ? undefined : fileOrPath;
-
-            const binary = this.isBinary(path);
-            const localContent = await this.readFileContent(fileOrPath, binary, isStr);
-
-            // Important: Use SyncManager's logic which handles rootPath/vaultFolder mapping
-            const repoPath = this.plugin.getNormalizedPath(path);
-            const remote = await this.plugin.gitService.getFile(repoPath, this.plugin.settings.branch);
-
-            const { status, diff } = this.determineFileStatus(binary, localContent, remote);
-
-            this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha, diff });
+            if (remoteEntry?.sha !== undefined) {
+                await this.refreshFileStatusBySha(fileOrPath, remoteEntry);
+            } else {
+                await this.refreshFileStatusByContent(fileOrPath);
+            }
         } catch (e) {
             const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
             logger.warn(`Failed to determine sync status for ${path}`, e);
@@ -493,6 +513,60 @@ export class SyncStatusView extends ItemView {
                 status: 'unsynced'
             });
         }
+    }
+
+    private async refreshFileStatusBySha(fileOrPath: TFile | string, remoteEntry: GitTreeEntry): Promise<void> {
+        const isStr = typeof fileOrPath === 'string';
+        const path = isStr ? fileOrPath : fileOrPath.path;
+        const file = isStr ? undefined : fileOrPath;
+        const binary = this.isBinary(path);
+
+        const symlinkMode = getEffectiveSymlinkHandling(this.plugin.settings);
+        const localContent = await this.readLocalContentForSha(fileOrPath, isStr, binary, remoteEntry.symlink, symlinkMode);
+        const localSha = await gitBlobSha(localContent);
+
+        const status = localSha === remoteEntry.sha ? 'synced' : 'modified';
+        this.fileStatuses.set(path, {
+            file, path, status, localContent,
+            remoteSha: remoteEntry.sha,
+            isSymlink: remoteEntry.symlink,
+        });
+    }
+
+    /**
+     * Determines what to hash locally so it's comparable to the remote blob SHA.
+     * A symlink's blob content is its target path string, not the content it
+     * points at, so "real" mode hashes the raw link target instead of following
+     * it. "follow" mode (and "real" without an actual local OS symlink, e.g. on
+     * mobile) always hashes the local file's content as read normally.
+     */
+    private async readLocalContentForSha(
+        fileOrPath: TFile | string, isStr: boolean, binary: boolean, remoteIsSymlink: boolean, symlinkMode: SymlinkHandling
+    ): Promise<string | ArrayBuffer> {
+        if (remoteIsSymlink && symlinkMode === 'real') {
+            const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
+            const target = readLocalSymlinkTarget(this.app, path);
+            if (target !== null) return target;
+        }
+        return this.readFileContent(fileOrPath, binary, isStr);
+    }
+
+    /** Fallback status check via full content fetch, for entries without a usable tree SHA. */
+    private async refreshFileStatusByContent(fileOrPath: TFile | string): Promise<void> {
+        const isStr = typeof fileOrPath === 'string';
+        const path = isStr ? fileOrPath : fileOrPath.path;
+        const file = isStr ? undefined : fileOrPath;
+
+        const binary = this.isBinary(path);
+        const localContent = await this.readFileContent(fileOrPath, binary, isStr);
+
+        // Important: Use SyncManager's logic which handles rootPath/vaultFolder mapping
+        const repoPath = this.plugin.getNormalizedPath(path);
+        const remote = await this.plugin.gitService.getFile(repoPath, this.plugin.settings.branch);
+
+        const status = this.determineFileStatus(localContent, remote);
+
+        this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha });
     }
 
     private async readFileContent(fileOrPath: TFile | string, binary: boolean, isStr: boolean): Promise<string | ArrayBuffer> {
@@ -519,43 +593,16 @@ export class SyncStatusView extends ItemView {
         throw new Error('Expected TFile when isStr is false');
     }
 
-    private determineFileStatus(binary: boolean, localContent: string | ArrayBuffer, remote: { sha?: string; content?: string | ArrayBuffer }): { status: FileStatus['status']; diff?: string } {
-        if (!remote.sha) {
-            return { status: 'unsynced' };
-        }
-        if (remote.content && this.contentsEqual(localContent, remote.content)) {
-            return { status: 'synced' };
-        }
-        const diff = this.computeDiff(binary, localContent, remote.content || '');
-        return { status: 'modified', diff };
-    }
-
-    private computeDiff(binary: boolean, localContent: string | ArrayBuffer, remoteContent: string | ArrayBuffer): string {
-        if (binary || typeof localContent !== 'string' || typeof remoteContent !== 'string') {
-            return 'Binary file changed';
-        }
-        return this.generateDiff(remoteContent, localContent);
+    private determineFileStatus(localContent: string | ArrayBuffer, remote: { sha?: string; content?: string | ArrayBuffer }): FileStatus['status'] {
+        if (!remote.sha) return 'unsynced';
+        if (remote.content && this.contentsEqual(localContent, remote.content)) return 'synced';
+        return 'modified';
     }
 
     private isBinary(path: string): boolean { return isBinaryPath(path); }
 
     private contentsEqual(a: string | ArrayBuffer, b: string | ArrayBuffer): boolean {
         return contentsEqual(a, b);
-    }
-
-    private generateDiff(oldContent: string, newContent: string): string {
-        const oldLines = oldContent.split('\n');
-        const newLines = newContent.split('\n');
-        const diff = ['--- Remote', '+++ Local', ''];
-        const maxLines = Math.max(oldLines.length, newLines.length);
-        for (let i = 0; i < maxLines; i++) {
-            const o = oldLines[i], n = newLines[i];
-            if (o !== n) {
-                if (o !== undefined) diff.push(`- ${o}`);
-                if (n !== undefined) diff.push(`+ ${n}`);
-            }
-        }
-        return diff.join('\n');
     }
 
     // ── Batch push/pull/delete ─────────────────────────────────────

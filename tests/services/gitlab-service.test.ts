@@ -148,6 +148,38 @@ describe('GitLabService', () => {
             mockRequest({ status: 404, json: { message: '404 Branch Not Found' }, text: '404 Branch Not Found' });
             await expect(service.listFiles('missing-branch')).rejects.toThrow(/Branch "missing-branch" was not found/);
         });
+
+        it('listFilesDetailed maps GitLab\'s "id" field to sha', async () => {
+            mockRequest({ status: 200, json: [
+                { path: 'file1.md', type: 'blob', id: 'id-as-sha-1' },
+            ] });
+            expect(await service.listFilesDetailed('main')).toEqual([
+                { path: 'file1.md', symlink: false, sha: 'id-as-sha-1' },
+            ]);
+        });
+    });
+
+    describe('getBlob', () => {
+        it('returns the raw text content for a non-binary path', async () => {
+            mockRequest({ status: 200, text: 'hello world' });
+            const result = await service.getBlob('blob-sha', 'test.md');
+            expect(result.content).toBe('hello world');
+            expect(result.sha).toBe('blob-sha');
+        });
+
+        it('requests the raw blob endpoint by sha', async () => {
+            mockRequest({ status: 200, text: 'x' });
+            await service.getBlob('abc123', 'test.md');
+            const call = getLastRequestCall();
+            expect(call.url).toBe(`${baseUrl}/api/v4/projects/${projectId}/repository/blobs/abc123/raw`);
+        });
+
+        it('returns arrayBuffer content for a binary path', async () => {
+            const buf = new ArrayBuffer(4);
+            mockRequest({ status: 200, arrayBuffer: buf });
+            const result = await service.getBlob('blob-sha', 'image.png');
+            expect(result.content).toBe(buf);
+        });
     });
 
     describe('deleteFile', () => {

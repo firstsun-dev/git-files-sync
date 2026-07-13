@@ -111,7 +111,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
 
         const entries = data.tree
             .filter(item => item.type === 'blob')
-            .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE }));
+            .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE, sha: item.sha }));
 
         if (!useFilter) return entries;
 
@@ -120,6 +120,10 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
             const cleanRoot = this.rootPath.endsWith('/') ? this.rootPath : `${this.rootPath}/`;
             return e.path === this.rootPath || e.path.startsWith(cleanRoot);
         });
+    }
+
+    async getBlob(sha: string, path: string): Promise<GitFile> {
+        return this.fetchGitHubStyleBlob(`https://api.github.com/repos/${this.owner}/${this.repo}/git/blobs/${sha}`, path);
     }
 
     async deleteFile(path: string, branch: string, message: string): Promise<void> {

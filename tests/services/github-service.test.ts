@@ -196,6 +196,33 @@ describe('GitHubService', () => {
             mockRequest({ status: 404, json: { message: 'Not Found' }, text: 'Not Found' });
             await expect(service.listFiles('missing-branch')).rejects.toThrow(/Branch "missing-branch" was not found/);
         });
+
+        it('listFilesDetailed includes each blob\'s sha', async () => {
+            mockRequest({ status: 200, json: { tree: [
+                { path: 'file1.md', type: 'blob', sha: 'sha-1' },
+                { path: 'file2.md', type: 'blob', sha: 'sha-2' },
+            ] } });
+            expect(await service.listFilesDetailed('main')).toEqual([
+                { path: 'file1.md', symlink: false, sha: 'sha-1' },
+                { path: 'file2.md', symlink: false, sha: 'sha-2' },
+            ]);
+        });
+    });
+
+    describe('getBlob', () => {
+        it('decodes base64 blob content by sha', async () => {
+            mockRequest({ status: 200, json: { content: btoa('hello world'), encoding: 'base64', sha: 'blob-sha' } });
+            const result = await service.getBlob('blob-sha', 'test.md');
+            expect(result.content).toBe('hello world');
+            expect(result.sha).toBe('blob-sha');
+        });
+
+        it('requests the blob endpoint by sha, not path', async () => {
+            mockRequest({ status: 200, json: { content: btoa('x'), sha: 'abc123' } });
+            await service.getBlob('abc123', 'test.md');
+            const call = getLastRequestCall();
+            expect(call.url).toContain('/git/blobs/abc123');
+        });
     });
 
     describe('deleteFile', () => {
