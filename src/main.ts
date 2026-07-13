@@ -39,7 +39,7 @@ export default class GitLabFilesPush extends Plugin {
 		});
 
 		this.initializeGitService();
-		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath, this.settings.vaultFolder);
+		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath, this.settings.vaultFolder, this.settings.ignorePatterns);
 		this.sync = new SyncManager(this.app, this.gitService, this.settings, this.saveSettings.bind(this));
 
 		this.pushRibbonEl = this.addRibbonIcon('upload-cloud', this.pushRibbonLabel(), async () => {

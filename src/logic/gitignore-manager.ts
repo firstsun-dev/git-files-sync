@@ -11,16 +11,21 @@ export class GitignoreManager {
     
     private readonly rootPath: string;
     private readonly vaultFolder: string;
-    
+    // User-defined local ignore patterns (settings.ignorePatterns), applied on top of
+    // remote/local .gitignore rules. Matched against the same vault/rootPath-relative
+    // path passed into isIgnored().
+    private readonly localIgnore: Ignore | null;
+
     // Maps directory path (empty string for root) to Ignore instance
     private readonly ignoreMap: Map<string, Ignore> = new Map();
 
-    constructor(app: App, gitService: GitServiceInterface, branch: string, rootPath: string, vaultFolder: string = '') {
+    constructor(app: App, gitService: GitServiceInterface, branch: string, rootPath: string, vaultFolder: string = '', ignorePatterns: string = '') {
         this.app = app;
         this.gitService = gitService;
         this.branch = branch;
         this.rootPath = rootPath.replace(/^\/|\/$/g, '');
         this.vaultFolder = vaultFolder.replace(/^\/|\/$/g, '');
+        this.localIgnore = ignorePatterns.trim() ? ignore().add(ignorePatterns) : null;
     }
 
     private getNormalizedPath(path: string): string {
@@ -159,6 +164,8 @@ export class GitignoreManager {
      * Checks if a given file path should be ignored based on loaded .gitignore rules.
      */
     isIgnored(filePath: string): boolean {
+        if (this.localIgnore?.ignores(filePath)) return true;
+
         const fullPath = this.rootPath ? `${this.rootPath}/${filePath}` : filePath;
 
         for (const [dirPath, ig] of this.ignoreMap.entries()) {
