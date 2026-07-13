@@ -1,5 +1,6 @@
 {
   "_note": "GitHub Issues (firstsun-dev/git-files-sync, Project #6) is the source of truth for the full backlog and priority/estimate fields. This file mirrors only the active feature and the next few candidates so an agent session has a local, offline checkpoint — sync it against `gh issue list --repo firstsun-dev/git-files-sync --state open` at the start of a session rather than treating it as authoritative.",
+  "_prPolicy": "User explicitly requested fewer PRs (2026-07-13): all issue work is consolidated onto branch claude/fix-directory-symlink-pull-260713 -> PR #51, not one PR per issue. Commit new work directly onto that branch unless told otherwise.",
   "features": [
     {
       "id": "feat-001",
@@ -14,16 +15,16 @@
       "name": "Settings UX bundle (issues #40, #41, #42)",
       "description": "Local ignore-pattern sync setting (#40), persistent connection status badge in settings (#41), and resized/tabbed conflict resolution modal (#42)",
       "dependencies": ["feat-001"],
-      "status": "in-review",
-      "evidence": "Commit 28f4f8e on branch claude/settings-ux-improvements-260713 - lint/build/test pass (254 tests); pushed to origin, PR not yet opened"
+      "status": "done",
+      "evidence": "Consolidated onto PR #51 (branch claude/fix-directory-symlink-pull-260713); 302 tests pass"
     },
     {
       "id": "feat-003",
       "name": "fix: symbolic link pull fails (issue #33)",
-      "description": "Bug report with screenshot; needs repro/investigation before a fix can be scoped",
+      "description": "Directory symlinks were walked as real trees by local scanning code, causing bogus remote .gitignore 404s and a permanently-stuck 'remote only' status; also fixed a missing Windows symlinkSync type hint",
       "dependencies": [],
-      "status": "not-started",
-      "evidence": ""
+      "status": "done",
+      "evidence": "Commit 4c8896b, consolidated onto PR #51"
     },
     {
       "id": "feat-004",
@@ -38,6 +39,46 @@
       "name": "feat(settings): folder picker for root path / vault folder (issue #48)",
       "description": "Searchable folder suggester for the Root path and Vault folder settings fields, replacing free-text entry",
       "dependencies": [],
+      "status": "done",
+      "evidence": "Commit c107979, consolidated onto PR #51"
+    },
+    {
+      "id": "feat-006",
+      "name": "perf(refresh): use tree blob SHAs to avoid per-file content fetches (issue #36)",
+      "description": "Status refresh compares a locally-computed git blob SHA against each remote tree entry's SHA instead of one getFile per file; diff content fetched on demand via new getBlob(sha,path); symlink-aware hashing per real/follow/skip modes",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "Commit 2ed5a43, consolidated onto PR #51; 302 tests pass"
+    },
+    {
+      "id": "feat-007",
+      "name": "fix: clear error when requestUrl() rejects with HTML (issue #31)",
+      "description": "Some Obsidian versions eagerly JSON-parse inside requestUrl() itself, so a login/proxy HTML page rejected the whole call with a raw SyntaxError bypassing the existing parseJson() HTML-detection wrapper; added the same detection to safeRequest's outer catch",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "Commit a867217, consolidated onto PR #51"
+    },
+    {
+      "id": "feat-008",
+      "name": "feat: show new feature tips after update (issue #39)",
+      "description": "Hand-curated src/changelog.ts (separate from auto-generated CHANGELOG.md) with a notable flag per entry, numeric compareVersions(), WhatsNewModal shown once per version bump via a new lastSeenVersion setting",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "Commit 4eebebc, consolidated onto PR #51"
+    },
+    {
+      "id": "feat-009",
+      "name": "feat: add i18n (multi-language) support (issue #38)",
+      "description": "Extract hardcoded UI strings (~47 in settings.ts, ~24 in SyncStatusView.ts) and 37 Notice() call sites (4 files, many with interpolated values) into an i18n key system with locale detection and English fallback",
+      "dependencies": [],
+      "status": "blocked",
+      "evidence": "Scope question asked, dismissed without an answer. No code written. Blocked on user picking a scope: (a) settings.ts only, Notices later; (b) settings.ts + all Notices now; (c) infra/mechanism only, defer string migration."
+    },
+    {
+      "id": "feat-010",
+      "name": "feat: add bitbucket support (issue #37)",
+      "description": "Add Bitbucket as a fourth GitServiceInterface provider; Bitbucket's API has no native blob SHA concept and is PR-based rather than direct-commit, so GitFile.sha semantics may need adjusting",
+      "dependencies": ["feat-009"],
       "status": "not-started",
       "evidence": ""
     }
