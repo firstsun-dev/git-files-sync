@@ -41,13 +41,12 @@ export const PluginSettingTab = class {
   }
 };
 
-export const TextComponent = class {
-  inputEl: HTMLInputElement;
-  private changeHandler?: (value: string) => void;
+class BaseTextComponent<T extends HTMLInputElement | HTMLTextAreaElement> {
+  inputEl: T;
+  protected changeHandler?: (value: string) => void;
 
-  constructor(containerEl?: HTMLElement) {
-    this.inputEl = document.createElement('input');
-    containerEl?.appendChild(this.inputEl);
+  constructor(inputEl: T) {
+    this.inputEl = inputEl;
   }
 
   setPlaceholder(value: string) {
@@ -68,36 +67,22 @@ export const TextComponent = class {
   triggerChange(value: string) {
     this.inputEl.value = value;
     this.changeHandler?.(value);
+  }
+}
+
+export const TextComponent = class extends BaseTextComponent<HTMLInputElement> {
+  constructor(containerEl?: HTMLElement) {
+    const inputEl = document.createElement('input');
+    containerEl?.appendChild(inputEl);
+    super(inputEl);
   }
 };
 
-export const TextAreaComponent = class {
-  inputEl: HTMLTextAreaElement;
-  private changeHandler?: (value: string) => void;
-
+export const TextAreaComponent = class extends BaseTextComponent<HTMLTextAreaElement> {
   constructor(containerEl?: HTMLElement) {
-    this.inputEl = document.createElement('textarea');
-    containerEl?.appendChild(this.inputEl);
-  }
-
-  setPlaceholder(value: string) {
-    this.inputEl.placeholder = value;
-    return this;
-  }
-
-  setValue(value: string) {
-    this.inputEl.value = value;
-    return this;
-  }
-
-  onChange(handler: (value: string) => void) {
-    this.changeHandler = handler;
-    return this;
-  }
-
-  triggerChange(value: string) {
-    this.inputEl.value = value;
-    this.changeHandler?.(value);
+    const inputEl = document.createElement('textarea');
+    containerEl?.appendChild(inputEl);
+    super(inputEl);
   }
 };
 
