@@ -40,6 +40,14 @@
       "dependencies": [],
       "status": "not-started",
       "evidence": ""
+    },
+    {
+      "id": "feat-006",
+      "name": "feat: add i18n (multi-language) support (issue #38)",
+      "description": "Extract hardcoded UI text (settings tab, Notice messages) into i18n keys; detect language via window.moment.locale() with English fallback; ship English (default) and Traditional Chinese (zh-tw)",
+      "dependencies": [],
+      "status": "in-review",
+      "evidence": "Branch claude/i18n-support-260713 (based on origin/claude/fix-directory-symlink-pull-260713) - added src/i18n/{index,locales/en,locales/zh-tw}.ts and tests/i18n/index.test.ts; ~130 strings replaced across settings.ts, main.ts, and 7 ui/ files; lint/build clean, 308 tests pass; not yet pushed/PR'd, to be merged back into claude/fix-directory-symlink-pull-260713"
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."

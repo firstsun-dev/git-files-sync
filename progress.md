@@ -12,28 +12,28 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-07-13 11:40
-**Session ID:** session_01YYCTyZw7gUmJ7oh1VTmAqh
-**Active Feature:** feat-002 - Settings UX bundle (issues #40, #41, #42)
+**Last Updated:** 2026-07-13 14:20
+**Session ID:** (this session)
+**Active Feature:** feat-006 - i18n (multi-language) support (issue #38)
 
 ## Status
 
 ### What's Done
 
 - [x] feat-001 - Project Setup verified (see archive/2026-07.md)
-- [x] feat-002 implementation - all three sub-features coded, tested, linted, built (see archive/2026-07.md)
+- [x] feat-002 - Settings UX bundle (see archive/2026-07.md); this branch's history already contains it (merged upstream of `claude/fix-directory-symlink-pull-260713`)
+- [x] feat-006 implementation - i18n core (`src/i18n/index.ts`, `locales/en.ts`, `locales/zh-tw.ts`), ~130 strings extracted across settings.ts, main.ts, and 7 `ui/` files, tests added, lint/build/test all clean
 
 ### What's In Progress
 
-- [ ] feat-002 - Open a PR for branch `claude/settings-ux-improvements-260713` and get it merged
-  - Details: commit 28f4f8e is pushed to origin; no PR opened yet
-  - Blockers: none, just needs `gh pr create`
+- [ ] feat-006 - push branch `claude/i18n-support-260713` and open a PR (or fold it back into `claude/fix-directory-symlink-pull-260713` per the user's stated intent)
+  - Details: worked in a separate branch/worktree because `claude/fix-directory-symlink-pull-260713` was already checked out elsewhere in this repo's other worktree (main checkout at `/home/tianyao/git-files-sync`), so git wouldn't allow checking out the same branch twice
+  - Blockers: none technically; needs the user's go-ahead on push/merge direction
 
 ### What's Next
 
-1. Open PR for `claude/settings-ux-improvements-260713`, close issues #40/#41/#42 on merge
-2. Pick up feat-003 (issue #33, symlink pull fails) — needs repro investigation first
-3. Re-sync this file's backlog entries against `gh issue list --repo firstsun-dev/git-files-sync --state open` since new issues may have been filed (e.g. #48 folder picker was added mid-session)
+1. Confirm with user whether to push `claude/i18n-support-260713` and open a PR, or merge it locally into `claude/fix-directory-symlink-pull-260713`
+2. Re-sync this file's backlog (feat-003..005) against `gh issue list --repo firstsun-dev/git-files-sync --state open`
 
 ## Blockers / Risks
 
@@ -41,26 +41,28 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Decisions Made
 
-- **Discarded a stale local WIP for Obsidian 1.12.x compatibility**: origin/main already shipped this via PR #46 (`applyDestructiveStyle`, `typecheck-compat.mjs`) with a different mechanism. Local main was fast-forwarded to origin/main and the new features (#40/#41/#42) were manually re-applied on top of the correct base rather than merged via `git stash pop` (which would have conflicted/duplicated the compat layer).
-- **feat-002 bundles three issues in one commit**: #40/#41/#42 touch overlapping files (`src/settings.ts`, `styles.css`, `tests/setup.ts`) closely enough that splitting into three atomic commits wasn't worth the risk of an intermediate broken state.
+- **Worked on a new branch instead of the pre-existing `claude/fix-directory-symlink-pull-260713`**: that branch was already checked out in another worktree (the main repo checkout), and git disallows the same branch in two worktrees. Created `claude/i18n-support-260713` off `origin/claude/fix-directory-symlink-pull-260713` instead, per the user's choice.
+- **Flat key-value i18n dict, not nested namespaces**: matches this plugin's small scale; simpler `t(key, vars)` lookup, no external i18n library dependency.
+- **Locale detection via `window.moment.locale()`**: per issue #38's suggested approach; unknown/unmapped locales fall back to English. A bare `zh` locale code is mapped to `zh-tw` since that's the only Chinese variant shipped.
+- **Diff-format markers, changelog release-note text, and proper nouns (GitHub/GitLab/Gitea) were left untranslated** — out of scope for UI-chrome i18n.
 
 ## Files Modified This Session
 
-- `src/settings.ts` - connection status badge (#41), ignore patterns setting (#40)
-- `src/ui/SyncConflictModal.ts` - Diff/Local/Remote tab switcher (#42)
-- `src/logic/gitignore-manager.ts`, `src/main.ts` - local ignore pattern matching (#40)
-- `styles.css` - badge + modal + tab styles
-- `tests/setup.ts`, `tests/ui/setup-dom.ts` - expanded Obsidian mocks (TextAreaComponent, removeClass, configDir, etc.)
-- `tests/logic/gitignore-manager.test.ts`, `tests/logic/sync-manager*.test.ts`, `tests/ui/SyncConflictModal.test.ts`, `tests/ui/SettingsConnectionStatus.test.ts` - new/updated tests
+- `src/i18n/index.ts` (new) - `t(key, vars?)` helper, locale detection/resolution
+- `src/i18n/locales/en.ts`, `src/i18n/locales/zh-tw.ts` (new) - 159 keys each, full parity
+- `src/settings.ts`, `src/main.ts` - all hardcoded UI strings replaced with `t()` calls
+- `src/ui/SyncStatusView.ts`, `src/ui/SyncConflictModal.ts`, `src/ui/WhatsNewModal.ts`, `src/ui/ConfirmModal.ts` - same
+- `src/ui/components/ActionBar.ts`, `FileListItem.ts`, `DiffPanel.ts` - same
+- `tests/i18n/index.test.ts` (new) - 6 test cases covering fallback, locale resolution, interpolation
 
 ## Evidence of Completion
 
-- [x] Tests pass: `npx vitest run` → 254/254 passed
+- [x] Tests pass: `npx vitest run` → 308/308 passed (302 pre-existing + 6 new i18n tests)
 - [x] Type check clean: `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) → clean
 - [x] Lint clean: `npx eslint .` → 0 errors
 - [ ] Manual verification in Obsidian: not done (no Obsidian instance available in this environment)
 
 ## Notes for Next Session
 
-- Branch `claude/settings-ux-improvements-260713` is pushed but has no PR yet — check with the user before opening one (they were asked and hadn't confirmed as of session end).
+- Branch `claude/i18n-support-260713` has uncommitted working-tree changes as of this session's end — not yet committed or pushed.
 - `feature_list.json`'s backlog (feat-003..005) is a snapshot from 2026-07-13; re-check `gh issue list` before trusting it.
