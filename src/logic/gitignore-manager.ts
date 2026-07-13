@@ -2,6 +2,7 @@ import ignore, { Ignore } from 'ignore';
 import { App } from 'obsidian';
 import { GitServiceInterface } from '../services/git-service-interface';
 import { logger } from '../utils/logger';
+import { readLocalSymlinkTarget } from '../utils/symlink';
 
 export class GitignoreManager {
     private readonly app: App;
@@ -95,6 +96,11 @@ export class GitignoreManager {
                 }
             }
             for (const subFolder of listing.folders) {
+                // A folder that's actually a symlink (e.g. a shared folder linked in from
+                // elsewhere) is a single git blob on the remote, not a real tree — walking
+                // into it would scan an unrelated directory structure and produce bogus
+                // .gitignore lookups against paths that don't exist in this repo.
+                if (readLocalSymlinkTarget(this.app, subFolder) !== null) continue;
                 await this.scanDir(subFolder, out);
             }
         } catch { /* adapter.list may be unavailable in some environments */ }

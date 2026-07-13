@@ -3,8 +3,10 @@ import { describe, it, expect, vi, beforeEach, Mocked } from 'vitest';
 import { GitignoreManager } from '../../src/logic/gitignore-manager';
 import { App, DataAdapter } from 'obsidian';
 import { GitServiceInterface } from '../../src/services/git-service-interface';
+import { readLocalSymlinkTarget } from '../../src/utils/symlink';
 
 vi.mock('obsidian');
+vi.mock('../../src/utils/symlink', () => ({ readLocalSymlinkTarget: vi.fn() }));
 
 describe('GitignoreManager', () => {
     let manager: GitignoreManager;
@@ -14,6 +16,7 @@ describe('GitignoreManager', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(readLocalSymlinkTarget).mockReturnValue(null);
 
         const mockAdapter = {
             exists: vi.fn(),
@@ -271,6 +274,25 @@ describe('GitignoreManager', () => {
 
             expect(adapter.list).toHaveBeenCalledWith('');
             expect(adapter.list).toHaveBeenCalledWith('.claude');
+        });
+
+        it('should not recurse into a folder that is actually a symlink', async () => {
+            // "linked" is a directory symlink (e.g. a shared skills folder) pointing
+            // outside the repo; walking into it would scan an unrelated tree and
+            // produce bogus .gitignore lookups for paths that don't exist remotely.
+            vi.mocked(adapter.list).mockImplementation((dir: string) => {
+                if (dir === '' || dir === undefined) {
+                    return Promise.resolve({ files: ['.gitignore'], folders: ['linked'] });
+                }
+                return Promise.resolve({ files: ['linked/nested/.gitignore'], folders: ['linked/nested'] });
+            });
+            vi.mocked(readLocalSymlinkTarget).mockImplementation((_app, path) => path === 'linked' ? '/some/other/dir' : null);
+            vi.mocked(adapter.read).mockResolvedValue('*.secret');
+
+            await manager.loadGitignores();
+
+            expect(adapter.list).toHaveBeenCalledWith('');
+            expect(adapter.list).not.toHaveBeenCalledWith('linked');
         });
     });
 });

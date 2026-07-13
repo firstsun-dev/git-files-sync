@@ -14,16 +14,18 @@ import { logger } from './logger';
 // builtins (they don't exist in the mobile bundle).
 interface NodeFs {
     lstatSync(p: string): { isSymbolicLink(): boolean };
+    statSync(p: string): { isDirectory(): boolean };
     readlinkSync(p: string): string;
     existsSync(p: string): boolean;
     mkdirSync(p: string, opts: { recursive: boolean }): void;
     rmSync(p: string, opts: { force: boolean }): void;
-    symlinkSync(target: string, p: string): void;
+    symlinkSync(target: string, p: string, type?: string): void;
 }
 
 interface NodePath {
     join(...parts: string[]): string;
     dirname(p: string): string;
+    isAbsolute(p: string): boolean;
 }
 
 type NodeRequire = (id: string) => unknown;
@@ -88,7 +90,7 @@ export function createLocalSymlink(app: App, vaultPath: string, target: string):
         if (mods.fs.existsSync(abs) || isSymlink(mods.fs, abs)) {
             mods.fs.rmSync(abs, { force: true });
         }
-        mods.fs.symlinkSync(target, abs);
+        mods.fs.symlinkSync(target, abs, symlinkType(mods, abs, target));
         return true;
     } catch (e) {
         logger.warn(`Failed to create local symlink ${vaultPath} -> ${target}`, e);
@@ -101,5 +103,19 @@ function isSymlink(fs: NodeFs, abs: string): boolean {
         return fs.lstatSync(abs).isSymbolicLink();
     } catch {
         return false;
+    }
+}
+
+// Node's `type` hint to symlinkSync is a no-op on POSIX but required on
+// Windows: omitting it defaults to 'file', which produces a broken link
+// whenever the target is actually a directory (as with a symlinked folder).
+function symlinkType(mods: { fs: NodeFs; path: NodePath }, abs: string, target: string): 'file' | 'dir' {
+    try {
+        const resolvedTarget = mods.path.isAbsolute(target)
+            ? target
+            : mods.path.join(mods.path.dirname(abs), target);
+        return mods.fs.statSync(resolvedTarget).isDirectory() ? 'dir' : 'file';
+    } catch {
+        return 'file';
     }
 }

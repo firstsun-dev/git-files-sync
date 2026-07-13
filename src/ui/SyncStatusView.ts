@@ -8,6 +8,7 @@ import { renderActionBar } from './components/ActionBar';
 import { renderFileItem, statusMeta, type FileItemCallbacks } from './components/FileListItem';
 import { ICONS } from './components/icons';
 import { isBinaryPath, contentsEqual } from '../utils/path';
+import { readLocalSymlinkTarget } from '../utils/symlink';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
 
@@ -370,6 +371,14 @@ export class SyncStatusView extends ItemView {
             }
             for (const folder of listing.folders) {
                 if (folder === '.git' || folder.endsWith('/.git')) continue;
+                // A symlinked folder is a single blob on the remote, not a real tree —
+                // walking into it would scan whatever unrelated directory it points at.
+                // Track the link itself (same as a hidden file) so push/pull can still
+                // handle it via the existing symlink machinery, without recursing.
+                if (readLocalSymlinkTarget(this.app, folder) !== null) {
+                    if (this.isHidden(folder)) result.push(folder);
+                    continue;
+                }
                 await this.recursiveScan(folder, result);
             }
         } catch { /* adapter may not support listing */ }

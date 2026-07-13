@@ -57,6 +57,10 @@ export const TFile = class {};
 export const requestUrl = vi.fn();
 export const setTooltip = vi.fn();
 export const setIcon = vi.fn();
+export const Platform = { isDesktopApp: true };
+export const FileSystemAdapter = class {
+  getBasePath() { return '/mock/path'; }
+};
 
 vi.mock('obsidian', () => ({
   Plugin,
@@ -71,4 +75,6 @@ vi.mock('obsidian', () => ({
   requestUrl,
   setTooltip,
   setIcon,
+  Platform,
+  FileSystemAdapter,
 }));
