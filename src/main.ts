@@ -9,6 +9,9 @@ import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
 import { GitignoreManager } from './logic/gitignore-manager';
 import { logger } from './utils/logger';
 import { ConfirmModal } from './ui/ConfirmModal';
+import { WhatsNewModal } from './ui/WhatsNewModal';
+import { CHANGELOG, getUnseenReleases } from './changelog';
+import { compareVersions } from './utils/version';
 
 export default class GitLabFilesPush extends Plugin {
 	settings: GitLabFilesPushSettings;
@@ -109,6 +112,31 @@ export default class GitLabFilesPush extends Plugin {
 				}
 			})
 		);
+
+		await this.checkForUpdateNotice();
+	}
+
+	private async checkForUpdateNotice(): Promise<void> {
+		try {
+			const currentVersion = this.manifest.version;
+			const lastSeen = this.settings.lastSeenVersion;
+
+			// A fresh install has nothing to compare against — just record the
+			// current version silently rather than showing a "what's new" tip.
+			if (lastSeen && compareVersions(currentVersion, lastSeen) > 0) {
+				const newReleases = getUnseenReleases(CHANGELOG, lastSeen);
+				if (newReleases.length > 0) {
+					new WhatsNewModal(this.app, newReleases).open();
+				}
+			}
+
+			if (lastSeen !== currentVersion) {
+				this.settings.lastSeenVersion = currentVersion;
+				await this.saveSettings();
+			}
+		} catch (e) {
+			logger.warn('Failed to check for update notice', e);
+		}
 	}
 
 	private get serviceName(): string {
