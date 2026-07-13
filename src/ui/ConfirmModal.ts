@@ -1,4 +1,5 @@
 import { App, Modal, ButtonComponent } from 'obsidian';
+import { t } from '../i18n';
 
 export class ConfirmModal extends Modal {
     private readonly message: string;
@@ -14,20 +15,20 @@ export class ConfirmModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.createEl('h3', { text: 'Confirm' });
+        contentEl.createEl('h3', { text: t('confirmModal.title') });
         contentEl.createEl('p', { text: this.message });
 
         const buttonContainer = contentEl.createDiv({ cls: 'ssv-confirm-buttons modal-button-container' });
 
         new ButtonComponent(buttonContainer)
-            .setButtonText('Cancel')
+            .setButtonText(t('confirmModal.cancel'))
             .onClick(() => {
                 this.close();
                 if (this.onCancel) this.onCancel();
             });
 
         new ButtonComponent(buttonContainer)
-            .setButtonText('Confirm')
+            .setButtonText(t('confirmModal.confirm'))
             .setCta()
             .onClick(() => {
                 this.close();
