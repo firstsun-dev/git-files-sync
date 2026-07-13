@@ -54,6 +54,17 @@ export const App = class {
 };
 
 export const TFile = class {};
+export const TFolder = class {};
+export const AbstractInputSuggest = class {
+  app: unknown;
+  constructor(app: unknown) {
+    this.app = app;
+  }
+  setValue() {}
+  getValue() { return ''; }
+  close() {}
+  open() {}
+};
 export const requestUrl = vi.fn();
 export const setTooltip = vi.fn();
 export const setIcon = vi.fn();
@@ -72,6 +83,8 @@ vi.mock('obsidian', () => ({
   Editor,
   App,
   TFile,
+  TFolder,
+  AbstractInputSuggest,
   requestUrl,
   setTooltip,
   setIcon,
