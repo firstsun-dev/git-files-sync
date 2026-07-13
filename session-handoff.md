@@ -9,17 +9,18 @@
 
 ## Current Objective
 
-- Goal: Implement issues #40 (local ignore patterns), #41 (settings connection status badge), #42 (resize conflict modal)
-- Current status: Implemented, tested, linted, built clean; committed and pushed. PR not yet opened (pending user confirmation).
-- Branch / commit: `claude/settings-ux-improvements-260713` @ 28f4f8e
+- Goal: Work through open issues one at a time, all consolidated into a single PR (user explicitly asked for fewer PRs, not one per issue).
+- Current status: 6 issues done and pushed (#33, #36, #31, #39, plus #40/#41/#42/#48 from an earlier session), all on one branch/PR. Issue #38 (i18n) was scoped but paused before any code was written — waiting on the user's answer to a scope question.
+- Branch / commit: `claude/fix-directory-symlink-pull-260713` @ 4eebebc → **PR #51** (open, all CI checks green as of last check)
 
 ## Completed This Session
 
-- [x] #42 - Resized conflict modal (`min(1100px,92vw) x min(85vh,800px)`, flex layout, removed 280px content cap, added Diff/Local/Remote tab switcher on narrow screens)
-- [x] #41 - Persistent connection status badge in settings tab (Checking/Connected/Not connected), 800ms debounce on token/branch/URL/owner/repo edits, updates in place (no focus-stealing re-render)
-- [x] #40 - "Ignore patterns" setting (multi-line, .gitignore-style), applied in `GitignoreManager.isIgnored()` additively alongside remote/local `.gitignore`
-- [x] Filed issue #48 (folder picker for root path / vault folder settings) at user's request mid-session
-- [x] Rebased local `main` onto `origin/main` to adopt the already-shipped Obsidian 1.12.x compat work (PR #46), discarding a stale duplicate local WIP, then re-applied the above three features cleanly on top
+- [x] #31 - `fix: surface a clear error when requestUrl() itself rejects with HTML content` — some Obsidian versions eagerly JSON-parse inside `requestUrl()`, so a login/proxy HTML page rejected the whole call with a raw `SyntaxError`, bypassing the existing `parseJson()` HTML-detection wrapper. Added the same detection to `safeRequest`'s outer catch.
+- [x] #33 - `fix: symlinked directories no longer break pull discovery` — a directory symlink is a single git blob, not a real tree; local scanning recursed into it as if it were, causing bogus remote `.gitignore` 404s and a permanently-stuck "remote only" status. Also fixed `createLocalSymlink`'s missing Windows `symlinkSync` type hint.
+- [x] #36 - `perf(refresh): use tree blob SHAs to avoid per-file content fetches` — refresh now compares a locally-computed git blob SHA against each tree entry's SHA instead of one `getFile` network call per file; diff content is fetched on demand via a new `getBlob(sha, path)` per service. Symlink-aware hashing (real/follow/skip modes) per the issue's follow-up design.
+- [x] #39 - `feat: show new feature tips after update` — new `src/changelog.ts` (hand-curated, separate from the auto-generated `CHANGELOG.md`) with a `notable` flag per entry, a `WhatsNewModal`, and a `lastSeenVersion` setting so the tip shows once per upgrade only.
+- [x] Consolidated everything (this session's 4 issues + the prior session's #40/#41/#42/#48) onto one branch/PR (#51) per the user's explicit request to reduce PR count — closed/merged the now-redundant PRs #49/#50/#52/#53.
+- [ ] #38 (i18n) - **paused, not started.** Counted scope (~47 strings in `settings.ts`, ~24 in `SyncStatusView.ts`, 37 `Notice()` call sites across 4 files) and asked the user how deep to scope it; the question prompt was dismissed without an answer before they ran `/firstsun-harness`. No `src/i18n/*` files exist yet — don't assume a design, ask again first.
 
 ## Verification Evidence
 
@@ -27,33 +28,39 @@
 |---|---|---|---|
 | Lint | `npx eslint .` | 0 errors | Repo-wide, no exceptions |
 | Type check + compat | `npm run build` | Pass | Includes `typecheck-compat.mjs` against Obsidian 1.11.0 |
-| Tests | `npx vitest run` | 254/254 passed | 17 test files |
+| Tests | `npx vitest run` | 302/302 passed | 22 test files |
+| Duplication | `npx jscpd --min-lines 5 --min-tokens 50 src` | 14 clones, all pre-existing | Checked after every commit — SonarCloud's gate is 3% on *new* code, learned this the hard way earlier (PR #49 failed at 8.3%) |
 | Manual (in Obsidian) | — | Not done | No Obsidian instance available in this environment |
 
-## Files Changed
+## Files Changed (this session, cumulative across the 4 issues)
 
-- `src/settings.ts`, `src/ui/SyncConflictModal.ts`, `src/logic/gitignore-manager.ts`, `src/main.ts`, `styles.css`
-- `tests/setup.ts`, `tests/ui/setup-dom.ts` (expanded Obsidian test mocks)
-- `tests/logic/gitignore-manager.test.ts`, `tests/logic/sync-manager.test.ts`, `tests/logic/sync-manager-mapping.test.ts`
-- `tests/ui/SyncConflictModal.test.ts`, `tests/ui/SettingsConnectionStatus.test.ts` (new)
+- `src/services/git-service-base.ts`, `git-service-interface.ts`, `github-service.ts`, `gitlab-service.ts`, `gitea-service.ts` — tree-entry `sha`, `getBlob()`, HTML-error detection in `safeRequest`
+- `src/logic/gitignore-manager.ts`, `src/ui/SyncStatusView.ts` — symlink-directory recursion guard, SHA-based status refresh, lazy diff loading
+- `src/utils/symlink.ts` — Windows `symlinkSync` type hint
+- `src/utils/git-blob-sha.ts`, `src/utils/version.ts` (new) — SHA-1 blob hashing, numeric version compare
+- `src/changelog.ts`, `src/ui/WhatsNewModal.ts` (new) — what's-new modal + data
+- `src/ui/components/DiffPanel.ts`, `FileListItem.ts` — on-demand diff fetch
+- `src/settings.ts`, `src/main.ts` — `lastSeenVersion` field, update-check wiring
+- Corresponding test files under `tests/` for all of the above (302 tests total)
 
 ## Decisions Made
 
-- Bundled #40/#41/#42 into a single commit rather than three, since they touch overlapping files closely enough that atomic per-issue commits risked an intermediate broken build.
-- Discarded the local uncommitted 1.12.x-compat WIP (user confirmed it was superseded by origin/main's PR #46) rather than trying to merge two different compat mechanisms.
+- **One PR, not one-per-issue**: user said "不要那麼多pr merge" (don't want so many PRs). All further issue work goes directly onto `claude/fix-directory-symlink-pull-260713` — do not create a new branch/PR for the next issue.
+- **`src/changelog.ts` is hand-curated, separate from `CHANGELOG.md`**: the auto-generated changelog (via semantic-release) isn't shipped in release assets and is too commit-log-granular for an end-user popup anyway.
+- Deduped two accidental code-duplication regressions mid-session (test mocks, `getBlob` bodies) before they could trip SonarCloud's new-code gate again.
 
 ## Blockers / Risks
 
-- None blocking. Open item: PR for the pushed branch hasn't been created — user was asked "要接著幫你開 PR 嗎？" and the session moved to harness setup before they answered.
+- **#38 (i18n) needs a scope answer from the user before any code is written.** Options put to them: (a) build the i18n mechanism + fully migrate `settings.ts` only, Notices later; (b) fully migrate settings.ts *and* all 37 Notice call sites now; (c) build just the `t()`/detection/fallback mechanism with a couple of sample keys, defer actual string migration. Don't guess — the wrong choice means redoing a large diff.
+- PR #51 is now fairly large (6 issues). Consider flagging to the user that it may be worth reviewing/merging before more commits pile on.
 
 ## Next Session Startup
 
-1. Read `CLAUDE.md`.
-2. Read `feature_list.json` and `progress.md`.
-3. Review this handoff.
-4. Run `./init.sh` before editing.
-5. Check whether the user wants a PR opened for `claude/settings-ux-improvements-260713` before starting new work.
+1. Read `CLAUDE.md`, `feature_list.json`, `progress.md`, then this file.
+2. Run `./init.sh` before editing.
+3. Ask the user for #38's scope decision (see "Blockers / Risks") before touching any i18n code.
+4. All new commits go on `claude/fix-directory-symlink-pull-260713` (PR #51) unless told otherwise.
 
 ## Recommended Next Step
 
-- Ask the user whether to open the PR for the pushed branch; if yes, use `gh pr create` per the repo's PR conventions (see `CLAUDE.md` / firstsun-pm workflow) and reference issues #40/#41/#42 so they auto-close on merge.
+- Get the #38 scope decision, implement it, then move to #37 (Bitbucket provider) per the previously agreed order (39→38→37, all done).
