@@ -152,6 +152,75 @@ describe('GitHubService', () => {
                 'Push 1 file(s) from Obsidian'
             )).rejects.toThrow('Head sha was modified');
         });
+
+        it('retries with a freshly re-read HEAD when the mutation reports a stale-expectedHeadOid-shaped error', async () => {
+            // Regression test: a push immediately followed by another commit to the
+            // same branch (e.g. push then delete) can read a HEAD that hasn't caught
+            // up yet, so a file the caller expects to exist/not-exist isn't there —
+            // GitHub reports this as "path does not exist in tree <oid>", not as an
+            // obviously-named staleness error. A retry with a fresh HEAD self-heals.
+            vi.useFakeTimers();
+            try {
+                vi.mocked(requestUrl)
+                    .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'stale-commit' } } } as unknown as RequestUrlResponse) // get ref (stale)
+                    .mockResolvedValueOnce({ status: 200, json: { errors: [{ message: 'A path was requested for deletion, but that path does not exist in tree `stale-commit`' }] } } as unknown as RequestUrlResponse) // mutation fails
+                    .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'fresh-commit' } } } as unknown as RequestUrlResponse) // get ref (fresh, retry)
+                    .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse) // mutation succeeds
+                    .mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'a.md', type: 'blob', sha: 'blob-a' }], truncated: false } } as unknown as RequestUrlResponse); // fresh tree
+
+                const resultPromise = service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'Push 1 file(s) from Obsidian');
+                await vi.runAllTimersAsync();
+                const result = await resultPromise;
+
+                expect(result).toEqual([{ path: 'a.md', sha: 'blob-a' }]);
+                const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+                expect(calls).toHaveLength(5);
+                const firstMutation = JSON.parse(calls[1]?.body as string) as { variables: { input: { expectedHeadOid: string } } };
+                const retryMutation = JSON.parse(calls[3]?.body as string) as { variables: { input: { expectedHeadOid: string } } };
+                expect(firstMutation.variables.input.expectedHeadOid).toBe('stale-commit');
+                expect(retryMutation.variables.input.expectedHeadOid).toBe('fresh-commit');
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('does not retry an unrelated GraphQL error', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse) // get ref
+                .mockResolvedValueOnce({ status: 200, json: { errors: [{ message: 'Resource not accessible by integration' }] } } as unknown as RequestUrlResponse); // unrelated failure
+
+            await expect(service.pushBatch(
+                [{ path: 'a.md', content: 'hello' }],
+                'main',
+                'Push 1 file(s) from Obsidian'
+            )).rejects.toThrow('Resource not accessible by integration');
+
+            expect(requestUrl).toHaveBeenCalledTimes(2);
+        });
+
+        it('retries the follow-up tree fetch when it is still missing a just-committed file', async () => {
+            // The tree-by-branch-name read used to recover blob shas after the
+            // commit succeeds is exposed to the same eventual-consistency lag as
+            // the expectedHeadOid read — it can briefly omit a file that was just
+            // written, rather than erroring outright.
+            vi.useFakeTimers();
+            try {
+                vi.mocked(requestUrl)
+                    .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse) // get ref
+                    .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse) // mutation succeeds
+                    .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse) // stale tree, missing a.md
+                    .mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'a.md', type: 'blob', sha: 'blob-a' }], truncated: false } } as unknown as RequestUrlResponse); // fresh tree
+
+                const resultPromise = service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'Push 1 file(s) from Obsidian');
+                await vi.runAllTimersAsync();
+                const result = await resultPromise;
+
+                expect(result).toEqual([{ path: 'a.md', sha: 'blob-a' }]);
+                expect(requestUrl).toHaveBeenCalledTimes(4);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
     });
 
     describe('pushFile', () => {
@@ -353,6 +422,32 @@ describe('GitHubService', () => {
 
             await expect(service.deleteBatch(['a.md'], 'main', 'Delete 1 file(s) from Obsidian'))
                 .rejects.toThrow('Head sha was modified');
+        });
+
+        it('retries with a freshly re-read HEAD when the mutation reports a stale-expectedHeadOid-shaped error', async () => {
+            // Regression test for the reported bug: pushing files and immediately
+            // batch-deleting them (or vice versa) can read a HEAD that hasn't
+            // caught up to the just-completed write yet, so GitHub reports the
+            // to-be-deleted path as not existing in that (stale) tree.
+            vi.useFakeTimers();
+            try {
+                vi.mocked(requestUrl)
+                    .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'stale-commit' } } } as unknown as RequestUrlResponse) // get ref (stale)
+                    .mockResolvedValueOnce({ status: 200, json: { errors: [{ message: 'A path was requested for deletion, but that path does not exist in tree `stale-commit`' }] } } as unknown as RequestUrlResponse) // mutation fails
+                    .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'fresh-commit' } } } as unknown as RequestUrlResponse) // get ref (fresh, retry)
+                    .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse); // mutation succeeds
+
+                const resultPromise = service.deleteBatch(['a.md'], 'main', 'Delete 1 file(s) from Obsidian');
+                await vi.runAllTimersAsync();
+                await resultPromise;
+
+                const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+                expect(calls).toHaveLength(4);
+                const retryMutation = JSON.parse(calls[3]?.body as string) as { variables: { input: { expectedHeadOid: string } } };
+                expect(retryMutation.variables.input.expectedHeadOid).toBe('fresh-commit');
+            } finally {
+                vi.useRealTimers();
+            }
         });
     });
 
