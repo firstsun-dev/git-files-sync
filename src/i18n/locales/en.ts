@@ -6,6 +6,13 @@ const en = {
 	'settings.connectionStatus.disconnected': 'Not connected',
 	'settings.connectionStatus.withDetail': '{label} — {detail}',
 
+	'settings.language.name': 'Language',
+	'settings.language.desc': 'UI language for this plugin',
+	'settings.language.option.system': 'System default',
+	'settings.language.option.en': 'English',
+	'settings.language.option.zhTw': '繁體中文 (Traditional Chinese)',
+	'settings.language.option.zhCn': '简体中文 (Simplified Chinese)',
+
 	'settings.gitService.name': 'Git service',
 	'settings.gitService.desc': 'Choose your Git hosting service',
 
@@ -101,6 +108,9 @@ const en = {
 	'whatsNew.title': "What's new",
 	'whatsNew.viewChangelog': 'View full changelog',
 	'whatsNew.gotIt': 'Got it',
+
+	'settings.whatsNewBanner.title': "What's new in v{version}",
+	'settings.whatsNewBanner.dismiss': 'Dismiss',
 
 	'syncStatus.viewTitle': 'Sync status',
 	'syncStatus.emptyPrompt': 'Click "Refresh" to check sync status',

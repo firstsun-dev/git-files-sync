@@ -2,7 +2,8 @@ import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
 import GitLabFilesPush, { type ConnectionStatus } from "./main";
 import {FolderSuggest} from "./ui/FolderSuggest";
 import {RemoteFolderSuggest} from "./ui/RemoteFolderSuggest";
-import { t } from "./i18n";
+import { t, setLanguageOverride, type LanguageSetting } from "./i18n";
+import { CHANGELOG } from "./changelog";
 
 // Minimal shape of Obsidian >= 1.13's SettingDefinitionItem. Declared locally so
 // the plugin still type-checks against older Obsidian typings (minAppVersion
@@ -51,6 +52,10 @@ export interface GitLabFilesPushSettings {
     ignorePatterns: string;
     /** Plugin version last seen by this vault, used to show a "what's new" tip after an update. */
     lastSeenVersion: string;
+    /** Version whose "what's new" banner in the settings tab has been dismissed, if any. */
+    bannerDismissedVersion: string;
+    /** UI language. 'system' follows Obsidian's display language, falling back to English if unsupported. */
+    language: LanguageSetting;
 }
 
 export function getServiceName(settings: GitLabFilesPushSettings): string {
@@ -90,7 +95,9 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	vaultFolder: '',
 	symlinkHandling: 'real',
 	ignorePatterns: '',
-	lastSeenVersion: ''
+	lastSeenVersion: '',
+	bannerDismissedVersion: '',
+	language: 'system'
 }
 
 const CONNECTION_TEST_DEBOUNCE_MS = 800;
@@ -151,6 +158,41 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	// badge element is instead created once per renderSettings pass and
 	// updated in place by setStatusBadge(), driven by the plugin's shared
 	// connection status (see main.ts) so it stays in sync with the status bar.
+	// Persistent (until dismissed) banner surfacing the current version's notable
+	// highlights right at the top of the settings tab, so users who dismissed or
+	// never saw the WhatsNewModal (see main.ts) can still find them. Separate
+	// from `lastSeenVersion` — that gate controls the once-per-upgrade modal,
+	// this one just tracks whether the banner itself was dismissed.
+	private renderWhatsNewBanner(containerEl: HTMLElement): void {
+		const currentVersion = this.plugin.manifest.version;
+		if (this.plugin.settings.bannerDismissedVersion === currentVersion) return;
+
+		const release = CHANGELOG.find(r => r.version === currentVersion);
+		const notableEntries = release?.entries.filter(entry => entry.notable) ?? [];
+		if (notableEntries.length === 0) return;
+
+		const banner = containerEl.createDiv({ cls: 'gfs-whats-new-banner' });
+		const textEl = banner.createDiv({ cls: 'gfs-whats-new-banner-text' });
+		textEl.createEl('strong', { text: t('settings.whatsNewBanner.title', { version: currentVersion }) });
+		const list = textEl.createEl('ul', { cls: 'gfs-whats-new-banner-list' });
+		for (const entry of notableEntries) {
+			list.createEl('li', { text: entry.text });
+		}
+
+		const dismissBtn = banner.createEl('button', {
+			cls: 'gfs-whats-new-banner-dismiss',
+			text: '×',
+			attr: { 'aria-label': t('settings.whatsNewBanner.dismiss') }
+		});
+		dismissBtn.addEventListener('click', () => {
+			void (async () => {
+				this.plugin.settings.bannerDismissedVersion = currentVersion;
+				await this.plugin.saveSettings();
+				this.refresh();
+			})();
+		});
+	}
+
 	private renderConnectionStatus(containerEl: HTMLElement): void {
 		this.statusBadgeEl = containerEl.createDiv({ cls: 'gfs-connection-status' });
 		this.unsubscribeConnectionStatus?.();
@@ -188,7 +230,24 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	private renderSettings(containerEl: HTMLElement): void {
 		containerEl.empty();
 
+		this.renderWhatsNewBanner(containerEl);
 		this.renderConnectionStatus(containerEl);
+
+		new Setting(containerEl)
+			.setName(t('settings.language.name'))
+			.setDesc(t('settings.language.desc'))
+			.addDropdown(dropdown => dropdown
+				.addOption('system', t('settings.language.option.system'))
+				.addOption('en', t('settings.language.option.en'))
+				.addOption('zh-tw', t('settings.language.option.zhTw'))
+				.addOption('zh-cn', t('settings.language.option.zhCn'))
+				.setValue(this.plugin.settings.language)
+				.onChange((value: string) => {
+					this.plugin.settings.language = value as LanguageSetting;
+					void this.plugin.saveSettings();
+					setLanguageOverride(this.plugin.settings.language);
+					this.refresh();
+				}));
 
 		new Setting(containerEl)
 			.setName(t('settings.gitService.name'))

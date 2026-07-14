@@ -8,6 +8,13 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'settings.connectionStatus.disconnected': '未連線',
 	'settings.connectionStatus.withDetail': '{label} — {detail}',
 
+	'settings.language.name': '語言',
+	'settings.language.desc': '此外掛的介面語言',
+	'settings.language.option.system': '系統預設',
+	'settings.language.option.en': 'English',
+	'settings.language.option.zhTw': '繁體中文',
+	'settings.language.option.zhCn': '简体中文',
+
 	'settings.gitService.name': 'Git 服務',
 	'settings.gitService.desc': '選擇您的 Git 代管服務',
 
@@ -103,6 +110,9 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'whatsNew.title': '有什麼新功能',
 	'whatsNew.viewChangelog': '查看完整更新日誌',
 	'whatsNew.gotIt': '知道了',
+
+	'settings.whatsNewBanner.title': 'v{version} 更新重點',
+	'settings.whatsNewBanner.dismiss': '關閉提示',
 
 	'syncStatus.viewTitle': '同步狀態',
 	'syncStatus.emptyPrompt': '點擊「重新整理」以檢查同步狀態',
