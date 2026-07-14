@@ -25,7 +25,7 @@ export const CHANGELOG: ChangelogRelease[] = [
         entries: [
             { text: 'The plugin now speaks multiple languages — English, Traditional Chinese, and Simplified Chinese. It follows your Obsidian display language automatically, or you can pick one in Settings.', notable: true },
             { text: 'Checking sync status is now much faster, especially in vaults with lots of files.', notable: true },
-            { text: 'Fixed a bug where a linked (symlinked) folder could be pulled incorrectly instead of being treated as a link.', notable: true },
+            { text: 'Fixed a bug where a linked (symlinked) folder could be pulled incorrectly instead of being treated as a link.' },
             { text: 'Added a setting to keep specific files or folders out of sync, in addition to what your repo\'s .gitignore already excludes.' },
             { text: 'Settings now show your connection status at a glance, so you can tell right away if something needs attention.' },
             { text: 'The conflict resolution window can now be resized to see more content at once.' },
