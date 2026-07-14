@@ -14,6 +14,23 @@ type BatchOutcome = 'done' | 'unchanged' | 'conflict';
 /** A file classified as needing a push, queued for the grouped batch-commit call. */
 type ToPushEntry = { path: string; name: string; repoPath: string; content: string | ArrayBuffer; existingSha?: string };
 
+/**
+ * Result of a batch push. `syncedPaths` lists every path that's now confirmed
+ * synced (content just written matches what's now on the remote), with its
+ * new blob sha when known. The caller uses this to mark those files' UI
+ * status directly rather than re-fetching the remote tree right after a
+ * write — GitHub's tree-by-branch-name read can lag a successful write by a
+ * moment, so an immediate re-fetch can misreport a just-pushed file as
+ * "modified" even though nothing is actually different.
+ */
+export type PushResults = {
+    success: number;
+    failed: number;
+    conflicts: number;
+    errors: Array<{ file: string; error: string }>;
+    syncedPaths: Array<{ path: string; sha?: string }>;
+};
+
 export class SyncManager {
     private readonly app: App;
     private gitService: GitServiceInterface;
@@ -192,7 +209,7 @@ export class SyncManager {
         }
     }
 
-    private async performPush(file: {path: string, name: string}, content: string | ArrayBuffer, existingSha?: string, silent = false) {
+    private async performPush(file: {path: string, name: string}, content: string | ArrayBuffer, existingSha?: string, silent = false): Promise<string | undefined> {
         const repoPath = this.getNormalizedPath(file.path);
         const result = await this.gitService.pushFile(
             repoPath,
@@ -212,6 +229,7 @@ export class SyncManager {
         if (newSha) await this.updateMetadata(file.path, newSha);
 
         if (!silent) new Notice(`Pushed ${file.name} to ${this.serviceName}`);
+        return newSha;
     }
 
     /**
@@ -360,7 +378,7 @@ export class SyncManager {
         files: (TFile | string)[],
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
-    ): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
+    ): Promise<PushResults> {
         return this.processPushBatch(files, onProgress, remoteTree);
     }
 
@@ -402,8 +420,8 @@ export class SyncManager {
         files: (TFile | string)[],
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
-    ): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
-        const results = { success: 0, failed: 0, conflicts: 0, errors: [] as Array<{ file: string; error: string }> };
+    ): Promise<PushResults> {
+        const results: PushResults = { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
 
         const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
         const treeByFullPath = new Map<string, GitTreeEntry>(tree.map(e => [e.path, e]));
@@ -418,7 +436,13 @@ export class SyncManager {
 
             try {
                 const outcome = await this.classifyPushCandidate(fileOrPath, path, name, isString, treeByFullPath, toPush);
-                if (outcome === 'done') results.success++;
+                if (outcome === 'done') {
+                    results.success++;
+                    // Symlink/rename pushes are committed immediately outside the
+                    // toPush queue, so the new sha isn't known here — the caller
+                    // still gets to mark the path synced, just without a sha update.
+                    results.syncedPaths.push({ path });
+                }
                 else if (outcome === 'conflict') results.conflicts++;
                 // 'unchanged' and 'queued' don't move any of the counters directly:
                 // 'unchanged' never did, and 'queued' is resolved by commitPushBatch below.
@@ -535,10 +559,7 @@ export class SyncManager {
     }
 
     /** Commits every queued file in one or more grouped batch-commit calls. */
-    private async commitPushBatch(
-        toPush: ToPushEntry[],
-        results: { success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }
-    ): Promise<void> {
+    private async commitPushBatch(toPush: ToPushEntry[], results: PushResults): Promise<void> {
         if (!this.gitService.pushBatch) {
             await this.pushSequentialFallback(toPush, results);
             return;
@@ -551,14 +572,12 @@ export class SyncManager {
 
     /** Provider doesn't support a batch/atomic multi-file commit — fall back to
      * the same sequential per-file push used by the single-file flow. */
-    private async pushSequentialFallback(
-        toPush: ToPushEntry[],
-        results: { success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }
-    ): Promise<void> {
+    private async pushSequentialFallback(toPush: ToPushEntry[], results: PushResults): Promise<void> {
         for (const f of toPush) {
             try {
-                await this.performPush({ path: f.path, name: f.name }, f.content, f.existingSha, true);
+                const sha = await this.performPush({ path: f.path, name: f.name }, f.content, f.existingSha, true);
                 results.success++;
+                results.syncedPaths.push({ path: f.path, sha });
             } catch (e) {
                 results.failed++;
                 results.errors.push({ file: f.path, error: e instanceof Error ? e.message : String(e) });
@@ -566,10 +585,7 @@ export class SyncManager {
         }
     }
 
-    private async commitOneChunk(
-        chunk: ToPushEntry[],
-        results: { success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }
-    ): Promise<void> {
+    private async commitOneChunk(chunk: ToPushEntry[], results: PushResults): Promise<void> {
         try {
             const commitMessage = `Push ${chunk.length} file(s) from Obsidian`;
             const batchResults = await this.gitService.pushBatch!(
@@ -582,6 +598,7 @@ export class SyncManager {
                 const sha = shaByPath.get(f.repoPath);
                 if (sha) await this.updateMetadata(f.path, sha);
                 results.success++;
+                results.syncedPaths.push({ path: f.path, sha });
             }
         } catch (e) {
             // Atomic per-provider failure: none of this chunk's files were

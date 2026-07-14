@@ -128,6 +128,33 @@ describe('SyncManager Batch Operations', () => {
                 { path: 'a.md', content: 'content-a', existedRemotely: false },
                 { path: 'b.md', content: 'content-b', existedRemotely: false },
             ]);
+            // syncedPaths lets the caller mark these files synced directly, without
+            // a follow-up remote read that could race a provider's eventual
+            // consistency window (see SyncStatusView's use of this field).
+            expect(results.syncedPaths).toEqual([
+                { path: 'a.md', sha: 'sha-a' },
+                { path: 'b.md', sha: 'sha-b' },
+            ]);
+        });
+
+        it('reports syncedPaths via the sequential fallback when the provider has no pushBatch', async () => {
+            const files = ['a.md', 'b.md'];
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockImplementation(async (p) => (p === 'a.md' ? 'content-a' : 'content-b'));
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([]);
+            mockGitService.pushBatch = undefined;
+            vi.mocked(mockGitService.pushFile).mockImplementation(async (path) => ({ path, sha: `sha-${path}` }));
+
+            const results = await manager.pushAllFiles(files);
+
+            expect(results.success).toBe(2);
+            expect(mockGitService.pushFile).toHaveBeenCalledTimes(2);
+            expect(results.syncedPaths).toEqual([
+                { path: 'a.md', sha: 'sha-a.md' },
+                { path: 'b.md', sha: 'sha-b.md' },
+            ]);
         });
 
         it('handles a mixed binary + text batch, computing blob shas for both', async () => {
@@ -166,6 +193,7 @@ describe('SyncManager Batch Operations', () => {
                 { file: 'a.md', error: 'commit failed' },
                 { file: 'b.md', error: 'commit failed' },
             ]);
+            expect(results.syncedPaths).toEqual([]);
         });
 
         it('skips both getFile and pushBatch when the local blob sha already matches the tree', async () => {
