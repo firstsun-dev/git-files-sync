@@ -605,6 +605,36 @@
     background: var(--background-modifier-error);
 }
 
+/* ── Global status bar connection indicator ────────────────────── */
+.gfs-status-bar-connection {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+
+.gfs-status-bar-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+.gfs-status-bar-icon svg {
+    width: 12px;
+    height: 12px;
+}
+
+.gfs-status-bar-connection.is-checking {
+    color: var(--text-muted);
+}
+
+.gfs-status-bar-connection.is-connected {
+    color: var(--text-success);
+}
+
+.gfs-status-bar-connection.is-disconnected {
+    color: var(--text-error);
+}
+
 /* ── Conflict Modal ─────────────────────────────────────────────── */
 .sync-conflict-modal.modal {
     width: min(1100px, 92vw);

@@ -1,9 +1,10 @@
-import { Plugin, TFile, MarkdownView, Notice, Platform, setTooltip } from 'obsidian';
+import { Plugin, TFile, MarkdownView, Notice, Platform, setTooltip, setIcon } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getServiceName } from "./settings";
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
 import { GiteaService } from './services/gitea-service';
 import { GitServiceInterface, GitTreeEntry } from './services/git-service-interface';
+import { ConnectionTestResult } from './services/git-service-base';
 import { SyncManager } from './logic/sync-manager';
 import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
 import { GitignoreManager } from './logic/gitignore-manager';
@@ -14,12 +15,23 @@ import { CHANGELOG, getUnseenReleases } from './changelog';
 import { compareVersions } from './utils/version';
 import { t } from './i18n';
 
+export type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
+
+export interface ConnectionStatus {
+	state: ConnectionStatusState;
+	detail?: string;
+}
+
 export default class GitLabFilesPush extends Plugin {
 	settings: GitLabFilesPushSettings;
 	gitService: GitServiceInterface;
 	sync: SyncManager;
 	gitignoreManager: GitignoreManager;
 	private pushRibbonEl: HTMLElement;
+	private statusBarEl: HTMLElement;
+	connectionStatus: ConnectionStatus = { state: 'checking' };
+	private connectionStatusListeners: Set<(status: ConnectionStatus) => void> = new Set();
+	private connectionTestSeq = 0;
 
 	async onload() {
 		await this.loadSettings();
@@ -45,6 +57,13 @@ export default class GitLabFilesPush extends Plugin {
 		this.initializeGitService();
 		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath, this.settings.vaultFolder, this.settings.ignorePatterns);
 		this.sync = new SyncManager(this.app, this.gitService, this.settings, this.saveSettings.bind(this));
+
+		this.statusBarEl = this.addStatusBarItem();
+		this.statusBarEl.addClass('gfs-status-bar-connection');
+		setTooltip(this.statusBarEl, t('settings.connectionStatus.checking'));
+		this.registerDomEvent(this.statusBarEl, 'click', () => void this.testConnection());
+		this.onConnectionStatusChange((status) => this.renderStatusBarConnection(status));
+		void this.testConnection();
 
 		this.pushRibbonEl = this.addRibbonIcon('upload-cloud', this.pushRibbonLabel(), async () => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -142,6 +161,75 @@ export default class GitLabFilesPush extends Plugin {
 
 	private get serviceName(): string {
 		return getServiceName(this.settings);
+	}
+
+	// Subscribes to connection status changes, immediately replaying the current
+	// status so late subscribers (e.g. the settings tab opened after the initial
+	// test already ran) don't have to wait for the next change. Returns an
+	// unsubscribe function.
+	onConnectionStatusChange(listener: (status: ConnectionStatus) => void): () => void {
+		this.connectionStatusListeners.add(listener);
+		listener(this.connectionStatus);
+		return () => this.connectionStatusListeners.delete(listener);
+	}
+
+	private setConnectionStatus(status: ConnectionStatus): void {
+		this.connectionStatus = status;
+		for (const listener of this.connectionStatusListeners) listener(status);
+	}
+
+	// Single source of truth for connection testing, shared by the settings tab
+	// badge and the status bar item so both reflect the same in-flight request
+	// instead of racing separate calls against the remote API.
+	async testConnection(): Promise<ConnectionTestResult> {
+		const seq = ++this.connectionTestSeq;
+		this.setConnectionStatus({ state: 'checking' });
+
+		try {
+			const result = await this.gitService.testConnection(this.settings.branch);
+			if (seq !== this.connectionTestSeq) return result;
+
+			if (!result.repoOk) {
+				this.setConnectionStatus({ state: 'disconnected', detail: result.error ?? t('settings.testConnection.failed.unreachable') });
+			} else if (!result.branchOk) {
+				this.setConnectionStatus({ state: 'disconnected', detail: t('settings.testConnection.branchNotFound.badge', { branch: this.settings.branch }) });
+			} else {
+				this.setConnectionStatus({ state: 'connected' });
+			}
+			return result;
+		} catch (e: unknown) {
+			if (seq === this.connectionTestSeq) {
+				const message = e instanceof Error ? e.message : String(e);
+				this.setConnectionStatus({ state: 'disconnected', detail: message });
+			}
+			throw e;
+		}
+	}
+
+	private renderStatusBarConnection(status: ConnectionStatus): void {
+		const el = this.statusBarEl;
+		if (!el) return;
+		el.empty();
+		el.removeClass('is-checking', 'is-connected', 'is-disconnected');
+		el.addClass(`is-${status.state}`);
+
+		const icons: Record<ConnectionStatusState, string> = {
+			checking: 'loader',
+			connected: 'check-circle',
+			disconnected: 'alert-circle',
+		};
+		setIcon(el.createSpan({ cls: 'gfs-status-bar-icon' }), icons[status.state]);
+
+		const labels: Record<ConnectionStatusState, string> = {
+			checking: t('settings.connectionStatus.checking'),
+			connected: t('settings.connectionStatus.connected'),
+			disconnected: t('settings.connectionStatus.disconnected'),
+		};
+		el.createSpan({ text: ` ${this.serviceName}: ${labels[status.state]}` });
+
+		setTooltip(el, status.detail
+			? t('settings.connectionStatus.withDetail', { label: labels[status.state], detail: status.detail })
+			: labels[status.state]);
 	}
 
 	private pushRibbonLabel(): string {

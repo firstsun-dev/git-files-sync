@@ -1,8 +1,7 @@
 import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
-import GitLabFilesPush from "./main";
+import GitLabFilesPush, { type ConnectionStatus } from "./main";
 import {FolderSuggest} from "./ui/FolderSuggest";
 import {RemoteFolderSuggest} from "./ui/RemoteFolderSuggest";
-import { ConnectionTestResult } from "./services/git-service-base";
 import { t } from "./i18n";
 
 // Minimal shape of Obsidian >= 1.13's SettingDefinitionItem. Declared locally so
@@ -94,19 +93,29 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	lastSeenVersion: ''
 }
 
-type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
-
 const CONNECTION_TEST_DEBOUNCE_MS = 800;
 
 export class GitLabSyncSettingTab extends PluginSettingTab {
 	plugin: GitLabFilesPush;
 	private statusBadgeEl: HTMLElement | null = null;
 	private connectionTestTimer: ReturnType<typeof setTimeout> | null = null;
-	private connectionTestSeq = 0;
+	private unsubscribeConnectionStatus: (() => void) | null = null;
 
 	constructor(app: App, plugin: GitLabFilesPush) {
 		super(app, plugin);
 		this.plugin = plugin;
+	}
+
+	// The status badge mirrors the plugin's shared connection status (also
+	// driving the status bar item) instead of running its own test, so both
+	// stay in sync and don't race separate requests against the remote API.
+	hide(): void {
+		this.unsubscribeConnectionStatus?.();
+		this.unsubscribeConnectionStatus = null;
+		if (this.connectionTestTimer) {
+			clearTimeout(this.connectionTestTimer);
+			this.connectionTestTimer = null;
+		}
 	}
 
 	// Kept as a fallback for Obsidian < 1.13.0 (older than 1.13, down to
@@ -140,28 +149,28 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	// Rebuilding the whole settings tab (renderSettings) to refresh the badge
 	// would empty and recreate every field, stealing focus mid-typing. The
 	// badge element is instead created once per renderSettings pass and
-	// updated in place by setStatusBadge().
+	// updated in place by setStatusBadge(), driven by the plugin's shared
+	// connection status (see main.ts) so it stays in sync with the status bar.
 	private renderConnectionStatus(containerEl: HTMLElement): void {
 		this.statusBadgeEl = containerEl.createDiv({ cls: 'gfs-connection-status' });
-		this.setStatusBadge('checking');
+		this.unsubscribeConnectionStatus?.();
+		this.unsubscribeConnectionStatus = this.plugin.onConnectionStatusChange((status) => this.setStatusBadge(status));
 	}
 
-	private setStatusBadge(state: ConnectionStatusState, detail?: string): void {
+	private setStatusBadge(status: ConnectionStatus): void {
 		const badge = this.statusBadgeEl;
 		if (!badge) return;
 
-		badge.removeClass('is-checking');
-		badge.removeClass('is-connected');
-		badge.removeClass('is-disconnected');
-		badge.addClass(`is-${state}`);
+		badge.removeClass('is-checking', 'is-connected', 'is-disconnected');
+		badge.addClass(`is-${status.state}`);
 
-		const labels: Record<ConnectionStatusState, string> = {
+		const labels: Record<ConnectionStatus['state'], string> = {
 			checking: t('settings.connectionStatus.checking'),
 			connected: t('settings.connectionStatus.connected'),
 			disconnected: t('settings.connectionStatus.disconnected')
 		};
-		const label = labels[state];
-		badge.setText(detail ? t('settings.connectionStatus.withDetail', { label, detail }) : label);
+		const label = labels[status.state];
+		badge.setText(status.detail ? t('settings.connectionStatus.withDetail', { label, detail: status.detail }) : label);
 	}
 
 	// Debounced so token/branch fields (which call this on every keystroke)
@@ -172,33 +181,8 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		}
 		this.connectionTestTimer = setTimeout(() => {
 			this.connectionTestTimer = null;
-			void this.testConnectionSilently();
+			void this.plugin.testConnection();
 		}, CONNECTION_TEST_DEBOUNCE_MS);
-	}
-
-	private async testConnectionSilently(): Promise<ConnectionTestResult> {
-		const seq = ++this.connectionTestSeq;
-		this.setStatusBadge('checking');
-
-		try {
-			const result = await this.plugin.gitService.testConnection(this.plugin.settings.branch);
-			if (seq !== this.connectionTestSeq) return result;
-
-			if (!result.repoOk) {
-				this.setStatusBadge('disconnected', result.error ?? t('settings.testConnection.failed.unreachable'));
-			} else if (!result.branchOk) {
-				this.setStatusBadge('disconnected', t('settings.testConnection.branchNotFound.badge', { branch: this.plugin.settings.branch }));
-			} else {
-				this.setStatusBadge('connected');
-			}
-			return result;
-		} catch (e: unknown) {
-			if (seq === this.connectionTestSeq) {
-				const message = e instanceof Error ? e.message : String(e);
-				this.setStatusBadge('disconnected', message);
-			}
-			throw e;
-		}
 	}
 
 	private renderSettings(containerEl: HTMLElement): void {
@@ -310,7 +294,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.setButtonText(t('settings.testConnection.button'))
 				.onClick(async () => {
 					try {
-						const result = await this.testConnectionSilently();
+						const result = await this.plugin.testConnection();
 						if (!result.repoOk) {
 							new Notice(t('settings.testConnection.failed', { reason: result.error ?? t('settings.testConnection.failed.unreachable') }));
 						} else if (!result.branchOk) {
