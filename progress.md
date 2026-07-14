@@ -12,9 +12,9 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-07-14 09:35
+**Last Updated:** 2026-07-14 10:10
 **Session ID:** current
-**Active Feature:** issue #78 (blog repo, misfiled — actually a git-files-sync bug: delete remote-only file fails) — three root causes found and fixed, awaiting user re-test after rebuild
+**Active Feature:** feat-011 (perf: batch-commit push-all + SHA-based diffing) — done, lint/build/test all green. Previous active item (issue #78 delete-remote-only-file fix) still awaiting user re-test after rebuild.
 
 ## Status
 
@@ -33,16 +33,28 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
   - All three root causes committed (`896d77b`, merge `563a28e`, `fa42fea`) and pushed to `claude/fix-directory-symlink-pull-260713`. Test coverage for #2/#3 added after that — pending commit as of this note.
   - Not yet done: comment on/reference issue #78 (in the `blog` repo) noting the fix landed in `git-files-sync` instead — flag to user before doing so since it crosses repos.
 
+- [x] feat-011: perf(push): batch-commit push-all + SHA-based diffing. User asked "現在外掛的 push功能很慢，可能是什麼原因" then approved doing all three identified fixes (a/b/c) via a full plan-mode design pass. Implementation:
+  1. **Batched commit instead of one-commit-per-file**: new optional `GitServiceInterface.pushBatch?(items, branch, message)`. `GitHubService`/`GiteaService` implement it via the git blob→tree→commit→ref Data API (generalizing `pushSymlink`'s existing pattern, factored into shared `resolveGitHubStyleBaseTree`/`commitGitHubStyleTree` helpers in `git-service-base.ts`); `GitLabService` implements it via the native multi-file Commits API (`POST .../repository/commits` with an `actions` array), with one follow-up `listFilesDetailed` call afterward to recover each file's new blob sha (that API doesn't return them). Symlinks stay on the existing per-file `pushSymlink` path, not folded into batches.
+  2. **SHA-based diffing instead of per-file `getFile`**: `sync-manager.ts`'s push-all flow (`processPushBatch`/`classifyPushCandidate`/`classifyAgainstTreeEntry`) now compares a locally-computed git blob sha (`utils/git-blob-sha.ts`'s `gitBlobSha`, already used by feat-006's status refresh) against a pre-fetched remote tree's per-entry sha — no network round trip needed to detect unchanged/new/modified/conflicting files. Rename detection and symlink handling are untouched (still per-file, immediate).
+  3. **Dedup the remote-tree fetch**: `main.ts:runAllFiles` now fetches the tree once (`listFilesDetailed(branch, false)`) and threads it into both `GitignoreManager.loadGitignores(tree)` (new optional param, replacing its own `getRepoGitignores` call when a tree is supplied) and `SyncManager.pushAllFiles(files, onProgress, tree)` — replacing the old discarded `listFiles()` call plus gitignore-manager's separate fetch with a single shared one.
+  - Batches are chunked at `MAX_BATCH_PUSH_SIZE = 200` files per commit call (`git-service-base.ts`); a failed chunk marks every file in that chunk as failed (not silently dropped), earlier successful chunks stay committed.
+  - Providers without `pushBatch` (future Bitbucket) fall back to the original sequential per-file push path, unchanged.
+  - Added `pushBatch` tests to `github-service.test.ts`/`gitea-service.test.ts`/`gitlab-service.test.ts` (happy path, empty-batch short-circuit, base64 encoding, GitLab's create-vs-update action + sha-recovery-miss case), a `MAX_BATCH_PUSH_SIZE` sanity test, new `sync-manager-batch.test.ts` cases (grouped pushBatch call, mixed binary+text batch, whole-chunk-failure, sha-match skips both `getFile` and `pushBatch`), and a `gitignore-manager.test.ts` case for the pre-fetched-tree path. Existing conflict/rename/symlink batch tests rewritten to mock `listFilesDetailed` instead of `getFile` for the equality/conflict check (rename detection's own `getFile` calls are untouched).
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 330/330 passed (313 pre-existing + wording/mock updates + 17 new cases).
+  - Pull path (`pullAllFiles`) intentionally untouched — out of scope, still needs full remote content regardless of sha comparison.
+  - Not yet committed as of this note — pending commit onto `claude/fix-directory-symlink-pull-260713`.
+
 ### What's In Progress
 
 - Nothing else actively in progress.
 
 ### What's Next
 
-1. Get user confirmation that delete now works (or a new detailed error message) after they rebuild/reload with the latest push.
-2. Issue #37 (Bitbucket provider support, feat-010) — large, was deferred until #38 (i18n) landed. Now unblocked.
-3. Re-sync against `gh issue list --repo firstsun-dev/git-files-sync --state open`. Remaining genuinely-unstarted issues as of this session: #47 (regex ignore lists), #45 (SonarQube findings), #37 (Bitbucket), #28 (non-engineering: community visibility).
-4. PR #51 is large (7+ issues' worth of changes now). If the user wants to review/merge it before more work piles on, flag this rather than continuing to add commits indefinitely.
+1. Get user confirmation that delete now works (or a new detailed error message) after they rebuild/reload with the latest push (issue #78).
+2. Manually verify feat-011 in Obsidian if possible: push-all on a mixed vault should produce one new commit containing only changed/new files.
+3. Issue #37 (Bitbucket provider support, feat-010) — large, was deferred until #38 (i18n) landed. Now unblocked. Its `GitServiceInterface` implementation should simply omit `pushBatch` and use the existing per-file fallback.
+4. Re-sync against `gh issue list --repo firstsun-dev/git-files-sync --state open`. Remaining genuinely-unstarted issues as of this session: #47 (regex ignore lists), #45 (SonarQube findings), #37 (Bitbucket), #28 (non-engineering: community visibility).
+5. PR #51 is large (8+ issues' worth of changes now). If the user wants to review/merge it before more work piles on, flag this rather than continuing to add commits indefinitely.
 
 ## Blockers / Risks
 

@@ -81,6 +81,14 @@
       "dependencies": ["feat-009"],
       "status": "not-started",
       "evidence": ""
+    },
+    {
+      "id": "feat-011",
+      "name": "perf(push): batch-commit push-all + SHA-based diffing",
+      "description": "Push-all was up to 3N sequential HTTP calls and N separate commits for N files, plus two redundant full-tree fetches per run. Added optional GitServiceInterface.pushBatch (GitHub/Gitea via blob->tree->commit->ref, generalizing pushSymlink's pattern; GitLab via the native multi-action Commits API + a follow-up tree read for blob shas); sync-manager now classifies each file via a locally-computed git blob sha against one pre-fetched remote tree (no getFile per file) and commits all queued files in one grouped call (chunked at MAX_BATCH_PUSH_SIZE=200), falling back to the old per-file path when a provider has no pushBatch; main.ts/GitignoreManager now share one tree fetch instead of two",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 330/330 passed; consolidated onto PR #51"
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."

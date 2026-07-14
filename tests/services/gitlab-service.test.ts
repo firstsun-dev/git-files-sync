@@ -68,6 +68,56 @@ describe('GitLabService', () => {
         });
     });
 
+    describe('pushBatch', () => {
+        it('returns [] and makes no requests for an empty item list', async () => {
+            const result = await service.pushBatch([], 'main', 'push nothing');
+            expect(result).toEqual([]);
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('commits via the Commits API actions array, then reads back shas from a follow-up tree fetch', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse) // POST commits
+                .mockResolvedValueOnce({ status: 200, json: [
+                    { path: 'a.md', type: 'blob', id: 'new-sha-a' },
+                    { path: 'b.md', type: 'blob', id: 'new-sha-b' },
+                ] } as unknown as RequestUrlResponse); // follow-up listFilesDetailed
+
+            const result = await service.pushBatch(
+                [
+                    { path: 'a.md', content: 'hello', existedRemotely: true },
+                    { path: 'b.md', content: 'world', existedRemotely: false },
+                ],
+                'main',
+                'Push 2 file(s) from Obsidian'
+            );
+
+            expect(result).toEqual([{ path: 'a.md', sha: 'new-sha-a' }, { path: 'b.md', sha: 'new-sha-b' }]);
+
+            const calls = vi.mocked(requestUrl).mock.calls;
+            expect(calls).toHaveLength(2);
+            const commitCall = calls[0]?.[0] as { url: string; method: string; body: string };
+            expect(commitCall.url).toBe(`${baseUrl}/api/v4/projects/${projectId}/repository/commits`);
+            expect(commitCall.method).toBe('POST');
+            const body = JSON.parse(commitCall.body) as { branch: string; commit_message: string; actions: Array<{ action: string; file_path: string; content: string; encoding: string }> };
+            expect(body.branch).toBe('main');
+            expect(body.commit_message).toBe('Push 2 file(s) from Obsidian');
+            expect(body.actions).toEqual([
+                { action: 'update', file_path: 'a.md', content: btoa('hello'), encoding: 'base64' },
+                { action: 'create', file_path: 'b.md', content: btoa('world'), encoding: 'base64' },
+            ]);
+        });
+
+        it('returns sha: undefined for a pushed path missing from the follow-up tree', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: [] } as unknown as RequestUrlResponse);
+
+            const result = await service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'push');
+            expect(result).toEqual([{ path: 'a.md', sha: undefined }]);
+        });
+    });
+
     describe('listFiles', () => {
         it('should list blob files from tree API', async () => {
             mockRequest({ status: 200, json: [

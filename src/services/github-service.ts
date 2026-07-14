@@ -1,4 +1,4 @@
-import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
 import { logger } from '../utils/logger';
 
@@ -21,6 +21,10 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         const fullPath = this.getFullPath(path);
         const encodedPath = fullPath.split('/').map(encodeURIComponent).join('/');
         return `https://api.github.com/repos/${this.owner}/${this.repo}/contents/${encodedPath}`;
+    }
+
+    protected getGitDataApiBase(): string {
+        return `https://api.github.com/repos/${this.owner}/${this.repo}`;
     }
 
     async getFile(path: string, branch: string): Promise<GitFile> {
@@ -67,33 +71,46 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         // (mode 120000) must be committed through the lower-level Git Data API:
         // blob -> tree (with the symlink mode) -> commit -> move the branch ref.
         const fullPath = this.getFullPath(path);
-        const base = `https://api.github.com/repos/${this.owner}/${this.repo}`;
+        const base = this.getGitDataApiBase();
 
-        const refResp = await this.safeRequest(`${base}/git/ref/heads/${branch}`, 'GET');
-        const latestCommitSha = this.parseJson<{ object: { sha: string } }>(refResp).object.sha;
-
-        const commitResp = await this.safeRequest(`${base}/git/commits/${latestCommitSha}`, 'GET');
-        const baseTreeSha = this.parseJson<{ tree: { sha: string } }>(commitResp).tree.sha;
+        const { latestCommitSha, baseTreeSha } = await this.resolveGitHubStyleBaseTree(branch);
 
         const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', { content: target, encoding: 'utf-8' });
         const blobSha = this.parseJson<{ sha: string }>(blobResp).sha;
 
-        const treeResp = await this.safeRequest(`${base}/git/trees`, 'POST', {
-            base_tree: baseTreeSha,
-            tree: [{ path: fullPath, mode: GIT_SYMLINK_MODE, type: 'blob', sha: blobSha }],
-        });
-        const newTreeSha = this.parseJson<{ sha: string }>(treeResp).sha;
-
-        const newCommitResp = await this.safeRequest(`${base}/git/commits`, 'POST', {
-            message,
-            tree: newTreeSha,
-            parents: [latestCommitSha],
-        });
-        const newCommitSha = this.parseJson<{ sha: string }>(newCommitResp).sha;
-
-        await this.safeRequest(`${base}/git/refs/heads/${branch}`, 'PATCH', { sha: newCommitSha });
+        await this.commitGitHubStyleTree(
+            base, branch, baseTreeSha, latestCommitSha,
+            [{ path: fullPath, mode: GIT_SYMLINK_MODE, type: 'blob', sha: blobSha }],
+            message
+        );
 
         return { path: fullPath, sha: blobSha };
+    }
+
+    async pushBatch(items: BatchPushItem[], branch: string, message: string): Promise<BatchPushResult[]> {
+        if (items.length === 0) return [];
+        const base = this.getGitDataApiBase();
+        const { latestCommitSha, baseTreeSha } = await this.resolveGitHubStyleBaseTree(branch);
+
+        const blobShas: string[] = [];
+        for (const item of items) {
+            const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', {
+                content: this.encodeContent(item.content),
+                encoding: 'base64',
+            });
+            blobShas.push(this.parseJson<{ sha: string }>(blobResp).sha);
+        }
+
+        const treeItems = items.map((item, i) => ({
+            path: this.getFullPath(item.path),
+            mode: '100644',
+            type: 'blob' as const,
+            sha: blobShas[i] as string,
+        }));
+
+        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
+
+        return items.map((item, i) => ({ path: item.path, sha: blobShas[i] }));
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {

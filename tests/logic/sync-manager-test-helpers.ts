@@ -38,6 +38,7 @@ export function createSyncManagerMocks(): SyncManagerMocks {
         getFile: vi.fn(),
         testConnection: vi.fn(),
         listFiles: vi.fn(),
+        listFilesDetailed: vi.fn().mockResolvedValue([]),
         deleteFile: vi.fn(),
         getRepoGitignores: vi.fn(),
         updateConfig: vi.fn(),

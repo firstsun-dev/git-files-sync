@@ -120,6 +120,26 @@ describe('GitignoreManager', () => {
             expect(manager.isIgnored('sub/root-ignored.txt')).toBe(true);
         });
 
+        it('scans a pre-fetched remote tree for .gitignore paths instead of calling getRepoGitignores', async () => {
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+            vi.mocked(mockGitService.getFile).mockImplementation((path) => {
+                if (path === '/.gitignore') return Promise.resolve({ content: 'node_modules/', sha: '1' });
+                if (path === '/sub/.gitignore') return Promise.resolve({ content: '*.tmp', sha: '2' });
+                return Promise.resolve({ content: '', sha: '' });
+            });
+
+            await manager.loadGitignores([
+                { path: '.gitignore', symlink: false, sha: 'a' },
+                { path: 'sub/.gitignore', symlink: false, sha: 'b' },
+                { path: 'src/main.ts', symlink: false, sha: 'c' },
+            ]);
+
+            expect(mockGitService.getRepoGitignores).not.toHaveBeenCalled();
+            expect(manager.isIgnored('node_modules/test.js')).toBe(true);
+            expect(manager.isIgnored('sub/test.tmp')).toBe(true);
+        });
+
         it('should pick up local-only subdirectory .gitignore not yet on remote', async () => {
             // Remote only knows about root .gitignore; sub/.gitignore exists locally but not pushed yet
             vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue(['.gitignore']);
