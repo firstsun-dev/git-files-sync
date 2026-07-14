@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabSyncSettingTab } from '../../src/settings';
 import GitLabFilesPush from '../../src/main';
+import type { ConnectionTestResult } from '../../src/services/git-service-base';
 import { createContainer, setupObsidianDOM } from './setup-dom';
 
 vi.mock('../../src/main', () => ({
@@ -11,12 +12,38 @@ vi.mock('../../src/main', () => ({
 
 beforeAll(() => { setupObsidianDOM(); });
 
-function createPluginStub(testConnection: ReturnType<typeof vi.fn>): GitLabFilesPush {
+// Mirrors the connection-status pub/sub that main.ts owns (onConnectionStatusChange
+// / testConnection), since src/main is mocked out above and the settings tab now
+// delegates to the plugin instead of running its own connection test.
+function createPluginStub(testConnection: () => Promise<ConnectionTestResult>): GitLabFilesPush {
+  let connectionStatus: { state: string; detail?: string } = { state: 'checking' };
+  const listeners = new Set<(status: typeof connectionStatus) => void>();
+
   return {
     settings: { ...DEFAULT_SETTINGS },
     saveSettings: vi.fn().mockResolvedValue(undefined),
     initializeGitService: vi.fn(),
     gitService: { testConnection },
+    onConnectionStatusChange: vi.fn((listener: (status: typeof connectionStatus) => void) => {
+      listeners.add(listener);
+      listener(connectionStatus);
+      return () => listeners.delete(listener);
+    }),
+    testConnection: vi.fn(async () => {
+      connectionStatus = { state: 'checking' };
+      for (const listener of listeners) listener(connectionStatus);
+
+      const result = await testConnection();
+      if (!result.repoOk) {
+        connectionStatus = { state: 'disconnected', detail: result.error ?? 'unreachable' };
+      } else if (!result.branchOk) {
+        connectionStatus = { state: 'disconnected', detail: 'branch not found' };
+      } else {
+        connectionStatus = { state: 'connected' };
+      }
+      for (const listener of listeners) listener(connectionStatus);
+      return result;
+    }),
   } as unknown as GitLabFilesPush;
 }
 
