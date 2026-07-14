@@ -13,7 +13,7 @@ import { ConfirmModal } from './ui/ConfirmModal';
 import { WhatsNewModal } from './ui/WhatsNewModal';
 import { CHANGELOG, getUnseenReleases } from './changelog';
 import { compareVersions } from './utils/version';
-import { t } from './i18n';
+import { t, setLanguageOverride } from './i18n';
 
 export type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
 
@@ -422,6 +422,7 @@ export default class GitLabFilesPush extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<GitLabFilesPushSettings>);
+		setLanguageOverride(this.settings.language);
 	}
 
 	async saveSettings() {

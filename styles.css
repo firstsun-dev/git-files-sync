@@ -762,3 +762,40 @@
 .ssv-whats-new-notable {
     font-weight: 600;
 }
+
+/* ── Settings "what's new" banner ──────────────────────────────── */
+.gfs-whats-new-banner {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.gfs-whats-new-banner-text {
+    flex: 1;
+}
+
+.gfs-whats-new-banner-list {
+    margin: 4px 0 0;
+    padding-left: 20px;
+}
+
+.gfs-whats-new-banner-dismiss {
+    background: none;
+    border: none;
+    box-shadow: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 1.1em;
+    line-height: 1;
+    padding: 2px 4px;
+}
+
+.gfs-whats-new-banner-dismiss:hover {
+    color: var(--text-normal);
+}

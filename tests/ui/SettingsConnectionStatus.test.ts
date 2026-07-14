@@ -21,6 +21,7 @@ function createPluginStub(testConnection: () => Promise<ConnectionTestResult>): 
 
   return {
     settings: { ...DEFAULT_SETTINGS },
+    manifest: { version: '0.0.0-test' },
     saveSettings: vi.fn().mockResolvedValue(undefined),
     initializeGitService: vi.fn(),
     gitService: { testConnection },
