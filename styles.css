@@ -595,14 +595,18 @@
     background: var(--background-secondary);
 }
 
+/* Background intentionally stays the same neutral --background-secondary as
+ * the checking state rather than --background-modifier-success/error: some
+ * themes define those modifier colors identically to --text-success/error,
+ * which would make the label text invisible against its own background. */
 .gfs-connection-status.is-connected {
     color: var(--text-success);
-    background: var(--background-modifier-success);
+    background: var(--background-secondary);
 }
 
 .gfs-connection-status.is-disconnected {
     color: var(--text-error);
-    background: var(--background-modifier-error);
+    background: var(--background-secondary);
 }
 
 /* ── Global status bar connection indicator ────────────────────── */
