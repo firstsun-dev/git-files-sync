@@ -569,11 +569,26 @@ export class SyncStatusView extends ItemView {
         this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha });
     }
 
+    private async readStringPathContent(path: string, binary: boolean): Promise<string | ArrayBuffer> {
+        try {
+            return binary
+                ? await this.app.vault.adapter.readBinary(path)
+                : await this.app.vault.adapter.read(path);
+        } catch (e) {
+            // A folder that's an OS symlink can surface here (not yet known to
+            // the remote, so it skipped the sha-based symlink handling above);
+            // adapter.read() follows the link and throws EISDIR trying to read
+            // a directory. Fall back to the raw link target, consistent with
+            // how a symlinked folder is treated as a single blob elsewhere.
+            const target = readLocalSymlinkTarget(this.app, path);
+            if (target !== null) return target;
+            throw e;
+        }
+    }
+
     private async readFileContent(fileOrPath: TFile | string, binary: boolean, isStr: boolean): Promise<string | ArrayBuffer> {
         if (isStr) {
-            return binary
-                ? await this.app.vault.adapter.readBinary(fileOrPath as string)
-                : await this.app.vault.adapter.read(fileOrPath as string);
+            return this.readStringPathContent(fileOrPath as string, binary);
         }
         if (fileOrPath instanceof TFile) {
             try {
@@ -660,16 +675,18 @@ export class SyncStatusView extends ItemView {
 
         const total = local.length + remote.length;
         const prog = new Notice(`Deleting 0/${total} files…`, 0);
-        const errors: string[] = [];
+        const errors: { path: string, message: string }[] = [];
 
         await this.performLocalDeletion(local, total, prog, errors);
         await this.performRemoteDeletion(remote, total, local.length, prog, errors);
 
         prog.hide();
-        new Notice(errors.length > 0
-            ? `Deleted ${total - errors.length}/${total}. ${errors.length} failed.`
-            : `Deleted ${total} files`
-        );
+        if (errors.length > 0) {
+            logger.error('Delete errors:', errors);
+            new Notice(`Deleted ${total - errors.length}/${total}. ${errors.length} failed: ${errors.map(e => e.message).join('; ')}`);
+        } else {
+            new Notice(`Deleted ${total} files`);
+        }
         this.renderView();
     }
 
@@ -704,7 +721,7 @@ export class SyncStatusView extends ItemView {
         return this.showConfirmDialog(msg);
     }
 
-    private async performLocalDeletion(local: FileStatus[], total: number, prog: Notice, errors: string[]): Promise<void> {
+    private async performLocalDeletion(local: FileStatus[], total: number, prog: Notice, errors: { path: string, message: string }[]): Promise<void> {
         let cur = 0;
         for (const s of local) {
             cur++;
@@ -715,11 +732,13 @@ export class SyncStatusView extends ItemView {
                 await this.plugin.sync.clearMetadata(s.path);
                 this.fileStatuses.delete(s.path);
                 this.selectedFiles.delete(s.path);
-            } catch { errors.push(s.path); }
+            } catch (e) {
+                errors.push({ path: s.path, message: e instanceof Error ? e.message : String(e) });
+            }
         }
     }
 
-    private async performRemoteDeletion(remote: FileStatus[], total: number, localCount: number, prog: Notice, errors: string[]): Promise<void> {
+    private async performRemoteDeletion(remote: FileStatus[], total: number, localCount: number, prog: Notice, errors: { path: string, message: string }[]): Promise<void> {
         let cur = localCount;
         for (const s of remote) {
             cur++;
@@ -728,7 +747,9 @@ export class SyncStatusView extends ItemView {
                 await this.plugin.gitService.deleteFile(s.path, this.plugin.settings.branch, `Delete ${s.path}`);
                 this.fileStatuses.delete(s.path);
                 this.selectedFiles.delete(s.path);
-            } catch { errors.push(s.path); }
+            } catch (e) {
+                errors.push({ path: s.path, message: e instanceof Error ? e.message : String(e) });
+            }
         }
     }
 
