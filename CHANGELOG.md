@@ -1,3 +1,39 @@
+## [1.3.0](https://github.com/firstsun-dev/git-files-sync/compare/1.2.1...1.3.0) (2026-07-14)
+
+### Features
+
+* add i18n (multi-language) support ([#38](https://github.com/firstsun-dev/git-files-sync/issues/38)) ([144eb28](https://github.com/firstsun-dev/git-files-sync/commit/144eb286d8372c9fe24c52b4730a837650731212))
+* add Simplified Chinese locale, settings what's-new banner, and 1.3.0 changelog ([72ed2cd](https://github.com/firstsun-dev/git-files-sync/commit/72ed2cde75a7360b00e2dd4faa146efcb3890c51))
+* resize conflict modal, add connection status badge, and local ignore patterns ([28f4f8e](https://github.com/firstsun-dev/git-files-sync/commit/28f4f8efd015dc89a2eb7459fbad224626597d5f)), closes [#42](https://github.com/firstsun-dev/git-files-sync/issues/42) [#41](https://github.com/firstsun-dev/git-files-sync/issues/41)
+* **settings:** add folder picker for root path and vault folder settings ([c107979](https://github.com/firstsun-dev/git-files-sync/commit/c107979427c2cdfabd6a8411c12dbe825356a78a)), closes [#48](https://github.com/firstsun-dev/git-files-sync/issues/48)
+* show new feature tips after update ([4eebebc](https://github.com/firstsun-dev/git-files-sync/commit/4eebebc765b1495ebc49baf38f8f08eff9bf3520)), closes [#39](https://github.com/firstsun-dev/git-files-sync/issues/39)
+* **ui:** show connection status in the global status bar ([83499c9](https://github.com/firstsun-dev/git-files-sync/commit/83499c92e8ddec59aa2340fac7c2c05262290c3b))
+
+### Bug Fixes
+
+* don't mark the symlink-pull fix as notable in 1.3.0 changelog ([1fc27ab](https://github.com/firstsun-dev/git-files-sync/commit/1fc27ab1b6cb91912eb8fb280a12f7fa1e7affa4))
+* normalize vaultFolder-relative path before gitService.deleteFile ([fa42fea](https://github.com/firstsun-dev/git-files-sync/commit/fa42fea5fdb50c0a1bcc28620d0c5194048e82b9))
+* **push:** avoid stale remote-tree read right after a batch push ([7676325](https://github.com/firstsun-dev/git-files-sync/commit/76763250881e382614d1aa31b1d8ca742cc9b014))
+* **push:** retry GitHub commit mutations on a stale expectedHeadOid ([33d41ac](https://github.com/firstsun-dev/git-files-sync/commit/33d41ac89ba120afa88475ae8e5f0d4dc525dab7))
+* remote-repo root path picker, delete-remote-only-file errors, symlinked-folder EISDIR ([896d77b](https://github.com/firstsun-dev/git-files-sync/commit/896d77bddffa5059593e8875b84e656847f4b3f7)), closes [firstsun-dev/blog#78](https://github.com/firstsun-dev/blog/issues/78)
+* satisfy Obsidian plugin scan (undescribed directive, popout-window timers) ([09bdf0c](https://github.com/firstsun-dev/git-files-sync/commit/09bdf0c0c716da7e857106891663a6cc1b8f4f05))
+* surface a clear error when requestUrl() itself rejects with HTML content ([a867217](https://github.com/firstsun-dev/git-files-sync/commit/a86721752a77529b4ebe631311bd4f31c64a5e48)), closes [#31](https://github.com/firstsun-dev/git-files-sync/issues/31)
+* symlinked directories no longer break pull discovery ([4c8896b](https://github.com/firstsun-dev/git-files-sync/commit/4c8896b6fa2bc5eae40d67168e171955a9234ed9)), closes [#33](https://github.com/firstsun-dev/git-files-sync/issues/33)
+* **sync:** clear sync metadata on vault file delete ([1a369b3](https://github.com/firstsun-dev/git-files-sync/commit/1a369b36ed22e396906d7b34b4c9c156d38f8c76))
+* **ui:** connection status badge text invisible on some themes ([12cce64](https://github.com/firstsun-dev/git-files-sync/commit/12cce6497e9932f772b4b17a401e5369bbb118f2))
+
+### Performance Improvements
+
+* **delete:** batch-commit remote-only file deletion ([d8e3663](https://github.com/firstsun-dev/git-files-sync/commit/d8e3663b8f11eacc235aea1d40deb25c70567fbb))
+* **push:** batch-commit push-all files + SHA-based diffing ([c28e0ec](https://github.com/firstsun-dev/git-files-sync/commit/c28e0ec09a566762f05dc4be88f46bae84c853e6))
+* **push:** GitHub batch push/delete via GraphQL createCommitOnBranch ([114a575](https://github.com/firstsun-dev/git-files-sync/commit/114a5759a7ee034ea99e6ae730024502062445fd))
+* **push:** parallelize blob creation within a batch commit ([c7ae0f6](https://github.com/firstsun-dev/git-files-sync/commit/c7ae0f675473716281ab32a38bb22a934dcf3b07))
+* **refresh:** use tree blob SHAs to avoid per-file content fetches ([2ed5a43](https://github.com/firstsun-dev/git-files-sync/commit/2ed5a436b07974a40e36b06e1cd57a15f614567a)), closes [#36](https://github.com/firstsun-dev/git-files-sync/issues/36)
+
+### Code Refactoring
+
+* **tests:** dedupe TextComponent/TextAreaComponent mocks ([f5ae8ef](https://github.com/firstsun-dev/git-files-sync/commit/f5ae8ef16df930578eeef3e467577c7873b01334)), closes [#49](https://github.com/firstsun-dev/git-files-sync/issues/49)
+
 ## [1.2.1](https://github.com/firstsun-dev/git-files-sync/compare/1.2.0...1.2.1) (2026-07-07)
 
 ### Bug Fixes
