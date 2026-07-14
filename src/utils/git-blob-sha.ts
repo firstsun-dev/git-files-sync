@@ -15,7 +15,7 @@ export async function gitBlobSha(content: string | ArrayBuffer): Promise<string>
 
     // SHA-1 isn't for security here — it's required because it's git's own
     // object-hashing algorithm, so this must match `git hash-object` exactly.
-    // eslint-disable-next-line sonarjs/hashing
+    // eslint-disable-next-line sonarjs/hashing -- SHA-1 is required here to match git's own object-hashing algorithm, not used for security
     const digest = await crypto.subtle.digest('SHA-1', combined);
     return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }

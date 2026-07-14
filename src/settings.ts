@@ -105,7 +105,7 @@ const CONNECTION_TEST_DEBOUNCE_MS = 800;
 export class GitLabSyncSettingTab extends PluginSettingTab {
 	plugin: GitLabFilesPush;
 	private statusBadgeEl: HTMLElement | null = null;
-	private connectionTestTimer: ReturnType<typeof setTimeout> | null = null;
+	private connectionTestTimer: number | null = null;
 	private unsubscribeConnectionStatus: (() => void) | null = null;
 
 	constructor(app: App, plugin: GitLabFilesPush) {
@@ -120,7 +120,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		this.unsubscribeConnectionStatus?.();
 		this.unsubscribeConnectionStatus = null;
 		if (this.connectionTestTimer) {
-			clearTimeout(this.connectionTestTimer);
+			window.clearTimeout(this.connectionTestTimer);
 			this.connectionTestTimer = null;
 		}
 	}
@@ -153,11 +153,6 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		}
 	}
 
-	// Rebuilding the whole settings tab (renderSettings) to refresh the badge
-	// would empty and recreate every field, stealing focus mid-typing. The
-	// badge element is instead created once per renderSettings pass and
-	// updated in place by setStatusBadge(), driven by the plugin's shared
-	// connection status (see main.ts) so it stays in sync with the status bar.
 	// Persistent (until dismissed) banner surfacing the current version's notable
 	// highlights right at the top of the settings tab, so users who dismissed or
 	// never saw the WhatsNewModal (see main.ts) can still find them. Separate
@@ -193,6 +188,11 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		});
 	}
 
+	// Rebuilding the whole settings tab (renderSettings) to refresh the badge
+	// would empty and recreate every field, stealing focus mid-typing. The
+	// badge element is instead created once per renderSettings pass and
+	// updated in place by setStatusBadge(), driven by the plugin's shared
+	// connection status (see main.ts) so it stays in sync with the status bar.
 	private renderConnectionStatus(containerEl: HTMLElement): void {
 		this.statusBadgeEl = containerEl.createDiv({ cls: 'gfs-connection-status' });
 		this.unsubscribeConnectionStatus?.();
@@ -219,9 +219,9 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	// don't hit the remote API on every character typed.
 	private scheduleConnectionTest(): void {
 		if (this.connectionTestTimer) {
-			clearTimeout(this.connectionTestTimer);
+			window.clearTimeout(this.connectionTestTimer);
 		}
-		this.connectionTestTimer = setTimeout(() => {
+		this.connectionTestTimer = window.setTimeout(() => {
 			this.connectionTestTimer = null;
 			void this.plugin.testConnection();
 		}, CONNECTION_TEST_DEBOUNCE_MS);

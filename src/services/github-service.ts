@@ -148,7 +148,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
                 const errorMessage = e instanceof Error ? e.message : String(e);
                 const looksStale = /does not exist in tree|does not match|expectedHeadOid/i.test(errorMessage);
                 if (!looksStale || attempt === maxAttempts) throw e;
-                await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+                await new Promise(resolve => window.setTimeout(resolve, 500 * attempt));
             }
         }
         // Unreachable: the loop always returns or throws.
@@ -178,7 +178,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
             const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
             const results = items.map((item, i) => ({ path: item.path, sha: shaByPath.get(fullPaths[i] as string) }));
             if (results.every(r => r.sha) || attempt === 3) return results;
-            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+            await new Promise(resolve => window.setTimeout(resolve, 500 * attempt));
         }
         // Unreachable: the loop always returns on its last iteration.
         throw new Error('pushBatch: exhausted retries reading back blob shas');
