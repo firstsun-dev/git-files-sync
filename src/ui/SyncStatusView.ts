@@ -11,6 +11,7 @@ import { isBinaryPath, contentsEqual } from '../utils/path';
 import { readLocalSymlinkTarget } from '../utils/symlink';
 import { gitBlobSha } from '../utils/git-blob-sha';
 import { type GitTreeEntry } from '../services/git-service-interface';
+import { t, type TranslationKey } from '../i18n';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
 
@@ -29,7 +30,7 @@ export class SyncStatusView extends ItemView {
     }
 
     getViewType(): string { return SYNC_STATUS_VIEW_TYPE; }
-    getDisplayText(): string { return 'Sync status'; }
+    getDisplayText(): string { return t('syncStatus.viewTitle'); }
     getIcon(): string { return 'git-compare'; }
 
     onOpen(): Promise<void> {
@@ -56,7 +57,7 @@ export class SyncStatusView extends ItemView {
             this.renderProgressBar(listEl);
             this.renderCheckedFilesDuringRefresh(listEl);
         } else if (this.fileStatuses.size === 0) {
-            listEl.createDiv({ cls: 'ssv-empty', text: 'Click "Refresh" to check sync status' });
+            listEl.createDiv({ cls: 'ssv-empty', text: t('syncStatus.emptyPrompt') });
         } else {
             this.renderFileList(listEl);
         }
@@ -68,7 +69,7 @@ export class SyncStatusView extends ItemView {
         const prog = container.createDiv({ cls: 'ssv-progress' });
         prog.createDiv({
             cls: 'ssv-progress-text',
-            text: total > 0 ? `Checking files… ${current}/${total} (${pct}%)` : 'Checking files…'
+            text: total > 0 ? t('syncStatus.progress.checkingWithCount', { current, total, pct }) : t('syncStatus.progress.checking')
         });
         const bar = prog.createDiv({ cls: 'ssv-progress-bar' });
         bar.createDiv({ cls: 'ssv-progress-fill' }).setAttr('style', `width: ${pct}%`);
@@ -114,7 +115,7 @@ export class SyncStatusView extends ItemView {
                 cls: 'ssv-info-time',
                 text: Platform.isMobile
                     ? new Date(this.lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : `Last sync: ${new Date(this.lastSyncTime).toLocaleTimeString()}`
+                    : t('syncStatus.lastSync', { time: new Date(this.lastSyncTime).toLocaleTimeString() })
             });
         }
     }
@@ -132,11 +133,11 @@ export class SyncStatusView extends ItemView {
         };
 
         const tabs: Array<{ value: FilterValue; label: string }> = [
-            { value: 'all',         label: 'All' },
-            { value: 'synced',      label: 'Synced' },
-            { value: 'modified',    label: 'Changed' },
-            { value: 'unsynced',    label: 'Local only' },
-            { value: 'remote-only', label: 'Remote' },
+            { value: 'all',         label: t('syncStatus.tab.all') },
+            { value: 'synced',      label: t('syncStatus.tab.synced') },
+            { value: 'modified',    label: t('syncStatus.tab.modified') },
+            { value: 'unsynced',    label: t('syncStatus.tab.unsynced') },
+            { value: 'remote-only', label: t('syncStatus.tab.remote-only') },
         ];
 
         const tabsEl = container.createDiv({ cls: 'ssv-tabs' });
@@ -232,7 +233,8 @@ export class SyncStatusView extends ItemView {
             : all.filter(s => s.status === this.statusFilter);
 
         if (statuses.length === 0) {
-            container.createDiv({ cls: 'ssv-empty', text: `No ${this.statusFilter} files` });
+            const filterLabel = this.statusFilter === 'all' ? t('syncStatus.tab.all') : statusMeta(this.statusFilter).label;
+            container.createDiv({ cls: 'ssv-empty', text: t('syncStatus.noFilesForFilter', { filter: filterLabel }) });
             return;
         }
 
@@ -245,7 +247,7 @@ export class SyncStatusView extends ItemView {
     // ── Single-file operations ──────────────────────────────────────
 
     private async handleLocalDelete(fileStatus: FileStatus): Promise<void> {
-        const confirmed = await this.showConfirmDialog(`Delete local file "${fileStatus.path}"? Handled per your vault's "Deleted files" setting.`);
+        const confirmed = await this.showConfirmDialog(t('syncStatus.confirmDeleteLocal', { path: fileStatus.path }));
         if (!confirmed) return;
         try {
             if (fileStatus.file) {
@@ -254,11 +256,11 @@ export class SyncStatusView extends ItemView {
                 await this.app.vault.adapter.remove(fileStatus.path);
             }
             await this.plugin.sync.clearMetadata(fileStatus.path);
-            new Notice(`Deleted ${fileStatus.path}`);
+            new Notice(t('syncStatus.notice.deleted', { path: fileStatus.path }));
             this.fileStatuses.delete(fileStatus.path);
             this.renderView();
         } catch (e) {
-            new Notice(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
+            new Notice(t('syncStatus.notice.deleteFailed', { message: e instanceof Error ? e.message : String(e) }));
         }
     }
 
@@ -277,7 +279,8 @@ export class SyncStatusView extends ItemView {
             await this.refreshFileStatus(fileStatus.file || fileStatus.path, undefined);
             this.renderView();
         } catch (e) {
-            new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
+            const verb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
+            new Notice(t('syncStatus.notice.opFailed', { verb, message: e instanceof Error ? e.message : String(e) }));
             await this.refreshFileStatus(fileStatus.file || fileStatus.path, undefined);
             this.renderView();
         }
@@ -287,7 +290,7 @@ export class SyncStatusView extends ItemView {
 
     async refreshAllStatuses(): Promise<void> {
         if (this.isRefreshing) {
-            new Notice('Already refreshing…');
+            new Notice(t('syncStatus.notice.alreadyRefreshing'));
             return;
         }
 
@@ -313,11 +316,11 @@ export class SyncStatusView extends ItemView {
             this.lastSyncTime = Date.now();
             this.isRefreshing = false; // Set to false BEFORE final renderView
             this.renderView();
-            new Notice(`Checked ${files.local.length + files.hiddenLocalPaths.size} local + ${files.remoteMap.size} remote files`);
+            new Notice(t('syncStatus.notice.refreshed', { local: files.local.length + files.hiddenLocalPaths.size, remote: files.remoteMap.size }));
         } catch (e) {
             this.isRefreshing = false;
             this.renderView();
-            new Notice(`Failed to refresh: ${e instanceof Error ? e.message : String(e)}`);
+            new Notice(t('syncStatus.notice.refreshFailed', { message: e instanceof Error ? e.message : String(e) }));
         }
     }
 
@@ -627,6 +630,11 @@ export class SyncStatusView extends ItemView {
     async pushSelected():   Promise<void> { await this.runBatchOperation('selected', 'push'); }
     async pullSelected():   Promise<void> { await this.runBatchOperation('selected', 'pull'); }
 
+    private static readonly NO_RUNNABLE_FILES_KEYS: Record<'push' | 'pull', Record<'selected' | 'found', TranslationKey>> = {
+        push: { selected: 'syncStatus.notice.noPushableFiles.selected', found: 'syncStatus.notice.noPushableFiles.found' },
+        pull: { selected: 'syncStatus.notice.noPullableFiles.selected', found: 'syncStatus.notice.noPullableFiles.found' },
+    };
+
     private async runBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull'): Promise<void> {
         const targets = Array.from(this.fileStatuses.values()).filter(s => {
             if (filter === 'selected' && !this.selectedFiles.has(s.path)) return false;
@@ -636,32 +644,40 @@ export class SyncStatusView extends ItemView {
         });
 
         if (targets.length === 0) {
-            new Notice(`No ${op}able files ${filter === 'selected' ? 'selected' : 'found'}.`);
+            const scope = filter === 'selected' ? 'selected' : 'found';
+            new Notice(t(SyncStatusView.NO_RUNNABLE_FILES_KEYS[op][scope]));
             return;
         }
 
         const files = targets.map(s => s.file || s.path);
         const serviceName = getServiceName(this.plugin.settings);
         const msg = op === 'push'
-            ? `Push ${files.length} file(s) to ${serviceName}?`
-            : `Pull ${files.length} file(s) from ${serviceName}? This will overwrite local changes.`;
+            ? t('syncStatus.confirm.pushSelected', { count: files.length, service: serviceName })
+            : t('syncStatus.confirm.pullSelected', { count: files.length, service: serviceName });
 
         if (!await this.showConfirmDialog(msg)) return;
 
-        const prog = new Notice(`${op === 'push' ? 'Pushing' : 'Pulling'} 0/${files.length} files…`, 0);
+        await this.executeBatchOperation(filter, op, files);
+    }
+
+    private async executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string | TFile>): Promise<void> {
+        const runVerb = op === 'push' ? t('main.verb.pushing') : t('main.verb.pulling');
+        const prog = new Notice(t('main.progress.running', { verb: runVerb, total: files.length }), 0);
         try {
             const results = op === 'push'
-                ? await this.plugin.sync.pushAllFiles(files, (cur, total, name) => prog.setMessage(`Pushing ${cur}/${total}: ${name}`))
-                : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(`Pulling ${cur}/${total}: ${name}`));
+                ? await this.plugin.sync.pushAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pushing', { current: cur, total, name })))
+                : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pulling', { current: cur, total, name })));
 
             prog.hide();
             if (results.errors.length > 0) logger.error(`${op} errors:`, results.errors);
             if (filter === 'selected') this.selectedFiles.clear();
-            new Notice(`${op === 'push' ? 'Push' : 'Pull'} completed. Refreshing…`);
+            const doneVerb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
+            new Notice(t('syncStatus.notice.opCompleted', { verb: doneVerb }));
             await this.refreshAllStatuses();
         } catch (e) {
             prog.hide();
-            new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
+            const failVerb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
+            new Notice(t('syncStatus.notice.opFailed', { verb: failVerb, message: e instanceof Error ? e.message : String(e) }));
         }
     }
 
@@ -670,11 +686,11 @@ export class SyncStatusView extends ItemView {
         if (targets.length === 0) return;
 
         const { local, remote } = this.partitionTargets(targets);
-        if (local.length === 0 && remote.length === 0) { new Notice('Nothing to delete'); return; }
+        if (local.length === 0 && remote.length === 0) { new Notice(t('syncStatus.notice.nothingToDelete')); return; }
         if (!await this.confirmDeletion(local.length, remote.length)) return;
 
         const total = local.length + remote.length;
-        const prog = new Notice(`Deleting 0/${total} files…`, 0);
+        const prog = new Notice(t('syncStatus.progress.deleting', { total }), 0);
         const errors: { path: string, message: string }[] = [];
 
         await this.performLocalDeletion(local, total, prog, errors);
@@ -683,15 +699,20 @@ export class SyncStatusView extends ItemView {
         prog.hide();
         if (errors.length > 0) {
             logger.error('Delete errors:', errors);
-            new Notice(`Deleted ${total - errors.length}/${total}. ${errors.length} failed: ${errors.map(e => e.message).join('; ')}`);
+            new Notice(t('syncStatus.notice.deleteResult.partialWithMessage', {
+                succeeded: total - errors.length,
+                total,
+                failed: errors.length,
+                message: errors.map(e => e.message).join('; ')
+            }));
         } else {
-            new Notice(`Deleted ${total} files`);
+            new Notice(t('syncStatus.notice.deleteResult.success', { total }));
         }
         this.renderView();
     }
 
     private getSelectedTargets(): FileStatus[] {
-        if (this.selectedFiles.size === 0) { new Notice('No files selected'); return []; }
+        if (this.selectedFiles.size === 0) { new Notice(t('syncStatus.notice.noFilesSelected')); return []; }
         return Array.from(this.selectedFiles)
             .map(p => this.fileStatuses.get(p))
             .filter(Boolean) as FileStatus[];
@@ -712,11 +733,11 @@ export class SyncStatusView extends ItemView {
         // recoverability; remote deletes are unconditionally permanent.
         let msg = '';
         if (localCount > 0 && remoteCount > 0) {
-            msg = `Delete ${localCount} local file(s) (per your vault's trash setting) and ${remoteCount} remote file(s) (cannot be undone)?`;
+            msg = t('syncStatus.confirmDelete.localAndRemote', { local: localCount, remote: remoteCount });
         } else if (localCount > 0) {
-            msg = `Delete ${localCount} local file(s)? They'll be handled per your vault's "Deleted files" setting.`;
+            msg = t('syncStatus.confirmDelete.localOnly', { local: localCount });
         } else {
-            msg = `Delete ${remoteCount} remote file(s)? This cannot be undone.`;
+            msg = t('syncStatus.confirmDelete.remoteOnly', { remote: remoteCount });
         }
         return this.showConfirmDialog(msg);
     }
@@ -725,7 +746,7 @@ export class SyncStatusView extends ItemView {
         let cur = 0;
         for (const s of local) {
             cur++;
-            prog.setMessage(`Deleting local ${cur}/${total}: ${s.path}`);
+            prog.setMessage(t('syncStatus.progress.deletingLocal', { current: cur, total, path: s.path }));
             try {
                 if (s.file) await this.app.fileManager.trashFile(s.file);
                 else await this.app.vault.adapter.remove(s.path);
@@ -742,7 +763,7 @@ export class SyncStatusView extends ItemView {
         let cur = localCount;
         for (const s of remote) {
             cur++;
-            prog.setMessage(`Deleting remote ${cur}/${total}: ${s.path}`);
+            prog.setMessage(t('syncStatus.progress.deletingRemote', { current: cur, total, path: s.path }));
             try {
                 await this.plugin.gitService.deleteFile(s.path, this.plugin.settings.branch, `Delete ${s.path}`);
                 this.fileStatuses.delete(s.path);

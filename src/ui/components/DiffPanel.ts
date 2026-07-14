@@ -1,12 +1,13 @@
 import { computeSideBySideDiff, type DiffSide } from '../../utils/diff';
+import { t } from '../../i18n';
 
 /** Renders the side-by-side + unified diff body into an existing container. */
 export function renderDiffPanel(container: HTMLElement, remoteContent: string, localContent: string): void {
     const rows = computeSideBySideDiff(remoteContent, localContent);
 
     const grid = container.createDiv({ cls: 'ssv-diff-split' }).createDiv({ cls: 'ssv-diff-grid' });
-    grid.createDiv({ cls: 'ssv-diff-hd', text: 'Remote' });
-    grid.createDiv({ cls: 'ssv-diff-hd', text: 'Local' });
+    grid.createDiv({ cls: 'ssv-diff-hd', text: t('diffPanel.remote') });
+    grid.createDiv({ cls: 'ssv-diff-hd', text: t('diffPanel.local') });
     for (const row of rows) {
         renderDiffCell(grid, row.left);
         renderDiffCell(grid, row.right);
