@@ -281,16 +281,25 @@ export abstract class BaseGitService {
     }
 
     /**
-     * Resolves a branch to its latest commit sha and that commit's base tree
-     * sha, via GitHub's `git/ref/heads/{branch}` endpoint. Gitea's older
-     * versions require a different branch-resolution endpoint, so it provides
-     * its own override rather than using this helper.
+     * Resolves a branch to its latest commit sha via GitHub's
+     * `git/ref/heads/{branch}` endpoint. Gitea's older versions require a
+     * different branch-resolution endpoint, so it provides its own override
+     * rather than using this helper.
      */
-    protected async resolveGitHubStyleBaseTree(branch: string): Promise<{ latestCommitSha: string; baseTreeSha: string }> {
+    protected async getLatestCommitSha(branch: string): Promise<string> {
         const base = this.getGitDataApiBase();
         const refResp = await this.safeRequest(`${base}/git/ref/heads/${branch}`, 'GET');
-        const latestCommitSha = this.parseJson<{ object: { sha: string } }>(refResp).object.sha;
+        return this.parseJson<{ object: { sha: string } }>(refResp).object.sha;
+    }
 
+    /**
+     * Resolves a branch to its latest commit sha and that commit's base tree
+     * sha. Only needed by the REST Git Data API flow (pushSymlink, and
+     * Gitea's pushBatch/deleteBatch which lack a GraphQL alternative).
+     */
+    protected async resolveGitHubStyleBaseTree(branch: string): Promise<{ latestCommitSha: string; baseTreeSha: string }> {
+        const latestCommitSha = await this.getLatestCommitSha(branch);
+        const base = this.getGitDataApiBase();
         const commitResp = await this.safeRequest(`${base}/git/commits/${latestCommitSha}`, 'GET');
         const baseTreeSha = this.parseJson<{ tree: { sha: string } }>(commitResp).tree.sha;
 
