@@ -211,6 +211,27 @@ export const Modal = class {
 
 export const MarkdownView = class {};
 export const Editor = class {};
+export const WorkspaceLeaf = class {};
+export const ItemView = class {
+  app: unknown;
+  leaf: unknown;
+  containerEl: HTMLElement;
+
+  constructor(leaf?: { app?: unknown }) {
+    this.leaf = leaf;
+    this.app = leaf?.app;
+    // Real ItemView's containerEl has a header at children[0] and the
+    // content root at children[1]; views render into the latter.
+    this.containerEl = document.createElement('div') as HTMLElement;
+    this.containerEl.appendChild(document.createElement('div'));
+    this.containerEl.appendChild(document.createElement('div'));
+  }
+
+  registerEvent() {}
+  register() {}
+  registerDomEvent() {}
+  registerInterval() {}
+};
 export const App = class {
   workspace = {
     getActiveViewOfType: vi.fn(),
@@ -256,6 +277,8 @@ vi.mock('obsidian', () => ({
   Modal,
   MarkdownView,
   Editor,
+  WorkspaceLeaf,
+  ItemView,
   App,
   TFile,
   TFolder,
