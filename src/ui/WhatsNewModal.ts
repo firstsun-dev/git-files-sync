@@ -1,5 +1,6 @@
 import { App, Modal, ButtonComponent } from 'obsidian';
 import { type ChangelogRelease } from '../changelog';
+import { t } from '../i18n';
 
 const CHANGELOG_URL = 'https://github.com/firstsun-dev/git-files-sync/blob/main/CHANGELOG.md';
 
@@ -13,7 +14,7 @@ export class WhatsNewModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.createEl('h3', { text: "What's new" });
+        contentEl.createEl('h3', { text: t('whatsNew.title') });
 
         for (const release of this.releases) {
             contentEl.createEl('h4', { text: `v${release.version}` });
@@ -27,11 +28,11 @@ export class WhatsNewModal extends Modal {
         const buttonContainer = contentEl.createDiv({ cls: 'ssv-confirm-buttons modal-button-container' });
 
         new ButtonComponent(buttonContainer)
-            .setButtonText('View full changelog')
+            .setButtonText(t('whatsNew.viewChangelog'))
             .onClick(() => window.open(CHANGELOG_URL, '_blank', 'noopener'));
 
         new ButtonComponent(buttonContainer)
-            .setButtonText('Got it')
+            .setButtonText(t('whatsNew.gotIt'))
             .setCta()
             .onClick(() => this.close());
     }

@@ -12,6 +12,7 @@ import { ConfirmModal } from './ui/ConfirmModal';
 import { WhatsNewModal } from './ui/WhatsNewModal';
 import { CHANGELOG, getUnseenReleases } from './changelog';
 import { compareVersions } from './utils/version';
+import { t } from './i18n';
 
 export default class GitLabFilesPush extends Plugin {
 	settings: GitLabFilesPushSettings;
@@ -29,13 +30,13 @@ export default class GitLabFilesPush extends Plugin {
 			(leaf) => new SyncStatusView(leaf, this)
 		);
 
-		this.addRibbonIcon('git-compare', 'Open sync status', async () => {
+		this.addRibbonIcon('git-compare', t('main.ribbon.openSyncStatus'), async () => {
 			await this.activateSyncStatusView();
 		});
 
 		this.addCommand({
 			id: 'open-sync-status',
-			name: 'Open sync status',
+			name: t('main.command.openSyncStatus'),
 			callback: async () => {
 				await this.activateSyncStatusView();
 			}
@@ -50,7 +51,7 @@ export default class GitLabFilesPush extends Plugin {
 			if (activeView && activeView.file instanceof TFile) {
 				await this.sync.pushFile(activeView.file);
 			} else {
-				new Notice('No active note to push');
+				new Notice(t('main.notice.noActiveNote'));
 			}
 		});
 
@@ -60,7 +61,7 @@ export default class GitLabFilesPush extends Plugin {
 		// leave a stale name in the Command Palette until Obsidian reloads.
 		this.addCommand({
 			id: 'push-current-file',
-			name: 'Push current file',
+			name: t('main.command.pushCurrentFile'),
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
@@ -71,7 +72,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'pull-current-file',
-			name: 'Pull current file',
+			name: t('main.command.pullCurrentFile'),
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
@@ -82,7 +83,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'push-all-files',
-			name: 'Push all files',
+			name: t('main.command.pushAllFiles'),
 			callback: async () => {
 				await this.pushAllFiles();
 			}
@@ -90,7 +91,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'pull-all-files',
-			name: 'Pull all files',
+			name: t('main.command.pullAllFiles'),
 			callback: async () => {
 				await this.pullAllFiles();
 			}
@@ -100,12 +101,12 @@ export default class GitLabFilesPush extends Plugin {
 			this.app.workspace.on('file-menu', (menu, file) => {
 				if (file instanceof TFile) {
 					menu.addItem((item) => {
-						item.setTitle(`Push to ${this.serviceName}`)
+						item.setTitle(t('main.contextMenu.pushTo', { service: this.serviceName }))
 							.setIcon('upload-cloud')
 							.onClick(async () => { await this.sync.pushFile(file); });
 					});
 					menu.addItem((item) => {
-						item.setTitle(`Pull from ${this.serviceName}`)
+						item.setTitle(t('main.contextMenu.pullFrom', { service: this.serviceName }))
 							.setIcon('download-cloud')
 							.onClick(async () => { await this.sync.pullFile(file); });
 					});
@@ -144,7 +145,7 @@ export default class GitLabFilesPush extends Plugin {
 	}
 
 	private pushRibbonLabel(): string {
-		return Platform.isMobile ? 'Push' : `Push to ${this.serviceName}`;
+		return Platform.isMobile ? t('main.ribbon.push') : t('main.ribbon.pushTo', { service: this.serviceName });
 	}
 
 	// The ribbon icon's tooltip is set once when addRibbonIcon runs, so it goes
@@ -205,26 +206,27 @@ export default class GitLabFilesPush extends Plugin {
 		const files = allPaths.filter(p => !this.gitignoreManager.isIgnored(this.getNormalizedPath(p)));
 
 		if (files.length === 0) {
-			new Notice(`No files to ${op} in the configured vault folder`);
+			new Notice(t('main.notice.noFilesToRun', { op: op === 'push' ? t('main.op.push') : t('main.op.pull') }));
 			return;
 		}
 
 		const msg = op === 'push'
-			? `Push ${files.length} file(s) to ${this.serviceName}?`
-			: `Pull ${files.length} file(s) from ${this.serviceName}? This will overwrite local changes.`;
+			? t('main.confirm.pushAll', { count: files.length, service: this.serviceName })
+			: t('main.confirm.pullAll', { count: files.length, service: this.serviceName });
 
 		const confirmed = await this.showConfirmDialog(msg);
 		if (!confirmed) return;
 
-		const progressNotice = new Notice(`${op === 'push' ? 'Pushing' : 'Pulling'} 0/${files.length} files...`, 0);
+		const runVerb = op === 'push' ? t('main.verb.pushing') : t('main.verb.pulling');
+		const progressNotice = new Notice(t('main.progress.running', { verb: runVerb, total: files.length }), 0);
 
 		try {
 			const results = op === 'push'
 				? await this.sync.pushAllFiles(files, (current, total, fileName) => {
-					progressNotice.setMessage(`Pushing ${current}/${total}: ${fileName}`);
+					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pushing'), current, total, fileName }));
 				})
 				: await this.sync.pullAllFiles(files, (current, total, fileName) => {
-					progressNotice.setMessage(`Pulling ${current}/${total}: ${fileName}`);
+					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pulling'), current, total, fileName }));
 				});
 
 			progressNotice.hide();
@@ -235,7 +237,8 @@ export default class GitLabFilesPush extends Plugin {
 		} catch (e) {
 			progressNotice.hide();
 			logger.error(String(e));
-			new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
+			const failVerb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
+			new Notice(t('main.notice.runFailed', { verb: failVerb, message: e instanceof Error ? e.message : String(e) }));
 		}
 	}
 

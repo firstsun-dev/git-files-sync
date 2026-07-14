@@ -69,10 +69,10 @@
     {
       "id": "feat-009",
       "name": "feat: add i18n (multi-language) support (issue #38)",
-      "description": "Extract hardcoded UI strings (~47 in settings.ts, ~24 in SyncStatusView.ts) and 37 Notice() call sites (4 files, many with interpolated values) into an i18n key system with locale detection and English fallback",
+      "description": "Extract hardcoded UI strings (settings tab, ribbon/command labels, Notice messages, sync status view/modals) into an i18n key system with locale detection and English fallback",
       "dependencies": [],
-      "status": "blocked",
-      "evidence": "Scope question asked, dismissed without an answer. No code written. Blocked on user picking a scope: (a) settings.ts only, Notices later; (b) settings.ts + all Notices now; (c) infra/mechanism only, defer string migration."
+      "status": "done",
+      "evidence": "Commit 144eb28 on branch claude/i18n-support-260713, merged into claude/fix-directory-symlink-pull-260713 - added src/i18n/{index,locales/en,locales/zh-tw}.ts (159 keys, en + zh-tw) and tests/i18n/index.test.ts; ~130 strings replaced across settings.ts, main.ts, and 7 ui/ files; lint/build clean, 308 tests pass; consolidated onto PR #51"
     },
     {
       "id": "feat-010",
