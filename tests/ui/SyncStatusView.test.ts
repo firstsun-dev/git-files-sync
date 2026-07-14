@@ -209,3 +209,68 @@ describe('SyncStatusView.identifyExtraFiles folder/remote-record collisions', ()
         expect(extra).toEqual(['notes/hidden.md']);
     });
 });
+
+describe('SyncStatusView post-push status update', () => {
+    beforeAll(() => { setupObsidianDOM(); });
+
+    // Regression test: GitHub's tree-by-branch-name read can lag a moment behind
+    // a just-completed write (GraphQL createCommitOnBranch or otherwise), so
+    // re-fetching the remote tree immediately after a push can misreport a file
+    // that was just pushed correctly as still "modified". The fix marks
+    // successfully-pushed paths 'synced' directly from the push result instead
+    // of trusting an immediate remote re-read.
+    it('marks pushed files synced from the push result instead of re-fetching the remote tree', async () => {
+        const pushAllFiles = vi.fn().mockResolvedValue({
+            success: 2, failed: 0, conflicts: 0, errors: [],
+            syncedPaths: [{ path: 'a.md', sha: 'sha-a' }, { path: 'b.md', sha: 'sha-b' }],
+        });
+
+        const plugin = {
+            settings: { branch: 'main', vaultFolder: '' },
+            gitService: {},
+            sync: { pushAllFiles },
+        } as unknown as GitLabFilesPush;
+        const app = { vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } };
+        const leaf = { app } as unknown as WorkspaceLeaf;
+        const view = new SyncStatusView(leaf, plugin);
+
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('a.md', { path: 'a.md', status: 'modified', localContent: '' });
+        statuses.set('b.md', { path: 'b.md', status: 'modified', localContent: '' });
+
+        const refreshSpy = vi.spyOn(view, 'refreshAllStatuses').mockResolvedValue(undefined);
+
+        await (view as unknown as {
+            executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string>): Promise<void>
+        }).executeBatchOperation('modified', 'push', ['a.md', 'b.md']);
+
+        expect(pushAllFiles).toHaveBeenCalledTimes(1);
+        // The fix: no remote tree re-fetch right after push (that read is what
+        // can lag GitHub's write and misreport the file as still modified).
+        expect(refreshSpy).not.toHaveBeenCalled();
+        expect(statuses.get('a.md')).toEqual({ path: 'a.md', status: 'synced', localContent: '', remoteSha: 'sha-a' });
+        expect(statuses.get('b.md')).toEqual({ path: 'b.md', status: 'synced', localContent: '', remoteSha: 'sha-b' });
+    });
+
+    it('still does a full remote refresh after a pull (unaffected by this fix)', async () => {
+        const pullAllFiles = vi.fn().mockResolvedValue({ success: 1, failed: 0, conflicts: 0, errors: [] });
+
+        const plugin = {
+            settings: { branch: 'main', vaultFolder: '' },
+            gitService: {},
+            sync: { pullAllFiles },
+        } as unknown as GitLabFilesPush;
+        const app = { vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } };
+        const leaf = { app } as unknown as WorkspaceLeaf;
+        const view = new SyncStatusView(leaf, plugin);
+
+        const refreshSpy = vi.spyOn(view, 'refreshAllStatuses').mockResolvedValue(undefined);
+
+        await (view as unknown as {
+            executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string>): Promise<void>
+        }).executeBatchOperation('modified', 'pull', ['a.md']);
+
+        expect(pullAllFiles).toHaveBeenCalledTimes(1);
+        expect(refreshSpy).toHaveBeenCalledTimes(1);
+    });
+});

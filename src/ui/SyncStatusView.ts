@@ -13,6 +13,7 @@ import { gitBlobSha } from '../utils/git-blob-sha';
 import { type GitTreeEntry } from '../services/git-service-interface';
 import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
 import { t, type TranslationKey } from '../i18n';
+import { type PushResults } from '../logic/sync-manager';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
 
@@ -682,6 +683,24 @@ export class SyncStatusView extends ItemView {
         await this.executeBatchOperation(filter, op, files);
     }
 
+    /**
+     * Marks just-pushed paths as 'synced' directly from data already in hand
+     * (the content that was just written, and the new sha when the provider
+     * reported one), instead of re-fetching the remote tree. Used in place of
+     * refreshAllStatuses() right after a push — see the call site's comment.
+     */
+    private applyOptimisticSyncedStatus(syncedPaths: Array<{ path: string; sha?: string }>): void {
+        for (const { path, sha } of syncedPaths) {
+            const existing = this.fileStatuses.get(path);
+            this.fileStatuses.set(path, {
+                ...existing,
+                path,
+                status: 'synced',
+                remoteSha: sha ?? existing?.remoteSha,
+            });
+        }
+    }
+
     private async executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string | TFile>): Promise<void> {
         const runVerb = op === 'push' ? t('main.verb.pushing') : t('main.verb.pulling');
         const prog = new Notice(t('main.progress.running', { verb: runVerb, total: files.length }), 0);
@@ -695,7 +714,17 @@ export class SyncStatusView extends ItemView {
             if (filter === 'selected') this.selectedFiles.clear();
             const doneVerb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
             new Notice(t('syncStatus.notice.opCompleted', { verb: doneVerb }));
-            await this.refreshAllStatuses();
+
+            if (op === 'push') {
+                // Mark just-pushed files synced directly instead of re-fetching the
+                // remote tree: GitHub's tree-by-branch-name read can lag a few
+                // seconds behind a just-completed write, so an immediate refresh
+                // can misreport a file we know just synced correctly as "modified".
+                this.applyOptimisticSyncedStatus((results as PushResults).syncedPaths);
+                this.renderView();
+            } else {
+                await this.refreshAllStatuses();
+            }
         } catch (e) {
             prog.hide();
             const failVerb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
