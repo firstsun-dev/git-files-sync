@@ -9,52 +9,53 @@
 
 ## Current Objective
 
-- Goal: Work through open issues one at a time, all consolidated into a single PR (user explicitly asked for fewer PRs, not one per issue). This session's issue: #38 (i18n / multi-language support).
-- Current status: #38 implemented, tested, linted, built clean, and merged onto the shared branch. 7 issues done total (#33, #36, #31, #39, #38, plus #40/#41/#42/#48 from an earlier session), all on one branch/PR.
-- Branch / commit: `claude/fix-directory-symlink-pull-260713` → **PR #51** (open). i18n work landed via a temporary branch `claude/i18n-support-260713` (commit `144eb28`), merged in and pushed.
+- Two fixes this session, both committed onto `claude/fix-directory-symlink-pull-260713` (PR #51), **not yet pushed to remote**:
+  1. **feat-014** (commit `114a575`): GitHub's `pushBatch`/`deleteBatch` switched from the REST Git Data API's per-file blob-creation loop to a single GraphQL `createCommitOnBranch` mutation.
+  2. **feat-015** (commit `7676325`): fixed a false "modified" status shown right after a batch push, caused by re-fetching the remote tree too soon after a write (GitHub's tree-by-branch-name read can lag a moment behind a just-completed commit).
 
 ## Completed This Session
 
-- [x] #38 - i18n / multi-language support: `src/i18n/index.ts` (`t(key, vars?)` flat-dict lookup, `{placeholder}` interpolation, English fallback), `src/i18n/locales/en.ts` (159 keys, source of truth) and `zh-tw.ts` (full parity, verified no missing/extra keys)
-- [x] Locale detection via `window.moment.locale()`; unresolvable/unsupported locales fall back to `en`; bare `zh` maps to `zh-tw`
-- [x] Replaced ~130 hardcoded strings across `src/settings.ts`, `src/main.ts`, `src/ui/SyncStatusView.ts`, `SyncConflictModal.ts`, `WhatsNewModal.ts`, `ConfirmModal.ts`, `components/ActionBar.ts`, `FileListItem.ts`, `DiffPanel.ts`
-- [x] Left untranslated on purpose: GitHub/GitLab/Gitea proper nouns, diff-format markers (`--- Remote`/`+++ Local`), URL placeholders, changelog release-note content
-- [x] Fixed a lint regression (cognitive-complexity + nested-ternary) introduced by the change in `SyncStatusView.runBatchOperation` by extracting a lookup table and a helper method
-- [x] Added `tests/i18n/index.test.ts` (6 cases: fallback with no `window.moment`, fallback for unsupported locale, zh-tw resolution, bare `zh` → `zh-tw` mapping, interpolation, fallback-per-key when zh-tw is missing a translation)
-- [x] Worked on a temporary branch (`claude/i18n-support-260713`, off `origin/claude/fix-directory-symlink-pull-260713`) because that branch was already checked out in this repo's other worktree; merged it back into `claude/fix-directory-symlink-pull-260713` immediately afterward per the one-PR policy, rather than leaving it as a standing separate branch/PR
-- [x] Resolved a merge conflict in `feature_list.json`/`progress.md`/`session-handoff.md` against a parallel session's harness-state commit that had (incorrectly, since it predated this session's actual implementation) recorded #38 as "blocked, awaiting scope decision"
+- [x] `githubGraphQL()` helper in `github-service.ts`; explicit handling for GraphQL's 200-status-with-`errors`-array failure mode.
+- [x] `BaseGitService.getLatestCommitSha()` extracted from `resolveGitHubStyleBaseTree()`.
+- [x] `SyncManager.pushAllFiles()` now returns `syncedPaths: Array<{path, sha?}>`, populated at all three push-success sites (batch chunk, sequential fallback, immediate symlink/rename push).
+- [x] `SyncStatusView.executeBatchOperation()` marks just-pushed paths `'synced'` directly via a new `applyOptimisticSyncedStatus()` instead of calling `refreshAllStatuses()` after a push. Pull is unchanged (still does a full refresh).
+- [x] Live-verified both fixes against a real GitHub repo (`firstsun-dev/obsidian-sync-test`) using a scratchpad script that bundles the actual `github-service.ts` with a thin `obsidian` stub (`requestUrl` backed by real `fetch`) — not just mocks.
+- [x] Filed issue #57 on `firstsun-dev/git-files-sync` (Project #6, P2, 4h): build a repeatable live-credential smoke test process across GitHub/GitLab/Gitea (this session only covered GitHub).
+- [x] Cleaned up harness state: archived feat-011/012/013 + issue #78 fix + status-badge UI work into `archive/2026-07.md` (progress.md had grown past its own 80-line cleanup threshold); trimmed `feature_list.json` evidence strings under 300 chars. Harness self-audit went from 96/100 to 100/100.
 
 ## Verification Evidence
 
 | Check | Command | Result | Notes |
 |---|---|---|---|
-| Lint | `npx eslint .` | 0 errors | Repo-wide, no exceptions |
-| Type check + compat | `npm run build` | Pass | Includes `typecheck-compat.mjs` against Obsidian 1.11.0 |
-| Tests | `npx vitest run` | 308/308 passed | 23 test files (302 pre-existing + 6 new i18n tests) |
+| Lint | `npx eslint .` | 0 errors | |
+| Type check + compat | `npm run build` | Pass | Includes Obsidian 1.11.0 compat typecheck |
+| Tests | `npx vitest run` | 344/344 passed | +3 new: 2 for `syncedPaths`, 1 more for the post-push status behavior (total 5 new across both fixes) |
+| Live smoke test | ad-hoc scratchpad scripts | Pass | feat-014: pushBatch/deleteBatch each produced one commit with correct content. feat-015: single empty file and two-identical-empty-file batches both wrote correct 0-byte blobs with matching git shas — confirmed the bug was read-side (tree fetch timing), not write-side |
 | Manual (in Obsidian) | — | Not done | No Obsidian instance available in this environment |
 
 ## Files Changed (this session)
 
-- New: `src/i18n/index.ts`, `src/i18n/locales/en.ts`, `src/i18n/locales/zh-tw.ts`, `tests/i18n/index.test.ts`
-- Modified: `src/settings.ts`, `src/main.ts`, `src/ui/SyncStatusView.ts`, `src/ui/SyncConflictModal.ts`, `src/ui/WhatsNewModal.ts`, `src/ui/ConfirmModal.ts`, `src/ui/components/ActionBar.ts`, `src/ui/components/FileListItem.ts`, `src/ui/components/DiffPanel.ts`
+- feat-014: `src/services/github-service.ts`, `src/services/git-service-base.ts`, `tests/services/github-service.test.ts`
+- feat-015: `src/logic/sync-manager.ts`, `src/ui/SyncStatusView.ts`, `tests/logic/sync-manager-batch.test.ts`, `tests/ui/SyncStatusView.test.ts`
+- Harness state: `progress.md`, `session-handoff.md`, `feature_list.json`, `archive/2026-07.md`
 
 ## Decisions Made
 
-- **One PR, not one-per-issue**: user said "不要那麼多pr merge" (don't want so many PRs). All further issue work goes directly onto `claude/fix-directory-symlink-pull-260713` — do not create a new branch/PR for the next issue unless a branch conflict (as above) forces a temporary one, and merge it back in immediately if so.
-- **#38 scope**: settings.ts + all Notice() messages, done in one pass — user confirmed flat key-value dict (not nested namespaces) and `window.moment.locale()` detection with English fallback.
-- **`src/changelog.ts` is hand-curated, separate from `CHANGELOG.md`**: the auto-generated changelog (via semantic-release) isn't shipped in release assets and is too commit-log-granular for an end-user popup anyway.
-- Deduped two accidental code-duplication regressions in an earlier part of this session (test mocks, `getBlob` bodies) before they could trip SonarCloud's new-code gate again.
+- **GraphQL only for GitHub**: GitLab's Commits API already sends a whole batch in one call; Gitea has no GraphQL API. `GitServiceInterface` stays REST-based elsewhere.
+- **Optimistic local status update over re-fetching (feat-015)**: use data already known from the push itself rather than trusting an immediate remote read, which sidesteps GitHub's eventual-consistency window rather than just narrowing it with a delay/retry.
+- **Credential handling**: PATs must go into a scratchpad file the agent reads directly (`fs.readFileSync`), never typed as a `!`-prefixed command (still lands in the transcript) or passed as a Bash command-line argument (blocked by the permission classifier as credential materialization). Filed issue #57 to formalize this as the only documented path for future provider testing.
 
 ## Blockers / Risks
 
-- None currently. PR #51 is now fairly large (7 issues). Consider flagging to the user that it may be worth reviewing/merging before more commits pile on.
+- **Commits `114a575` and `7676325` are local only** — not pushed to `origin/claude/fix-directory-symlink-pull-260713` yet. Confirm with the user before pushing.
+- PR #51 keeps growing (10+ issues' worth now) — still worth flagging before adding more.
 
 ## Next Session Startup
 
 1. Read `CLAUDE.md`, `feature_list.json`, `progress.md`, then this file.
 2. Run `./init.sh` before editing.
-3. All new commits go on `claude/fix-directory-symlink-pull-260713` (PR #51) unless told otherwise.
+3. Check whether `114a575`/`7676325` have been pushed yet (`git log origin/claude/fix-directory-symlink-pull-260713..HEAD`); push first if not, after confirming with the user.
 
 ## Recommended Next Step
 
-- Move to issue #37 (Bitbucket provider support) per the previously agreed order (39→38→37, all now done ahead of it).
+- Push this session's two commits, then either re-sync `gh issue list` or move to issue #37 (Bitbucket provider support) per the previously agreed order.

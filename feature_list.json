@@ -72,7 +72,7 @@
       "description": "Extract hardcoded UI strings (settings tab, ribbon/command labels, Notice messages, sync status view/modals) into an i18n key system with locale detection and English fallback",
       "dependencies": [],
       "status": "done",
-      "evidence": "Commit 144eb28 on branch claude/i18n-support-260713, merged into claude/fix-directory-symlink-pull-260713 - added src/i18n/{index,locales/en,locales/zh-tw}.ts (159 keys, en + zh-tw) and tests/i18n/index.test.ts; ~130 strings replaced across settings.ts, main.ts, and 7 ui/ files; lint/build clean, 308 tests pass; consolidated onto PR #51"
+      "evidence": "Commit 144eb28, merged into claude/fix-directory-symlink-pull-260713 - 159 i18n keys (en+zh-tw), ~130 strings replaced; lint/build clean, 308 tests pass; consolidated onto PR #51"
     },
     {
       "id": "feat-010",
@@ -105,6 +105,22 @@
       "dependencies": ["feat-011"],
       "status": "done",
       "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 340/340 passed; consolidated onto PR #51"
+    },
+    {
+      "id": "feat-014",
+      "name": "perf(push): GitHub batch push/delete via GraphQL createCommitOnBranch",
+      "description": "User reported batch push was still slow on GitHub after feat-013's blob-concurrency fix. Root cause: GitHubService.pushBatch/deleteBatch still needed N/8 rounds of sequential REST blob-creation calls before the tree/commit/ref sequence. Replaced GitHub's pushBatch/deleteBatch with a single GraphQL createCommitOnBranch mutation carrying file content directly (additions/deletions), cutting an N-file batch to 2-3 HTTP calls total (ref lookup + mutation, plus one follow-up tree fetch for pushBatch's per-file shas, which the mutation doesn't return). Extracted BaseGitService.getLatestCommitSha out of resolveGitHubStyleBaseTree (still used by pushSymlink and Gitea's REST-only batch path, which has no GraphQL equivalent). Added explicit handling for GraphQL's 200-status-with-errors-array failure mode, which REST's status-code check can't catch.",
+      "dependencies": ["feat-013"],
+      "status": "done",
+      "evidence": "Commit 114a575. npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 341/341 passed; live smoke test against a real GitHub repo confirmed pushBatch/deleteBatch each produce one commit."
+    },
+    {
+      "id": "feat-015",
+      "name": "fix(push): avoid stale remote-tree read right after a batch push",
+      "description": "User reported: batch-pushing two empty files, then refreshing immediately, showed them as 'modified' even though the diff was identical; refreshing again a bit later showed them synced. Root cause (confirmed via live GitHub API test, not a content bug - the pushed blob was byte-for-byte correct): SyncStatusView re-fetched the remote tree via refreshAllStatuses() right after push, and GitHub's tree-by-branch-name read can lag a just-completed write by a moment. Fix: SyncManager.pushAllFiles now also returns syncedPaths (path + new sha) from data already known at each write site (batch chunk result, sequential fallback, immediate symlink/rename push); SyncStatusView marks those paths 'synced' directly instead of re-fetching the tree, avoiding the race entirely. Pull unaffected.",
+      "dependencies": ["feat-014"],
+      "status": "done",
+      "evidence": "Commit 7676325. npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 344/344 passed."
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."
