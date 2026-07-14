@@ -21,6 +21,11 @@ if (typeof window === 'undefined') {
   (globalThis as unknown as { window: unknown }).window = {
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
+    // Delegate to the global timers (not bound methods captured once) so
+    // vi.useFakeTimers()/vi.useRealTimers() — which patch globalThis — keep
+    // controlling window.setTimeout/clearTimeout too.
+    setTimeout: (handler: (...args: unknown[]) => void, timeout?: number) => globalThis.setTimeout(handler, timeout),
+    clearTimeout: (handle?: ReturnType<typeof globalThis.setTimeout>) => globalThis.clearTimeout(handle),
   };
 }
 
