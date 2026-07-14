@@ -97,6 +97,14 @@
       "dependencies": ["feat-011"],
       "status": "done",
       "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 339/339 passed; consolidated onto PR #51"
+    },
+    {
+      "id": "feat-013",
+      "name": "perf(push): parallelize blob creation within a batch commit",
+      "description": "User reported push-all was still slow on GitHub after feat-011's one-commit-per-run batching landed. Root cause: GitHubService/GiteaService.pushBatch still created each file's blob with a sequential `for` loop (N sequential POST .../git/blobs round trips before the single tree/commit/ref sequence), so wall-clock time was still O(N) latency-bound. Added a shared BaseGitService.mapWithConcurrency helper (order-preserving, bounded concurrency) and a BLOB_CREATE_CONCURRENCY=8 cap in git-service-base.ts; both services' pushBatch now creates blobs concurrently instead of one at a time. GitLab unaffected (its Commits API already sends the whole batch in one request, no per-file blob step)",
+      "dependencies": ["feat-011"],
+      "status": "done",
+      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 340/340 passed; consolidated onto PR #51"
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."

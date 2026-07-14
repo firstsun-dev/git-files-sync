@@ -59,6 +59,14 @@ export interface ConnectionTestResult {
  * bodies / provider payload limits when a vault has thousands of files. */
 export const MAX_BATCH_PUSH_SIZE = 200;
 
+/** How many blob-creation requests to have in flight at once when building a
+ * batch commit. Creating each file's blob is an independent request with no
+ * ordering dependency, so running them one-at-a-time (as opposed to the final
+ * tree/commit/ref sequence, which genuinely is sequential) just adds N
+ * round trips of pure latency. A moderate cap keeps this fast without
+ * bursting past a provider's abuse-detection/secondary rate limits. */
+export const BLOB_CREATE_CONCURRENCY = 8;
+
 export abstract class BaseGitService {
     protected token: string = '';
     protected rootPath: string = '';
@@ -318,6 +326,25 @@ export abstract class BaseGitService {
         await this.safeRequest(`${base}/git/refs/heads/${branch}`, 'PATCH', { sha: newCommitSha });
 
         return newCommitSha;
+    }
+
+    /**
+     * Runs `fn` over `items` with at most `concurrency` calls in flight at
+     * once, preserving result order. Used to parallelize independent
+     * per-file requests (e.g. blob creation) that would otherwise pay N
+     * round trips of latency running one at a time.
+     */
+    protected async mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+        const results = new Array<R>(items.length);
+        let nextIndex = 0;
+        const worker = async (): Promise<void> => {
+            while (nextIndex < items.length) {
+                const i = nextIndex++;
+                results[i] = await fn(items[i] as T, i);
+            }
+        };
+        await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+        return results;
     }
 
     async getRepoGitignores(branch: string): Promise<string[]> {
