@@ -120,30 +120,68 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         return body.data;
     }
 
+    /**
+     * Runs createCommitOnBranch, re-reading the branch HEAD and retrying on a
+     * stale-expectedHeadOid failure. GitHub's git/ref/heads/{branch} read (used
+     * to get expectedHeadOid) can briefly lag a just-completed write to the same
+     * branch — e.g. a push immediately followed by a delete — so the oid it
+     * returns may predate a file the caller is trying to add or remove, and
+     * GitHub reports that as "path does not exist in tree <oid>" rather than as
+     * an obvious staleness error. A short retry with a freshly re-read HEAD
+     * self-heals once GitHub's read catches up.
+     */
+    private async commitOnBranch(branch: string, message: string, fileChanges: Record<string, unknown>): Promise<string> {
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const expectedHeadOid = await this.getLatestCommitSha(branch);
+            try {
+                const data = await this.githubGraphQL<{ createCommitOnBranch: { commit: { oid: string } } }>(CREATE_COMMIT_MUTATION, {
+                    input: {
+                        branch: { repositoryNameWithOwner: `${this.owner}/${this.repo}`, branchName: branch },
+                        message: { headline: message },
+                        expectedHeadOid,
+                        fileChanges,
+                    },
+                });
+                return data.createCommitOnBranch.commit.oid;
+            } catch (e) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                const looksStale = /does not exist in tree|does not match|expectedHeadOid/i.test(errorMessage);
+                if (!looksStale || attempt === maxAttempts) throw e;
+                await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+            }
+        }
+        // Unreachable: the loop always returns or throws.
+        throw new Error('commitOnBranch: exhausted retries without a result');
+    }
+
     async pushBatch(items: BatchPushItem[], branch: string, message: string): Promise<BatchPushResult[]> {
         if (items.length === 0) return [];
-        const expectedHeadOid = await this.getLatestCommitSha(branch);
 
-        await this.githubGraphQL(CREATE_COMMIT_MUTATION, {
-            input: {
-                branch: { repositoryNameWithOwner: `${this.owner}/${this.repo}`, branchName: branch },
-                message: { headline: message },
-                expectedHeadOid,
-                fileChanges: {
-                    additions: items.map(item => ({
-                        path: this.getFullPath(item.path),
-                        contents: this.encodeContent(item.content),
-                    })),
-                },
-            },
+        await this.commitOnBranch(branch, message, {
+            additions: items.map(item => ({
+                path: this.getFullPath(item.path),
+                contents: this.encodeContent(item.content),
+            })),
         });
 
         // createCommitOnBranch only returns the new commit's oid, not each
-        // file's blob sha, so read them back with one follow-up tree fetch
-        // (mirrors GitLab's pushBatch, which has the same limitation).
-        const freshTree = await this.listFilesDetailed(branch, false);
-        const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
-        return items.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) }));
+        // file's blob sha, so read them back with a follow-up tree fetch
+        // (mirrors GitLab's pushBatch, which has the same limitation). That
+        // fetch is exposed to the same eventual-consistency lag the retry
+        // above works around, so a fresh tree can still be briefly missing an
+        // entry that was just committed; retry it too rather than silently
+        // returning an undefined sha for that file.
+        const fullPaths = items.map(item => this.getFullPath(item.path));
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            const freshTree = await this.listFilesDetailed(branch, false);
+            const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
+            const results = items.map((item, i) => ({ path: item.path, sha: shaByPath.get(fullPaths[i] as string) }));
+            if (results.every(r => r.sha) || attempt === 3) return results;
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+        }
+        // Unreachable: the loop always returns on its last iteration.
+        throw new Error('pushBatch: exhausted retries reading back blob shas');
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
@@ -194,17 +232,9 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
 
     async deleteBatch(paths: string[], branch: string, message: string): Promise<void> {
         if (paths.length === 0) return;
-        const expectedHeadOid = await this.getLatestCommitSha(branch);
 
-        await this.githubGraphQL(CREATE_COMMIT_MUTATION, {
-            input: {
-                branch: { repositoryNameWithOwner: `${this.owner}/${this.repo}`, branchName: branch },
-                message: { headline: message },
-                expectedHeadOid,
-                fileChanges: {
-                    deletions: paths.map(path => ({ path: this.getFullPath(path) })),
-                },
-            },
+        await this.commitOnBranch(branch, message, {
+            deletions: paths.map(path => ({ path: this.getFullPath(path) })),
         });
     }
 
