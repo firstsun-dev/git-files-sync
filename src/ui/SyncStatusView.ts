@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setIcon, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
-import { getServiceName, getEffectiveSymlinkHandling } from '../settings';
+import { getServiceName, getEffectiveSymlinkHandling, type SymlinkHandling } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
 import { logger } from '../utils/logger';
 import { type FileStatus, type FilterValue } from './types';
@@ -8,6 +8,12 @@ import { renderActionBar } from './components/ActionBar';
 import { renderFileItem, statusMeta, type FileItemCallbacks } from './components/FileListItem';
 import { ICONS } from './components/icons';
 import { isBinaryPath, contentsEqual } from '../utils/path';
+import { readLocalSymlinkTarget } from '../utils/symlink';
+import { gitBlobSha } from '../utils/git-blob-sha';
+import { type GitTreeEntry } from '../services/git-service-interface';
+import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
+import { t, type TranslationKey } from '../i18n';
+import { type PushResults } from '../logic/sync-manager';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
 
@@ -26,7 +32,7 @@ export class SyncStatusView extends ItemView {
     }
 
     getViewType(): string { return SYNC_STATUS_VIEW_TYPE; }
-    getDisplayText(): string { return 'Sync status'; }
+    getDisplayText(): string { return t('syncStatus.viewTitle'); }
     getIcon(): string { return 'git-compare'; }
 
     onOpen(): Promise<void> {
@@ -41,6 +47,10 @@ export class SyncStatusView extends ItemView {
     private renderView(): void {
         const container = this.containerEl.children[1] as HTMLElement;
         if (!container) return;
+
+        const prevListEl = container.querySelector<HTMLElement>('.ssv-list');
+        const scrollTop = prevListEl?.scrollTop ?? 0;
+
         container.empty();
 
         this.renderInfoStrip(container);
@@ -53,10 +63,12 @@ export class SyncStatusView extends ItemView {
             this.renderProgressBar(listEl);
             this.renderCheckedFilesDuringRefresh(listEl);
         } else if (this.fileStatuses.size === 0) {
-            listEl.createDiv({ cls: 'ssv-empty', text: 'Click "Refresh" to check sync status' });
+            listEl.createDiv({ cls: 'ssv-empty', text: t('syncStatus.emptyPrompt') });
         } else {
             this.renderFileList(listEl);
         }
+
+        listEl.scrollTop = scrollTop;
     }
 
     private renderProgressBar(container: HTMLElement): void {
@@ -65,7 +77,7 @@ export class SyncStatusView extends ItemView {
         const prog = container.createDiv({ cls: 'ssv-progress' });
         prog.createDiv({
             cls: 'ssv-progress-text',
-            text: total > 0 ? `Checking files… ${current}/${total} (${pct}%)` : 'Checking files…'
+            text: total > 0 ? t('syncStatus.progress.checkingWithCount', { current, total, pct }) : t('syncStatus.progress.checking')
         });
         const bar = prog.createDiv({ cls: 'ssv-progress-bar' });
         bar.createDiv({ cls: 'ssv-progress-fill' }).setAttr('style', `width: ${pct}%`);
@@ -111,7 +123,7 @@ export class SyncStatusView extends ItemView {
                 cls: 'ssv-info-time',
                 text: Platform.isMobile
                     ? new Date(this.lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : `Last sync: ${new Date(this.lastSyncTime).toLocaleTimeString()}`
+                    : t('syncStatus.lastSync', { time: new Date(this.lastSyncTime).toLocaleTimeString() })
             });
         }
     }
@@ -129,11 +141,11 @@ export class SyncStatusView extends ItemView {
         };
 
         const tabs: Array<{ value: FilterValue; label: string }> = [
-            { value: 'all',         label: 'All' },
-            { value: 'synced',      label: 'Synced' },
-            { value: 'modified',    label: 'Changed' },
-            { value: 'unsynced',    label: 'Local only' },
-            { value: 'remote-only', label: 'Remote' },
+            { value: 'all',         label: t('syncStatus.tab.all') },
+            { value: 'synced',      label: t('syncStatus.tab.synced') },
+            { value: 'modified',    label: t('syncStatus.tab.modified') },
+            { value: 'unsynced',    label: t('syncStatus.tab.unsynced') },
+            { value: 'remote-only', label: t('syncStatus.tab.remote-only') },
         ];
 
         const tabsEl = container.createDiv({ cls: 'ssv-tabs' });
@@ -202,7 +214,24 @@ export class SyncStatusView extends ItemView {
             onPush:   (fs) => void this.runSingleFile(fs, 'push'),
             onPull:   (fs) => void this.runSingleFile(fs, 'pull'),
             onDelete: (fs) => void this.handleLocalDelete(fs),
+            onExpandDiff: (fs) => this.loadDiffContent(fs),
         };
+    }
+
+    /**
+     * Lazily fetches a modified file's remote content by SHA (Phase 2 of the
+     * SHA-based refresh) so the diff panel has something to render. Mutates
+     * the FileStatus object in place, caching the result on the same instance
+     * held in this.fileStatuses so re-expanding doesn't refetch.
+     */
+    private async loadDiffContent(fileStatus: FileStatus): Promise<void> {
+        if (fileStatus.remoteContent !== undefined || !fileStatus.remoteSha) return;
+        try {
+            const blob = await this.plugin.gitService.getBlob(fileStatus.remoteSha, fileStatus.path);
+            fileStatus.remoteContent = blob.content;
+        } catch (e) {
+            logger.warn(`Failed to load diff content for ${fileStatus.path}`, e);
+        }
     }
 
     private renderFileList(container: HTMLElement): void {
@@ -212,7 +241,8 @@ export class SyncStatusView extends ItemView {
             : all.filter(s => s.status === this.statusFilter);
 
         if (statuses.length === 0) {
-            container.createDiv({ cls: 'ssv-empty', text: `No ${this.statusFilter} files` });
+            const filterLabel = this.statusFilter === 'all' ? t('syncStatus.tab.all') : statusMeta(this.statusFilter).label;
+            container.createDiv({ cls: 'ssv-empty', text: t('syncStatus.noFilesForFilter', { filter: filterLabel }) });
             return;
         }
 
@@ -225,7 +255,7 @@ export class SyncStatusView extends ItemView {
     // ── Single-file operations ──────────────────────────────────────
 
     private async handleLocalDelete(fileStatus: FileStatus): Promise<void> {
-        const confirmed = await this.showConfirmDialog(`Delete local file "${fileStatus.path}"? Handled per your vault's "Deleted files" setting.`);
+        const confirmed = await this.showConfirmDialog(t('syncStatus.confirmDeleteLocal', { path: fileStatus.path }));
         if (!confirmed) return;
         try {
             if (fileStatus.file) {
@@ -234,11 +264,11 @@ export class SyncStatusView extends ItemView {
                 await this.app.vault.adapter.remove(fileStatus.path);
             }
             await this.plugin.sync.clearMetadata(fileStatus.path);
-            new Notice(`Deleted ${fileStatus.path}`);
+            new Notice(t('syncStatus.notice.deleted', { path: fileStatus.path }));
             this.fileStatuses.delete(fileStatus.path);
             this.renderView();
         } catch (e) {
-            new Notice(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
+            new Notice(t('syncStatus.notice.deleteFailed', { message: e instanceof Error ? e.message : String(e) }));
         }
     }
 
@@ -254,11 +284,12 @@ export class SyncStatusView extends ItemView {
             }
 
             await new Promise(r => window.setTimeout(r, 500));
-            await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+            await this.refreshFileStatus(fileStatus.file || fileStatus.path, undefined);
             this.renderView();
         } catch (e) {
-            new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
-            await this.refreshFileStatus(fileStatus.file || fileStatus.path);
+            const verb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
+            new Notice(t('syncStatus.notice.opFailed', { verb, message: e instanceof Error ? e.message : String(e) }));
+            await this.refreshFileStatus(fileStatus.file || fileStatus.path, undefined);
             this.renderView();
         }
     }
@@ -267,7 +298,7 @@ export class SyncStatusView extends ItemView {
 
     async refreshAllStatuses(): Promise<void> {
         if (this.isRefreshing) {
-            new Notice('Already refreshing…');
+            new Notice(t('syncStatus.notice.alreadyRefreshing'));
             return;
         }
 
@@ -288,16 +319,16 @@ export class SyncStatusView extends ItemView {
             this.renderView();
 
             const filesToCheck = this.getCheckableFiles(files.local, extra, files.hiddenLocalPaths);
-            await this.performStatusCheck(filesToCheck);
+            await this.performStatusCheck(filesToCheck, files.remoteMap);
 
             this.lastSyncTime = Date.now();
             this.isRefreshing = false; // Set to false BEFORE final renderView
             this.renderView();
-            new Notice(`Checked ${files.local.length + files.hiddenLocalPaths.size} local + ${files.remoteMap.size} remote files`);
+            new Notice(t('syncStatus.notice.refreshed', { local: files.local.length + files.hiddenLocalPaths.size, remote: files.remoteMap.size }));
         } catch (e) {
             this.isRefreshing = false;
             this.renderView();
-            new Notice(`Failed to refresh: ${e instanceof Error ? e.message : String(e)}`);
+            new Notice(t('syncStatus.notice.refreshFailed', { message: e instanceof Error ? e.message : String(e) }));
         }
     }
 
@@ -309,7 +340,7 @@ export class SyncStatusView extends ItemView {
         await this.plugin.gitignoreManager.loadGitignores();
 
         // Map remote paths to vault paths
-        const remoteMap = new Map<string, string>(); // vaultPath -> remoteFullPath
+        const remoteMap = new Map<string, GitTreeEntry>(); // vaultPath -> tree entry (path, symlink, sha)
         const skipSymlinks = getEffectiveSymlinkHandling(this.plugin.settings) === 'skip';
         for (const entry of remoteEntries) {
             if (entry.symlink && skipSymlinks) continue; // Symlink handling: skip
@@ -318,7 +349,7 @@ export class SyncStatusView extends ItemView {
 
             const vaultPath = this.plugin.getVaultPath(normalized);
             if (!this.plugin.gitignoreManager.isIgnored(normalized)) {
-                remoteMap.set(vaultPath, entry.path);
+                remoteMap.set(vaultPath, entry);
             }
         }
 
@@ -364,12 +395,25 @@ export class SyncStatusView extends ItemView {
         try {
             const listing = await this.app.vault.adapter.list(folderPath);
             for (const file of listing.files) {
-                if (this.isHidden(file)) {
+                if (!this.isHidden(file)) continue;
+                // Guard against a symlinked folder being misclassified as a file
+                // by the adapter's raw listing (Node's dirent type doesn't follow
+                // links) — still track it as a link entry rather than a readable
+                // file, same as a symlinked folder found via listing.folders below.
+                if (readLocalSymlinkTarget(this.app, file) !== null || await this.isLocalFile(file)) {
                     result.push(file);
                 }
             }
             for (const folder of listing.folders) {
                 if (folder === '.git' || folder.endsWith('/.git')) continue;
+                // A symlinked folder is a single blob on the remote, not a real tree —
+                // walking into it would scan whatever unrelated directory it points at.
+                // Track the link itself (same as a hidden file) so push/pull can still
+                // handle it via the existing symlink machinery, without recursing.
+                if (readLocalSymlinkTarget(this.app, folder) !== null) {
+                    if (this.isHidden(folder)) result.push(folder);
+                    continue;
+                }
                 await this.recursiveScan(folder, result);
             }
         } catch { /* adapter may not support listing */ }
@@ -379,13 +423,19 @@ export class SyncStatusView extends ItemView {
         return path.split('/').some(part => part.startsWith('.'));
     }
 
+    /** True only for an actual local file — excludes real directories (and symlinks to one), which `adapter.stat()` follows. */
+    private async isLocalFile(vaultPath: string): Promise<boolean> {
+        const stat = await this.app.vault.adapter.stat(vaultPath);
+        return stat?.type === 'file';
+    }
+
     private initializeFileStatuses(localFiles: TFile[]): void {
         for (const file of localFiles) {
             this.fileStatuses.set(file.path, { file, path: file.path, status: 'checking' });
         }
     }
 
-    private async identifyExtraFiles(remoteMap: Map<string, string>, localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>) {
+    private async identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>) {
         const extra: Array<TFile | string> = [];
         for (const [vaultPath] of remoteMap.entries()) {
             if (localFilePaths.has(vaultPath)) continue;
@@ -398,9 +448,13 @@ export class SyncStatusView extends ItemView {
 
             if (localFile) {
                 extra.push(localFile);
-            } else if (await this.app.vault.adapter.exists(vaultPath)) {
+            } else if (await this.isLocalFile(vaultPath)) {
                 extra.push(vaultPath);
             } else {
+                // Either nothing exists locally, or the remote's record (e.g. a
+                // stale symlink push) now collides with a real local folder of
+                // the same name — either way there's no readable local file to
+                // compare, so it's remote-only.
                 this.fileStatuses.set(vaultPath, { path: vaultPath, status: 'remote-only' });
             }
         }
@@ -431,7 +485,7 @@ export class SyncStatusView extends ItemView {
     private static readonly STATUS_CHECK_CONCURRENCY = 8;
     private static readonly RENDER_THROTTLE_MS = 150;
 
-    private async performStatusCheck(filesToCheck: Array<TFile | string>): Promise<void> {
+    private async performStatusCheck(filesToCheck: Array<TFile | string>, remoteMap: Map<string, GitTreeEntry>): Promise<void> {
         const total = filesToCheck.length;
         this.refreshProgress = { current: 0, total };
 
@@ -448,7 +502,10 @@ export class SyncStatusView extends ItemView {
         const worker = async (): Promise<void> => {
             while (next < total) {
                 const file = filesToCheck[next++];
-                if (file) await this.refreshFileStatus(file);
+                if (file) {
+                    const path = typeof file === 'string' ? file : file.path;
+                    await this.refreshFileStatus(file, remoteMap.get(path));
+                }
                 this.refreshProgress.current++;
                 maybeRender();
             }
@@ -459,22 +516,20 @@ export class SyncStatusView extends ItemView {
         maybeRender(true);
     }
 
-    private async refreshFileStatus(fileOrPath: TFile | string): Promise<void> {
+    /**
+     * Classifies a file's sync status. When the remote tree entry carries a git
+     * blob SHA (the common case), this is a single local hash + comparison with
+     * no network request (Phase 1 of the SHA-based refresh). Falls back to the
+     * previous full-content comparison via getFile() when a tree entry is
+     * missing a SHA, or wasn't found on the remote at all (new local file).
+     */
+    private async refreshFileStatus(fileOrPath: TFile | string, remoteEntry: GitTreeEntry | undefined): Promise<void> {
         try {
-            const isStr = typeof fileOrPath === 'string';
-            const path = isStr ? fileOrPath : fileOrPath.path;
-            const file = isStr ? undefined : fileOrPath;
-
-            const binary = this.isBinary(path);
-            const localContent = await this.readFileContent(fileOrPath, binary, isStr);
-
-            // Important: Use SyncManager's logic which handles rootPath/vaultFolder mapping
-            const repoPath = this.plugin.getNormalizedPath(path);
-            const remote = await this.plugin.gitService.getFile(repoPath, this.plugin.settings.branch);
-
-            const { status, diff } = this.determineFileStatus(binary, localContent, remote);
-
-            this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha, diff });
+            if (remoteEntry?.sha !== undefined) {
+                await this.refreshFileStatusBySha(fileOrPath, remoteEntry);
+            } else {
+                await this.refreshFileStatusByContent(fileOrPath);
+            }
         } catch (e) {
             const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
             logger.warn(`Failed to determine sync status for ${path}`, e);
@@ -486,11 +541,80 @@ export class SyncStatusView extends ItemView {
         }
     }
 
+    private async refreshFileStatusBySha(fileOrPath: TFile | string, remoteEntry: GitTreeEntry): Promise<void> {
+        const isStr = typeof fileOrPath === 'string';
+        const path = isStr ? fileOrPath : fileOrPath.path;
+        const file = isStr ? undefined : fileOrPath;
+        const binary = this.isBinary(path);
+
+        const symlinkMode = getEffectiveSymlinkHandling(this.plugin.settings);
+        const localContent = await this.readLocalContentForSha(fileOrPath, isStr, binary, remoteEntry.symlink, symlinkMode);
+        const localSha = await gitBlobSha(localContent);
+
+        const status = localSha === remoteEntry.sha ? 'synced' : 'modified';
+        this.fileStatuses.set(path, {
+            file, path, status, localContent,
+            remoteSha: remoteEntry.sha,
+            isSymlink: remoteEntry.symlink,
+        });
+    }
+
+    /**
+     * Determines what to hash locally so it's comparable to the remote blob SHA.
+     * A symlink's blob content is its target path string, not the content it
+     * points at, so "real" mode hashes the raw link target instead of following
+     * it. "follow" mode (and "real" without an actual local OS symlink, e.g. on
+     * mobile) always hashes the local file's content as read normally.
+     */
+    private async readLocalContentForSha(
+        fileOrPath: TFile | string, isStr: boolean, binary: boolean, remoteIsSymlink: boolean, symlinkMode: SymlinkHandling
+    ): Promise<string | ArrayBuffer> {
+        if (remoteIsSymlink && symlinkMode === 'real') {
+            const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
+            const target = readLocalSymlinkTarget(this.app, path);
+            if (target !== null) return target;
+        }
+        return this.readFileContent(fileOrPath, binary, isStr);
+    }
+
+    /** Fallback status check via full content fetch, for entries without a usable tree SHA. */
+    private async refreshFileStatusByContent(fileOrPath: TFile | string): Promise<void> {
+        const isStr = typeof fileOrPath === 'string';
+        const path = isStr ? fileOrPath : fileOrPath.path;
+        const file = isStr ? undefined : fileOrPath;
+
+        const binary = this.isBinary(path);
+        const localContent = await this.readFileContent(fileOrPath, binary, isStr);
+
+        // Important: Use SyncManager's logic which handles rootPath/vaultFolder mapping
+        const repoPath = this.plugin.getNormalizedPath(path);
+        const remote = await this.plugin.gitService.getFile(repoPath, this.plugin.settings.branch);
+
+        const status = this.determineFileStatus(localContent, remote);
+
+        this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha });
+    }
+
+    private async readStringPathContent(path: string, binary: boolean): Promise<string | ArrayBuffer> {
+        try {
+            return binary
+                ? await this.app.vault.adapter.readBinary(path)
+                : await this.app.vault.adapter.read(path);
+        } catch (e) {
+            // A folder that's an OS symlink can surface here (not yet known to
+            // the remote, so it skipped the sha-based symlink handling above);
+            // adapter.read() follows the link and throws EISDIR trying to read
+            // a directory. Fall back to the raw link target, consistent with
+            // how a symlinked folder is treated as a single blob elsewhere.
+            const target = readLocalSymlinkTarget(this.app, path);
+            if (target !== null) return target;
+            throw e;
+        }
+    }
+
     private async readFileContent(fileOrPath: TFile | string, binary: boolean, isStr: boolean): Promise<string | ArrayBuffer> {
         if (isStr) {
-            return binary
-                ? await this.app.vault.adapter.readBinary(fileOrPath as string)
-                : await this.app.vault.adapter.read(fileOrPath as string);
+            return this.readStringPathContent(fileOrPath as string, binary);
         }
         if (fileOrPath instanceof TFile) {
             try {
@@ -510,22 +634,10 @@ export class SyncStatusView extends ItemView {
         throw new Error('Expected TFile when isStr is false');
     }
 
-    private determineFileStatus(binary: boolean, localContent: string | ArrayBuffer, remote: { sha?: string; content?: string | ArrayBuffer }): { status: FileStatus['status']; diff?: string } {
-        if (!remote.sha) {
-            return { status: 'unsynced' };
-        }
-        if (remote.content && this.contentsEqual(localContent, remote.content)) {
-            return { status: 'synced' };
-        }
-        const diff = this.computeDiff(binary, localContent, remote.content || '');
-        return { status: 'modified', diff };
-    }
-
-    private computeDiff(binary: boolean, localContent: string | ArrayBuffer, remoteContent: string | ArrayBuffer): string {
-        if (binary || typeof localContent !== 'string' || typeof remoteContent !== 'string') {
-            return 'Binary file changed';
-        }
-        return this.generateDiff(remoteContent, localContent);
+    private determineFileStatus(localContent: string | ArrayBuffer, remote: { sha?: string; content?: string | ArrayBuffer }): FileStatus['status'] {
+        if (!remote.sha) return 'unsynced';
+        if (remote.content && this.contentsEqual(localContent, remote.content)) return 'synced';
+        return 'modified';
     }
 
     private isBinary(path: string): boolean { return isBinaryPath(path); }
@@ -534,27 +646,17 @@ export class SyncStatusView extends ItemView {
         return contentsEqual(a, b);
     }
 
-    private generateDiff(oldContent: string, newContent: string): string {
-        const oldLines = oldContent.split('\n');
-        const newLines = newContent.split('\n');
-        const diff = ['--- Remote', '+++ Local', ''];
-        const maxLines = Math.max(oldLines.length, newLines.length);
-        for (let i = 0; i < maxLines; i++) {
-            const o = oldLines[i], n = newLines[i];
-            if (o !== n) {
-                if (o !== undefined) diff.push(`- ${o}`);
-                if (n !== undefined) diff.push(`+ ${n}`);
-            }
-        }
-        return diff.join('\n');
-    }
-
     // ── Batch push/pull/delete ─────────────────────────────────────
 
     async pushAllModified(): Promise<void> { await this.runBatchOperation('modified', 'push'); }
     async pullAllModified(): Promise<void> { await this.runBatchOperation('modified', 'pull'); }
     async pushSelected():   Promise<void> { await this.runBatchOperation('selected', 'push'); }
     async pullSelected():   Promise<void> { await this.runBatchOperation('selected', 'pull'); }
+
+    private static readonly NO_RUNNABLE_FILES_KEYS: Record<'push' | 'pull', Record<'selected' | 'found', TranslationKey>> = {
+        push: { selected: 'syncStatus.notice.noPushableFiles.selected', found: 'syncStatus.notice.noPushableFiles.found' },
+        pull: { selected: 'syncStatus.notice.noPullableFiles.selected', found: 'syncStatus.notice.noPullableFiles.found' },
+    };
 
     private async runBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull'): Promise<void> {
         const targets = Array.from(this.fileStatuses.values()).filter(s => {
@@ -565,32 +667,68 @@ export class SyncStatusView extends ItemView {
         });
 
         if (targets.length === 0) {
-            new Notice(`No ${op}able files ${filter === 'selected' ? 'selected' : 'found'}.`);
+            const scope = filter === 'selected' ? 'selected' : 'found';
+            new Notice(t(SyncStatusView.NO_RUNNABLE_FILES_KEYS[op][scope]));
             return;
         }
 
         const files = targets.map(s => s.file || s.path);
         const serviceName = getServiceName(this.plugin.settings);
         const msg = op === 'push'
-            ? `Push ${files.length} file(s) to ${serviceName}?`
-            : `Pull ${files.length} file(s) from ${serviceName}? This will overwrite local changes.`;
+            ? t('syncStatus.confirm.pushSelected', { count: files.length, service: serviceName })
+            : t('syncStatus.confirm.pullSelected', { count: files.length, service: serviceName });
 
         if (!await this.showConfirmDialog(msg)) return;
 
-        const prog = new Notice(`${op === 'push' ? 'Pushing' : 'Pulling'} 0/${files.length} files…`, 0);
+        await this.executeBatchOperation(filter, op, files);
+    }
+
+    /**
+     * Marks just-pushed paths as 'synced' directly from data already in hand
+     * (the content that was just written, and the new sha when the provider
+     * reported one), instead of re-fetching the remote tree. Used in place of
+     * refreshAllStatuses() right after a push — see the call site's comment.
+     */
+    private applyOptimisticSyncedStatus(syncedPaths: Array<{ path: string; sha?: string }>): void {
+        for (const { path, sha } of syncedPaths) {
+            const existing = this.fileStatuses.get(path);
+            this.fileStatuses.set(path, {
+                ...existing,
+                path,
+                status: 'synced',
+                remoteSha: sha ?? existing?.remoteSha,
+            });
+        }
+    }
+
+    private async executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string | TFile>): Promise<void> {
+        const runVerb = op === 'push' ? t('main.verb.pushing') : t('main.verb.pulling');
+        const prog = new Notice(t('main.progress.running', { verb: runVerb, total: files.length }), 0);
         try {
             const results = op === 'push'
-                ? await this.plugin.sync.pushAllFiles(files, (cur, total, name) => prog.setMessage(`Pushing ${cur}/${total}: ${name}`))
-                : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(`Pulling ${cur}/${total}: ${name}`));
+                ? await this.plugin.sync.pushAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pushing', { current: cur, total, name })))
+                : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pulling', { current: cur, total, name })));
 
             prog.hide();
             if (results.errors.length > 0) logger.error(`${op} errors:`, results.errors);
             if (filter === 'selected') this.selectedFiles.clear();
-            new Notice(`${op === 'push' ? 'Push' : 'Pull'} completed. Refreshing…`);
-            await this.refreshAllStatuses();
+            const doneVerb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
+            new Notice(t('syncStatus.notice.opCompleted', { verb: doneVerb }));
+
+            if (op === 'push') {
+                // Mark just-pushed files synced directly instead of re-fetching the
+                // remote tree: GitHub's tree-by-branch-name read can lag a few
+                // seconds behind a just-completed write, so an immediate refresh
+                // can misreport a file we know just synced correctly as "modified".
+                this.applyOptimisticSyncedStatus((results as PushResults).syncedPaths);
+                this.renderView();
+            } else {
+                await this.refreshAllStatuses();
+            }
         } catch (e) {
             prog.hide();
-            new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
+            const failVerb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
+            new Notice(t('syncStatus.notice.opFailed', { verb: failVerb, message: e instanceof Error ? e.message : String(e) }));
         }
     }
 
@@ -599,26 +737,33 @@ export class SyncStatusView extends ItemView {
         if (targets.length === 0) return;
 
         const { local, remote } = this.partitionTargets(targets);
-        if (local.length === 0 && remote.length === 0) { new Notice('Nothing to delete'); return; }
+        if (local.length === 0 && remote.length === 0) { new Notice(t('syncStatus.notice.nothingToDelete')); return; }
         if (!await this.confirmDeletion(local.length, remote.length)) return;
 
         const total = local.length + remote.length;
-        const prog = new Notice(`Deleting 0/${total} files…`, 0);
-        const errors: string[] = [];
+        const prog = new Notice(t('syncStatus.progress.deleting', { total }), 0);
+        const errors: { path: string, message: string }[] = [];
 
         await this.performLocalDeletion(local, total, prog, errors);
         await this.performRemoteDeletion(remote, total, local.length, prog, errors);
 
         prog.hide();
-        new Notice(errors.length > 0
-            ? `Deleted ${total - errors.length}/${total}. ${errors.length} failed.`
-            : `Deleted ${total} files`
-        );
+        if (errors.length > 0) {
+            logger.error('Delete errors:', errors);
+            new Notice(t('syncStatus.notice.deleteResult.partialWithMessage', {
+                succeeded: total - errors.length,
+                total,
+                failed: errors.length,
+                message: errors.map(e => e.message).join('; ')
+            }));
+        } else {
+            new Notice(t('syncStatus.notice.deleteResult.success', { total }));
+        }
         this.renderView();
     }
 
     private getSelectedTargets(): FileStatus[] {
-        if (this.selectedFiles.size === 0) { new Notice('No files selected'); return []; }
+        if (this.selectedFiles.size === 0) { new Notice(t('syncStatus.notice.noFilesSelected')); return []; }
         return Array.from(this.selectedFiles)
             .map(p => this.fileStatuses.get(p))
             .filter(Boolean) as FileStatus[];
@@ -639,40 +784,90 @@ export class SyncStatusView extends ItemView {
         // recoverability; remote deletes are unconditionally permanent.
         let msg = '';
         if (localCount > 0 && remoteCount > 0) {
-            msg = `Delete ${localCount} local file(s) (per your vault's trash setting) and ${remoteCount} remote file(s) (cannot be undone)?`;
+            msg = t('syncStatus.confirmDelete.localAndRemote', { local: localCount, remote: remoteCount });
         } else if (localCount > 0) {
-            msg = `Delete ${localCount} local file(s)? They'll be handled per your vault's "Deleted files" setting.`;
+            msg = t('syncStatus.confirmDelete.localOnly', { local: localCount });
         } else {
-            msg = `Delete ${remoteCount} remote file(s)? This cannot be undone.`;
+            msg = t('syncStatus.confirmDelete.remoteOnly', { remote: remoteCount });
         }
         return this.showConfirmDialog(msg);
     }
 
-    private async performLocalDeletion(local: FileStatus[], total: number, prog: Notice, errors: string[]): Promise<void> {
+    private async performLocalDeletion(local: FileStatus[], total: number, prog: Notice, errors: { path: string, message: string }[]): Promise<void> {
         let cur = 0;
         for (const s of local) {
             cur++;
-            prog.setMessage(`Deleting local ${cur}/${total}: ${s.path}`);
+            prog.setMessage(t('syncStatus.progress.deletingLocal', { current: cur, total, path: s.path }));
             try {
                 if (s.file) await this.app.fileManager.trashFile(s.file);
                 else await this.app.vault.adapter.remove(s.path);
                 await this.plugin.sync.clearMetadata(s.path);
                 this.fileStatuses.delete(s.path);
                 this.selectedFiles.delete(s.path);
-            } catch { errors.push(s.path); }
+            } catch (e) {
+                errors.push({ path: s.path, message: e instanceof Error ? e.message : String(e) });
+            }
         }
     }
 
-    private async performRemoteDeletion(remote: FileStatus[], total: number, localCount: number, prog: Notice, errors: string[]): Promise<void> {
+    private async performRemoteDeletion(remote: FileStatus[], total: number, localCount: number, prog: Notice, errors: { path: string, message: string }[]): Promise<void> {
+        if (remote.length === 0) return;
+
+        // s.path is a vault-relative path (may carry the vaultFolder prefix); the
+        // git service expects a path relative to rootPath only, so strip
+        // vaultFolder first, same as every other gitService call site.
+        const entries = remote.map(s => ({ status: s, repoPath: this.plugin.getNormalizedPath(s.path) }));
+
+        if (!this.plugin.gitService.deleteBatch) {
+            await this.performRemoteDeletionSequential(entries, total, localCount, prog, errors);
+            return;
+        }
+
         let cur = localCount;
-        for (const s of remote) {
+        for (const e of entries) {
             cur++;
-            prog.setMessage(`Deleting remote ${cur}/${total}: ${s.path}`);
+            prog.setMessage(t('syncStatus.progress.deletingRemote', { current: cur, total, path: e.status.path }));
+        }
+
+        const branch = this.plugin.settings.branch;
+        for (let i = 0; i < entries.length; i += MAX_BATCH_PUSH_SIZE) {
+            const chunk = entries.slice(i, i + MAX_BATCH_PUSH_SIZE);
             try {
-                await this.plugin.gitService.deleteFile(s.path, this.plugin.settings.branch, `Delete ${s.path}`);
-                this.fileStatuses.delete(s.path);
-                this.selectedFiles.delete(s.path);
-            } catch { errors.push(s.path); }
+                const message = `Delete ${chunk.length} file(s) from Obsidian`;
+                await this.plugin.gitService.deleteBatch(chunk.map(e => e.repoPath), branch, message);
+                for (const e of chunk) {
+                    this.fileStatuses.delete(e.status.path);
+                    this.selectedFiles.delete(e.status.path);
+                }
+            } catch (err) {
+                // Atomic per-provider failure: none of this chunk's files were
+                // actually deleted, so every path in it is failed, not dropped.
+                const message = err instanceof Error ? err.message : String(err);
+                for (const e of chunk) errors.push({ path: e.status.path, message });
+            }
+        }
+    }
+
+    /** Provider doesn't support a batch/atomic multi-file delete commit —
+     * fall back to the original sequential per-file delete. */
+    private async performRemoteDeletionSequential(
+        entries: Array<{ status: FileStatus; repoPath: string }>,
+        total: number,
+        localCount: number,
+        prog: Notice,
+        errors: { path: string, message: string }[]
+    ): Promise<void> {
+        let cur = localCount;
+        for (const e of entries) {
+            cur++;
+            prog.setMessage(t('syncStatus.progress.deletingRemote', { current: cur, total, path: e.status.path }));
+            try {
+                await this.plugin.gitService.deleteFile(e.repoPath, this.plugin.settings.branch, `Delete ${e.repoPath}`);
+                this.fileStatuses.delete(e.status.path);
+                this.selectedFiles.delete(e.status.path);
+            } catch (err) {
+                errors.push({ path: e.status.path, message: err instanceof Error ? err.message : String(err) });
+            }
         }
     }
 

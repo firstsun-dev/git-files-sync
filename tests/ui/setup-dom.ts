@@ -50,6 +50,12 @@ export function setupObsidianDOM(): void {
             (this as HTMLElement).appendChild(el);
             return el as unknown as HTMLSpanElement;
         },
+        addClass(cls: string): void {
+            (this as HTMLElement).classList.add(cls);
+        },
+        removeClass(cls: string): void {
+            (this as HTMLElement).classList.remove(cls);
+        },
         hasClass(cls: string): boolean {
             return (this as HTMLElement).classList.contains(cls);
         },
@@ -58,6 +64,9 @@ export function setupObsidianDOM(): void {
         },
         setText(text: string): void {
             (this as HTMLElement).textContent = text;
+        },
+        empty(): void {
+            (this as HTMLElement).replaceChildren();
         },
     });
 }

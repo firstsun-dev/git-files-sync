@@ -1,5 +1,9 @@
 import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
-import GitLabFilesPush from "./main";
+import GitLabFilesPush, { type ConnectionStatus } from "./main";
+import {FolderSuggest} from "./ui/FolderSuggest";
+import {RemoteFolderSuggest} from "./ui/RemoteFolderSuggest";
+import { t, setLanguageOverride, type LanguageSetting } from "./i18n";
+import { CHANGELOG } from "./changelog";
 
 // Minimal shape of Obsidian >= 1.13's SettingDefinitionItem. Declared locally so
 // the plugin still type-checks against older Obsidian typings (minAppVersion
@@ -44,6 +48,14 @@ export interface GitLabFilesPushSettings {
     rootPath: string;
     vaultFolder: string;
     symlinkHandling: SymlinkHandling;
+    /** Multi-line, .gitignore-style patterns applied locally, in addition to the remote repo's .gitignore rules. */
+    ignorePatterns: string;
+    /** Plugin version last seen by this vault, used to show a "what's new" tip after an update. */
+    lastSeenVersion: string;
+    /** Version whose "what's new" banner in the settings tab has been dismissed, if any. */
+    bannerDismissedVersion: string;
+    /** UI language. 'system' follows Obsidian's display language, falling back to English if unsupported. */
+    language: LanguageSetting;
 }
 
 export function getServiceName(settings: GitLabFilesPushSettings): string {
@@ -81,15 +93,36 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	branch: 'main',
 	syncMetadata: {},
 	vaultFolder: '',
-	symlinkHandling: 'real'
+	symlinkHandling: 'real',
+	ignorePatterns: '',
+	lastSeenVersion: '',
+	bannerDismissedVersion: '',
+	language: 'system'
 }
+
+const CONNECTION_TEST_DEBOUNCE_MS = 800;
 
 export class GitLabSyncSettingTab extends PluginSettingTab {
 	plugin: GitLabFilesPush;
+	private statusBadgeEl: HTMLElement | null = null;
+	private connectionTestTimer: number | null = null;
+	private unsubscribeConnectionStatus: (() => void) | null = null;
 
 	constructor(app: App, plugin: GitLabFilesPush) {
 		super(app, plugin);
 		this.plugin = plugin;
+	}
+
+	// The status badge mirrors the plugin's shared connection status (also
+	// driving the status bar item) instead of running its own test, so both
+	// stay in sync and don't race separate requests against the remote API.
+	hide(): void {
+		this.unsubscribeConnectionStatus?.();
+		this.unsubscribeConnectionStatus = null;
+		if (this.connectionTestTimer) {
+			window.clearTimeout(this.connectionTestTimer);
+			this.connectionTestTimer = null;
+		}
 	}
 
 	// Kept as a fallback for Obsidian < 1.13.0 (older than 1.13, down to
@@ -120,12 +153,105 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		}
 	}
 
+	// Persistent (until dismissed) banner surfacing the current version's notable
+	// highlights right at the top of the settings tab, so users who dismissed or
+	// never saw the WhatsNewModal (see main.ts) can still find them. Separate
+	// from `lastSeenVersion` — that gate controls the once-per-upgrade modal,
+	// this one just tracks whether the banner itself was dismissed.
+	private renderWhatsNewBanner(containerEl: HTMLElement): void {
+		const currentVersion = this.plugin.manifest.version;
+		if (this.plugin.settings.bannerDismissedVersion === currentVersion) return;
+
+		const release = CHANGELOG.find(r => r.version === currentVersion);
+		const notableEntries = release?.entries.filter(entry => entry.notable) ?? [];
+		if (notableEntries.length === 0) return;
+
+		const banner = containerEl.createDiv({ cls: 'gfs-whats-new-banner' });
+		const textEl = banner.createDiv({ cls: 'gfs-whats-new-banner-text' });
+		textEl.createEl('strong', { text: t('settings.whatsNewBanner.title', { version: currentVersion }) });
+		const list = textEl.createEl('ul', { cls: 'gfs-whats-new-banner-list' });
+		for (const entry of notableEntries) {
+			list.createEl('li', { text: entry.text });
+		}
+
+		const dismissBtn = banner.createEl('button', {
+			cls: 'gfs-whats-new-banner-dismiss',
+			text: '×',
+			attr: { 'aria-label': t('settings.whatsNewBanner.dismiss') }
+		});
+		dismissBtn.addEventListener('click', () => {
+			void (async () => {
+				this.plugin.settings.bannerDismissedVersion = currentVersion;
+				await this.plugin.saveSettings();
+				this.refresh();
+			})();
+		});
+	}
+
+	// Rebuilding the whole settings tab (renderSettings) to refresh the badge
+	// would empty and recreate every field, stealing focus mid-typing. The
+	// badge element is instead created once per renderSettings pass and
+	// updated in place by setStatusBadge(), driven by the plugin's shared
+	// connection status (see main.ts) so it stays in sync with the status bar.
+	private renderConnectionStatus(containerEl: HTMLElement): void {
+		this.statusBadgeEl = containerEl.createDiv({ cls: 'gfs-connection-status' });
+		this.unsubscribeConnectionStatus?.();
+		this.unsubscribeConnectionStatus = this.plugin.onConnectionStatusChange((status) => this.setStatusBadge(status));
+	}
+
+	private setStatusBadge(status: ConnectionStatus): void {
+		const badge = this.statusBadgeEl;
+		if (!badge) return;
+
+		badge.removeClass('is-checking', 'is-connected', 'is-disconnected');
+		badge.addClass(`is-${status.state}`);
+
+		const labels: Record<ConnectionStatus['state'], string> = {
+			checking: t('settings.connectionStatus.checking'),
+			connected: t('settings.connectionStatus.connected'),
+			disconnected: t('settings.connectionStatus.disconnected')
+		};
+		const label = labels[status.state];
+		badge.setText(status.detail ? t('settings.connectionStatus.withDetail', { label, detail: status.detail }) : label);
+	}
+
+	// Debounced so token/branch fields (which call this on every keystroke)
+	// don't hit the remote API on every character typed.
+	private scheduleConnectionTest(): void {
+		if (this.connectionTestTimer) {
+			window.clearTimeout(this.connectionTestTimer);
+		}
+		this.connectionTestTimer = window.setTimeout(() => {
+			this.connectionTestTimer = null;
+			void this.plugin.testConnection();
+		}, CONNECTION_TEST_DEBOUNCE_MS);
+	}
+
 	private renderSettings(containerEl: HTMLElement): void {
 		containerEl.empty();
 
+		this.renderWhatsNewBanner(containerEl);
+		this.renderConnectionStatus(containerEl);
+
 		new Setting(containerEl)
-			.setName('Git service')
-			.setDesc('Choose your Git hosting service')
+			.setName(t('settings.language.name'))
+			.setDesc(t('settings.language.desc'))
+			.addDropdown(dropdown => dropdown
+				.addOption('system', t('settings.language.option.system'))
+				.addOption('en', t('settings.language.option.en'))
+				.addOption('zh-tw', t('settings.language.option.zhTw'))
+				.addOption('zh-cn', t('settings.language.option.zhCn'))
+				.setValue(this.plugin.settings.language)
+				.onChange((value: string) => {
+					this.plugin.settings.language = value as LanguageSetting;
+					void this.plugin.saveSettings();
+					setLanguageOverride(this.plugin.settings.language);
+					this.refresh();
+				}));
+
+		new Setting(containerEl)
+			.setName(t('settings.gitService.name'))
+			.setDesc(t('settings.gitService.desc'))
 			.addDropdown(dropdown => dropdown
 				.addOption('gitlab', 'GitLab')
 				.addOption('github', 'GitHub')
@@ -149,52 +275,70 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		}
 
 		new Setting(containerEl)
-			.setName('Branch')
-			.setDesc('Branch to push or pull from')
+			.setName(t('settings.branch.name'))
+			.setDesc(t('settings.branch.desc'))
 			.addText(text => text
-				.setPlaceholder('Main')
+				.setPlaceholder(t('settings.branch.placeholder'))
 				.setValue(this.plugin.settings.branch)
 				.onChange((value) => {
 					this.plugin.settings.branch = value || 'main';
 					void this.plugin.saveSettings();
+					this.scheduleConnectionTest();
 				}));
 
 		new Setting(containerEl)
-			.setName('Root path')
-			.setDesc('Optional: subfolder in repository (e.g. "notes")')
-			.addText(text => text
-				.setPlaceholder('Enter subfolder path')
-				.setValue(this.plugin.settings.rootPath)
-				.onChange((value) => {
-					this.plugin.settings.rootPath = value.replace(/^\/|\/$/g, '');
-					void this.plugin.saveSettings();
-					this.plugin.initializeGitService();
-				}));
+			.setName(t('settings.rootPath.name'))
+			.setDesc(t('settings.rootPath.desc'))
+			.addText(text => {
+				text.setPlaceholder(t('settings.rootPath.placeholder'))
+					.setValue(this.plugin.settings.rootPath)
+					.onChange((value) => {
+						this.plugin.settings.rootPath = value.replace(/^\/|\/$/g, '');
+						void this.plugin.saveSettings();
+						this.plugin.initializeGitService();
+					});
+				RemoteFolderSuggest.attach(this.app, text.inputEl, this.plugin);
+			});
 
 		new Setting(containerEl)
-			.setName('Vault folder')
-			.setDesc('Optional: only sync files in this vault folder (e.g. "sync" to only sync files in the sync folder)')
-			.addText(text => text
-				.setPlaceholder('Leave empty to sync all files')
-				.setValue(this.plugin.settings.vaultFolder)
-				.onChange((value) => {
-					this.plugin.settings.vaultFolder = value.replace(/^\/|\/$/g, '');
-					void this.plugin.saveSettings();
-				}));
+			.setName(t('settings.vaultFolder.name'))
+			.setDesc(t('settings.vaultFolder.desc'))
+			.addText(text => {
+				text.setPlaceholder(t('settings.vaultFolder.placeholder'))
+					.setValue(this.plugin.settings.vaultFolder)
+					.onChange((value) => {
+						this.plugin.settings.vaultFolder = value.replace(/^\/|\/$/g, '');
+						void this.plugin.saveSettings();
+					});
+				FolderSuggest.attach(this.app, text.inputEl);
+			});
+
+		new Setting(containerEl)
+			.setName(t('settings.ignorePatterns.name'))
+			.setDesc(t('settings.ignorePatterns.desc'))
+			.addTextArea(text => {
+				text.setPlaceholder(`${this.app.vault.configDir}/\n*.tmp`)
+					.setValue(this.plugin.settings.ignorePatterns)
+					.onChange((value) => {
+						this.plugin.settings.ignorePatterns = value;
+						void this.plugin.saveSettings();
+					});
+				text.inputEl.rows = 4;
+			});
 
 		// "Real symlink" needs the Git Data API, which only GitHub offers. For
 		// other providers, offer follow/skip only so the option can't mislead.
 		const supportsRealSymlink = this.plugin.settings.serviceType === 'github';
 		new Setting(containerEl)
-			.setName('Symbolic links')
+			.setName(t('settings.symlinks.name'))
 			.setDesc(supportsRealSymlink
-				? 'How to sync symlinks: "real" recreates the link on desktop and falls back to the target content on mobile, "follow" always syncs the target content, and "skip" ignores symlinks.'
-				: 'How to sync symlinks: "follow" syncs the target content as a normal file, "skip" ignores symlinks. Real symlinks require GitHub.')
+				? t('settings.symlinks.desc.supported')
+				: t('settings.symlinks.desc.unsupported'))
 			.addDropdown(dropdown => {
-				if (supportsRealSymlink) dropdown.addOption('real', 'Real symlink (recommended)');
+				if (supportsRealSymlink) dropdown.addOption('real', t('settings.symlinks.option.real'));
 				dropdown
-					.addOption('follow', 'Follow (sync target content)')
-					.addOption('skip', 'Skip')
+					.addOption('follow', t('settings.symlinks.option.follow'))
+					.addOption('skip', t('settings.symlinks.option.skip'))
 					.setValue(getEffectiveSymlinkHandling(this.plugin.settings))
 					.onChange((value: string) => {
 						this.plugin.settings.symlinkHandling = value as SymlinkHandling;
@@ -203,29 +347,30 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName('Test connection')
-			.setDesc(`Verify your ${getServiceName(this.plugin.settings)} settings`)
+			.setName(t('settings.testConnection.name'))
+			.setDesc(t('settings.testConnection.desc', { service: getServiceName(this.plugin.settings) }))
 			.addButton(button => button
-				.setButtonText('Test connection')
+				.setButtonText(t('settings.testConnection.button'))
 				.onClick(async () => {
 					try {
-						const result = await this.plugin.gitService.testConnection(this.plugin.settings.branch);
+						const result = await this.plugin.testConnection();
 						if (!result.repoOk) {
-							new Notice(`Connection failed: ${result.error ?? 'could not reach the repository'}`);
+							new Notice(t('settings.testConnection.failed', { reason: result.error ?? t('settings.testConnection.failed.unreachable') }));
 						} else if (!result.branchOk) {
 							new Notice(
-								`Connected, but branch "${this.plugin.settings.branch}" was not found. ` +
-								'Check the Branch setting, or confirm the repository has a branch with this name.',
+								t('settings.testConnection.branchNotFound.notice', { branch: this.plugin.settings.branch }),
 								8000
 							);
 						} else {
-							new Notice(`${getServiceName(this.plugin.settings)} connection successful!`);
+							new Notice(t('settings.testConnection.success', { service: getServiceName(this.plugin.settings) }));
 						}
 					} catch (e: unknown) {
 						const message = e instanceof Error ? e.message : String(e);
-						new Notice(`Connection failed: ${message}`);
+						new Notice(t('settings.testConnection.failed', { reason: message }));
 					}
 				}));
+
+		this.scheduleConnectionTest();
 	}
 
 	// Token fields are masked like a password input (with a toggle to reveal
@@ -239,18 +384,18 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 			.addText(text => {
 				textComponent = text;
 				text.inputEl.type = 'password';
-				text.setPlaceholder('Enter your token')
+				text.setPlaceholder(t('settings.token.placeholder'))
 					.setValue(getValue())
 					.onChange(onChange);
 			})
 			.addExtraButton(btn => {
 				btn.setIcon('eye')
-					.setTooltip('Show token')
+					.setTooltip(t('settings.token.show'))
 					.onClick(() => {
 						const revealing = textComponent.inputEl.type === 'password';
 						textComponent.inputEl.type = revealing ? 'text' : 'password';
 						btn.setIcon(revealing ? 'eye-off' : 'eye');
-						btn.setTooltip(revealing ? 'Hide token' : 'Show token');
+						btn.setTooltip(revealing ? t('settings.token.hide') : t('settings.token.show'));
 					});
 			});
 	}
@@ -258,19 +403,20 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	private displayGitLabSettings(containerEl: HTMLElement): void {
 		this.addTokenSetting(
 			containerEl,
-			'GitLab personal access token',
-			'Create a token in GitLab user settings > access tokens with "API" scope',
+			t('settings.gitlab.token.name'),
+			t('settings.gitlab.token.desc'),
 			() => this.plugin.settings.gitlabToken,
 			(value) => {
 				this.plugin.settings.gitlabToken = value;
 				void this.plugin.saveSettings();
 				this.plugin.initializeGitService();
+				this.scheduleConnectionTest();
 			}
 		);
 
 		new Setting(containerEl)
-			.setName('GitLab base URL')
-			.setDesc('Defaults to https://gitlab.com')
+			.setName(t('settings.gitlab.baseUrl.name'))
+			.setDesc(t('settings.gitlab.baseUrl.desc'))
 			.addText(text => text
 				.setPlaceholder('https://gitlab.com')
 				.setValue(this.plugin.settings.gitlabBaseUrl)
@@ -278,37 +424,40 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.gitlabBaseUrl = value || 'https://gitlab.com';
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 
 		new Setting(containerEl)
-			.setName('Project ID')
-			.setDesc('Found in GitLab project overview')
+			.setName(t('settings.gitlab.projectId.name'))
+			.setDesc(t('settings.gitlab.projectId.desc'))
 			.addText(text => text
-				.setPlaceholder('Enter numeric project ID')
+				.setPlaceholder(t('settings.gitlab.projectId.placeholder'))
 				.setValue(this.plugin.settings.projectId)
 				.onChange((value) => {
 					this.plugin.settings.projectId = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 	}
 
 	private displayGiteaSettings(containerEl: HTMLElement): void {
 		this.addTokenSetting(
 			containerEl,
-			'Gitea personal access token',
-			'Create a token in user settings > applications > access tokens',
+			t('settings.gitea.token.name'),
+			t('settings.gitea.token.desc'),
 			() => this.plugin.settings.giteaToken,
 			(value) => {
 				this.plugin.settings.giteaToken = value;
 				void this.plugin.saveSettings();
 				this.plugin.initializeGitService();
+				this.scheduleConnectionTest();
 			}
 		);
 
 		new Setting(containerEl)
-			.setName('Gitea base URL')
-			.setDesc('URL of your Gitea instance (e.g. https://gitea.example.com)')
+			.setName(t('settings.gitea.baseUrl.name'))
+			.setDesc(t('settings.gitea.baseUrl.desc'))
 			.addText(text => text
 				.setPlaceholder('https://gitea.example.com')
 				.setValue(this.plugin.settings.giteaBaseUrl)
@@ -316,68 +465,74 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.giteaBaseUrl = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 
 		new Setting(containerEl)
-			.setName('Repository owner')
-			.setDesc('Gitea username or organization name')
+			.setName(t('settings.repoOwner.name'))
+			.setDesc(t('settings.repoOwner.desc.gitea'))
 			.addText(text => text
-				.setPlaceholder('Username')
+				.setPlaceholder(t('settings.repoOwner.placeholder'))
 				.setValue(this.plugin.settings.giteaOwner)
 				.onChange((value) => {
 					this.plugin.settings.giteaOwner = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 
 		new Setting(containerEl)
-			.setName('Repository name')
-			.setDesc('Name of the repository')
+			.setName(t('settings.repoName.name'))
+			.setDesc(t('settings.repoName.desc.gitea'))
 			.addText(text => text
-				.setPlaceholder('My notes')
+				.setPlaceholder(t('settings.repoName.placeholder'))
 				.setValue(this.plugin.settings.giteaRepo)
 				.onChange((value) => {
 					this.plugin.settings.giteaRepo = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 	}
 
 	private displayGitHubSettings(containerEl: HTMLElement): void {
 		this.addTokenSetting(
 			containerEl,
-			'GitHub personal access token',
-			'Create a token in GitHub settings > developer settings > personal access tokens with "repo" scope',
+			t('settings.github.token.name'),
+			t('settings.github.token.desc'),
 			() => this.plugin.settings.githubToken,
 			(value) => {
 				this.plugin.settings.githubToken = value;
 				void this.plugin.saveSettings();
 				this.plugin.initializeGitService();
+				this.scheduleConnectionTest();
 			}
 		);
 
 		new Setting(containerEl)
-			.setName('Repository owner')
-			.setDesc('GitHub username or organization name')
+			.setName(t('settings.repoOwner.name'))
+			.setDesc(t('settings.repoOwner.desc.github'))
 			.addText(text => text
-				.setPlaceholder('Username')
+				.setPlaceholder(t('settings.repoOwner.placeholder'))
 				.setValue(this.plugin.settings.githubOwner)
 				.onChange((value) => {
 					this.plugin.settings.githubOwner = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 
 		new Setting(containerEl)
-			.setName('Repository name')
-			.setDesc('Name of the GitHub repository')
+			.setName(t('settings.repoName.name'))
+			.setDesc(t('settings.repoName.desc.github'))
 			.addText(text => text
-				.setPlaceholder('My notes')
+				.setPlaceholder(t('settings.repoName.placeholder'))
 				.setValue(this.plugin.settings.githubRepo)
 				.onChange((value) => {
 					this.plugin.settings.githubRepo = value;
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
+					this.scheduleConnectionTest();
 				}));
 	}
 }

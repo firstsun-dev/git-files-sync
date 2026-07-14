@@ -1,14 +1,26 @@
-import { Plugin, TFile, MarkdownView, Notice, Platform, setTooltip } from 'obsidian';
+import { Plugin, TFile, MarkdownView, Notice, Platform, setTooltip, setIcon } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getServiceName } from "./settings";
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
 import { GiteaService } from './services/gitea-service';
-import { GitServiceInterface } from './services/git-service-interface';
+import { GitServiceInterface, GitTreeEntry } from './services/git-service-interface';
+import { ConnectionTestResult } from './services/git-service-base';
 import { SyncManager } from './logic/sync-manager';
 import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
 import { GitignoreManager } from './logic/gitignore-manager';
 import { logger } from './utils/logger';
 import { ConfirmModal } from './ui/ConfirmModal';
+import { WhatsNewModal } from './ui/WhatsNewModal';
+import { CHANGELOG, getUnseenReleases } from './changelog';
+import { compareVersions } from './utils/version';
+import { t, setLanguageOverride } from './i18n';
+
+export type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
+
+export interface ConnectionStatus {
+	state: ConnectionStatusState;
+	detail?: string;
+}
 
 export default class GitLabFilesPush extends Plugin {
 	settings: GitLabFilesPushSettings;
@@ -16,6 +28,10 @@ export default class GitLabFilesPush extends Plugin {
 	sync: SyncManager;
 	gitignoreManager: GitignoreManager;
 	private pushRibbonEl: HTMLElement;
+	private statusBarEl: HTMLElement;
+	connectionStatus: ConnectionStatus = { state: 'checking' };
+	private connectionStatusListeners: Set<(status: ConnectionStatus) => void> = new Set();
+	private connectionTestSeq = 0;
 
 	async onload() {
 		await this.loadSettings();
@@ -26,28 +42,35 @@ export default class GitLabFilesPush extends Plugin {
 			(leaf) => new SyncStatusView(leaf, this)
 		);
 
-		this.addRibbonIcon('git-compare', 'Open sync status', async () => {
+		this.addRibbonIcon('git-compare', t('main.ribbon.openSyncStatus'), async () => {
 			await this.activateSyncStatusView();
 		});
 
 		this.addCommand({
 			id: 'open-sync-status',
-			name: 'Open sync status',
+			name: t('main.command.openSyncStatus'),
 			callback: async () => {
 				await this.activateSyncStatusView();
 			}
 		});
 
 		this.initializeGitService();
-		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath, this.settings.vaultFolder);
+		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath, this.settings.vaultFolder, this.settings.ignorePatterns);
 		this.sync = new SyncManager(this.app, this.gitService, this.settings, this.saveSettings.bind(this));
+
+		this.statusBarEl = this.addStatusBarItem();
+		this.statusBarEl.addClass('gfs-status-bar-connection');
+		setTooltip(this.statusBarEl, t('settings.connectionStatus.checking'));
+		this.registerDomEvent(this.statusBarEl, 'click', () => void this.testConnection());
+		this.onConnectionStatusChange((status) => this.renderStatusBarConnection(status));
+		void this.testConnection();
 
 		this.pushRibbonEl = this.addRibbonIcon('upload-cloud', this.pushRibbonLabel(), async () => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView && activeView.file instanceof TFile) {
 				await this.sync.pushFile(activeView.file);
 			} else {
-				new Notice('No active note to push');
+				new Notice(t('main.notice.noActiveNote'));
 			}
 		});
 
@@ -57,7 +80,7 @@ export default class GitLabFilesPush extends Plugin {
 		// leave a stale name in the Command Palette until Obsidian reloads.
 		this.addCommand({
 			id: 'push-current-file',
-			name: 'Push current file',
+			name: t('main.command.pushCurrentFile'),
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
@@ -68,7 +91,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'pull-current-file',
-			name: 'Pull current file',
+			name: t('main.command.pullCurrentFile'),
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
@@ -79,7 +102,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'push-all-files',
-			name: 'Push all files',
+			name: t('main.command.pushAllFiles'),
 			callback: async () => {
 				await this.pushAllFiles();
 			}
@@ -87,7 +110,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.addCommand({
 			id: 'pull-all-files',
-			name: 'Pull all files',
+			name: t('main.command.pullAllFiles'),
 			callback: async () => {
 				await this.pullAllFiles();
 			}
@@ -97,26 +120,133 @@ export default class GitLabFilesPush extends Plugin {
 			this.app.workspace.on('file-menu', (menu, file) => {
 				if (file instanceof TFile) {
 					menu.addItem((item) => {
-						item.setTitle(`Push to ${this.serviceName}`)
+						item.setTitle(t('main.contextMenu.pushTo', { service: this.serviceName }))
 							.setIcon('upload-cloud')
 							.onClick(async () => { await this.sync.pushFile(file); });
 					});
 					menu.addItem((item) => {
-						item.setTitle(`Pull from ${this.serviceName}`)
+						item.setTitle(t('main.contextMenu.pullFrom', { service: this.serviceName }))
 							.setIcon('download-cloud')
 							.onClick(async () => { await this.sync.pullFile(file); });
 					});
 				}
 			})
 		);
+
+		// A file deleted outside the plugin's own delete UI (e.g. from Obsidian's
+		// file explorer) would otherwise leave its syncMetadata entry behind
+		// forever; detectRename's rename-matching scan treats every such orphan
+		// as a rename candidate and does a live remote lookup for it on every
+		// future single-file push, so clear it as soon as Obsidian reports the delete.
+		this.registerEvent(
+			this.app.vault.on('delete', (file) => {
+				if (file instanceof TFile) {
+					void this.sync.clearMetadata(file.path);
+				}
+			})
+		);
+
+		await this.checkForUpdateNotice();
+	}
+
+	private async checkForUpdateNotice(): Promise<void> {
+		try {
+			const currentVersion = this.manifest.version;
+			const lastSeen = this.settings.lastSeenVersion;
+
+			// A fresh install has nothing to compare against — just record the
+			// current version silently rather than showing a "what's new" tip.
+			if (lastSeen && compareVersions(currentVersion, lastSeen) > 0) {
+				const newReleases = getUnseenReleases(CHANGELOG, lastSeen);
+				if (newReleases.length > 0) {
+					new WhatsNewModal(this.app, newReleases).open();
+				}
+			}
+
+			if (lastSeen !== currentVersion) {
+				this.settings.lastSeenVersion = currentVersion;
+				await this.saveSettings();
+			}
+		} catch (e) {
+			logger.warn('Failed to check for update notice', e);
+		}
 	}
 
 	private get serviceName(): string {
 		return getServiceName(this.settings);
 	}
 
+	// Subscribes to connection status changes, immediately replaying the current
+	// status so late subscribers (e.g. the settings tab opened after the initial
+	// test already ran) don't have to wait for the next change. Returns an
+	// unsubscribe function.
+	onConnectionStatusChange(listener: (status: ConnectionStatus) => void): () => void {
+		this.connectionStatusListeners.add(listener);
+		listener(this.connectionStatus);
+		return () => this.connectionStatusListeners.delete(listener);
+	}
+
+	private setConnectionStatus(status: ConnectionStatus): void {
+		this.connectionStatus = status;
+		for (const listener of this.connectionStatusListeners) listener(status);
+	}
+
+	// Single source of truth for connection testing, shared by the settings tab
+	// badge and the status bar item so both reflect the same in-flight request
+	// instead of racing separate calls against the remote API.
+	async testConnection(): Promise<ConnectionTestResult> {
+		const seq = ++this.connectionTestSeq;
+		this.setConnectionStatus({ state: 'checking' });
+
+		try {
+			const result = await this.gitService.testConnection(this.settings.branch);
+			if (seq !== this.connectionTestSeq) return result;
+
+			if (!result.repoOk) {
+				this.setConnectionStatus({ state: 'disconnected', detail: result.error ?? t('settings.testConnection.failed.unreachable') });
+			} else if (!result.branchOk) {
+				this.setConnectionStatus({ state: 'disconnected', detail: t('settings.testConnection.branchNotFound.badge', { branch: this.settings.branch }) });
+			} else {
+				this.setConnectionStatus({ state: 'connected' });
+			}
+			return result;
+		} catch (e: unknown) {
+			if (seq === this.connectionTestSeq) {
+				const message = e instanceof Error ? e.message : String(e);
+				this.setConnectionStatus({ state: 'disconnected', detail: message });
+			}
+			throw e;
+		}
+	}
+
+	private renderStatusBarConnection(status: ConnectionStatus): void {
+		const el = this.statusBarEl;
+		if (!el) return;
+		el.empty();
+		el.removeClass('is-checking', 'is-connected', 'is-disconnected');
+		el.addClass(`is-${status.state}`);
+
+		const icons: Record<ConnectionStatusState, string> = {
+			checking: 'loader',
+			connected: 'check-circle',
+			disconnected: 'alert-circle',
+		};
+		setIcon(el.createSpan({ cls: 'gfs-status-bar-icon' }), icons[status.state]);
+
+		const labels: Record<ConnectionStatusState, string> = {
+			checking: t('settings.connectionStatus.checking'),
+			connected: t('settings.connectionStatus.connected'),
+			disconnected: t('settings.connectionStatus.disconnected'),
+		};
+		el.createSpan({ text: ` ${this.serviceName}: ${labels[status.state]}` });
+
+		setTooltip(el, status.detail
+			? t('settings.connectionStatus.withDetail', { label: labels[status.state], detail: status.detail })
+			: labels[status.state]);
+	}
+
 	private pushRibbonLabel(): string {
-		return Platform.isMobile ? 'Push' : `Push to ${this.serviceName}`;
+		return Platform.isMobile ? t('main.ribbon.push') : t('main.ribbon.pushTo', { service: this.serviceName });
 	}
 
 	// The ribbon icon's tooltip is set once when addRibbonIcon runs, so it goes
@@ -172,31 +302,40 @@ export default class GitLabFilesPush extends Plugin {
 		const startPath = this.settings.vaultFolder || '';
 		const allPaths = await this.listAllFilesFromAdapter(startPath);
 
-		await this.gitService.listFiles(this.settings.branch);
-		await this.gitignoreManager.loadGitignores();
+		// Fetch the remote tree once and share it with both gitignore discovery
+		// and (for push) the SHA-based diff, instead of each fetching it separately.
+		let tree: GitTreeEntry[] | undefined;
+		try {
+			tree = await this.gitService.listFilesDetailed(this.settings.branch, false);
+		} catch (e) {
+			logger.warn('Failed to fetch remote tree; falling back to per-call fetches', e);
+		}
+
+		await this.gitignoreManager.loadGitignores(tree);
 		const files = allPaths.filter(p => !this.gitignoreManager.isIgnored(this.getNormalizedPath(p)));
 
 		if (files.length === 0) {
-			new Notice(`No files to ${op} in the configured vault folder`);
+			new Notice(t('main.notice.noFilesToRun', { op: op === 'push' ? t('main.op.push') : t('main.op.pull') }));
 			return;
 		}
 
 		const msg = op === 'push'
-			? `Push ${files.length} file(s) to ${this.serviceName}?`
-			: `Pull ${files.length} file(s) from ${this.serviceName}? This will overwrite local changes.`;
+			? t('main.confirm.pushAll', { count: files.length, service: this.serviceName })
+			: t('main.confirm.pullAll', { count: files.length, service: this.serviceName });
 
 		const confirmed = await this.showConfirmDialog(msg);
 		if (!confirmed) return;
 
-		const progressNotice = new Notice(`${op === 'push' ? 'Pushing' : 'Pulling'} 0/${files.length} files...`, 0);
+		const runVerb = op === 'push' ? t('main.verb.pushing') : t('main.verb.pulling');
+		const progressNotice = new Notice(t('main.progress.running', { verb: runVerb, total: files.length }), 0);
 
 		try {
 			const results = op === 'push'
 				? await this.sync.pushAllFiles(files, (current, total, fileName) => {
-					progressNotice.setMessage(`Pushing ${current}/${total}: ${fileName}`);
-				})
+					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pushing'), current, total, fileName }));
+				}, tree)
 				: await this.sync.pullAllFiles(files, (current, total, fileName) => {
-					progressNotice.setMessage(`Pulling ${current}/${total}: ${fileName}`);
+					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pulling'), current, total, fileName }));
 				});
 
 			progressNotice.hide();
@@ -207,7 +346,8 @@ export default class GitLabFilesPush extends Plugin {
 		} catch (e) {
 			progressNotice.hide();
 			logger.error(String(e));
-			new Notice(`${op === 'push' ? 'Push' : 'Pull'} failed: ${e instanceof Error ? e.message : String(e)}`);
+			const failVerb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
+			new Notice(t('main.notice.runFailed', { verb: failVerb, message: e instanceof Error ? e.message : String(e) }));
 		}
 	}
 
@@ -295,6 +435,7 @@ export default class GitLabFilesPush extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<GitLabFilesPushSettings>);
+		setLanguageOverride(this.settings.language);
 	}
 
 	async saveSettings() {

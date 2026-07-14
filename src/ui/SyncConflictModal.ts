@@ -1,4 +1,7 @@
 import { App, Modal, Setting } from 'obsidian';
+import { t } from '../i18n';
+
+type ConflictPanelName = 'diff' | 'local' | 'remote';
 
 /**
  * Apply the "destructive" button style, but only when the running Obsidian
@@ -33,49 +36,78 @@ export class SyncConflictModal extends Modal {
         const { contentEl } = this;
         contentEl.addClass('sync-conflict-modal');
 
-        contentEl.createEl('h2', { text: `Conflict in ${this.fileName}` });
+        contentEl.createEl('h2', { text: t('syncConflictModal.title', { fileName: this.fileName }) });
         contentEl.createEl('p', {
-            text: 'The remote file has different content. Review the differences and choose which version to keep.',
+            text: t('syncConflictModal.description'),
             cls: 'conflict-description'
         });
 
-        const diffContainer = contentEl.createDiv({ cls: 'conflict-diff-container' });
+        const panels = {} as Record<ConflictPanelName, HTMLElement>;
+        const tabs = {} as Record<ConflictPanelName, HTMLElement>;
 
-        const localSection = diffContainer.createDiv({ cls: 'conflict-section' });
-        localSection.createEl('h3', { text: 'Local version' });
+        const setActivePanel = (name: ConflictPanelName) => {
+            (Object.keys(panels) as ConflictPanelName[]).forEach(key => {
+                panels[key].toggleClass('is-active', key === name);
+                tabs[key].toggleClass('is-active', key === name);
+            });
+        };
+
+        const tabsContainer = contentEl.createDiv({ cls: 'conflict-tabs' });
+        const tabLabels: Record<ConflictPanelName, string> = {
+            diff: t('syncConflictModal.tab.diff'),
+            local: t('syncConflictModal.tab.local'),
+            remote: t('syncConflictModal.tab.remote')
+        };
+        (['diff', 'local', 'remote'] as const).forEach(name => {
+            const tab = tabsContainer.createEl('button', { text: tabLabels[name], cls: 'conflict-tab' });
+            tab.addEventListener('click', () => setActivePanel(name));
+            tabs[name] = tab;
+        });
+
+        const contentArea = contentEl.createDiv({ cls: 'conflict-content-area' });
+
+        const diffContainer = contentArea.createDiv({ cls: 'conflict-diff-container' });
+
+        const localSection = diffContainer.createDiv({ cls: 'conflict-section conflict-panel' });
+        localSection.createEl('h3', { text: t('syncConflictModal.localVersion') });
         const localPre = localSection.createEl('pre', { cls: 'conflict-content' });
         localPre.createEl('code', { text: this.localContent });
+        panels.local = localSection;
 
-        const remoteSection = diffContainer.createDiv({ cls: 'conflict-section' });
-        remoteSection.createEl('h3', { text: 'Remote version' });
+        const remoteSection = diffContainer.createDiv({ cls: 'conflict-section conflict-panel' });
+        remoteSection.createEl('h3', { text: t('syncConflictModal.remoteVersion') });
         const remotePre = remoteSection.createEl('pre', { cls: 'conflict-content' });
         remotePre.createEl('code', { text: this.remoteContent });
+        panels.remote = remoteSection;
 
-        const diffSection = contentEl.createDiv({ cls: 'conflict-diff-section' });
-        diffSection.createEl('h3', { text: 'Differences' });
+        const diffSection = contentArea.createDiv({ cls: 'conflict-diff-section conflict-panel' });
+        diffSection.createEl('h3', { text: t('syncConflictModal.differences') });
         const diffPre = diffSection.createEl('pre', { cls: 'conflict-diff' });
         this.renderDiff(diffPre);
+        panels.diff = diffSection;
+
+        setActivePanel('diff');
 
         const buttonContainer = contentEl.createDiv({ cls: 'conflict-buttons' });
 
         new Setting(buttonContainer)
             .addButton(btn => btn
-                .setButtonText('Keep local')
-                .setTooltip('Overwrite remote with your local content')
+                .setButtonText(t('syncConflictModal.keepLocal'))
+                .setTooltip(t('syncConflictModal.keepLocal.tooltip'))
                 .setCta()
                 .onClick(() => {
                     this.onChoose('local');
                     this.close();
                 }))
             .addButton(btn => applyDestructiveStyle(btn)
-                .setButtonText('Keep remote')
-                .setTooltip('Overwrite local with remote content')
+                .setButtonText(t('syncConflictModal.keepRemote'))
+                .setTooltip(t('syncConflictModal.keepRemote.tooltip'))
                 .onClick(() => {
                     this.onChoose('remote');
                     this.close();
                 }))
             .addButton(btn => btn
-                .setButtonText('Cancel')
+                .setButtonText(t('syncConflictModal.cancel'))
                 .onClick(() => {
                     this.close();
                 }));

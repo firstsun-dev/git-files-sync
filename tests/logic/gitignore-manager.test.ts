@@ -3,8 +3,10 @@ import { describe, it, expect, vi, beforeEach, Mocked } from 'vitest';
 import { GitignoreManager } from '../../src/logic/gitignore-manager';
 import { App, DataAdapter } from 'obsidian';
 import { GitServiceInterface } from '../../src/services/git-service-interface';
+import { readLocalSymlinkTarget } from '../../src/utils/symlink';
 
 vi.mock('obsidian');
+vi.mock('../../src/utils/symlink', () => ({ readLocalSymlinkTarget: vi.fn() }));
 
 describe('GitignoreManager', () => {
     let manager: GitignoreManager;
@@ -14,6 +16,7 @@ describe('GitignoreManager', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(readLocalSymlinkTarget).mockReturnValue(null);
 
         const mockAdapter = {
             exists: vi.fn(),
@@ -117,6 +120,26 @@ describe('GitignoreManager', () => {
             expect(manager.isIgnored('sub/root-ignored.txt')).toBe(true);
         });
 
+        it('scans a pre-fetched remote tree for .gitignore paths instead of calling getRepoGitignores', async () => {
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+            vi.mocked(mockGitService.getFile).mockImplementation((path) => {
+                if (path === '/.gitignore') return Promise.resolve({ content: 'node_modules/', sha: '1' });
+                if (path === '/sub/.gitignore') return Promise.resolve({ content: '*.tmp', sha: '2' });
+                return Promise.resolve({ content: '', sha: '' });
+            });
+
+            await manager.loadGitignores([
+                { path: '.gitignore', symlink: false, sha: 'a' },
+                { path: 'sub/.gitignore', symlink: false, sha: 'b' },
+                { path: 'src/main.ts', symlink: false, sha: 'c' },
+            ]);
+
+            expect(mockGitService.getRepoGitignores).not.toHaveBeenCalled();
+            expect(manager.isIgnored('node_modules/test.js')).toBe(true);
+            expect(manager.isIgnored('sub/test.tmp')).toBe(true);
+        });
+
         it('should pick up local-only subdirectory .gitignore not yet on remote', async () => {
             // Remote only knows about root .gitignore; sub/.gitignore exists locally but not pushed yet
             vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue(['.gitignore']);
@@ -184,6 +207,58 @@ describe('GitignoreManager', () => {
             
             // vault/src/main.ts should NOT be ignored
             expect(manager.isIgnored('src/main.ts')).toBe(false);
+        });
+    });
+
+    describe('local ignorePatterns setting', () => {
+        it('ignores files matching a local pattern even with no remote/local .gitignore', async () => {
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue([]);
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+
+            const localManager = new GitignoreManager(mockApp, mockGitService, branch, '', '', 'secrets/\n*.private');
+            await localManager.loadGitignores();
+
+            expect(localManager.isIgnored('secrets/key.txt')).toBe(true);
+            expect(localManager.isIgnored('note.private')).toBe(true);
+            expect(localManager.isIgnored('note.md')).toBe(false);
+        });
+
+        it('applies local patterns in addition to remote .gitignore, not instead of it', async () => {
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue(['.gitignore']);
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('*.log');
+
+            const localManager = new GitignoreManager(mockApp, mockGitService, branch, '', '', '*.tmp');
+            await localManager.loadGitignores();
+
+            expect(localManager.isIgnored('test.log')).toBe(true);
+            expect(localManager.isIgnored('test.tmp')).toBe(true);
+            expect(localManager.isIgnored('test.md')).toBe(false);
+        });
+
+        it('ignores blank ignorePatterns without throwing', async () => {
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue([]);
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+
+            const localManager = new GitignoreManager(mockApp, mockGitService, branch, '', '', '   \n  ');
+            await localManager.loadGitignores();
+
+            expect(localManager.isIgnored('note.md')).toBe(false);
+        });
+
+        it('respects comments and negation in local patterns', async () => {
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue([]);
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+
+            const localManager = new GitignoreManager(mockApp, mockGitService, branch, '', '', '# comment\ndraft/*\n!draft/keep.md');
+            await localManager.loadGitignores();
+
+            expect(localManager.isIgnored('draft/scratch.md')).toBe(true);
+            expect(localManager.isIgnored('draft/keep.md')).toBe(false);
         });
     });
 
@@ -271,6 +346,25 @@ describe('GitignoreManager', () => {
 
             expect(adapter.list).toHaveBeenCalledWith('');
             expect(adapter.list).toHaveBeenCalledWith('.claude');
+        });
+
+        it('should not recurse into a folder that is actually a symlink', async () => {
+            // "linked" is a directory symlink (e.g. a shared skills folder) pointing
+            // outside the repo; walking into it would scan an unrelated tree and
+            // produce bogus .gitignore lookups for paths that don't exist remotely.
+            vi.mocked(adapter.list).mockImplementation((dir: string) => {
+                if (dir === '' || dir === undefined) {
+                    return Promise.resolve({ files: ['.gitignore'], folders: ['linked'] });
+                }
+                return Promise.resolve({ files: ['linked/nested/.gitignore'], folders: ['linked/nested'] });
+            });
+            vi.mocked(readLocalSymlinkTarget).mockImplementation((_app, path) => path === 'linked' ? '/some/other/dir' : null);
+            vi.mocked(adapter.read).mockResolvedValue('*.secret');
+
+            await manager.loadGitignores();
+
+            expect(adapter.list).toHaveBeenCalledWith('');
+            expect(adapter.list).not.toHaveBeenCalledWith('linked');
         });
     });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitHubService } from '../../src/services/github-service';
 import { requestUrl, RequestUrlResponse } from 'obsidian';
+import { MAX_BATCH_PUSH_SIZE } from '../../src/services/git-service-base';
 
 // Tests for BaseGitService protected methods exercised via GitHubService
 describe('BaseGitService', () => {
@@ -77,6 +78,30 @@ describe('BaseGitService', () => {
         });
     });
 
+    describe('safeRequest when requestUrl() itself throws a JSON-parse-of-HTML error', () => {
+        // Some Obsidian versions eagerly parse the response body as JSON inside
+        // requestUrl() itself, so a proxy/login HTML page can make the whole
+        // call reject with a raw SyntaxError — before `throw: false` or our own
+        // status/content-type checks ever get a response object to inspect.
+        it('wraps the raw "Unexpected token \'<\'... is not valid JSON" rejection with a clear message', async () => {
+            vi.mocked(requestUrl).mockRejectedValue(
+                new SyntaxError('Unexpected token \'<\', "<!DOCTYPE "... is not valid JSON')
+            );
+            await expect(service.listFiles('main')).rejects.toThrow(/received an HTML page/);
+            await expect(service.listFiles('main')).rejects.not.toThrow(/Unexpected token/);
+        });
+
+        it('wraps the older V8 phrasing ("Unexpected token < in JSON at position 0") too', async () => {
+            vi.mocked(requestUrl).mockRejectedValue(new SyntaxError('Unexpected token < in JSON at position 0'));
+            await expect(service.listFiles('main')).rejects.toThrow(/received an HTML page/);
+        });
+
+        it('does not misclassify an unrelated JSON syntax error as an HTML response', async () => {
+            vi.mocked(requestUrl).mockRejectedValue(new SyntaxError('Unexpected end of JSON input'));
+            await expect(service.listFiles('main')).rejects.toThrow('Unexpected end of JSON input');
+        });
+    });
+
     describe('parseJson with non-JSON (HTML) responses', () => {
         // Simulates Obsidian's real RequestUrlResponse.json getter, which throws
         // SyntaxError when the body is not valid JSON (e.g. an HTML page).
@@ -139,6 +164,12 @@ describe('BaseGitService', () => {
             await expect(service.listFiles('main')).rejects.toThrow(/Received an HTML page instead of a JSON error/);
             // The raw HTML document must not be dumped into the message.
             await expect(service.listFiles('main')).rejects.not.toThrow(/DOCTYPE/);
+        });
+    });
+
+    describe('MAX_BATCH_PUSH_SIZE', () => {
+        it('is a sane positive chunk size', () => {
+            expect(MAX_BATCH_PUSH_SIZE).toBeGreaterThan(0);
         });
     });
 

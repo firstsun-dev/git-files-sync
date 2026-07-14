@@ -13,6 +13,33 @@ export interface GitFile {
 export interface GitTreeEntry {
     path: string;
     symlink: boolean;
+    /**
+     * The blob's git SHA, when the provider's tree listing includes it. Lets a
+     * refresh classify sync status by comparing a locally-computed blob SHA
+     * against this, instead of fetching full file content per entry. Absent
+     * entries fall back to a content-based comparison via getFile.
+     */
+    sha?: string;
+}
+
+/** One file's content to include in a batched multi-file commit. */
+export interface BatchPushItem {
+    /** Path relative to rootPath, same shape pushFile's `path` param takes. */
+    path: string;
+    content: string | ArrayBuffer;
+    /**
+     * Whether this path already existed on the remote before this push, per the
+     * caller's pre-fetched tree. Only GitLab's Commits API needs this (to choose
+     * action 'create' vs 'update'); GitHub/Gitea's tree-based commit ignores it.
+     */
+    existedRemotely?: boolean;
+}
+
+/** Result for one file after a batch push completes. */
+export interface BatchPushResult {
+    path: string;
+    /** New blob sha, when the provider can report it directly. */
+    sha?: string;
 }
 
 export interface GitServiceInterface {
@@ -30,6 +57,29 @@ export interface GitServiceInterface {
      * implement it; callers must fall back to pushFile when it's absent.
      */
     pushSymlink?(path: string, target: string, branch: string, commitMessage: string): Promise<{ path: string, sha?: string }>;
+    /**
+     * Push many files in a single commit. Optional: only providers with a way to
+     * write multiple files atomically implement it; callers must fall back to
+     * sequential pushFile calls when it's absent (mirrors pushSymlink?). Must be
+     * atomic: on failure it throws rather than returning partial results, so the
+     * caller can mark every item in the attempted batch as failed.
+     */
+    pushBatch?(items: BatchPushItem[], branch: string, commitMessage: string): Promise<BatchPushResult[]>;
     deleteFile(path: string, branch: string, commitMessage: string): Promise<void>;
+    /**
+     * Delete many files in a single commit. Optional: only providers with a way
+     * to write multiple changes atomically implement it; callers must fall back
+     * to sequential deleteFile calls when it's absent (mirrors pushBatch?). Must
+     * be atomic: on failure it throws rather than partially deleting, so the
+     * caller can mark every path in the attempted batch as failed.
+     */
+    deleteBatch?(paths: string[], branch: string, commitMessage: string): Promise<void>;
     getRepoGitignores(branch: string): Promise<string[]>;
+    /**
+     * Fetches a blob's content directly by its git SHA (from a GitTreeEntry),
+     * bypassing the path/ref-based Contents API. Used to lazily load a modified
+     * file's remote content (e.g. to render a diff) once a SHA-based refresh has
+     * already determined it differs from the local copy.
+     */
+    getBlob(sha: string, path: string): Promise<GitFile>;
 }
