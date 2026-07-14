@@ -144,6 +144,50 @@ describe('GitHubService', () => {
             expect(calls[6]?.method).toBe('PATCH');
             expect(JSON.parse(calls[6]?.body as string)).toEqual({ sha: 'commit2' });
         });
+
+        it('creates blobs concurrently, not one at a time (regression guard against a sequential loop)', async () => {
+            // Deferred blob responses: none of them resolve until every blob
+            // POST has already been dispatched. A sequential `for` loop would
+            // deadlock here since call N+1 never fires until call N resolves.
+            const blobDeferreds = Array.from({ length: 4 }, () => {
+                let resolve!: (v: RequestUrlResponse) => void;
+                const promise = new Promise<RequestUrlResponse>(r => { resolve = r; });
+                return { promise, resolve };
+            });
+            let blobCallCount = 0;
+
+            vi.mocked(requestUrl).mockImplementation(((param: string | RequestUrlParam) => {
+                const url = (param as RequestUrlParam).url;
+                if (url.endsWith('/git/ref/heads/main')) {
+                    return Promise.resolve({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse);
+                }
+                if (url.includes('/git/commits/commit1')) {
+                    return Promise.resolve({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse);
+                }
+                if (url.endsWith('/git/blobs')) {
+                    return blobDeferreds[blobCallCount++]!.promise;
+                }
+                if (url.endsWith('/git/trees')) {
+                    return Promise.resolve({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse);
+                }
+                if (url.endsWith('/git/commits')) {
+                    return Promise.resolve({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse);
+                }
+                return Promise.resolve({ status: 200, json: {} } as unknown as RequestUrlResponse);
+            }) as unknown as typeof requestUrl);
+
+            const items = Array.from({ length: 4 }, (_, i) => ({ path: `f${i}.md`, content: `content${i}` }));
+            const resultPromise = service.pushBatch(items, 'main', 'push');
+
+            // Wait for every blob POST to have been dispatched — a sequential
+            // loop would never get past the first one, since its promise never resolves.
+            await vi.waitFor(() => expect(blobCallCount).toBe(4));
+
+            blobDeferreds.forEach((d, i) => d.resolve({ status: 201, json: { sha: `blob-${i}` } } as unknown as RequestUrlResponse));
+            const result = await resultPromise;
+
+            expect(result).toEqual(items.map((item, i) => ({ path: item.path, sha: `blob-${i}` })));
+        });
     });
 
     describe('pushFile', () => {

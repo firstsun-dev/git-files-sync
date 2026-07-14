@@ -12,9 +12,9 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-07-14 10:30
+**Last Updated:** 2026-07-14 10:45
 **Session ID:** current
-**Active Feature:** feat-012 (perf: batch-commit remote-only file deletion) — done, lint/build/test all green. feat-011 (push-all batching) also done this session. Previous active item (issue #78 delete-remote-only-file fix) still awaiting user re-test after rebuild.
+**Active Feature:** feat-013 (perf: parallelize blob creation in batch push) — done, lint/build/test all green. feat-011/feat-012 (push-all + delete batching) also done this session. Previous active item (issue #78 delete-remote-only-file fix) still awaiting user re-test after rebuild.
 
 ## Status
 
@@ -54,6 +54,15 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
   - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 339/339 passed.
   - Not yet committed as of this note — pending commit onto `claude/fix-directory-symlink-pull-260713`.
 
+- [x] feat-013: perf(push): parallelize blob creation within a batch commit. User reported "batch push 還是很慢" (batch push is still slow) after feat-011/feat-012 landed; confirmed they were on GitHub with the latest build. Root cause found by re-reading `GitHubService.pushBatch`/`GiteaService.pushBatch`: the blob-creation step was still a sequential `for` loop — one `POST .../git/blobs` awaited fully before the next started — so wall-clock time for the batch was still O(N) network round trips of pure latency, even though only one commit was produced at the end. This was a known, called-out tradeoff from feat-011's plan ("sequential is fine... could be Promise.all'd for extra speed, but... note as a possible future optimization"); the user's report made it worth doing now.
+  - Added `BaseGitService.mapWithConcurrency<T,R>(items, concurrency, fn)` (`git-service-base.ts`): order-preserving, bounded-concurrency mapper (worker-pool pattern over a shared cursor, `Promise.all` over `Math.min(concurrency, items.length)` workers).
+  - Added `BLOB_CREATE_CONCURRENCY = 8` constant alongside `MAX_BATCH_PUSH_SIZE`.
+  - `GitHubService.pushBatch`/`GiteaService.pushBatch` now build blobs via `mapWithConcurrency` instead of a `for` loop; the tree/commit/ref sequence after it is unchanged (genuinely sequential — each step depends on the previous one's result).
+  - GitLab unaffected — its `pushBatch` already sends the whole batch in one Commits API request, no per-file blob step to parallelize.
+  - Added a regression-guard test (`github-service.test.ts`): deferred blob-response promises that only resolve after every blob POST has been dispatched — a reintroduced sequential loop would deadlock on this test (call 2 never fires until call 1's promise resolves, which it doesn't), so it fails loudly if someone reverts to sequential.
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 340/340 passed.
+  - Not yet committed as of this note — pending commit onto `claude/fix-directory-symlink-pull-260713`.
+
 ### What's In Progress
 
 - Nothing else actively in progress.
@@ -61,7 +70,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ### What's Next
 
 1. Get user confirmation that delete now works (or a new detailed error message) after they rebuild/reload with the latest push (issue #78).
-2. Manually verify feat-011/feat-012 in Obsidian if possible: push-all and batch-delete on a mixed vault should each produce exactly one new commit.
+2. Manually verify feat-011/feat-012/feat-013 in Obsidian if possible: push-all and batch-delete on a mixed vault should each produce exactly one new commit, and push-all should now feel noticeably faster on GitHub/Gitea (blobs created concurrently, up to 8 in flight).
 3. Issue #37 (Bitbucket provider support, feat-010) — large, was deferred until #38 (i18n) landed. Now unblocked. Its `GitServiceInterface` implementation should simply omit `pushBatch`/`deleteBatch` and use the existing per-file fallbacks.
 4. Re-sync against `gh issue list --repo firstsun-dev/git-files-sync --state open`. Remaining genuinely-unstarted issues as of this session: #47 (regex ignore lists), #45 (SonarQube findings), #37 (Bitbucket), #28 (non-engineering: community visibility).
 5. PR #51 is large (8+ issues' worth of changes now). If the user wants to review/merge it before more work piles on, flag this rather than continuing to add commits indefinitely.

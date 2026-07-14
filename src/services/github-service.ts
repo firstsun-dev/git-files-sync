@@ -1,5 +1,5 @@
 import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
-import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
+import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE, BLOB_CREATE_CONCURRENCY } from './git-service-base';
 import { logger } from '../utils/logger';
 
 export class GitHubService extends BaseGitService implements GitServiceInterface {
@@ -92,14 +92,13 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         const base = this.getGitDataApiBase();
         const { latestCommitSha, baseTreeSha } = await this.resolveGitHubStyleBaseTree(branch);
 
-        const blobShas: string[] = [];
-        for (const item of items) {
+        const blobShas = await this.mapWithConcurrency(items, BLOB_CREATE_CONCURRENCY, async item => {
             const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', {
                 content: this.encodeContent(item.content),
                 encoding: 'base64',
             });
-            blobShas.push(this.parseJson<{ sha: string }>(blobResp).sha);
-        }
+            return this.parseJson<{ sha: string }>(blobResp).sha;
+        });
 
         const treeItems = items.map((item, i) => ({
             path: this.getFullPath(item.path),
