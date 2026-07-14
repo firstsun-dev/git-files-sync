@@ -300,6 +300,35 @@ describe('GiteaService', () => {
         });
     });
 
+    describe('deleteBatch', () => {
+        it('returns and makes no requests for an empty path list', async () => {
+            await service.deleteBatch([], 'main', 'delete nothing');
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('resolves branch via /branches/{branch}, then deletes N files in one commit', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { commit: { id: 'commit1' } } } as unknown as RequestUrlResponse) // resolve branch
+                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)    // get commit
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)              // create tree
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)            // create commit
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                           // update ref
+
+            await service.deleteBatch(['a.md'], 'main', 'Delete 1 file(s) from Obsidian');
+
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            expect(calls).toHaveLength(5);
+            expect(calls[0]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/branches/main`);
+            expect(calls[1]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/commits/commit1`);
+
+            const treeBody = JSON.parse(calls[2]?.body as string) as { tree: Array<{ path: string; sha: string | null }> };
+            expect(treeBody.tree).toEqual([{ path: 'a.md', mode: '100644', type: 'blob', sha: null }]);
+
+            expect(calls[4]?.method).toBe('PATCH');
+            expect(calls[4]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/refs/heads/main`);
+        });
+    });
+
     describe('testConnection', () => {
         sharedTestConnection(() => service);
 

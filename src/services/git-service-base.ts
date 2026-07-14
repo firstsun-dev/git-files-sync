@@ -299,7 +299,10 @@ export abstract class BaseGitService {
         branch: string,
         baseTreeSha: string,
         latestCommitSha: string,
-        treeItems: Array<{ path: string; mode: string; type: 'blob'; sha: string }>,
+        // A null sha removes that path from the resulting tree — how a batch
+        // delete is expressed at the tree level (mode/type are still required
+        // fields on the entry but are otherwise irrelevant for a deletion).
+        treeItems: Array<{ path: string; mode: string; type: 'blob'; sha: string | null }>,
         message: string
     ): Promise<string> {
         const treeResp = await this.safeRequest(`${base}/git/trees`, 'POST', { base_tree: baseTreeSha, tree: treeItems });

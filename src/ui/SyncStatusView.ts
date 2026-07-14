@@ -11,6 +11,7 @@ import { isBinaryPath, contentsEqual } from '../utils/path';
 import { readLocalSymlinkTarget } from '../utils/symlink';
 import { gitBlobSha } from '../utils/git-blob-sha';
 import { type GitTreeEntry } from '../services/git-service-interface';
+import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
 import { t, type TranslationKey } from '../i18n';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
@@ -45,6 +46,10 @@ export class SyncStatusView extends ItemView {
     private renderView(): void {
         const container = this.containerEl.children[1] as HTMLElement;
         if (!container) return;
+
+        const prevListEl = container.querySelector<HTMLElement>('.ssv-list');
+        const scrollTop = prevListEl?.scrollTop ?? 0;
+
         container.empty();
 
         this.renderInfoStrip(container);
@@ -61,6 +66,8 @@ export class SyncStatusView extends ItemView {
         } else {
             this.renderFileList(listEl);
         }
+
+        listEl.scrollTop = scrollTop;
     }
 
     private renderProgressBar(container: HTMLElement): void {
@@ -775,20 +782,62 @@ export class SyncStatusView extends ItemView {
     }
 
     private async performRemoteDeletion(remote: FileStatus[], total: number, localCount: number, prog: Notice, errors: { path: string, message: string }[]): Promise<void> {
+        if (remote.length === 0) return;
+
+        // s.path is a vault-relative path (may carry the vaultFolder prefix); the
+        // git service expects a path relative to rootPath only, so strip
+        // vaultFolder first, same as every other gitService call site.
+        const entries = remote.map(s => ({ status: s, repoPath: this.plugin.getNormalizedPath(s.path) }));
+
+        if (!this.plugin.gitService.deleteBatch) {
+            await this.performRemoteDeletionSequential(entries, total, localCount, prog, errors);
+            return;
+        }
+
         let cur = localCount;
-        for (const s of remote) {
+        for (const e of entries) {
             cur++;
-            prog.setMessage(t('syncStatus.progress.deletingRemote', { current: cur, total, path: s.path }));
+            prog.setMessage(t('syncStatus.progress.deletingRemote', { current: cur, total, path: e.status.path }));
+        }
+
+        const branch = this.plugin.settings.branch;
+        for (let i = 0; i < entries.length; i += MAX_BATCH_PUSH_SIZE) {
+            const chunk = entries.slice(i, i + MAX_BATCH_PUSH_SIZE);
             try {
-                // s.path is a vault-relative path (may carry the vaultFolder prefix);
-                // the git service expects a path relative to rootPath only, so strip
-                // vaultFolder first, same as every other gitService call site.
-                const repoPath = this.plugin.getNormalizedPath(s.path);
-                await this.plugin.gitService.deleteFile(repoPath, this.plugin.settings.branch, `Delete ${repoPath}`);
-                this.fileStatuses.delete(s.path);
-                this.selectedFiles.delete(s.path);
-            } catch (e) {
-                errors.push({ path: s.path, message: e instanceof Error ? e.message : String(e) });
+                const message = `Delete ${chunk.length} file(s) from Obsidian`;
+                await this.plugin.gitService.deleteBatch(chunk.map(e => e.repoPath), branch, message);
+                for (const e of chunk) {
+                    this.fileStatuses.delete(e.status.path);
+                    this.selectedFiles.delete(e.status.path);
+                }
+            } catch (err) {
+                // Atomic per-provider failure: none of this chunk's files were
+                // actually deleted, so every path in it is failed, not dropped.
+                const message = err instanceof Error ? err.message : String(err);
+                for (const e of chunk) errors.push({ path: e.status.path, message });
+            }
+        }
+    }
+
+    /** Provider doesn't support a batch/atomic multi-file delete commit —
+     * fall back to the original sequential per-file delete. */
+    private async performRemoteDeletionSequential(
+        entries: Array<{ status: FileStatus; repoPath: string }>,
+        total: number,
+        localCount: number,
+        prog: Notice,
+        errors: { path: string, message: string }[]
+    ): Promise<void> {
+        let cur = localCount;
+        for (const e of entries) {
+            cur++;
+            prog.setMessage(t('syncStatus.progress.deletingRemote', { current: cur, total, path: e.status.path }));
+            try {
+                await this.plugin.gitService.deleteFile(e.repoPath, this.plugin.settings.branch, `Delete ${e.repoPath}`);
+                this.fileStatuses.delete(e.status.path);
+                this.selectedFiles.delete(e.status.path);
+            } catch (err) {
+                errors.push({ path: e.status.path, message: err instanceof Error ? err.message : String(err) });
             }
         }
     }

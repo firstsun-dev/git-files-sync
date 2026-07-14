@@ -10,6 +10,7 @@ import type { GitTreeEntry } from '../../src/services/git-service-interface';
 function makePlugin(overrides: {
     vaultFolder?: string;
     deleteFile?: ReturnType<typeof vi.fn>;
+    deleteBatch?: ReturnType<typeof vi.fn>;
     adapterExists?: ReturnType<typeof vi.fn>;
     adapterStat?: ReturnType<typeof vi.fn>;
     getAbstractFileByPath?: ReturnType<typeof vi.fn>;
@@ -29,7 +30,7 @@ function makePlugin(overrides: {
 
     const plugin = {
         settings: { branch: 'main', vaultFolder },
-        gitService: { deleteFile },
+        gitService: { deleteFile, deleteBatch: overrides.deleteBatch },
         getNormalizedPath(path: string): string {
             if (!vaultFolder) return path;
             const prefix = `${vaultFolder}/`;
@@ -97,6 +98,71 @@ describe('SyncStatusView remote deletion', () => {
         }).performRemoteDeletion([fileStatus], 1, 0, prog, errors);
 
         expect(errors).toEqual([{ path: 'notes/todo.md', message: 'Cannot delete "notes/todo.md": file was not found on branch "main".' }]);
+    });
+
+    it('groups all remote-only deletes into one gitService.deleteBatch call when the provider supports it', async () => {
+        const deleteBatch = vi.fn().mockResolvedValue(undefined);
+        const { plugin, leaf, deleteFile } = makePlugin({ deleteBatch });
+        const view = new SyncStatusView(leaf, plugin);
+
+        const targets: FileStatus[] = [
+            { path: 'a.md', status: 'remote-only' },
+            { path: 'b.md', status: 'remote-only' },
+        ];
+        const errors: { path: string, message: string }[] = [];
+        const prog = new Notice('', 0);
+
+        await (view as unknown as {
+            performRemoteDeletion(remote: FileStatus[], total: number, localCount: number, prog: Notice, errors: { path: string, message: string }[]): Promise<void>
+        }).performRemoteDeletion(targets, 2, 0, prog, errors);
+
+        expect(deleteBatch).toHaveBeenCalledTimes(1);
+        expect(deleteBatch).toHaveBeenCalledWith(['a.md', 'b.md'], 'main', expect.any(String));
+        expect(deleteFile).not.toHaveBeenCalled();
+        expect(errors).toHaveLength(0);
+    });
+
+    it('marks every path in a failed deleteBatch chunk as failed, not dropped', async () => {
+        const deleteBatch = vi.fn().mockRejectedValue(new Error('commit failed'));
+        const { plugin, leaf } = makePlugin({ deleteBatch });
+        const view = new SyncStatusView(leaf, plugin);
+
+        const targets: FileStatus[] = [
+            { path: 'a.md', status: 'remote-only' },
+            { path: 'b.md', status: 'remote-only' },
+        ];
+        const errors: { path: string, message: string }[] = [];
+        const prog = new Notice('', 0);
+
+        await (view as unknown as {
+            performRemoteDeletion(remote: FileStatus[], total: number, localCount: number, prog: Notice, errors: { path: string, message: string }[]): Promise<void>
+        }).performRemoteDeletion(targets, 2, 0, prog, errors);
+
+        expect(errors).toEqual([
+            { path: 'a.md', message: 'commit failed' },
+            { path: 'b.md', message: 'commit failed' },
+        ]);
+    });
+
+    it('falls back to the sequential deleteFile loop when the provider has no deleteBatch', async () => {
+        const { plugin, leaf, deleteFile } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+
+        const targets: FileStatus[] = [
+            { path: 'a.md', status: 'remote-only' },
+            { path: 'b.md', status: 'remote-only' },
+        ];
+        const errors: { path: string, message: string }[] = [];
+        const prog = new Notice('', 0);
+
+        await (view as unknown as {
+            performRemoteDeletion(remote: FileStatus[], total: number, localCount: number, prog: Notice, errors: { path: string, message: string }[]): Promise<void>
+        }).performRemoteDeletion(targets, 2, 0, prog, errors);
+
+        expect(deleteFile).toHaveBeenCalledTimes(2);
+        expect(deleteFile).toHaveBeenCalledWith('a.md', 'main', expect.any(String));
+        expect(deleteFile).toHaveBeenCalledWith('b.md', 'main', expect.any(String));
+        expect(errors).toHaveLength(0);
     });
 });
 

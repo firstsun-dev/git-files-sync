@@ -312,6 +312,40 @@ describe('GitHubService', () => {
         });
     });
 
+    describe('deleteBatch', () => {
+        it('returns and makes no requests for an empty path list', async () => {
+            await service.deleteBatch([], 'main', 'delete nothing');
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('deletes N files in one commit via ref -> commit -> tree(sha:null) -> commit -> ref', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse) // get ref
+                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)      // get commit
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)                // create tree
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)              // create commit
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                             // update ref
+
+            await service.deleteBatch(['a.md', 'b.md'], 'main', 'Delete 2 file(s) from Obsidian');
+
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            expect(calls).toHaveLength(5);
+
+            const treeBody = JSON.parse(calls[2]?.body as string) as { base_tree: string; tree: Array<{ path: string; mode: string; type: string; sha: string | null }> };
+            expect(treeBody.base_tree).toBe('tree1');
+            expect(treeBody.tree).toEqual([
+                { path: 'a.md', mode: '100644', type: 'blob', sha: null },
+                { path: 'b.md', mode: '100644', type: 'blob', sha: null },
+            ]);
+
+            const commitBody = JSON.parse(calls[3]?.body as string) as { message: string; tree: string; parents: string[] };
+            expect(commitBody).toEqual({ message: 'Delete 2 file(s) from Obsidian', tree: 'tree2', parents: ['commit1'] });
+
+            expect(calls[4]?.method).toBe('PATCH');
+            expect(JSON.parse(calls[4]?.body as string)).toEqual({ sha: 'commit2' });
+        });
+    });
+
     describe('testConnection', () => {
         sharedTestConnection(() => service);
 

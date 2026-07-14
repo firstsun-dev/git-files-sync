@@ -242,6 +242,30 @@ describe('GitLabService', () => {
         });
     });
 
+    describe('deleteBatch', () => {
+        it('returns and makes no requests for an empty path list', async () => {
+            await service.deleteBatch([], 'main', 'delete nothing');
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('posts a Commits API actions array with action: delete, no content/encoding', async () => {
+            mockRequest({ status: 201, json: { id: 'commit-sha' } });
+
+            await service.deleteBatch(['a.md', 'b.md'], 'main', 'Delete 2 file(s) from Obsidian');
+
+            const call = getLastRequestCall();
+            expect(call.url).toBe(`${baseUrl}/api/v4/projects/${projectId}/repository/commits`);
+            expect(call.method).toBe('POST');
+            const body = JSON.parse(call.body as string) as { branch: string; commit_message: string; actions: Array<{ action: string; file_path: string; content?: string; encoding?: string }> };
+            expect(body.branch).toBe('main');
+            expect(body.commit_message).toBe('Delete 2 file(s) from Obsidian');
+            expect(body.actions).toEqual([
+                { action: 'delete', file_path: 'a.md' },
+                { action: 'delete', file_path: 'b.md' },
+            ]);
+        });
+    });
+
     describe('testConnection', () => {
         sharedTestConnection(() => service);
 
