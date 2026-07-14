@@ -133,6 +133,19 @@ export default class GitLabFilesPush extends Plugin {
 			})
 		);
 
+		// A file deleted outside the plugin's own delete UI (e.g. from Obsidian's
+		// file explorer) would otherwise leave its syncMetadata entry behind
+		// forever; detectRename's rename-matching scan treats every such orphan
+		// as a rename candidate and does a live remote lookup for it on every
+		// future single-file push, so clear it as soon as Obsidian reports the delete.
+		this.registerEvent(
+			this.app.vault.on('delete', (file) => {
+				if (file instanceof TFile) {
+					void this.sync.clearMetadata(file.path);
+				}
+			})
+		);
+
 		await this.checkForUpdateNotice();
 	}
 
