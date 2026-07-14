@@ -387,7 +387,12 @@ export class SyncStatusView extends ItemView {
         try {
             const listing = await this.app.vault.adapter.list(folderPath);
             for (const file of listing.files) {
-                if (this.isHidden(file)) {
+                if (!this.isHidden(file)) continue;
+                // Guard against a symlinked folder being misclassified as a file
+                // by the adapter's raw listing (Node's dirent type doesn't follow
+                // links) — still track it as a link entry rather than a readable
+                // file, same as a symlinked folder found via listing.folders below.
+                if (readLocalSymlinkTarget(this.app, file) !== null || await this.isLocalFile(file)) {
                     result.push(file);
                 }
             }
@@ -410,6 +415,12 @@ export class SyncStatusView extends ItemView {
         return path.split('/').some(part => part.startsWith('.'));
     }
 
+    /** True only for an actual local file — excludes real directories (and symlinks to one), which `adapter.stat()` follows. */
+    private async isLocalFile(vaultPath: string): Promise<boolean> {
+        const stat = await this.app.vault.adapter.stat(vaultPath);
+        return stat?.type === 'file';
+    }
+
     private initializeFileStatuses(localFiles: TFile[]): void {
         for (const file of localFiles) {
             this.fileStatuses.set(file.path, { file, path: file.path, status: 'checking' });
@@ -429,9 +440,13 @@ export class SyncStatusView extends ItemView {
 
             if (localFile) {
                 extra.push(localFile);
-            } else if (await this.app.vault.adapter.exists(vaultPath)) {
+            } else if (await this.isLocalFile(vaultPath)) {
                 extra.push(vaultPath);
             } else {
+                // Either nothing exists locally, or the remote's record (e.g. a
+                // stale symlink push) now collides with a real local folder of
+                // the same name — either way there's no readable local file to
+                // compare, so it's remote-only.
                 this.fileStatuses.set(vaultPath, { path: vaultPath, status: 'remote-only' });
             }
         }
@@ -765,7 +780,11 @@ export class SyncStatusView extends ItemView {
             cur++;
             prog.setMessage(t('syncStatus.progress.deletingRemote', { current: cur, total, path: s.path }));
             try {
-                await this.plugin.gitService.deleteFile(s.path, this.plugin.settings.branch, `Delete ${s.path}`);
+                // s.path is a vault-relative path (may carry the vaultFolder prefix);
+                // the git service expects a path relative to rootPath only, so strip
+                // vaultFolder first, same as every other gitService call site.
+                const repoPath = this.plugin.getNormalizedPath(s.path);
+                await this.plugin.gitService.deleteFile(repoPath, this.plugin.settings.branch, `Delete ${repoPath}`);
                 this.fileStatuses.delete(s.path);
                 this.selectedFiles.delete(s.path);
             } catch (e) {
