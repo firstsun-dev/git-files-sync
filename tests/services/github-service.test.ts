@@ -105,15 +105,11 @@ describe('GitHubService', () => {
             expect(requestUrl).not.toHaveBeenCalled();
         });
 
-        it('commits N files in one commit via ref -> commit -> blobs -> tree -> commit -> ref', async () => {
+        it('commits N files in one GraphQL mutation via ref -> createCommitOnBranch -> tree', async () => {
             vi.mocked(requestUrl)
                 .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse) // get ref
-                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)      // get commit
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-a' } } as unknown as RequestUrlResponse)               // blob a
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-b' } } as unknown as RequestUrlResponse)               // blob b
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)                // create tree
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)              // create commit
-                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                             // update ref
+                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse) // mutation
+                .mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'a.md', type: 'blob', sha: 'blob-a' }, { path: 'b.md', type: 'blob', sha: 'blob-b' }], truncated: false } } as unknown as RequestUrlResponse); // fresh tree
 
             const result = await service.pushBatch(
                 [{ path: 'a.md', content: 'hello' }, { path: 'b.md', content: 'world' }],
@@ -124,69 +120,37 @@ describe('GitHubService', () => {
             expect(result).toEqual([{ path: 'a.md', sha: 'blob-a' }, { path: 'b.md', sha: 'blob-b' }]);
 
             const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
-            expect(calls).toHaveLength(7);
+            expect(calls).toHaveLength(3);
+            expect(calls[1]?.url).toBe('https://api.github.com/graphql');
+            expect(calls[1]?.method).toBe('POST');
 
-            // blobs are base64-encoded (not pushSymlink's raw utf-8 path), so binary content works too.
-            const blobABody = JSON.parse(calls[2]?.body as string) as { content: string; encoding: string };
-            expect(blobABody.encoding).toBe('base64');
-            expect(atob(blobABody.content)).toBe('hello');
-
-            const treeBody = JSON.parse(calls[4]?.body as string) as { base_tree: string; tree: Array<{ path: string; mode: string; type: string; sha: string }> };
-            expect(treeBody.base_tree).toBe('tree1');
-            expect(treeBody.tree).toEqual([
-                { path: 'a.md', mode: '100644', type: 'blob', sha: 'blob-a' },
-                { path: 'b.md', mode: '100644', type: 'blob', sha: 'blob-b' },
+            const mutationBody = JSON.parse(calls[1]?.body as string) as {
+                variables: { input: { branch: { repositoryNameWithOwner: string; branchName: string }; message: { headline: string }; expectedHeadOid: string; fileChanges: { additions: Array<{ path: string; contents: string }> } } };
+            };
+            const input = mutationBody.variables.input;
+            expect(input.branch).toEqual({ repositoryNameWithOwner: `${owner}/${repo}`, branchName: 'main' });
+            expect(input.message).toEqual({ headline: 'Push 2 file(s) from Obsidian' });
+            expect(input.expectedHeadOid).toBe('commit1');
+            // contents are base64-encoded (not pushSymlink's raw utf-8 path), so binary content works too.
+            expect(atob(input.fileChanges.additions[0]!.contents)).toBe('hello');
+            expect(input.fileChanges.additions).toEqual([
+                { path: 'a.md', contents: btoa('hello') },
+                { path: 'b.md', contents: btoa('world') },
             ]);
-
-            const commitBody = JSON.parse(calls[5]?.body as string) as { message: string; tree: string; parents: string[] };
-            expect(commitBody).toEqual({ message: 'Push 2 file(s) from Obsidian', tree: 'tree2', parents: ['commit1'] });
-
-            expect(calls[6]?.method).toBe('PATCH');
-            expect(JSON.parse(calls[6]?.body as string)).toEqual({ sha: 'commit2' });
         });
 
-        it('creates blobs concurrently, not one at a time (regression guard against a sequential loop)', async () => {
-            // Deferred blob responses: none of them resolve until every blob
-            // POST has already been dispatched. A sequential `for` loop would
-            // deadlock here since call N+1 never fires until call N resolves.
-            const blobDeferreds = Array.from({ length: 4 }, () => {
-                let resolve!: (v: RequestUrlResponse) => void;
-                const promise = new Promise<RequestUrlResponse>(r => { resolve = r; });
-                return { promise, resolve };
-            });
-            let blobCallCount = 0;
+        it('throws when the GraphQL response reports errors on an HTTP 200', async () => {
+            // GraphQL reports mutation failures (e.g. a stale expectedHeadOid) as a
+            // 200 response with an `errors` array, not an HTTP error status.
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse) // get ref
+                .mockResolvedValueOnce({ status: 200, json: { errors: [{ message: 'Head sha was modified' }] } } as unknown as RequestUrlResponse); // mutation failure
 
-            vi.mocked(requestUrl).mockImplementation(((param: string | RequestUrlParam) => {
-                const url = (param as RequestUrlParam).url;
-                if (url.endsWith('/git/ref/heads/main')) {
-                    return Promise.resolve({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse);
-                }
-                if (url.includes('/git/commits/commit1')) {
-                    return Promise.resolve({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse);
-                }
-                if (url.endsWith('/git/blobs')) {
-                    return blobDeferreds[blobCallCount++]!.promise;
-                }
-                if (url.endsWith('/git/trees')) {
-                    return Promise.resolve({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse);
-                }
-                if (url.endsWith('/git/commits')) {
-                    return Promise.resolve({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse);
-                }
-                return Promise.resolve({ status: 200, json: {} } as unknown as RequestUrlResponse);
-            }) as unknown as typeof requestUrl);
-
-            const items = Array.from({ length: 4 }, (_, i) => ({ path: `f${i}.md`, content: `content${i}` }));
-            const resultPromise = service.pushBatch(items, 'main', 'push');
-
-            // Wait for every blob POST to have been dispatched — a sequential
-            // loop would never get past the first one, since its promise never resolves.
-            await vi.waitFor(() => expect(blobCallCount).toBe(4));
-
-            blobDeferreds.forEach((d, i) => d.resolve({ status: 201, json: { sha: `blob-${i}` } } as unknown as RequestUrlResponse));
-            const result = await resultPromise;
-
-            expect(result).toEqual(items.map((item, i) => ({ path: item.path, sha: `blob-${i}` })));
+            await expect(service.pushBatch(
+                [{ path: 'a.md', content: 'hello' }],
+                'main',
+                'Push 1 file(s) from Obsidian'
+            )).rejects.toThrow('Head sha was modified');
         });
     });
 
@@ -362,31 +326,33 @@ describe('GitHubService', () => {
             expect(requestUrl).not.toHaveBeenCalled();
         });
 
-        it('deletes N files in one commit via ref -> commit -> tree(sha:null) -> commit -> ref', async () => {
+        it('deletes N files in one GraphQL mutation via ref -> createCommitOnBranch', async () => {
             vi.mocked(requestUrl)
                 .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse) // get ref
-                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)      // get commit
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)                // create tree
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)              // create commit
-                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                             // update ref
+                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse); // mutation
 
             await service.deleteBatch(['a.md', 'b.md'], 'main', 'Delete 2 file(s) from Obsidian');
 
             const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
-            expect(calls).toHaveLength(5);
+            expect(calls).toHaveLength(2);
+            expect(calls[1]?.url).toBe('https://api.github.com/graphql');
 
-            const treeBody = JSON.parse(calls[2]?.body as string) as { base_tree: string; tree: Array<{ path: string; mode: string; type: string; sha: string | null }> };
-            expect(treeBody.base_tree).toBe('tree1');
-            expect(treeBody.tree).toEqual([
-                { path: 'a.md', mode: '100644', type: 'blob', sha: null },
-                { path: 'b.md', mode: '100644', type: 'blob', sha: null },
-            ]);
+            const mutationBody = JSON.parse(calls[1]?.body as string) as {
+                variables: { input: { expectedHeadOid: string; message: { headline: string }; fileChanges: { deletions: Array<{ path: string }> } } };
+            };
+            const input = mutationBody.variables.input;
+            expect(input.expectedHeadOid).toBe('commit1');
+            expect(input.message).toEqual({ headline: 'Delete 2 file(s) from Obsidian' });
+            expect(input.fileChanges.deletions).toEqual([{ path: 'a.md' }, { path: 'b.md' }]);
+        });
 
-            const commitBody = JSON.parse(calls[3]?.body as string) as { message: string; tree: string; parents: string[] };
-            expect(commitBody).toEqual({ message: 'Delete 2 file(s) from Obsidian', tree: 'tree2', parents: ['commit1'] });
+        it('throws when the GraphQL response reports errors on an HTTP 200', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse) // get ref
+                .mockResolvedValueOnce({ status: 200, json: { errors: [{ message: 'Head sha was modified' }] } } as unknown as RequestUrlResponse); // mutation failure
 
-            expect(calls[4]?.method).toBe('PATCH');
-            expect(JSON.parse(calls[4]?.body as string)).toEqual({ sha: 'commit2' });
+            await expect(service.deleteBatch(['a.md'], 'main', 'Delete 1 file(s) from Obsidian'))
+                .rejects.toThrow('Head sha was modified');
         });
     });
 

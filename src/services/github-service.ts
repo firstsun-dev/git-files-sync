@@ -1,6 +1,21 @@
 import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
-import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE, BLOB_CREATE_CONCURRENCY } from './git-service-base';
+import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
 import { logger } from '../utils/logger';
+
+/**
+ * Commits any mix of file additions/deletions in one request. Used instead of
+ * the REST Git Data API's blob -> tree -> commit -> ref sequence for
+ * pushBatch/deleteBatch: those need one HTTP round trip per blob to upload
+ * content, while this mutation carries file content directly in the request
+ * body, so an N-file batch is one call instead of N+~5.
+ */
+const CREATE_COMMIT_MUTATION = `
+    mutation ($input: CreateCommitOnBranchInput!) {
+        createCommitOnBranch(input: $input) {
+            commit { oid }
+        }
+    }
+`;
 
 export class GitHubService extends BaseGitService implements GitServiceInterface {
     private owner: string = '';
@@ -87,29 +102,48 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         return { path: fullPath, sha: blobSha };
     }
 
+    /**
+     * Calls a GitHub GraphQL mutation. GraphQL reports mutation-level failures
+     * (e.g. a stale expectedHeadOid) as a 200 response with an `errors` array
+     * rather than an HTTP error status, so this checks for that on top of
+     * safeRequest's status-code check.
+     */
+    private async githubGraphQL<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+        const response = await this.safeRequest('https://api.github.com/graphql', 'POST', { query, variables });
+        const body = this.parseJson<{ data?: T; errors?: Array<{ message: string }> }>(response);
+        if (body.errors && body.errors.length > 0) {
+            throw new Error(`GitHub GraphQL error: ${body.errors.map(e => e.message).join('; ')}`);
+        }
+        if (!body.data) {
+            throw new Error('GitHub GraphQL response returned no data');
+        }
+        return body.data;
+    }
+
     async pushBatch(items: BatchPushItem[], branch: string, message: string): Promise<BatchPushResult[]> {
         if (items.length === 0) return [];
-        const base = this.getGitDataApiBase();
-        const { latestCommitSha, baseTreeSha } = await this.resolveGitHubStyleBaseTree(branch);
+        const expectedHeadOid = await this.getLatestCommitSha(branch);
 
-        const blobShas = await this.mapWithConcurrency(items, BLOB_CREATE_CONCURRENCY, async item => {
-            const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', {
-                content: this.encodeContent(item.content),
-                encoding: 'base64',
-            });
-            return this.parseJson<{ sha: string }>(blobResp).sha;
+        await this.githubGraphQL(CREATE_COMMIT_MUTATION, {
+            input: {
+                branch: { repositoryNameWithOwner: `${this.owner}/${this.repo}`, branchName: branch },
+                message: { headline: message },
+                expectedHeadOid,
+                fileChanges: {
+                    additions: items.map(item => ({
+                        path: this.getFullPath(item.path),
+                        contents: this.encodeContent(item.content),
+                    })),
+                },
+            },
         });
 
-        const treeItems = items.map((item, i) => ({
-            path: this.getFullPath(item.path),
-            mode: '100644',
-            type: 'blob' as const,
-            sha: blobShas[i] as string,
-        }));
-
-        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
-
-        return items.map((item, i) => ({ path: item.path, sha: blobShas[i] }));
+        // createCommitOnBranch only returns the new commit's oid, not each
+        // file's blob sha, so read them back with one follow-up tree fetch
+        // (mirrors GitLab's pushBatch, which has the same limitation).
+        const freshTree = await this.listFilesDetailed(branch, false);
+        const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
+        return items.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) }));
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
@@ -160,17 +194,18 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
 
     async deleteBatch(paths: string[], branch: string, message: string): Promise<void> {
         if (paths.length === 0) return;
-        const base = this.getGitDataApiBase();
-        const { latestCommitSha, baseTreeSha } = await this.resolveGitHubStyleBaseTree(branch);
+        const expectedHeadOid = await this.getLatestCommitSha(branch);
 
-        const treeItems = paths.map(path => ({
-            path: this.getFullPath(path),
-            mode: '100644',
-            type: 'blob' as const,
-            sha: null,
-        }));
-
-        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
+        await this.githubGraphQL(CREATE_COMMIT_MUTATION, {
+            input: {
+                branch: { repositoryNameWithOwner: `${this.owner}/${this.repo}`, branchName: branch },
+                message: { headline: message },
+                expectedHeadOid,
+                fileChanges: {
+                    deletions: paths.map(path => ({ path: this.getFullPath(path) })),
+                },
+            },
+        });
     }
 
     async testConnection(branch: string): Promise<ConnectionTestResult> {
