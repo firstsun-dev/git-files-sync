@@ -570,13 +570,124 @@
     display: inline;
 }
 
+/* ── Settings connection status badge ──────────────────────────── */
+.gfs-connection-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    margin-bottom: 12px;
+    border-radius: 12px;
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+.gfs-connection-status::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.gfs-connection-status.is-checking {
+    color: var(--text-muted);
+    background: var(--background-secondary);
+}
+
+/* Background intentionally stays the same neutral --background-secondary as
+ * the checking state rather than --background-modifier-success/error: some
+ * themes define those modifier colors identically to --text-success/error,
+ * which would make the label text invisible against its own background. */
+.gfs-connection-status.is-connected {
+    color: var(--text-success);
+    background: var(--background-secondary);
+}
+
+.gfs-connection-status.is-disconnected {
+    color: var(--text-error);
+    background: var(--background-secondary);
+}
+
+/* ── Global status bar connection indicator ────────────────────── */
+.gfs-status-bar-connection {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+
+.gfs-status-bar-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+.gfs-status-bar-icon svg {
+    width: 12px;
+    height: 12px;
+}
+
+.gfs-status-bar-connection.is-checking {
+    color: var(--text-muted);
+}
+
+.gfs-status-bar-connection.is-connected {
+    color: var(--text-success);
+}
+
+.gfs-status-bar-connection.is-disconnected {
+    color: var(--text-error);
+}
+
 /* ── Conflict Modal ─────────────────────────────────────────────── */
-.sync-conflict-modal { max-width: 900px; }
+.sync-conflict-modal.modal {
+    width: min(1100px, 92vw);
+    height: min(85vh, 800px);
+    display: flex;
+    flex-direction: column;
+}
+
+.sync-conflict-modal .modal-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
 
 .conflict-description {
     color: var(--text-muted);
-    margin-bottom: 20px;
+    margin-bottom: 12px;
     font-size: 0.9em;
+    flex-shrink: 0;
+}
+
+.conflict-tabs {
+    display: none;
+    gap: 6px;
+    margin-bottom: 12px;
+    flex-shrink: 0;
+}
+
+.conflict-tab {
+    padding: 6px 12px;
+    border-radius: 5px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.85em;
+}
+
+.conflict-tab.is-active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+}
+
+.conflict-content-area {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
 }
 
 .conflict-diff-container {
@@ -588,6 +699,11 @@
 
 @media (max-width: 600px) {
     .conflict-diff-container { grid-template-columns: 1fr; }
+
+    .conflict-tabs { display: flex; }
+
+    .conflict-panel { display: none; }
+    .conflict-panel.is-active { display: block; }
 }
 
 .conflict-section h3,
@@ -599,7 +715,6 @@
 
 .conflict-content,
 .conflict-diff {
-    max-height: 280px;
     overflow-y: auto;
     padding: 10px;
     background: var(--background-secondary);
@@ -620,6 +735,7 @@
     padding-top: 12px;
     border-top: 1px solid var(--background-modifier-border);
     flex-wrap: wrap;
+    flex-shrink: 0;
 }
 
 @media (max-width: 480px) {
@@ -636,4 +752,50 @@
 .conflict-buttons .setting-item-control {
     display: flex;
     gap: 10px;
+}
+
+.ssv-whats-new-list {
+    margin: 0 0 12px;
+    padding-left: 20px;
+}
+
+.ssv-whats-new-notable {
+    font-weight: 600;
+}
+
+/* ── Settings "what's new" banner ──────────────────────────────── */
+.gfs-whats-new-banner {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.gfs-whats-new-banner-text {
+    flex: 1;
+}
+
+.gfs-whats-new-banner-list {
+    margin: 4px 0 0;
+    padding-left: 20px;
+}
+
+.gfs-whats-new-banner-dismiss {
+    background: none;
+    border: none;
+    box-shadow: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 1.1em;
+    line-height: 1;
+    padding: 2px 4px;
+}
+
+.gfs-whats-new-banner-dismiss:hover {
+    color: var(--text-normal);
 }

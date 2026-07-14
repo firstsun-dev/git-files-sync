@@ -1,4 +1,4 @@
-import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
 
 export class GitLabService extends BaseGitService implements GitServiceInterface {
@@ -55,6 +55,28 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         return { path: data.file_path };
     }
 
+    async pushBatch(items: BatchPushItem[], branch: string, message: string): Promise<BatchPushResult[]> {
+        if (items.length === 0) return [];
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/commits`;
+
+        const actions = items.map(item => ({
+            action: item.existedRemotely ? 'update' : 'create',
+            file_path: this.getFullPath(item.path),
+            content: this.encodeContent(item.content),
+            encoding: 'base64',
+        }));
+
+        await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
+
+        // The Commits API response doesn't include each file's new blob sha, so
+        // read it back via a single follow-up tree fetch (one extra call for the
+        // whole batch, not per file) rather than per-file getFile calls.
+        const freshTree = await this.listFilesDetailed(branch, false);
+        const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
+        return items.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) }));
+    }
+
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
         const encodedProjectId = encodeURIComponent(this.projectId);
         let allEntries: GitTreeEntry[] = [];
@@ -75,7 +97,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
             const entries = data
                 .filter(item => item.type === 'blob')
-                .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE }));
+                .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE, sha: item.id }));
 
             if (useFilter) {
                 const filtered = entries.filter(e => {
@@ -95,6 +117,16 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         return allEntries;
     }
 
+    async getBlob(sha: string, path: string): Promise<GitFile> {
+        // Unlike GitHub/Gitea's base64-JSON blob endpoint, GitLab's raw blob
+        // endpoint returns the file's actual bytes directly.
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/blobs/${sha}/raw`;
+        const response = await this.safeRequest(url, 'GET');
+        const content = this.isBinary(path) ? response.arrayBuffer : response.text;
+        return { content, sha };
+    }
+
     async deleteFile(path: string, branch: string, message: string): Promise<void> {
         const url = this.getApiUrl(path);
         const body = {
@@ -103,6 +135,16 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         };
 
         await this.safeRequest(url, 'DELETE', body);
+    }
+
+    async deleteBatch(paths: string[], branch: string, message: string): Promise<void> {
+        if (paths.length === 0) return;
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/commits`;
+
+        const actions = paths.map(path => ({ action: 'delete', file_path: this.getFullPath(path) }));
+
+        await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
     }
 
     async testConnection(branch: string): Promise<ConnectionTestResult> {

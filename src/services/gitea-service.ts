@@ -1,5 +1,5 @@
-import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
-import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
+import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE, BLOB_CREATE_CONCURRENCY } from './git-service-base';
 import { logger } from '../utils/logger';
 
 export class GiteaService extends BaseGitService implements GitServiceInterface {
@@ -21,7 +21,27 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
 
     private getApiUrl(path: string): string {
         const fullPath = this.getFullPath(path);
-        return `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/contents/${fullPath}`;
+        const encodedPath = fullPath.split('/').map(encodeURIComponent).join('/');
+        return `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/contents/${encodedPath}`;
+    }
+
+    protected getGitDataApiBase(): string {
+        return `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}`;
+    }
+
+    // Gitea's git/commits/{sha} endpoint needs a resolved commit sha, not a
+    // branch ref name, and older Gitea versions don't expose GitHub's
+    // git/ref/heads/{branch} endpoint at all — resolve via /branches/{branch}
+    // instead, same as listFilesDetailed already does.
+    private async resolveBaseTree(branch: string): Promise<{ latestCommitSha: string; baseTreeSha: string }> {
+        const branchUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/branches/${branch}`;
+        const branchResp = await this.safeRequest(branchUrl, 'GET');
+        const latestCommitSha = this.parseJson<{ commit: { id: string } }>(branchResp).commit.id;
+
+        const commitResp = await this.safeRequest(`${this.getGitDataApiBase()}/git/commits/${latestCommitSha}`, 'GET');
+        const baseTreeSha = this.parseJson<{ tree: { sha: string } }>(commitResp).tree.sha;
+
+        return { latestCommitSha, baseTreeSha };
     }
 
     async getFile(path: string, branch: string): Promise<GitFile> {
@@ -55,6 +75,31 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         return { path: data.content.path, sha: data.content.sha };
     }
 
+    async pushBatch(items: BatchPushItem[], branch: string, message: string): Promise<BatchPushResult[]> {
+        if (items.length === 0) return [];
+        const base = this.getGitDataApiBase();
+        const { latestCommitSha, baseTreeSha } = await this.resolveBaseTree(branch);
+
+        const blobShas = await this.mapWithConcurrency(items, BLOB_CREATE_CONCURRENCY, async item => {
+            const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', {
+                content: this.encodeContent(item.content),
+                encoding: 'base64',
+            });
+            return this.parseJson<{ sha: string }>(blobResp).sha;
+        });
+
+        const treeItems = items.map((item, i) => ({
+            path: this.getFullPath(item.path),
+            mode: '100644',
+            type: 'blob' as const,
+            sha: blobShas[i] as string,
+        }));
+
+        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
+
+        return items.map((item, i) => ({ path: item.path, sha: blobShas[i] }));
+    }
+
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
         // Resolve branch name to commit SHA first for compatibility with all Gitea versions,
         // since the git/trees endpoint requires a SHA (not a ref name) on older instances.
@@ -77,7 +122,7 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
 
         const entries = treeData.tree
             .filter(item => item.type === 'blob')
-            .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE }));
+            .map(item => ({ path: item.path, symlink: item.mode === GIT_SYMLINK_MODE, sha: item.sha }));
 
         if (!useFilter) return entries;
 
@@ -88,8 +133,15 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         });
     }
 
+    async getBlob(sha: string, path: string): Promise<GitFile> {
+        return this.fetchGitHubStyleBlob(`${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/git/blobs/${sha}`, path);
+    }
+
     async deleteFile(path: string, branch: string, message: string): Promise<void> {
         const file = await this.getFile(path, branch);
+        if (!file.sha) {
+            throw new Error(`Cannot delete "${path}": file was not found on branch "${branch}".`);
+        }
         const url = this.getApiUrl(path);
         const body = {
             message,
@@ -98,6 +150,21 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         };
 
         await this.safeRequest(url, 'DELETE', body);
+    }
+
+    async deleteBatch(paths: string[], branch: string, message: string): Promise<void> {
+        if (paths.length === 0) return;
+        const base = this.getGitDataApiBase();
+        const { latestCommitSha, baseTreeSha } = await this.resolveBaseTree(branch);
+
+        const treeItems = paths.map(path => ({
+            path: this.getFullPath(path),
+            mode: '100644',
+            type: 'blob' as const,
+            sha: null,
+        }));
+
+        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
     }
 
     async testConnection(branch: string): Promise<ConnectionTestResult> {

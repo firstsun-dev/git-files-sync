@@ -1,25 +1,24 @@
 import { computeSideBySideDiff, type DiffSide } from '../../utils/diff';
+import { t } from '../../i18n';
 
-export function renderDiffPanel(fileEl: HTMLElement, remoteContent: string, localContent: string): HTMLElement {
-    const diffEl = fileEl.createDiv({ cls: 'ssv-diff' });
+/** Renders the side-by-side + unified diff body into an existing container. */
+export function renderDiffPanel(container: HTMLElement, remoteContent: string, localContent: string): void {
     const rows = computeSideBySideDiff(remoteContent, localContent);
 
-    const grid = diffEl.createDiv({ cls: 'ssv-diff-split' }).createDiv({ cls: 'ssv-diff-grid' });
-    grid.createDiv({ cls: 'ssv-diff-hd', text: 'Remote' });
-    grid.createDiv({ cls: 'ssv-diff-hd', text: 'Local' });
+    const grid = container.createDiv({ cls: 'ssv-diff-split' }).createDiv({ cls: 'ssv-diff-grid' });
+    grid.createDiv({ cls: 'ssv-diff-hd', text: t('diffPanel.remote') });
+    grid.createDiv({ cls: 'ssv-diff-hd', text: t('diffPanel.local') });
     for (const row of rows) {
         renderDiffCell(grid, row.left);
         renderDiffCell(grid, row.right);
     }
 
-    const unifiedEl = diffEl.createEl('pre', { cls: 'ssv-diff-unified' });
+    const unifiedEl = container.createEl('pre', { cls: 'ssv-diff-unified' });
     for (const { left, right } of rows) {
         if (left.type === 'removed')   unifiedEl.createSpan({ cls: 'ssv-u-line removed'   }).textContent = `- ${left.content ?? ''}\n`;
         if (right.type === 'added')    unifiedEl.createSpan({ cls: 'ssv-u-line added'     }).textContent = `+ ${right.content ?? ''}\n`;
         if (left.type === 'unchanged') unifiedEl.createSpan({ cls: 'ssv-u-line unchanged' }).textContent = `  ${left.content ?? ''}\n`;
     }
-
-    return diffEl;
 }
 
 function renderDiffCell(grid: HTMLElement, side: DiffSide): void {

@@ -23,6 +23,7 @@ export interface GitHubTreeItem {
     path: string;
     type: string;
     mode?: string;
+    sha?: string;
 }
 
 export interface GitHubTreeResponse {
@@ -41,6 +42,8 @@ export interface GitLabTreeItem {
     path: string;
     type: string;
     mode?: string;
+    /** GitLab's tree API calls the blob SHA "id", not "sha". */
+    id?: string;
 }
 
 export interface ConnectionTestResult {
@@ -51,6 +54,18 @@ export interface ConnectionTestResult {
     /** Populated when repoOk is false, describing the repo-level failure. */
     error?: string;
 }
+
+/** Max files per single batch-commit call. Guards against oversized request
+ * bodies / provider payload limits when a vault has thousands of files. */
+export const MAX_BATCH_PUSH_SIZE = 200;
+
+/** How many blob-creation requests to have in flight at once when building a
+ * batch commit. Creating each file's blob is an independent request with no
+ * ordering dependency, so running them one-at-a-time (as opposed to the final
+ * tree/commit/ref sequence, which genuinely is sequential) just adds N
+ * round trips of pure latency. A moderate cap keeps this fast without
+ * bursting past a provider's abuse-detection/secondary rate limits. */
+export const BLOB_CREATE_CONCURRENCY = 8;
 
 export abstract class BaseGitService {
     protected token: string = '';
@@ -78,8 +93,20 @@ export abstract class BaseGitService {
 
             response = await requestUrl(options);
         } catch (error) {
-            // Network-level failure (DNS, offline, TLS, etc.)
+            // Network-level failure (DNS, offline, TLS, etc.) — but some Obsidian
+            // versions eagerly parse the response body as JSON inside requestUrl()
+            // itself, before `throw: false` or our own status check ever run. If a
+            // proxy/login page returns HTML instead of JSON, that eager parse
+            // throws here as a raw "Unexpected token '<' ... is not valid JSON"
+            // error rather than surfacing as a normal response we could inspect.
             if (!silent) logger.error('Git Service Request Failed:', error);
+            if (this.looksLikeJsonParseOfHtmlError(error)) {
+                throw new Error(
+                    'Expected a JSON response from the Git server but received an HTML page ' +
+                    '(likely a login, SSO redirect, or proxy/error page). ' +
+                    'Please check the server URL, your access token, and any network proxy or firewall.'
+                );
+            }
             if (error instanceof Error) throw error;
             throw new Error(`Network error or unexpected failure: ${String(error)}`);
         }
@@ -101,6 +128,17 @@ export abstract class BaseGitService {
     }
 
     protected abstract addAuthHeader(headers: Record<string, string>): void;
+
+    /**
+     * Detects V8's JSON.parse error for a response starting with '<' (an HTML
+     * page), across its known message phrasings, e.g.:
+     *   "Unexpected token '<', "<!DOCTYPE "... is not valid JSON"
+     *   "Unexpected token < in JSON at position 0"
+     */
+    private looksLikeJsonParseOfHtmlError(error: unknown): boolean {
+        if (!(error instanceof Error)) return false;
+        return /unexpected token/i.test(error.message) && /json/i.test(error.message) && error.message.includes('<');
+    }
 
     /**
      * Safely parses a response body as JSON.
@@ -199,6 +237,16 @@ export abstract class BaseGitService {
         return this.isBinary(path) ? bytes.buffer : new TextDecoder().decode(bytes);
     }
 
+    /**
+     * Fetches a blob by SHA from a GitHub-shaped git data API (GitHub and Gitea
+     * both expose `GET .../git/blobs/{sha}` returning base64 `content`).
+     */
+    protected async fetchGitHubStyleBlob(url: string, path: string): Promise<GitFile> {
+        const response = await this.safeRequest(url, 'GET');
+        const data = this.parseJson<{ content: string; encoding: string; sha: string }>(response);
+        return { content: this.decodeContent(data.content, path), sha: data.sha };
+    }
+
     protected handleFileNotFound(e: unknown): GitFile {
         if (e instanceof Error && e.message.includes('404')) {
             return { content: '', sha: '' };
@@ -220,6 +268,92 @@ export abstract class BaseGitService {
             );
         }
         return e instanceof Error ? e : new Error(String(e));
+    }
+
+    /**
+     * The base URL for a GitHub-shaped Git Data API (e.g.
+     * `https://api.github.com/repos/{owner}/{repo}` or
+     * `{baseUrl}/api/v1/repos/{owner}/{repo}` for Gitea). Only meaningful for
+     * providers that implement pushBatch/pushSymlink via this API shape.
+     */
+    protected getGitDataApiBase(): string {
+        throw new Error('getGitDataApiBase is not implemented for this provider');
+    }
+
+    /**
+     * Resolves a branch to its latest commit sha via GitHub's
+     * `git/ref/heads/{branch}` endpoint. Gitea's older versions require a
+     * different branch-resolution endpoint, so it provides its own override
+     * rather than using this helper.
+     */
+    protected async getLatestCommitSha(branch: string): Promise<string> {
+        const base = this.getGitDataApiBase();
+        const refResp = await this.safeRequest(`${base}/git/ref/heads/${branch}`, 'GET');
+        return this.parseJson<{ object: { sha: string } }>(refResp).object.sha;
+    }
+
+    /**
+     * Resolves a branch to its latest commit sha and that commit's base tree
+     * sha. Only needed by the REST Git Data API flow (pushSymlink, and
+     * Gitea's pushBatch/deleteBatch which lack a GraphQL alternative).
+     */
+    protected async resolveGitHubStyleBaseTree(branch: string): Promise<{ latestCommitSha: string; baseTreeSha: string }> {
+        const latestCommitSha = await this.getLatestCommitSha(branch);
+        const base = this.getGitDataApiBase();
+        const commitResp = await this.safeRequest(`${base}/git/commits/${latestCommitSha}`, 'GET');
+        const baseTreeSha = this.parseJson<{ tree: { sha: string } }>(commitResp).tree.sha;
+
+        return { latestCommitSha, baseTreeSha };
+    }
+
+    /**
+     * Commits N tree items (already-created blobs) in one shot: builds a new
+     * tree on top of baseTreeSha, commits it, and moves the branch ref to point
+     * at the new commit. Shared by GitHub/Gitea's pushSymlink and pushBatch.
+     */
+    protected async commitGitHubStyleTree(
+        base: string,
+        branch: string,
+        baseTreeSha: string,
+        latestCommitSha: string,
+        // A null sha removes that path from the resulting tree — how a batch
+        // delete is expressed at the tree level (mode/type are still required
+        // fields on the entry but are otherwise irrelevant for a deletion).
+        treeItems: Array<{ path: string; mode: string; type: 'blob'; sha: string | null }>,
+        message: string
+    ): Promise<string> {
+        const treeResp = await this.safeRequest(`${base}/git/trees`, 'POST', { base_tree: baseTreeSha, tree: treeItems });
+        const newTreeSha = this.parseJson<{ sha: string }>(treeResp).sha;
+
+        const newCommitResp = await this.safeRequest(`${base}/git/commits`, 'POST', {
+            message,
+            tree: newTreeSha,
+            parents: [latestCommitSha],
+        });
+        const newCommitSha = this.parseJson<{ sha: string }>(newCommitResp).sha;
+
+        await this.safeRequest(`${base}/git/refs/heads/${branch}`, 'PATCH', { sha: newCommitSha });
+
+        return newCommitSha;
+    }
+
+    /**
+     * Runs `fn` over `items` with at most `concurrency` calls in flight at
+     * once, preserving result order. Used to parallelize independent
+     * per-file requests (e.g. blob creation) that would otherwise pay N
+     * round trips of latency running one at a time.
+     */
+    protected async mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+        const results = new Array<R>(items.length);
+        let nextIndex = 0;
+        const worker = async (): Promise<void> => {
+            while (nextIndex < items.length) {
+                const i = nextIndex++;
+                results[i] = await fn(items[i] as T, i);
+            }
+        };
+        await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+        return results;
     }
 
     async getRepoGitignores(branch: string): Promise<string[]> {

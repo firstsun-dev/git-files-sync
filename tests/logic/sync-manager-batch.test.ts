@@ -20,6 +20,8 @@ describe('SyncManager Batch Operations', () => {
             exists: vi.fn(),
             read: vi.fn(),
             write: vi.fn(),
+            readBinary: vi.fn(),
+            writeBinary: vi.fn(),
         } as unknown as Mocked<DataAdapter>;
 
         mockApp = {
@@ -40,6 +42,7 @@ describe('SyncManager Batch Operations', () => {
             getFile: vi.fn(),
             testConnection: vi.fn(),
             listFiles: vi.fn(),
+            listFilesDetailed: vi.fn().mockResolvedValue([]),
             deleteFile: vi.fn(),
             getRepoGitignores: vi.fn(),
             updateConfig: vi.fn(),
@@ -97,6 +100,123 @@ describe('SyncManager Batch Operations', () => {
             expect(results.success).toBe(1);
             expect(results.failed).toBe(1);
             expect(results.errors[0]!.file).toBe('bad.md');
+        });
+    });
+
+    describe('batch commit via gitService.pushBatch', () => {
+        it('groups all queued files into one pushBatch call when the provider supports it', async () => {
+            const files = ['a.md', 'b.md'];
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockImplementation(async (p) => (p === 'a.md' ? 'content-a' : 'content-b'));
+            // No tree entries: both files are new, so both are queued.
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([]);
+            mockGitService.pushBatch = vi.fn().mockResolvedValue([
+                { path: 'a.md', sha: 'sha-a' },
+                { path: 'b.md', sha: 'sha-b' },
+            ]);
+
+            const results = await manager.pushAllFiles(files);
+
+            expect(results.success).toBe(2);
+            expect(results.failed).toBe(0);
+            expect(mockGitService.pushBatch).toHaveBeenCalledTimes(1);
+            expect(mockGitService.pushFile).not.toHaveBeenCalled();
+            const [items] = vi.mocked(mockGitService.pushBatch).mock.calls[0]!;
+            expect(items).toEqual([
+                { path: 'a.md', content: 'content-a', existedRemotely: false },
+                { path: 'b.md', content: 'content-b', existedRemotely: false },
+            ]);
+            // syncedPaths lets the caller mark these files synced directly, without
+            // a follow-up remote read that could race a provider's eventual
+            // consistency window (see SyncStatusView's use of this field).
+            expect(results.syncedPaths).toEqual([
+                { path: 'a.md', sha: 'sha-a' },
+                { path: 'b.md', sha: 'sha-b' },
+            ]);
+        });
+
+        it('reports syncedPaths via the sequential fallback when the provider has no pushBatch', async () => {
+            const files = ['a.md', 'b.md'];
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockImplementation(async (p) => (p === 'a.md' ? 'content-a' : 'content-b'));
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([]);
+            mockGitService.pushBatch = undefined;
+            vi.mocked(mockGitService.pushFile).mockImplementation(async (path) => ({ path, sha: `sha-${path}` }));
+
+            const results = await manager.pushAllFiles(files);
+
+            expect(results.success).toBe(2);
+            expect(mockGitService.pushFile).toHaveBeenCalledTimes(2);
+            expect(results.syncedPaths).toEqual([
+                { path: 'a.md', sha: 'sha-a.md' },
+                { path: 'b.md', sha: 'sha-b.md' },
+            ]);
+        });
+
+        it('handles a mixed binary + text batch, computing blob shas for both', async () => {
+            const files = ['note.md', 'image.png'];
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('text content');
+            vi.mocked(adapter.readBinary).mockResolvedValue(new Uint8Array([1, 2, 3]).buffer);
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([]);
+            mockGitService.pushBatch = vi.fn().mockResolvedValue([
+                { path: 'note.md', sha: 'sha-note' },
+                { path: 'image.png', sha: 'sha-image' },
+            ]);
+
+            const results = await manager.pushAllFiles(files);
+
+            expect(results.success).toBe(2);
+            expect(mockGitService.pushBatch).toHaveBeenCalledTimes(1);
+        });
+
+        it('marks every file in a failed chunk as failed, not dropped', async () => {
+            const files = ['a.md', 'b.md'];
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('content');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([]);
+            mockGitService.pushBatch = vi.fn().mockRejectedValue(new Error('commit failed'));
+
+            const results = await manager.pushAllFiles(files);
+
+            expect(results.success).toBe(0);
+            expect(results.failed).toBe(2);
+            expect(results.errors).toEqual([
+                { file: 'a.md', error: 'commit failed' },
+                { file: 'b.md', error: 'commit failed' },
+            ]);
+            expect(results.syncedPaths).toEqual([]);
+        });
+
+        it('skips both getFile and pushBatch when the local blob sha already matches the tree', async () => {
+            const path = 'unchanged.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('same content');
+
+            // Compute the real git blob sha for the content so it matches the tree entry.
+            const { gitBlobSha } = await import('../../src/utils/git-blob-sha');
+            const sha = await gitBlobSha('same content');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path, symlink: false, sha }]);
+            mockGitService.pushBatch = vi.fn();
+
+            const results = await manager.pushAllFiles([path]);
+
+            expect(results.success).toBe(0);
+            expect(results.conflicts).toBe(0);
+            expect(results.failed).toBe(0);
+            expect(mockGitService.getFile).not.toHaveBeenCalled();
+            expect(mockGitService.pushBatch).not.toHaveBeenCalled();
+            expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe(sha);
         });
     });
 
@@ -161,8 +281,10 @@ describe('SyncManager Batch Operations', () => {
 
             vi.mocked(adapter.exists).mockResolvedValue(true);
             vi.mocked(adapter.read).mockResolvedValue('local edit');
-            // Remote sha differs from what we last synced, and content differs too.
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote edit', sha: 'sha-changed-on-remote' });
+            // Remote tree entry's sha differs from what we last synced.
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'sha-changed-on-remote' }
+            ]);
 
             const results = await manager.pushAllFiles([path]);
 
@@ -170,6 +292,7 @@ describe('SyncManager Batch Operations', () => {
             expect(results.conflicts).toBe(1);
             expect(results.failed).toBe(0);
             expect(mockGitService.pushFile).not.toHaveBeenCalled();
+            expect(mockGitService.getFile).not.toHaveBeenCalled();
         });
 
         it('should skip (not overwrite) a pull when the local file has diverged since last sync', async () => {
@@ -197,13 +320,16 @@ describe('SyncManager Batch Operations', () => {
 
             vi.mocked(adapter.exists).mockResolvedValue(true);
             vi.mocked(adapter.read).mockResolvedValue('local content');
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote content', sha: 'some-sha' });
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'some-sha' }
+            ]);
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path, sha: 'new-sha' });
 
             const results = await manager.pushAllFiles([path]);
 
             expect(results.success).toBe(1);
             expect(results.conflicts).toBe(0);
+            expect(mockGitService.pushFile).toHaveBeenCalledWith(path, 'local content', 'main', expect.any(String), 'some-sha');
         });
     });
 
@@ -274,10 +400,15 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockApp.vault.read).mockResolvedValue('unrelated content');
             vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: pushedPath, sha: 'new-sha' });
+            // detectRename still checks the orphaned metadata entry's remote content directly.
             vi.mocked(mockGitService.getFile).mockImplementation(async (path) => {
                 if (path === orphanedPath) return { content: 'totally different content', sha: 'orphaned-sha' };
-                return { content: 'old content', sha: 'remote-sha' };
+                return { content: '', sha: '' };
             });
+            // The pushed path's own remote state comes from the pre-fetched tree, not getFile.
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: pushedPath, symlink: false, sha: 'remote-sha' }
+            ]);
 
             const results = await manager.pushAllFiles([mockFile]);
 

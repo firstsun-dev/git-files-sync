@@ -117,6 +117,40 @@ describe('GiteaService', () => {
         });
     });
 
+    describe('pushBatch', () => {
+        it('returns [] and makes no requests for an empty item list', async () => {
+            const result = await service.pushBatch([], 'main', 'push nothing');
+            expect(result).toEqual([]);
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('resolves branch via /branches/{branch}, then commits N files in one commit', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { commit: { id: 'commit1' } } } as unknown as RequestUrlResponse) // resolve branch
+                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)    // get commit
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-a' } } as unknown as RequestUrlResponse)             // blob a
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)              // create tree
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)            // create commit
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                           // update ref
+
+            const result = await service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'Push 1 file(s) from Obsidian');
+
+            expect(result).toEqual([{ path: 'a.md', sha: 'blob-a' }]);
+
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            expect(calls).toHaveLength(6);
+            expect(calls[0]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/branches/main`);
+            expect(calls[1]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/commits/commit1`);
+
+            const blobBody = JSON.parse(calls[2]?.body as string) as { content: string; encoding: string };
+            expect(blobBody.encoding).toBe('base64');
+            expect(atob(blobBody.content)).toBe('hello');
+
+            expect(calls[5]?.method).toBe('PATCH');
+            expect(calls[5]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/refs/heads/main`);
+        });
+    });
+
     describe('listFiles', () => {
         const commitSha = 'abc123commit';
 
@@ -184,6 +218,33 @@ describe('GiteaService', () => {
             mockRequest({ status: 404, json: { message: 'branch does not exist' }, text: 'branch does not exist' });
             await expect(service.listFiles('missing-branch')).rejects.toThrow(/Branch "missing-branch" was not found/);
         });
+
+        it('listFilesDetailed includes each blob\'s sha', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { commit: { id: commitSha } } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { tree: [
+                    { path: 'file1.md', type: 'blob', sha: 'sha-1' },
+                ] } } as unknown as RequestUrlResponse);
+            expect(await service.listFilesDetailed('main')).toEqual([
+                { path: 'file1.md', symlink: false, sha: 'sha-1' },
+            ]);
+        });
+    });
+
+    describe('getBlob', () => {
+        it('decodes base64 blob content by sha', async () => {
+            mockRequest({ status: 200, json: { content: btoa('hello world'), encoding: 'base64', sha: 'blob-sha' } });
+            const result = await service.getBlob('blob-sha', 'test.md');
+            expect(result.content).toBe('hello world');
+            expect(result.sha).toBe('blob-sha');
+        });
+
+        it('requests the blob endpoint by sha, not path', async () => {
+            mockRequest({ status: 200, json: { content: btoa('x'), sha: 'abc123' } });
+            await service.getBlob('abc123', 'test.md');
+            const call = getLastRequestCall();
+            expect(call.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/blobs/abc123`);
+        });
     });
 
     describe('deleteFile', () => {
@@ -213,6 +274,58 @@ describe('GiteaService', () => {
             const calls = vi.mocked(requestUrl).mock.calls;
             const deleteCall = calls[1]?.[0] as RequestUrlParam;
             expect(deleteCall.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/contents/notes/test.md`);
+        });
+
+        it('should throw instead of sending an empty sha when the pre-delete lookup 404s', async () => {
+            mockRequest({ status: 404 });
+
+            await expect(service.deleteFile('missing.md', 'main', 'delete missing.md')).rejects.toThrow('missing.md');
+
+            const calls = vi.mocked(requestUrl).mock.calls;
+            expect(calls).toHaveLength(1); // no DELETE request was sent
+        });
+
+        it('should URL-encode path segments with spaces or non-ASCII characters', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { content: btoa('content'), sha: 'file-sha' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);
+
+            await service.deleteFile('folder/我的 筆記.md', 'main', 'delete note');
+
+            const calls = vi.mocked(requestUrl).mock.calls;
+            const getCall = calls[0]?.[0] as RequestUrlParam;
+            expect(getCall.url).toContain('/contents/folder/');
+            expect(getCall.url).not.toContain(' ');
+            expect(getCall.url).not.toContain('我的');
+        });
+    });
+
+    describe('deleteBatch', () => {
+        it('returns and makes no requests for an empty path list', async () => {
+            await service.deleteBatch([], 'main', 'delete nothing');
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('resolves branch via /branches/{branch}, then deletes N files in one commit', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { commit: { id: 'commit1' } } } as unknown as RequestUrlResponse) // resolve branch
+                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)    // get commit
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)              // create tree
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)            // create commit
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                           // update ref
+
+            await service.deleteBatch(['a.md'], 'main', 'Delete 1 file(s) from Obsidian');
+
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            expect(calls).toHaveLength(5);
+            expect(calls[0]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/branches/main`);
+            expect(calls[1]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/commits/commit1`);
+
+            const treeBody = JSON.parse(calls[2]?.body as string) as { tree: Array<{ path: string; sha: string | null }> };
+            expect(treeBody.tree).toEqual([{ path: 'a.md', mode: '100644', type: 'blob', sha: null }]);
+
+            expect(calls[4]?.method).toBe('PATCH');
+            expect(calls[4]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/refs/heads/main`);
         });
     });
 

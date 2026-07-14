@@ -1,7 +1,8 @@
 import ignore, { Ignore } from 'ignore';
 import { App } from 'obsidian';
-import { GitServiceInterface } from '../services/git-service-interface';
+import { GitServiceInterface, GitTreeEntry } from '../services/git-service-interface';
 import { logger } from '../utils/logger';
+import { readLocalSymlinkTarget } from '../utils/symlink';
 
 export class GitignoreManager {
     private readonly app: App;
@@ -10,16 +11,21 @@ export class GitignoreManager {
     
     private readonly rootPath: string;
     private readonly vaultFolder: string;
-    
+    // User-defined local ignore patterns (settings.ignorePatterns), applied on top of
+    // remote/local .gitignore rules. Matched against the same vault/rootPath-relative
+    // path passed into isIgnored().
+    private readonly localIgnore: Ignore | null;
+
     // Maps directory path (empty string for root) to Ignore instance
     private readonly ignoreMap: Map<string, Ignore> = new Map();
 
-    constructor(app: App, gitService: GitServiceInterface, branch: string, rootPath: string, vaultFolder: string = '') {
+    constructor(app: App, gitService: GitServiceInterface, branch: string, rootPath: string, vaultFolder: string = '', ignorePatterns: string = '') {
         this.app = app;
         this.gitService = gitService;
         this.branch = branch;
         this.rootPath = rootPath.replace(/^\/|\/$/g, '');
         this.vaultFolder = vaultFolder.replace(/^\/|\/$/g, '');
+        this.localIgnore = ignorePatterns.trim() ? ignore().add(ignorePatterns) : null;
     }
 
     private getNormalizedPath(path: string): string {
@@ -35,11 +41,34 @@ export class GitignoreManager {
     /**
      * Discovers and parses .gitignore files from the local filesystem and remote repository.
      * Local files take priority; remote supplements anything not found locally.
+     *
+     * @param remoteTree Optional pre-fetched, unfiltered remote tree (e.g. from
+     * `gitService.listFilesDetailed(branch, false)`). When supplied, it's scanned
+     * directly for `.gitignore` paths instead of making another remote fetch via
+     * `getRepoGitignores`. Falls back to that fetch when omitted, so this method
+     * still works standalone (e.g. in tests).
      */
-    async loadGitignores(): Promise<void> {
+    async loadGitignores(remoteTree?: GitTreeEntry[]): Promise<void> {
         this.ignoreMap.clear();
 
-        // 1. Collect all potential gitignore paths
+        const gitignorePaths = await this.collectGitignorePaths(remoteTree);
+
+        // Load content and build ignore instances
+        for (const fullGitignorePath of gitignorePaths) {
+            const dirPath = fullGitignorePath === '.gitignore'
+                ? ''
+                : fullGitignorePath.slice(0, -(('.gitignore'.length) + 1));
+            const content = await this.getGitignoreContent(fullGitignorePath);
+            if (content) {
+                this.ignoreMap.set(dirPath, ignore().add(content));
+            }
+        }
+    }
+
+    /** Collects every candidate .gitignore path: repo root, rootPath ancestors,
+     * local vault scan, and the remote listing (from a pre-fetched tree when
+     * supplied, else a dedicated remote fetch). */
+    private async collectGitignorePaths(remoteTree?: GitTreeEntry[]): Promise<Set<string>> {
         const gitignorePaths = new Set<string>();
 
         // a. Repo root
@@ -60,22 +89,25 @@ export class GitignoreManager {
         await this.scanLocalGitignores(gitignorePaths);
 
         // d. Supplement with remote repo's gitignore listing (filtered to rootPath)
+        await this.addRemoteGitignorePaths(gitignorePaths, remoteTree);
+
+        return gitignorePaths;
+    }
+
+    /** Adds remote .gitignore paths to `out`: scanned directly from a
+     * pre-fetched tree when supplied, else via a dedicated remote fetch. */
+    private async addRemoteGitignorePaths(out: Set<string>, remoteTree?: GitTreeEntry[]): Promise<void> {
+        if (remoteTree) {
+            for (const entry of remoteTree) {
+                if (entry.path.endsWith('.gitignore')) out.add(entry.path);
+            }
+            return;
+        }
         try {
             const remotePaths = await this.gitService.getRepoGitignores(this.branch);
-            for (const p of remotePaths) gitignorePaths.add(p);
+            for (const p of remotePaths) out.add(p);
         } catch (e) {
             logger.warn('Failed to fetch repo gitignores', e);
-        }
-
-        // 2. Load content and build ignore instances
-        for (const fullGitignorePath of gitignorePaths) {
-            const dirPath = fullGitignorePath === '.gitignore'
-                ? ''
-                : fullGitignorePath.slice(0, -(('.gitignore'.length) + 1));
-            const content = await this.getGitignoreContent(fullGitignorePath);
-            if (content) {
-                this.ignoreMap.set(dirPath, ignore().add(content));
-            }
         }
     }
 
@@ -95,6 +127,11 @@ export class GitignoreManager {
                 }
             }
             for (const subFolder of listing.folders) {
+                // A folder that's actually a symlink (e.g. a shared folder linked in from
+                // elsewhere) is a single git blob on the remote, not a real tree — walking
+                // into it would scan an unrelated directory structure and produce bogus
+                // .gitignore lookups against paths that don't exist in this repo.
+                if (readLocalSymlinkTarget(this.app, subFolder) !== null) continue;
                 await this.scanDir(subFolder, out);
             }
         } catch { /* adapter.list may be unavailable in some environments */ }
@@ -153,6 +190,8 @@ export class GitignoreManager {
      * Checks if a given file path should be ignored based on loaded .gitignore rules.
      */
     isIgnored(filePath: string): boolean {
+        if (this.localIgnore?.ignores(filePath)) return true;
+
         const fullPath = this.rootPath ? `${this.rootPath}/${filePath}` : filePath;
 
         for (const [dirPath, ig] of this.ignoreMap.entries()) {
