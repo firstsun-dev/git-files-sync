@@ -12,9 +12,9 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-07-14 10:10
+**Last Updated:** 2026-07-14 10:30
 **Session ID:** current
-**Active Feature:** feat-011 (perf: batch-commit push-all + SHA-based diffing) — done, lint/build/test all green. Previous active item (issue #78 delete-remote-only-file fix) still awaiting user re-test after rebuild.
+**Active Feature:** feat-012 (perf: batch-commit remote-only file deletion) — done, lint/build/test all green. feat-011 (push-all batching) also done this session. Previous active item (issue #78 delete-remote-only-file fix) still awaiting user re-test after rebuild.
 
 ## Status
 
@@ -44,6 +44,16 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
   - Pull path (`pullAllFiles`) intentionally untouched — out of scope, still needs full remote content regardless of sha comparison.
   - Not yet committed as of this note — pending commit onto `claude/fix-directory-symlink-pull-260713`.
 
+- [x] feat-012: perf(delete): batch-commit remote-only file deletion. User asked whether batch-deleting remote-only files (checkbox multi-select in the sync status panel) was also one commit; it wasn't (`performRemoteDeletion` looped `gitService.deleteFile` per file). Applied the same batching pattern as feat-011:
+  1. New optional `GitServiceInterface.deleteBatch?(paths, branch, commitMessage)`, mirroring `pushBatch?`. No result payload (deletes don't produce a new sha to report back).
+  2. `GitHubService`/`GiteaService.deleteBatch` reuse `resolveGitHubStyleBaseTree`/`resolveBaseTree` + `commitGitHubStyleTree` (widened `commitGitHubStyleTree`'s tree-item `sha` type to `string | null` — a `null` sha removes that path from the resulting tree, which is how GitHub's Git Data API expresses a delete at the tree level).
+  3. `GitLabService.deleteBatch` reuses the same Commits API endpoint as `pushBatch`, with `action: 'delete'` entries (no `content`/`encoding`).
+  4. `src/ui/SyncStatusView.ts`'s `performRemoteDeletion` now calls `deleteBatch` once per chunk (`MAX_BATCH_PUSH_SIZE`, reused from feat-011) when the provider supports it, updating progress per-file during a fast local pass before the grouped network call — same UX pattern as push. The original per-file loop was extracted verbatim into `performRemoteDeletionSequential`, used as the fallback when a provider has no `deleteBatch` (e.g. future Bitbucket). A failed chunk marks every path in it as failed (kept in `fileStatuses`/`selectedFiles`, not silently dropped); earlier successful chunks stay deleted.
+  - Local deletion (`performLocalDeletion`) untouched — pure local vault operation, nothing to batch.
+  - Added `deleteBatch` tests to `github-service.test.ts`/`gitea-service.test.ts`/`gitlab-service.test.ts` (happy path, empty-array short-circuit) and new `SyncStatusView.test.ts` cases (grouped call, whole-chunk-failure, fallback when `deleteBatch` is absent). Existing vaultFolder-prefix-stripping and real-error-message tests still pass unchanged against the fallback path.
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 339/339 passed.
+  - Not yet committed as of this note — pending commit onto `claude/fix-directory-symlink-pull-260713`.
+
 ### What's In Progress
 
 - Nothing else actively in progress.
@@ -51,8 +61,8 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ### What's Next
 
 1. Get user confirmation that delete now works (or a new detailed error message) after they rebuild/reload with the latest push (issue #78).
-2. Manually verify feat-011 in Obsidian if possible: push-all on a mixed vault should produce one new commit containing only changed/new files.
-3. Issue #37 (Bitbucket provider support, feat-010) — large, was deferred until #38 (i18n) landed. Now unblocked. Its `GitServiceInterface` implementation should simply omit `pushBatch` and use the existing per-file fallback.
+2. Manually verify feat-011/feat-012 in Obsidian if possible: push-all and batch-delete on a mixed vault should each produce exactly one new commit.
+3. Issue #37 (Bitbucket provider support, feat-010) — large, was deferred until #38 (i18n) landed. Now unblocked. Its `GitServiceInterface` implementation should simply omit `pushBatch`/`deleteBatch` and use the existing per-file fallbacks.
 4. Re-sync against `gh issue list --repo firstsun-dev/git-files-sync --state open`. Remaining genuinely-unstarted issues as of this session: #47 (regex ignore lists), #45 (SonarQube findings), #37 (Bitbucket), #28 (non-engineering: community visibility).
 5. PR #51 is large (8+ issues' worth of changes now). If the user wants to review/merge it before more work piles on, flag this rather than continuing to add commits indefinitely.
 

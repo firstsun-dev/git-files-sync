@@ -137,6 +137,16 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         await this.safeRequest(url, 'DELETE', body);
     }
 
+    async deleteBatch(paths: string[], branch: string, message: string): Promise<void> {
+        if (paths.length === 0) return;
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/commits`;
+
+        const actions = paths.map(path => ({ action: 'delete', file_path: this.getFullPath(path) }));
+
+        await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
+    }
+
     async testConnection(branch: string): Promise<ConnectionTestResult> {
         const encodedProjectId = encodeURIComponent(this.projectId);
         try {

@@ -89,6 +89,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 330/330 passed; consolidated onto PR #51"
+    },
+    {
+      "id": "feat-012",
+      "name": "perf(delete): batch-commit remote-only file deletion",
+      "description": "Follow-up to feat-011: batch-deleting remote-only files via the sync status panel's checkbox multi-select was still N separate commits (SyncStatusView.performRemoteDeletion looped gitService.deleteFile per file). Added optional GitServiceInterface.deleteBatch, mirroring pushBatch: GitHub/Gitea via the git blob->tree->commit->ref Data API (a tree entry with sha:null removes that path); GitLab via the same Commits API actions array used for pushBatch, with action:'delete'. SyncStatusView.performRemoteDeletion now calls deleteBatch once (chunked at MAX_BATCH_PUSH_SIZE) when the provider supports it, falling back to the original sequential per-file performRemoteDeletionSequential otherwise",
+      "dependencies": ["feat-011"],
+      "status": "done",
+      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 339/339 passed; consolidated onto PR #51"
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."

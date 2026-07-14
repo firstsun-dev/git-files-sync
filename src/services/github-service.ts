@@ -159,6 +159,21 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         await this.safeRequest(url, 'DELETE', body);
     }
 
+    async deleteBatch(paths: string[], branch: string, message: string): Promise<void> {
+        if (paths.length === 0) return;
+        const base = this.getGitDataApiBase();
+        const { latestCommitSha, baseTreeSha } = await this.resolveGitHubStyleBaseTree(branch);
+
+        const treeItems = paths.map(path => ({
+            path: this.getFullPath(path),
+            mode: '100644',
+            type: 'blob' as const,
+            sha: null,
+        }));
+
+        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
+    }
+
     async testConnection(branch: string): Promise<ConnectionTestResult> {
         try {
             const url = `https://api.github.com/repos/${this.owner}/${this.repo}`;

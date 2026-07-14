@@ -66,6 +66,14 @@ export interface GitServiceInterface {
      */
     pushBatch?(items: BatchPushItem[], branch: string, commitMessage: string): Promise<BatchPushResult[]>;
     deleteFile(path: string, branch: string, commitMessage: string): Promise<void>;
+    /**
+     * Delete many files in a single commit. Optional: only providers with a way
+     * to write multiple changes atomically implement it; callers must fall back
+     * to sequential deleteFile calls when it's absent (mirrors pushBatch?). Must
+     * be atomic: on failure it throws rather than partially deleting, so the
+     * caller can mark every path in the attempted batch as failed.
+     */
+    deleteBatch?(paths: string[], branch: string, commitMessage: string): Promise<void>;
     getRepoGitignores(branch: string): Promise<string[]>;
     /**
      * Fetches a blob's content directly by its git SHA (from a GitTreeEntry),
