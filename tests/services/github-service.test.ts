@@ -98,6 +98,54 @@ describe('GitHubService', () => {
         });
     });
 
+    describe('pushBatch', () => {
+        it('returns [] and makes no requests for an empty item list', async () => {
+            const result = await service.pushBatch([], 'main', 'push nothing');
+            expect(result).toEqual([]);
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('commits N files in one commit via ref -> commit -> blobs -> tree -> commit -> ref', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse) // get ref
+                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)      // get commit
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-a' } } as unknown as RequestUrlResponse)               // blob a
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-b' } } as unknown as RequestUrlResponse)               // blob b
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)                // create tree
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)              // create commit
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                             // update ref
+
+            const result = await service.pushBatch(
+                [{ path: 'a.md', content: 'hello' }, { path: 'b.md', content: 'world' }],
+                'main',
+                'Push 2 file(s) from Obsidian'
+            );
+
+            expect(result).toEqual([{ path: 'a.md', sha: 'blob-a' }, { path: 'b.md', sha: 'blob-b' }]);
+
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            expect(calls).toHaveLength(7);
+
+            // blobs are base64-encoded (not pushSymlink's raw utf-8 path), so binary content works too.
+            const blobABody = JSON.parse(calls[2]?.body as string) as { content: string; encoding: string };
+            expect(blobABody.encoding).toBe('base64');
+            expect(atob(blobABody.content)).toBe('hello');
+
+            const treeBody = JSON.parse(calls[4]?.body as string) as { base_tree: string; tree: Array<{ path: string; mode: string; type: string; sha: string }> };
+            expect(treeBody.base_tree).toBe('tree1');
+            expect(treeBody.tree).toEqual([
+                { path: 'a.md', mode: '100644', type: 'blob', sha: 'blob-a' },
+                { path: 'b.md', mode: '100644', type: 'blob', sha: 'blob-b' },
+            ]);
+
+            const commitBody = JSON.parse(calls[5]?.body as string) as { message: string; tree: string; parents: string[] };
+            expect(commitBody).toEqual({ message: 'Push 2 file(s) from Obsidian', tree: 'tree2', parents: ['commit1'] });
+
+            expect(calls[6]?.method).toBe('PATCH');
+            expect(JSON.parse(calls[6]?.body as string)).toEqual({ sha: 'commit2' });
+        });
+    });
+
     describe('pushFile', () => {
         it('should push new file correctly (no sha provided)', async () => {
             vi.mocked(requestUrl).mockResolvedValueOnce({

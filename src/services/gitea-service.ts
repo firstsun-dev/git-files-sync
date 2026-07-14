@@ -1,4 +1,4 @@
-import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
 import { logger } from '../utils/logger';
 
@@ -23,6 +23,25 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         const fullPath = this.getFullPath(path);
         const encodedPath = fullPath.split('/').map(encodeURIComponent).join('/');
         return `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/contents/${encodedPath}`;
+    }
+
+    protected getGitDataApiBase(): string {
+        return `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}`;
+    }
+
+    // Gitea's git/commits/{sha} endpoint needs a resolved commit sha, not a
+    // branch ref name, and older Gitea versions don't expose GitHub's
+    // git/ref/heads/{branch} endpoint at all — resolve via /branches/{branch}
+    // instead, same as listFilesDetailed already does.
+    private async resolveBaseTree(branch: string): Promise<{ latestCommitSha: string; baseTreeSha: string }> {
+        const branchUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/branches/${branch}`;
+        const branchResp = await this.safeRequest(branchUrl, 'GET');
+        const latestCommitSha = this.parseJson<{ commit: { id: string } }>(branchResp).commit.id;
+
+        const commitResp = await this.safeRequest(`${this.getGitDataApiBase()}/git/commits/${latestCommitSha}`, 'GET');
+        const baseTreeSha = this.parseJson<{ tree: { sha: string } }>(commitResp).tree.sha;
+
+        return { latestCommitSha, baseTreeSha };
     }
 
     async getFile(path: string, branch: string): Promise<GitFile> {
@@ -54,6 +73,32 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         const response = await this.safeRequest(url, method, body);
         const data = this.parseJson<{ content: { path: string, sha: string } }>(response);
         return { path: data.content.path, sha: data.content.sha };
+    }
+
+    async pushBatch(items: BatchPushItem[], branch: string, message: string): Promise<BatchPushResult[]> {
+        if (items.length === 0) return [];
+        const base = this.getGitDataApiBase();
+        const { latestCommitSha, baseTreeSha } = await this.resolveBaseTree(branch);
+
+        const blobShas: string[] = [];
+        for (const item of items) {
+            const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', {
+                content: this.encodeContent(item.content),
+                encoding: 'base64',
+            });
+            blobShas.push(this.parseJson<{ sha: string }>(blobResp).sha);
+        }
+
+        const treeItems = items.map((item, i) => ({
+            path: this.getFullPath(item.path),
+            mode: '100644',
+            type: 'blob' as const,
+            sha: blobShas[i] as string,
+        }));
+
+        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
+
+        return items.map((item, i) => ({ path: item.path, sha: blobShas[i] }));
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {

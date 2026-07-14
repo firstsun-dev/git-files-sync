@@ -1,4 +1,4 @@
-import { GitServiceInterface, GitTreeEntry } from './git-service-interface';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
 
 export class GitLabService extends BaseGitService implements GitServiceInterface {
@@ -53,6 +53,28 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         const response = await this.safeRequest(url, method, body);
         const data = this.parseJson<GitLabFileResponse>(response);
         return { path: data.file_path };
+    }
+
+    async pushBatch(items: BatchPushItem[], branch: string, message: string): Promise<BatchPushResult[]> {
+        if (items.length === 0) return [];
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/commits`;
+
+        const actions = items.map(item => ({
+            action: item.existedRemotely ? 'update' : 'create',
+            file_path: this.getFullPath(item.path),
+            content: this.encodeContent(item.content),
+            encoding: 'base64',
+        }));
+
+        await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
+
+        // The Commits API response doesn't include each file's new blob sha, so
+        // read it back via a single follow-up tree fetch (one extra call for the
+        // whole batch, not per file) rather than per-file getFile calls.
+        const freshTree = await this.listFilesDetailed(branch, false);
+        const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
+        return items.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) }));
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {

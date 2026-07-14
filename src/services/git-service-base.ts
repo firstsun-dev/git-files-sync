@@ -55,6 +55,10 @@ export interface ConnectionTestResult {
     error?: string;
 }
 
+/** Max files per single batch-commit call. Guards against oversized request
+ * bodies / provider payload limits when a vault has thousands of files. */
+export const MAX_BATCH_PUSH_SIZE = 200;
+
 export abstract class BaseGitService {
     protected token: string = '';
     protected rootPath: string = '';
@@ -256,6 +260,61 @@ export abstract class BaseGitService {
             );
         }
         return e instanceof Error ? e : new Error(String(e));
+    }
+
+    /**
+     * The base URL for a GitHub-shaped Git Data API (e.g.
+     * `https://api.github.com/repos/{owner}/{repo}` or
+     * `{baseUrl}/api/v1/repos/{owner}/{repo}` for Gitea). Only meaningful for
+     * providers that implement pushBatch/pushSymlink via this API shape.
+     */
+    protected getGitDataApiBase(): string {
+        throw new Error('getGitDataApiBase is not implemented for this provider');
+    }
+
+    /**
+     * Resolves a branch to its latest commit sha and that commit's base tree
+     * sha, via GitHub's `git/ref/heads/{branch}` endpoint. Gitea's older
+     * versions require a different branch-resolution endpoint, so it provides
+     * its own override rather than using this helper.
+     */
+    protected async resolveGitHubStyleBaseTree(branch: string): Promise<{ latestCommitSha: string; baseTreeSha: string }> {
+        const base = this.getGitDataApiBase();
+        const refResp = await this.safeRequest(`${base}/git/ref/heads/${branch}`, 'GET');
+        const latestCommitSha = this.parseJson<{ object: { sha: string } }>(refResp).object.sha;
+
+        const commitResp = await this.safeRequest(`${base}/git/commits/${latestCommitSha}`, 'GET');
+        const baseTreeSha = this.parseJson<{ tree: { sha: string } }>(commitResp).tree.sha;
+
+        return { latestCommitSha, baseTreeSha };
+    }
+
+    /**
+     * Commits N tree items (already-created blobs) in one shot: builds a new
+     * tree on top of baseTreeSha, commits it, and moves the branch ref to point
+     * at the new commit. Shared by GitHub/Gitea's pushSymlink and pushBatch.
+     */
+    protected async commitGitHubStyleTree(
+        base: string,
+        branch: string,
+        baseTreeSha: string,
+        latestCommitSha: string,
+        treeItems: Array<{ path: string; mode: string; type: 'blob'; sha: string }>,
+        message: string
+    ): Promise<string> {
+        const treeResp = await this.safeRequest(`${base}/git/trees`, 'POST', { base_tree: baseTreeSha, tree: treeItems });
+        const newTreeSha = this.parseJson<{ sha: string }>(treeResp).sha;
+
+        const newCommitResp = await this.safeRequest(`${base}/git/commits`, 'POST', {
+            message,
+            tree: newTreeSha,
+            parents: [latestCommitSha],
+        });
+        const newCommitSha = this.parseJson<{ sha: string }>(newCommitResp).sha;
+
+        await this.safeRequest(`${base}/git/refs/heads/${branch}`, 'PATCH', { sha: newCommitSha });
+
+        return newCommitSha;
     }
 
     async getRepoGitignores(branch: string): Promise<string[]> {

@@ -22,6 +22,26 @@ export interface GitTreeEntry {
     sha?: string;
 }
 
+/** One file's content to include in a batched multi-file commit. */
+export interface BatchPushItem {
+    /** Path relative to rootPath, same shape pushFile's `path` param takes. */
+    path: string;
+    content: string | ArrayBuffer;
+    /**
+     * Whether this path already existed on the remote before this push, per the
+     * caller's pre-fetched tree. Only GitLab's Commits API needs this (to choose
+     * action 'create' vs 'update'); GitHub/Gitea's tree-based commit ignores it.
+     */
+    existedRemotely?: boolean;
+}
+
+/** Result for one file after a batch push completes. */
+export interface BatchPushResult {
+    path: string;
+    /** New blob sha, when the provider can report it directly. */
+    sha?: string;
+}
+
 export interface GitServiceInterface {
     updateConfig(...args: unknown[]): void;
     getFile(path: string, branch: string): Promise<GitFile>;
@@ -37,6 +57,14 @@ export interface GitServiceInterface {
      * implement it; callers must fall back to pushFile when it's absent.
      */
     pushSymlink?(path: string, target: string, branch: string, commitMessage: string): Promise<{ path: string, sha?: string }>;
+    /**
+     * Push many files in a single commit. Optional: only providers with a way to
+     * write multiple files atomically implement it; callers must fall back to
+     * sequential pushFile calls when it's absent (mirrors pushSymlink?). Must be
+     * atomic: on failure it throws rather than returning partial results, so the
+     * caller can mark every item in the attempted batch as failed.
+     */
+    pushBatch?(items: BatchPushItem[], branch: string, commitMessage: string): Promise<BatchPushResult[]>;
     deleteFile(path: string, branch: string, commitMessage: string): Promise<void>;
     getRepoGitignores(branch: string): Promise<string[]>;
     /**

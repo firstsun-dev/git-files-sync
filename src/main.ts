@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getSer
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
 import { GiteaService } from './services/gitea-service';
-import { GitServiceInterface } from './services/git-service-interface';
+import { GitServiceInterface, GitTreeEntry } from './services/git-service-interface';
 import { SyncManager } from './logic/sync-manager';
 import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
 import { GitignoreManager } from './logic/gitignore-manager';
@@ -201,8 +201,16 @@ export default class GitLabFilesPush extends Plugin {
 		const startPath = this.settings.vaultFolder || '';
 		const allPaths = await this.listAllFilesFromAdapter(startPath);
 
-		await this.gitService.listFiles(this.settings.branch);
-		await this.gitignoreManager.loadGitignores();
+		// Fetch the remote tree once and share it with both gitignore discovery
+		// and (for push) the SHA-based diff, instead of each fetching it separately.
+		let tree: GitTreeEntry[] | undefined;
+		try {
+			tree = await this.gitService.listFilesDetailed(this.settings.branch, false);
+		} catch (e) {
+			logger.warn('Failed to fetch remote tree; falling back to per-call fetches', e);
+		}
+
+		await this.gitignoreManager.loadGitignores(tree);
 		const files = allPaths.filter(p => !this.gitignoreManager.isIgnored(this.getNormalizedPath(p)));
 
 		if (files.length === 0) {
@@ -224,7 +232,7 @@ export default class GitLabFilesPush extends Plugin {
 			const results = op === 'push'
 				? await this.sync.pushAllFiles(files, (current, total, fileName) => {
 					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pushing'), current, total, fileName }));
-				})
+				}, tree)
 				: await this.sync.pullAllFiles(files, (current, total, fileName) => {
 					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pulling'), current, total, fileName }));
 				});

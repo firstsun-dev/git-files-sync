@@ -117,6 +117,40 @@ describe('GiteaService', () => {
         });
     });
 
+    describe('pushBatch', () => {
+        it('returns [] and makes no requests for an empty item list', async () => {
+            const result = await service.pushBatch([], 'main', 'push nothing');
+            expect(result).toEqual([]);
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('resolves branch via /branches/{branch}, then commits N files in one commit', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { commit: { id: 'commit1' } } } as unknown as RequestUrlResponse) // resolve branch
+                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)    // get commit
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-a' } } as unknown as RequestUrlResponse)             // blob a
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)              // create tree
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)            // create commit
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                           // update ref
+
+            const result = await service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'Push 1 file(s) from Obsidian');
+
+            expect(result).toEqual([{ path: 'a.md', sha: 'blob-a' }]);
+
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            expect(calls).toHaveLength(6);
+            expect(calls[0]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/branches/main`);
+            expect(calls[1]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/commits/commit1`);
+
+            const blobBody = JSON.parse(calls[2]?.body as string) as { content: string; encoding: string };
+            expect(blobBody.encoding).toBe('base64');
+            expect(atob(blobBody.content)).toBe('hello');
+
+            expect(calls[5]?.method).toBe('PATCH');
+            expect(calls[5]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/refs/heads/main`);
+        });
+    });
+
     describe('listFiles', () => {
         const commitSha = 'abc123commit';
 

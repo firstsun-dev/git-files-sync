@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitHubService } from '../../src/services/github-service';
 import { requestUrl, RequestUrlResponse } from 'obsidian';
+import { MAX_BATCH_PUSH_SIZE } from '../../src/services/git-service-base';
 
 // Tests for BaseGitService protected methods exercised via GitHubService
 describe('BaseGitService', () => {
@@ -163,6 +164,12 @@ describe('BaseGitService', () => {
             await expect(service.listFiles('main')).rejects.toThrow(/Received an HTML page instead of a JSON error/);
             // The raw HTML document must not be dumped into the message.
             await expect(service.listFiles('main')).rejects.not.toThrow(/DOCTYPE/);
+        });
+    });
+
+    describe('MAX_BATCH_PUSH_SIZE', () => {
+        it('is a sane positive chunk size', () => {
+            expect(MAX_BATCH_PUSH_SIZE).toBeGreaterThan(0);
         });
     });
 
