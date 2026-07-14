@@ -21,7 +21,8 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
 
     private getApiUrl(path: string): string {
         const fullPath = this.getFullPath(path);
-        return `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/contents/${fullPath}`;
+        const encodedPath = fullPath.split('/').map(encodeURIComponent).join('/');
+        return `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/contents/${encodedPath}`;
     }
 
     async getFile(path: string, branch: string): Promise<GitFile> {
@@ -94,6 +95,9 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
 
     async deleteFile(path: string, branch: string, message: string): Promise<void> {
         const file = await this.getFile(path, branch);
+        if (!file.sha) {
+            throw new Error(`Cannot delete "${path}": file was not found on branch "${branch}".`);
+        }
         const url = this.getApiUrl(path);
         const body = {
             message,

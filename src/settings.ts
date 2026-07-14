@@ -1,6 +1,7 @@
 import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
 import GitLabFilesPush from "./main";
 import {FolderSuggest} from "./ui/FolderSuggest";
+import {RemoteFolderSuggest} from "./ui/RemoteFolderSuggest";
 import { ConnectionTestResult } from "./services/git-service-base";
 
 // Minimal shape of Obsidian >= 1.13's SettingDefinitionItem. Declared locally so
@@ -252,7 +253,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 						void this.plugin.saveSettings();
 						this.plugin.initializeGitService();
 					});
-				FolderSuggest.attach(this.app, text.inputEl);
+				RemoteFolderSuggest.attach(this.app, text.inputEl, this.plugin);
 			});
 
 		new Setting(containerEl)

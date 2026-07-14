@@ -241,6 +241,29 @@ describe('GiteaService', () => {
             const deleteCall = calls[1]?.[0] as RequestUrlParam;
             expect(deleteCall.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/contents/notes/test.md`);
         });
+
+        it('should throw instead of sending an empty sha when the pre-delete lookup 404s', async () => {
+            mockRequest({ status: 404 });
+
+            await expect(service.deleteFile('missing.md', 'main', 'delete missing.md')).rejects.toThrow('missing.md');
+
+            const calls = vi.mocked(requestUrl).mock.calls;
+            expect(calls).toHaveLength(1); // no DELETE request was sent
+        });
+
+        it('should URL-encode path segments with spaces or non-ASCII characters', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { content: btoa('content'), sha: 'file-sha' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);
+
+            await service.deleteFile('folder/我的 筆記.md', 'main', 'delete note');
+
+            const calls = vi.mocked(requestUrl).mock.calls;
+            const getCall = calls[0]?.[0] as RequestUrlParam;
+            expect(getCall.url).toContain('/contents/folder/');
+            expect(getCall.url).not.toContain(' ');
+            expect(getCall.url).not.toContain('我的');
+        });
     });
 
     describe('testConnection', () => {

@@ -12,9 +12,9 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-07-13 14:05
-**Session ID:** session_01YYCTyZw7gUmJ7oh1VTmAqh
-**Active Feature:** feat-009 - i18n / multi-language support (issue #38) — paused, awaiting scope decision
+**Last Updated:** 2026-07-14 04:20
+**Session ID:** current
+**Active Feature:** issue #78 (blog repo, misfiled — actually a git-files-sync bug: delete remote-only file fails) — investigation complete, fix in progress
 
 ## Status
 
@@ -22,13 +22,21 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 - [x] feat-001..008 (project setup, settings UX bundle, folder picker, symlink pull fix, tree-SHA refresh, HTML-response error clarity, what's-new modal) — see archive/2026-07.md
 - All consolidated onto branch `claude/fix-directory-symlink-pull-260713` → **PR #51** (open, all CI green as of last check), per user's explicit request to keep the PR count down rather than one PR per issue.
+- [x] "Root path" folder picker now suggests folders from the **remote repo tree** instead of the local vault. Added `src/ui/RemoteFolderSuggest.ts` (derives folder paths from `gitService.listFiles(branch, false)`); wired into the Root path field in `src/settings.ts`. Vault folder field untouched (still uses local `FolderSuggest`). Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 302/302 passed.
+
+- [x] Issue #78 (filed in `firstsun-dev/blog` but actually a git-files-sync bug — user confirmed to fix it here regardless of repo mismatch): "delete remote only file fail". Root-caused via subagent investigation, then fixed:
+  1. `github-service.ts`/`gitea-service.ts` `getApiUrl()` now URL-encodes each path segment (`fullPath.split('/').map(encodeURIComponent).join('/')`), matching `gitlab-service.ts`'s existing behavior. This was the likely actual trigger: paths with spaces/non-ASCII (e.g. Chinese filenames) 404'd on the Contents API.
+  2. `deleteFile()` in both services now throws a clear error (`Cannot delete "<path>": file was not found on branch "<branch>".`) instead of silently sending a DELETE with an empty `sha` when the pre-delete `getFile()` lookup 404s.
+  3. `SyncStatusView.ts` `performLocalDeletion`/`performRemoteDeletion` now capture `{path, message}` instead of swallowing the error; the failure Notice shows the real message(s), and `logger.error` logs full detail.
+  - Added 4 new tests (2 in `tests/services/github-service.test.ts`, 2 in `tests/services/gitea-service.test.ts`) covering the empty-sha throw and non-ASCII/space path encoding.
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 306/306 passed.
+  - Not yet done: comment on/reference issue #78 (in the `blog` repo) noting the fix landed in `git-files-sync` instead — flag to user before doing so since it crosses repos.
+  - **Second root cause found after user re-tested**: user confirmed the file they were deleting was NOT a symlink, so the encoding/empty-sha fixes above weren't the whole story. Separately spotted (from a real console error the user pasted: `EISDIR: illegal operation on a directory, read` for a local-only symlinked folder `.claude/skills/polish-blog`) that `SyncStatusView.ts` `readFileContent()` called `adapter.read()` directly on string paths with no symlink guard — only the sha-based path (`readLocalContentForSha`) checked for symlinks, and only when the *remote* already knew about the entry as a symlink. A new local-only symlinked folder (not yet pushed) hit `adapter.read()` on a directory → crash → status stuck, contributing to "delete never resolves". Fixed by extracting `readStringPathContent()` with a catch-and-fallback to `readLocalSymlinkTarget()`. This is a distinct bug from the original #78 report but was surfaced by the same debugging session.
+  - **Still unresolved as of this turn**: user reports "N failed" with no message when deleting a genuinely non-symlink remote-only file on GitHub — this is the *old* pre-fix Notice text, meaning none of the above fixes have reached the user's actual test vault yet (everything above is uncommitted in this sandbox). Next step: commit + push these changes to `claude/fix-directory-symlink-pull-260713` so the user can rebuild/reload and re-test with real error messages before further root-causing.
 
 ### What's In Progress
 
-- [ ] feat-009 - i18n / multi-language support (issue #38)
-  - Scope is large: ~47 hardcoded strings in `src/settings.ts`, ~24 in `src/ui/SyncStatusView.ts`, plus 37 `new Notice(...)` call sites across `src/logic/sync-manager.ts`, `src/settings.ts`, `src/main.ts`, `src/ui/SyncStatusView.ts` (many with interpolated values).
-  - Asked the user how deep to scope this (full settings.ts extraction only vs. settings+all Notices vs. infra-only-first); the question prompt was dismissed without an answer before the user ran `/firstsun-harness`. **Not yet started** — no i18n files created.
-  - Next step: get a scope decision from the user before writing any code, since a half-migrated i18n system (some strings extracted, most not) is worse than not starting.
+- [ ] feat-009 - i18n / multi-language support (issue #38) — still paused, awaiting scope decision from user (unchanged from prior session).
 
 ### What's Next
 
