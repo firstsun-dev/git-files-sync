@@ -1,1 +1,15 @@
+disabled=$(git diff --cached -U0 -- '*.ts' '*.tsx' '*.js' '*.mjs' \
+	| grep -E '^\+' \
+	| grep -Ev '^\+\+\+' \
+	| grep -E 'eslint-disable' || true)
+
+if [ -n "$disabled" ]; then
+	echo "error: commit adds eslint-disable comment(s):"
+	echo "$disabled"
+	echo
+	echo "Fix the underlying lint issue instead of disabling the rule."
+	echo "If a disable is genuinely warranted, name the specific rule, add a one-line justification, and flag it in the PR description."
+	exit 1
+fi
+
 npm run lint && npm run build
