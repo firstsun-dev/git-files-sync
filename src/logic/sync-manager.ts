@@ -625,8 +625,14 @@ export class SyncManager {
             );
             const shaByPath = new Map(batchResults.map(r => [r.path, r.sha]));
             for (const f of chunk) {
-                const sha = shaByPath.get(f.repoPath);
-                if (sha) await this.updateMetadata(f.path, sha);
+                // GitHub's createCommitOnBranch reports only the commit oid, so
+                // the provider returns no per-file sha. The content we just
+                // committed hashes to exactly what the remote now holds, so
+                // derive it locally — leaving the metadata stale would make the
+                // next push read the remote as "moved since last sync" and skip
+                // the file as a conflict.
+                const sha = shaByPath.get(f.repoPath) ?? await gitBlobSha(f.content);
+                await this.updateMetadata(f.path, sha);
                 results.success++;
                 results.syncedPaths.push({ path: f.path, sha });
             }

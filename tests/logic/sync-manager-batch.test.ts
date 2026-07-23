@@ -221,6 +221,33 @@ describe('SyncManager Batch Operations', () => {
         });
     });
 
+    describe('batch push metadata', () => {
+        it('records the local blob sha when the provider returns no per-file sha', async () => {
+            // GitHub's createCommitOnBranch reports only the commit oid, so
+            // pushBatch resolves with { path } alone. Skipping the metadata
+            // update there leaves lastSyncedSha at the pre-push value, and the
+            // next push then reads the remote as moved and skips the file as a
+            // conflict.
+            const path = 'note.md';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'sha-before-push', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('edited content');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'sha-before-push' }
+            ]);
+            mockGitService.pushBatch = vi.fn().mockResolvedValue([{ path }]);
+
+            const results = await manager.pushAllFiles([path]);
+
+            expect(results.success).toBe(1);
+            expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe(await gitBlobSha('edited content'));
+        });
+    });
+
     describe('pullAllAllFiles', () => {
         it('should pull multiple files correctly (strings and TFiles)', async () => {
             const mockFile = Object.assign(new TFile(), { path: 'file2.md', name: 'file2.md' });
