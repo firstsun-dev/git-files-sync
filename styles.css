@@ -11,6 +11,77 @@
 }
 
 
+/* Header holds the search input, which must never be re-rendered (it would
+   lose focus mid-typing); the body is what renderView() rebuilds. */
+.ssv-header {
+    flex-shrink: 0;
+}
+
+.ssv-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ── Search filter ──────────────────────────────────────────────── */
+.ssv-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    flex-shrink: 0;
+}
+
+.ssv-search-icon {
+    display: flex;
+    align-items: center;
+    color: var(--text-faint);
+    flex-shrink: 0;
+}
+
+.ssv-search-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+.ssv-search-input {
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    padding: 0 6px;
+    font-size: 0.82em;
+    background: var(--background-modifier-form-field);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    color: var(--text-normal);
+}
+
+.ssv-search-clear {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    height: 22px;
+    width: 22px;
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.ssv-search.has-query .ssv-search-clear { display: flex; }
+
+.ssv-search-clear:hover { color: var(--text-normal); }
+
+.ssv-search-clear svg {
+    width: 14px;
+    height: 14px;
+}
+
 /* ── Info strip ─────────────────────────────────────────────────── */
 .ssv-info {
     display: flex;
@@ -319,6 +390,18 @@
     min-width: 0;
 }
 
+/* Only the path is clickable, so it has to read as a link — the rest of the
+   row keeps its existing behaviour. Declared after .ssv-file-path so the
+   accent colour wins at equal specificity. */
+.ssv-file-path-link {
+    cursor: pointer;
+    color: var(--text-accent);
+}
+
+.ssv-file-path-link:hover {
+    text-decoration: underline;
+}
+
 .ssv-status-badge {
     font-size: 0.70em;
     font-weight: 600;
@@ -425,6 +508,57 @@
 }
 
 .ssv-diff.visible { display: block; }
+
+/* Diff shown in its own workspace pane (desktop). It carries its own
+   container-type so the split/unified container query below resolves against
+   the pane's width — which is the entire point of moving it out of the
+   sidebar. */
+.sync-diff-view {
+    padding: 10px 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.ssv-diff-pane {
+    container-type: inline-size;
+}
+
+/* Desktop pane: let the diff fill the tab's full height instead of the
+   sidebar's capped max-height (mobile keeps the cap — see below). */
+.sync-diff-view .ssv-diff-pane-path {
+    flex-shrink: 0;
+}
+
+.sync-diff-view .ssv-diff-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.sync-diff-view .ssv-diff-split {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.sync-diff-view .ssv-diff-grid,
+.sync-diff-view .ssv-diff-unified {
+    flex: 1;
+    max-height: none;
+    min-height: 0;
+}
+
+.ssv-diff-pane-path {
+    font-family: var(--font-monospace);
+    font-size: 0.82em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    overflow-wrap: anywhere;
+}
 
 /* ── Side-by-side diff (default for wide panels) ──────────────────── */
 .ssv-diff-split {

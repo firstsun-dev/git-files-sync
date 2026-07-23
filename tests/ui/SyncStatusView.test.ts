@@ -6,6 +6,12 @@ import { setupObsidianDOM } from './setup-dom';
 import type { FileStatus } from '../../src/ui/types';
 import type { GitTreeEntry } from '../../src/services/git-service-interface';
 
+// The diff pane is a separate view; none of these fixtures open one, so the
+// stale-pane cleanup just finds nothing.
+function noDiffPanes(): { getLeavesOfType: () => unknown[] } {
+    return { getLeavesOfType: (): unknown[] => [] };
+}
+
 // Minimal fake plugin: only the surface these tests actually exercise.
 function makePlugin(overrides: {
     vaultFolder?: string;
@@ -19,6 +25,7 @@ function makePlugin(overrides: {
     const deleteFile = overrides.deleteFile ?? vi.fn().mockResolvedValue(undefined);
 
     const app = {
+        workspace: noDiffPanes(),
         vault: {
             adapter: {
                 exists: overrides.adapterExists ?? vi.fn().mockResolvedValue(false),
@@ -220,7 +227,7 @@ describe('SyncStatusView local-only status', () => {
             gitService: { getFile },
             getNormalizedPath: (path: string) => path,
         } as unknown as GitLabFilesPush;
-        const leaf = { app: { vault: { adapter: { read: vi.fn().mockResolvedValue('new content') } } } } as unknown as WorkspaceLeaf;
+        const leaf = { app: { workspace: noDiffPanes(), vault: { adapter: { read: vi.fn().mockResolvedValue('new content') } } } } as unknown as WorkspaceLeaf;
         const view = new SyncStatusView(leaf, plugin);
 
         await (view as unknown as {
@@ -273,7 +280,7 @@ describe('SyncStatusView post-push status update', () => {
             gitService: {},
             sync: { pushAllFiles },
         } as unknown as GitLabFilesPush;
-        const app = { vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } };
+        const app = { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } };
         const leaf = { app } as unknown as WorkspaceLeaf;
         const view = new SyncStatusView(leaf, plugin);
 
@@ -303,7 +310,7 @@ describe('SyncStatusView post-push status update', () => {
             settings: { branch: 'main', vaultFolder: '', rootPath: '' },
             gitService: { getBranchHead }, sync: { pushAllFiles },
         } as unknown as GitLabFilesPush;
-        const leaf = { app: { vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } } } as unknown as WorkspaceLeaf;
+        const leaf = { app: { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } } } as unknown as WorkspaceLeaf;
         const view = new SyncStatusView(leaf, plugin);
         (view as unknown as { remoteTreeSnapshot: unknown }).remoteTreeSnapshot = { branch: 'main', rootPath: '', head: 'commit-1', entries: tree };
 
@@ -320,7 +327,7 @@ describe('SyncStatusView post-push status update', () => {
             settings: { branch: 'main', vaultFolder: '', rootPath: '' },
             gitService: { getBranchHead: vi.fn().mockResolvedValue('commit-2') }, sync: { pushAllFiles },
         } as unknown as GitLabFilesPush;
-        const leaf = { app: { vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } } } as unknown as WorkspaceLeaf;
+        const leaf = { app: { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } } } as unknown as WorkspaceLeaf;
         const view = new SyncStatusView(leaf, plugin);
         (view as unknown as { remoteTreeSnapshot: unknown }).remoteTreeSnapshot = {
             branch: 'main', rootPath: '', head: 'commit-1', entries: [{ path: 'a.md', symlink: false }],
@@ -341,7 +348,7 @@ describe('SyncStatusView post-push status update', () => {
             gitService: {},
             sync: { pullAllFiles },
         } as unknown as GitLabFilesPush;
-        const app = { vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } };
+        const app = { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } };
         const leaf = { app } as unknown as WorkspaceLeaf;
         const view = new SyncStatusView(leaf, plugin);
 

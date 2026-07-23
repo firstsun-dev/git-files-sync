@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, setIcon, setTooltip } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, debounce, setIcon, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
 import { getServiceName, getEffectiveSymlinkHandling, type SymlinkHandling } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
@@ -8,6 +8,8 @@ import { renderActionBar } from './components/ActionBar';
 import { renderFileItem, statusMeta, type FileItemCallbacks } from './components/FileListItem';
 import { ICONS } from './components/icons';
 import { isBinaryPath, contentsEqual } from '../utils/path';
+import { buildRemoteFileUrl } from '../utils/remote-url';
+import { DiffView, SYNC_DIFF_VIEW_TYPE } from './DiffView';
 import { readLocalSymlinkTarget } from '../utils/symlink';
 import { gitBlobSha } from '../utils/git-blob-sha';
 import { type GitTreeEntry } from '../services/git-service-interface';
@@ -25,9 +27,15 @@ export class SyncStatusView extends ItemView {
     private isRefreshing = false;
     private refreshProgress = { current: 0, total: 0 };
     private statusFilter: FilterValue = 'all';
+    private searchQuery = '';
     private readonly selectedFiles: Set<string> = new Set();
     private lastSyncTime: number = 0;
     private remoteTreeSnapshot?: RemoteTreeSnapshot;
+    // Persistent containers created once in onOpen(). renderView() rebuilds
+    // only what's inside them, so the search input (which lives in the header,
+    // outside both) is never destroyed mid-typing.
+    private infoEl?: HTMLElement;
+    private bodyEl?: HTMLElement;
 
     constructor(leaf: WorkspaceLeaf, plugin: GitLabFilesPush) {
         super(leaf);
@@ -39,24 +47,38 @@ export class SyncStatusView extends ItemView {
     getIcon(): string { return 'git-compare'; }
 
     onOpen(): Promise<void> {
-        const container = this.containerEl.children[1];
+        const container = this.containerEl.children[1] as HTMLElement | null;
         if (!container) return Promise.resolve();
         container.empty();
         container.addClass('sync-status-view');
+
+        // The search input must sit outside everything renderView() rebuilds:
+        // renderView() empties its containers on every interaction (even a
+        // checkbox tick), and an input destroyed mid-typing loses focus after
+        // a single character. The info strip still needs re-rendering for its
+        // last-sync time, so it gets its own slot inside the header.
+        const headerEl = container.createDiv({ cls: 'ssv-header' });
+        this.infoEl = headerEl.createDiv({ cls: 'ssv-info-slot' });
+        this.renderSearchBox(headerEl);
+        this.bodyEl = container.createDiv({ cls: 'ssv-body' });
+
         this.renderView();
         return Promise.resolve();
     }
 
     private renderView(): void {
-        const container = this.containerEl.children[1] as HTMLElement;
-        if (!container) return;
+        const infoEl = this.infoEl;
+        const container = this.bodyEl;
+        if (!infoEl || !container) return;
 
         const prevListEl = container.querySelector<HTMLElement>('.ssv-list');
         const scrollTop = prevListEl?.scrollTop ?? 0;
 
+        infoEl.empty();
+        this.renderInfoStrip(infoEl);
+
         container.empty();
 
-        this.renderInfoStrip(container);
         this.renderTabs(container);
         this.renderActionBarSection(container);
 
@@ -87,14 +109,99 @@ export class SyncStatusView extends ItemView {
     }
 
     private renderCheckedFilesDuringRefresh(container: HTMLElement): void {
-        const checked = Array.from(this.fileStatuses.values())
-            .filter(s => s.status !== 'checking')
-            .filter(s => this.statusFilter === 'all' || s.status === this.statusFilter);
+        const checked = this.visibleStatuses().filter(s => s.status !== 'checking');
         if (checked.length === 0) return;
         const checkedList = container.createDiv({ cls: 'ssv-list-checked' });
         const cb = this.fileItemCallbacks();
         for (const fs of checked) {
             renderFileItem(checkedList, fs, this.selectedFiles.has(fs.path), cb);
+        }
+    }
+
+    // ── Search filter ──────────────────────────────────────────────
+
+    /**
+     * Built once from onOpen() and deliberately never re-rendered — see the
+     * comment there. Applying a filter re-renders the body only, so the
+     * input's focus and caret position survive typing.
+     */
+    private renderSearchBox(container: HTMLElement): void {
+        const row = container.createDiv({ cls: 'ssv-search' });
+        setIcon(row.createSpan({ cls: 'ssv-search-icon' }), ICONS.search);
+
+        const input = row.createEl('input', {
+            type: 'text',
+            cls: 'ssv-search-input',
+            attr: { placeholder: t('syncStatus.search.placeholder'), spellcheck: 'false' },
+        });
+
+        const clearBtn = row.createEl('button', { cls: 'ssv-search-clear' });
+        setIcon(clearBtn, ICONS.clear);
+        setTooltip(clearBtn, t('syncStatus.search.clear'));
+
+        const apply = (value: string): void => {
+            const next = value.trim();
+            if (next === this.searchQuery) return;
+            this.searchQuery = next;
+            this.pruneSelectionToVisible();
+            row.toggleClass('has-query', next.length > 0);
+            this.renderView();
+        };
+
+        // Debounced: every keystroke re-renders the whole list, which is
+        // noticeable on a large vault.
+        const applyDebounced = debounce(apply, 150, false);
+
+        input.addEventListener('input', () => applyDebounced(input.value));
+        input.addEventListener('keydown', (evt) => {
+            if (evt.key !== 'Escape' || input.value === '') return;
+            evt.preventDefault();
+            input.value = '';
+            apply('');
+        });
+        clearBtn.addEventListener('click', () => {
+            input.value = '';
+            apply('');
+            input.focus();
+        });
+    }
+
+    /**
+     * Files matching the search box, before the status tab is applied.
+     * Case-insensitive substring against the *full* path — not fuzzy, so a
+     * match is always explainable, and typing a folder prefix filters to that
+     * folder.
+     */
+    private searchedStatuses(): FileStatus[] {
+        const all = Array.from(this.fileStatuses.values());
+        if (this.searchQuery === '') return all;
+        const query = this.searchQuery.toLowerCase();
+        return all.filter(s => s.path.toLowerCase().includes(query));
+    }
+
+    /** The rows actually on screen: search and status tab applied together. */
+    private visibleStatuses(): FileStatus[] {
+        const searched = this.searchedStatuses();
+        return this.statusFilter === 'all' ? searched : searched.filter(s => s.status === this.statusFilter);
+    }
+
+    /**
+     * Keeps the invariant that the selection is always a subset of what's on
+     * screen, by dropping only the entries the current filter hides. Call it
+     * after any change to the search or the status tab.
+     *
+     * The alternative — letting the selection outlive the filter — puts a
+     * count on Push/Pull/Delete that the visible rows don't explain. Those
+     * actions overwrite the remote, overwrite local files, and delete remote
+     * files irreversibly, so acting on something off-screen is not a risk worth
+     * trading for the convenience of accumulating a selection across filters.
+     * Clearing the selection outright is the other extreme, and throws away
+     * ticks that the new filter would still have shown.
+     */
+    private pruneSelectionToVisible(): void {
+        const visible = new Set(this.visibleStatuses().map(s => s.path));
+        for (const path of this.selectedFiles) {
+            if (!visible.has(path)) this.selectedFiles.delete(path);
         }
     }
 
@@ -134,7 +241,11 @@ export class SyncStatusView extends ItemView {
     // ── Filter tabs ─────────────────────────────────────────────────
 
     private renderTabs(container: HTMLElement): void {
-        const all = Array.from(this.fileStatuses.values());
+        // Counted against the search results, not the whole vault: with a
+        // filter active the tabs answer "where did my match go?" directly
+        // (e.g. `modified 0 · remote-only 3`) instead of leaving the user to
+        // hunt through tabs for a file the search has already found.
+        const all = this.searchedStatuses();
         const counts: Record<FilterValue, number> = {
             all: all.length,
             synced: all.filter(s => s.status === 'synced').length,
@@ -167,8 +278,11 @@ export class SyncStatusView extends ItemView {
             }
             setTooltip(btn, tab.label);
             btn.addEventListener('click', () => {
-                if (this.statusFilter !== tab.value) this.selectedFiles.clear();
+                // Was: clear the whole selection on any tab change. Pruning
+                // instead keeps the ticks the new tab still shows, under the
+                // same invariant the search filter follows.
                 this.statusFilter = tab.value;
+                this.pruneSelectionToVisible();
                 this.renderView();
             });
         }
@@ -177,8 +291,7 @@ export class SyncStatusView extends ItemView {
     // ── Action bar ─────────────────────────────────────────────────
 
     private renderActionBarSection(container: HTMLElement): void {
-        const all = Array.from(this.fileStatuses.values());
-        const visible = this.statusFilter === 'all' ? all : all.filter(s => s.status === this.statusFilter);
+        const visible = this.visibleStatuses();
         const selected = Array.from(this.selectedFiles)
             .map(p => this.fileStatuses.get(p))
             .filter(Boolean) as FileStatus[];
@@ -195,8 +308,13 @@ export class SyncStatusView extends ItemView {
         }, {
             onRefresh:   () => void this.refreshAllStatuses(),
             onSelectAll: (select) => {
-                if (select) { for (const s of visible) this.selectedFiles.add(s.path); }
-                else { this.selectedFiles.clear(); }
+                // Symmetric with select, and both act only on what's on screen —
+                // consistent with the invariant that the selection never holds
+                // anything the current filter is hiding.
+                for (const s of visible) {
+                    if (select) this.selectedFiles.add(s.path);
+                    else this.selectedFiles.delete(s.path);
+                }
                 this.renderView();
             },
             onPush:   () => void this.pushSelected(),
@@ -218,7 +336,74 @@ export class SyncStatusView extends ItemView {
             onPull:   (fs) => void this.runSingleFile(fs, 'pull'),
             onDelete: (fs) => void this.handleLocalDelete(fs),
             onExpandDiff: (fs) => this.loadDiffContent(fs),
+            onOpen:   (fs, newLeaf) => this.openFileFromRow(fs, newLeaf),
+            canOpen:  (fs) => this.openTargetFor(fs) !== null,
+            onOpenDiffPane: (fs) => void this.openDiffPane(fs),
         };
+    }
+
+    /**
+     * Shows a file's diff in its own workspace pane, reusing the one already
+     * open rather than stacking a pane per file. The first pane goes in a new
+     * tab and stays wherever the user drags it, since reuse keeps it there.
+     */
+    private async openDiffPane(fileStatus: FileStatus): Promise<void> {
+        await this.loadDiffContent(fileStatus);
+
+        const existing = this.app.workspace.getLeavesOfType(SYNC_DIFF_VIEW_TYPE)[0];
+        const leaf = existing ?? this.app.workspace.getLeaf('tab');
+        if (!existing) {
+            await leaf.setViewState({ type: SYNC_DIFF_VIEW_TYPE, active: true });
+        }
+
+        const view = leaf.view;
+        if (view instanceof DiffView) view.setDiff(fileStatus);
+        await this.app.workspace.revealLeaf(leaf);
+    }
+
+    /**
+     * Closes the diff pane when it's showing a file whose content has just
+     * changed under it. The pane would otherwise keep displaying the pre-push
+     * diff while looking perfectly current.
+     */
+    private closeDiffPaneFor(paths: Iterable<string>): void {
+        const changed = new Set(paths);
+        for (const leaf of this.app.workspace.getLeavesOfType(SYNC_DIFF_VIEW_TYPE)) {
+            const view = leaf.view;
+            const shown = view instanceof DiffView ? view.getPath() : null;
+            if (shown !== null && changed.has(shown)) leaf.detach();
+        }
+    }
+
+    /**
+     * Where a row's path points: the vault when there's a local file to open,
+     * the provider's site when the file only exists on the remote. Null means
+     * neither is possible, and the caller renders plain text — a link that goes
+     * nowhere is worse than no link.
+     */
+    private openTargetFor(fileStatus: FileStatus): { kind: 'local'; file: TFile } | { kind: 'remote'; url: string } | null {
+        if (fileStatus.status === 'remote-only') {
+            const url = buildRemoteFileUrl(this.plugin.settings, this.plugin.getNormalizedPath(fileStatus.path));
+            return url ? { kind: 'remote', url } : null;
+        }
+
+        // The panel deliberately tracks paths outside Obsidian's file index
+        // (hidden files, .obsidian/), and those have no TFile to open. They
+        // don't fall back to the remote link: a local-only file isn't there.
+        const file = fileStatus.file ?? this.app.vault.getFileByPath(fileStatus.path);
+        return file instanceof TFile ? { kind: 'local', file } : null;
+    }
+
+    private openFileFromRow(fileStatus: FileStatus, newLeaf: boolean): boolean {
+        const target = this.openTargetFor(fileStatus);
+        if (!target) return false;
+
+        if (target.kind === 'local') {
+            void this.app.workspace.getLeaf(newLeaf).openFile(target.file);
+        } else {
+            window.open(target.url, '_blank');
+        }
+        return true;
     }
 
     /**
@@ -238,14 +423,17 @@ export class SyncStatusView extends ItemView {
     }
 
     private renderFileList(container: HTMLElement): void {
-        const all = Array.from(this.fileStatuses.values());
-        const statuses = this.statusFilter === 'all'
-            ? all
-            : all.filter(s => s.status === this.statusFilter);
+        const statuses = this.visibleStatuses();
 
         if (statuses.length === 0) {
-            const filterLabel = this.statusFilter === 'all' ? t('syncStatus.tab.all') : statusMeta(this.statusFilter).label;
-            container.createDiv({ cls: 'ssv-empty', text: t('syncStatus.noFilesForFilter', { filter: filterLabel }) });
+            // With a search active, "no Changed files" would misattribute the
+            // empty list to the tab when it's the query that matched nothing.
+            const text = this.searchQuery !== ''
+                ? t('syncStatus.noFilesForSearch', { query: this.searchQuery })
+                : t('syncStatus.noFilesForFilter', {
+                    filter: this.statusFilter === 'all' ? t('syncStatus.tab.all') : statusMeta(this.statusFilter).label
+                });
+            container.createDiv({ cls: 'ssv-empty', text });
             return;
         }
 
@@ -278,6 +466,7 @@ export class SyncStatusView extends ItemView {
     private async runSingleFile(fileStatus: FileStatus, op: 'push' | 'pull'): Promise<void> {
         try {
             fileStatus.status = 'checking';
+            this.closeDiffPaneFor([fileStatus.path]);
             this.renderView();
 
             if (op === 'push') {
@@ -749,6 +938,7 @@ export class SyncStatusView extends ItemView {
     private async executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string | TFile>): Promise<void> {
         const runVerb = op === 'push' ? t('main.verb.pushing') : t('main.verb.pulling');
         const prog = new Notice(t('main.progress.running', { verb: runVerb, total: files.length }), 0);
+        this.closeDiffPaneFor(files.map(f => typeof f === 'string' ? f : f.path));
         try {
             const remoteTree = await this.getReusableRemoteTree();
             const results = op === 'push'

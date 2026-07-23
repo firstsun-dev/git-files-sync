@@ -7,6 +7,7 @@ import { GitServiceInterface, GitTreeEntry } from './services/git-service-interf
 import { ConnectionTestResult } from './services/git-service-base';
 import { SyncManager } from './logic/sync-manager';
 import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
+import { DiffView, SYNC_DIFF_VIEW_TYPE } from './ui/DiffView';
 import { GitignoreManager } from './logic/gitignore-manager';
 import { logger } from './utils/logger';
 import { ConfirmModal } from './ui/ConfirmModal';
@@ -40,6 +41,13 @@ export default class GitLabFilesPush extends Plugin {
 		this.registerView(
 			SYNC_STATUS_VIEW_TYPE,
 			(leaf) => new SyncStatusView(leaf, this)
+		);
+
+		// Desktop shows diffs here instead of inline in the sidebar, where a
+		// side-by-side view has no room. The sync panel opens and reuses it.
+		this.registerView(
+			SYNC_DIFF_VIEW_TYPE,
+			(leaf) => new DiffView(leaf)
 		);
 
 		this.addRibbonIcon('git-compare', t('main.ribbon.openSyncStatus'), async () => {

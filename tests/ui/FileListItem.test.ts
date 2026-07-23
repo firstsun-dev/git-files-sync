@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { renderFileItem, statusMeta, type FileItemCallbacks } from '../../src/ui/components/FileListItem';
 import type { FileStatus } from '../../src/ui/types';
-import { TFile } from 'obsidian';
+import { TFile, Platform } from 'obsidian';
 import { setupObsidianDOM, createContainer } from './setup-dom';
 
 beforeAll(() => { setupObsidianDOM(); });
@@ -45,6 +45,9 @@ describe('renderFileItem', () => {
             onPull:   vi.fn(),
             onDelete: vi.fn(),
             onExpandDiff: vi.fn().mockResolvedValue(undefined),
+            onOpen:   vi.fn().mockReturnValue(true),
+            canOpen:  vi.fn().mockReturnValue(true),
+            onOpenDiffPane: vi.fn(),
         };
     });
 
@@ -120,10 +123,39 @@ describe('renderFileItem', () => {
             expect(callbacks.onPull).toHaveBeenCalledWith(fs);
         });
 
-        it('renders diff toggle button for any modified file, even without preloaded content', () => {
+        it('renders a diff button for any modified file, even without preloaded content', () => {
             const fs = makeFileStatus('modified', { file: mockFile });
             renderFileItem(container, fs, false, callbacks);
             expect(container.querySelector('.ssv-action-btn.diff')).not.toBeNull();
+        });
+    });
+
+    // The inline panel is stuck at sidebar width, so desktop sends the diff to
+    // its own pane instead and never renders the inline one.
+    describe('modified file: desktop diff pane', () => {
+        it('asks for a diff pane instead of expanding inline', () => {
+            const fs = makeFileStatus('modified', { localContent: 'b', remoteContent: 'a' });
+            renderFileItem(container, fs, false, callbacks);
+            (container.querySelector('.ssv-action-btn.diff') as HTMLButtonElement).click();
+            expect(callbacks.onOpenDiffPane).toHaveBeenCalledWith(fs);
+        });
+
+        it('renders no inline diff panel', () => {
+            const fs = makeFileStatus('modified', { localContent: 'b', remoteContent: 'a' });
+            renderFileItem(container, fs, false, callbacks);
+            expect(container.querySelector('.ssv-diff')).toBeNull();
+        });
+    });
+
+    describe('modified file: mobile inline diff', () => {
+        beforeEach(() => { Platform.isMobile = true; });
+        afterEach(() => { Platform.isMobile = false; });
+
+        it('does not ask for a diff pane', () => {
+            const fs = makeFileStatus('modified', { localContent: 'b', remoteContent: 'a' });
+            renderFileItem(container, fs, false, callbacks);
+            (container.querySelector('.ssv-action-btn.diff') as HTMLButtonElement).click();
+            expect(callbacks.onOpenDiffPane).not.toHaveBeenCalled();
         });
 
         it('diff panel is not visible before toggle', () => {

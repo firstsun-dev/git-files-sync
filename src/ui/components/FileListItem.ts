@@ -1,4 +1,4 @@
-import { setIcon, setTooltip } from 'obsidian';
+import { Keymap, Platform, setIcon, setTooltip } from 'obsidian';
 import { type FileStatus } from '../types';
 import { renderDiffPanel } from './DiffPanel';
 import { ICONS } from './icons';
@@ -10,12 +10,28 @@ export interface FileItemCallbacks {
     onPull:   (fileStatus: FileStatus) => void;
     onDelete: (fileStatus: FileStatus) => void;
     /**
+     * Opens the file where it actually lives — in the vault when there's a
+     * local copy, otherwise on the provider's site in a browser. Returns false
+     * when neither is possible (a hidden path Obsidian can't open, or provider
+     * settings that don't identify a web URL), in which case the path renders
+     * as plain text rather than a link that goes nowhere.
+     */
+    onOpen: (fileStatus: FileStatus, newLeaf: boolean) => boolean;
+    /** Whether onOpen would succeed, so the path can be rendered accordingly. */
+    canOpen: (fileStatus: FileStatus) => boolean;
+    /**
      * Called the first time a modified file's diff is expanded and its remote
      * content hasn't been fetched yet. Must fetch the content, mutate the
      * fileStatus object in place (remoteContent, localContent as needed), and
      * resolve once it's ready to render.
      */
     onExpandDiff: (fileStatus: FileStatus) => Promise<void>;
+    /**
+     * Desktop only: shows the diff in its own workspace pane instead of inline.
+     * The inline panel is stuck at sidebar width, where the side-by-side view
+     * can't fit; a pane gives it room. Mobile keeps the inline panel.
+     */
+    onOpenDiffPane: (fileStatus: FileStatus) => void;
 }
 
 // `icon` is a Lucide icon id (rendered via Obsidian's setIcon) so every status
@@ -45,7 +61,7 @@ export function renderFileItem(
     cb.addEventListener('change', () => callbacks.onSelect(fileStatus.path, cb.checked));
 
     setIcon(row.createSpan({ cls: `ssv-file-icon ${iconCls}` }), icon);
-    row.createSpan({ cls: 'ssv-file-path', text: fileStatus.path });
+    renderFilePath(row, fileStatus, callbacks);
     row.createSpan({ cls: `ssv-status-badge ${badgeCls}`, text: label });
 
     if (fileStatus.status !== 'synced' && fileStatus.status !== 'checking') {
@@ -53,11 +69,45 @@ export function renderFileItem(
     }
 }
 
+/**
+ * The path opens the file; the rest of the row is left alone. Rows the caller
+ * can't open stay plain text so there's never a link that does nothing —
+ * `remote-only` rows are exactly the ones users are most curious about, so a
+ * dead link there would be worse than none.
+ */
+function renderFilePath(row: HTMLElement, fileStatus: FileStatus, callbacks: FileItemCallbacks): void {
+    if (!callbacks.canOpen(fileStatus)) {
+        row.createSpan({ cls: 'ssv-file-path', text: fileStatus.path });
+        return;
+    }
+
+    const pathEl = row.createSpan({ cls: 'ssv-file-path ssv-file-path-link', text: fileStatus.path });
+    pathEl.setAttr('role', 'link');
+    pathEl.setAttr('tabindex', '0');
+    setTooltip(pathEl, fileStatus.status === 'remote-only'
+        ? t('fileListItem.tooltip.openRemote')
+        : t('fileListItem.tooltip.openFile'));
+
+    pathEl.addEventListener('click', (evt) => {
+        evt.preventDefault();
+        // Obsidian's convention: a modifier opens in a new tab or split.
+        callbacks.onOpen(fileStatus, Keymap.isModEvent(evt) !== false);
+    });
+    pathEl.addEventListener('keydown', (evt) => {
+        if (evt.key !== 'Enter' && evt.key !== ' ') return;
+        evt.preventDefault();
+        callbacks.onOpen(fileStatus, false);
+    });
+}
+
 function renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus, callbacks: FileItemCallbacks): void {
     const actions = fileEl.createDiv({ cls: 'ssv-file-actions' });
 
     if (fileStatus.status === 'modified') {
-        renderDiffToggleButton(actions, fileEl, fileStatus, callbacks);
+        // One entry point per platform, never both: two buttons rendering the
+        // same diff differently just invites "what's the difference?".
+        if (Platform.isMobile) renderDiffToggleButton(actions, fileEl, fileStatus, callbacks);
+        else renderDiffPaneButton(actions, fileStatus, callbacks);
     }
 
     if (fileStatus.status === 'modified' || fileStatus.status === 'unsynced') {
@@ -71,6 +121,13 @@ function renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus, callback
     if (fileStatus.status === 'unsynced') {
         renderActionBtn(actions, ICONS.delete, t('fileListItem.action.remove'), t('fileListItem.tooltip.deleteLocalFile'), () => callbacks.onDelete(fileStatus), 'danger');
     }
+}
+
+function renderDiffPaneButton(actions: HTMLElement, fileStatus: FileStatus, callbacks: FileItemCallbacks): void {
+    renderActionBtn(
+        actions, ICONS.diff, t('fileListItem.action.diff'), t('fileListItem.tooltip.openDiffPane'),
+        () => callbacks.onOpenDiffPane(fileStatus), 'diff'
+    );
 }
 
 function renderDiffToggleButton(actions: HTMLElement, fileEl: HTMLElement, fileStatus: FileStatus, callbacks: FileItemCallbacks): void {
