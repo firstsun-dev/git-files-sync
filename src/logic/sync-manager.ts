@@ -148,26 +148,68 @@ export class SyncManager {
     }
 
     /**
+     * Tracked paths a rename could have come from: previously synced, still
+     * pointing at themselves, and no longer present in the vault.
+     */
+    private renameCandidates(file: TFile): string[] {
+        return Object.keys(this.settings.syncMetadata).filter(oldPath => {
+            const metadata = this.settings.syncMetadata[oldPath];
+            if (!metadata || metadata.lastKnownPath !== oldPath) return false;
+            if (oldPath === file.path) return false;
+            return !this.app.vault.getFileByPath(oldPath);
+        });
+    }
+
+    /**
      * A missing local file at a tracked path is only weak evidence of a rename —
      * any orphaned metadata entry (e.g. from a local delete) matches it too. Only
      * report a rename once the remote content at the old path still matches the
      * content being pushed now, confirming it's really the same file that moved.
+     *
+     * Given a pre-fetched tree this costs no requests: the tree carries each
+     * blob's sha, so one comparison against the local content's git blob sha
+     * answers both "is the old path still on the remote" and "is it the same
+     * bytes" (`contentsEqual` is exact equality, so the two agree). Without a
+     * tree every candidate needs its own `getFile`, and a candidate the remote
+     * no longer has 404s — which is why the batch push must pass its tree in
+     * rather than re-probing the same dead paths once per file being pushed.
      */
-    private async detectRename(file: TFile, content: string | ArrayBuffer): Promise<string | null> {
-        const metadataEntries = Object.keys(this.settings.syncMetadata);
-        for (const oldPath of metadataEntries) {
-            const metadata = this.settings.syncMetadata[oldPath];
-            if (!metadata) continue;
-            if (oldPath === file.path || metadata.lastKnownPath !== oldPath) continue;
-            if (this.app.vault.getFileByPath(oldPath)) continue;
+    private async detectRename(
+        file: TFile,
+        content: string | ArrayBuffer,
+        treeByFullPath?: Map<string, GitTreeEntry>
+    ): Promise<string | null> {
+        const candidates = this.renameCandidates(file);
+        if (candidates.length === 0) return null;
 
-            const oldRepoPath = this.getNormalizedPath(oldPath);
-            const remoteAtOldPath = await this.gitService.getFile(oldRepoPath, this.settings.branch);
-            if (remoteAtOldPath.sha && this.contentsEqual(content, remoteAtOldPath.content)) {
-                return oldPath;
-            }
+        const localSha = treeByFullPath ? await gitBlobSha(content) : undefined;
+        for (const oldPath of candidates) {
+            if (await this.isRenameSource(oldPath, content, localSha, treeByFullPath)) return oldPath;
         }
         return null;
+    }
+
+    /** Whether the content being pushed is what the remote still holds at `oldPath`. */
+    private async isRenameSource(
+        oldPath: string,
+        content: string | ArrayBuffer,
+        localSha: string | undefined,
+        treeByFullPath?: Map<string, GitTreeEntry>
+    ): Promise<boolean> {
+        const oldRepoPath = this.getNormalizedPath(oldPath);
+        const entry = treeByFullPath?.get(this.getFullPathForTree(oldRepoPath));
+
+        // The remote doesn't list the old path, so nothing moved from it.
+        if (treeByFullPath && !entry) return false;
+        // A symlink blob hashes its target path, not file content, so it can
+        // never be the source of a regular-file rename.
+        if (entry?.symlink) return false;
+        // Most providers' tree listings carry the blob sha; those that don't
+        // still need the content probe below.
+        if (entry?.sha) return entry.sha === localSha;
+
+        const remoteAtOldPath = await this.gitService.getFile(oldRepoPath, this.settings.branch);
+        return !!remoteAtOldPath.sha && this.contentsEqual(content, remoteAtOldPath.content);
     }
 
     private async handleRename(file: TFile, oldPath: string, content: string | ArrayBuffer): Promise<void> {
@@ -490,9 +532,10 @@ export class SyncManager {
         const content = await this.getFileContent(fileOrPath);
         const repoPath = this.getNormalizedPath(path);
 
-        // Rename detection
+        // Rename detection, resolved against the already-fetched tree so a batch
+        // of N files doesn't re-probe every orphaned metadata path N times.
         if (!isString && fileOrPath instanceof TFile) {
-            const renamedFrom = await this.detectRename(fileOrPath, content);
+            const renamedFrom = await this.detectRename(fileOrPath, content, treeByFullPath);
             if (renamedFrom) {
                 await this.handleRename(fileOrPath, renamedFrom, content);
                 return 'done';
