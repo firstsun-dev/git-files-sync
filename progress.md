@@ -27,6 +27,8 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
   - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 344/344 passed.
 - [x] Push failures reported as `GitHub GraphQL error: Expected branch to point to "<oid>" but it did not. Pull and try again.` (whole chunk failed, twice in a row, same oid). Two causes: the stale-HEAD retry pattern in `github-service.ts` never matched that wording, so no retry fired; and `expectedHeadOid` came from the REST `git/ref` read, which GitHub serves `private, max-age=60`, so retries would have resent the same cached oid anyway. `commitOnBranch` now reads the head over GraphQL, the pattern covers GitHub's real wording, exhaustion gives a branch-named message, and the REST read sends `Cache-Control: no-cache`. On `claude/git-file-sync-push-errors-9ffa82`, no PR opened yet.
   - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean (incl. Obsidian 1.11.0 compat); `npx vitest run` → 351/351 passed.
+- [x] Console flooded with `Git Service 404 (not found)` before every push (separate from the fix above, pre-existing). Two sources, both probing paths already known to be absent from the pre-fetched remote tree: `SyncStatusView.refreshFileStatus` fell back to `getFile` for any file with no tree entry (a guaranteed 404 per not-yet-pushed file, every refresh), and `SyncManager.detectRename` probed every orphaned `syncMetadata` path once per file in the batch. Both now answer from the tree; the `getFile` fallback is kept only for tree entries that carry no sha.
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 354/354 passed.
 
 ### What's In Progress
 

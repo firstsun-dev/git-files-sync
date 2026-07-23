@@ -210,6 +210,56 @@ describe('SyncStatusView.identifyExtraFiles folder/remote-record collisions', ()
     });
 });
 
+describe('SyncStatusView.refreshFileStatus for files absent from the remote tree', () => {
+    beforeAll(() => { setupObsidianDOM(); });
+
+    // Regression test: a local file the remote tree doesn't list is 'unsynced' by
+    // definition. Fetching it to find that out is a guaranteed 404 per file, which
+    // floods the console on any vault with several not-yet-pushed files.
+    it('classifies it unsynced from local content alone, with no getFile request', async () => {
+        const getFile = vi.fn();
+        const { plugin, leaf } = makePlugin({ adapterExists: vi.fn().mockResolvedValue(true) });
+        (plugin.gitService as unknown as { getFile: typeof getFile }).getFile = getFile;
+
+        const view = new SyncStatusView(leaf, plugin);
+        vi.spyOn(view as unknown as { readFileContent(f: unknown, b: boolean, s: boolean): Promise<string> }, 'readFileContent')
+            .mockResolvedValue('local only content');
+
+        await (view as unknown as {
+            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
+        }).refreshFileStatus('notes/new.md', undefined);
+
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.get('notes/new.md')).toMatchObject({
+            path: 'notes/new.md',
+            status: 'unsynced',
+            localContent: 'local only content',
+            remoteSha: '',
+        });
+        expect(getFile).not.toHaveBeenCalled();
+    });
+
+    // A tree entry that exists but carries no sha (providers whose listing omits
+    // it) still needs the content fetch — that path must stay intact.
+    it('still fetches content for a tree entry without a sha', async () => {
+        const getFile = vi.fn().mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+        const { plugin, leaf } = makePlugin({ adapterExists: vi.fn().mockResolvedValue(true) });
+        (plugin.gitService as unknown as { getFile: typeof getFile }).getFile = getFile;
+
+        const view = new SyncStatusView(leaf, plugin);
+        vi.spyOn(view as unknown as { readFileContent(f: unknown, b: boolean, s: boolean): Promise<string> }, 'readFileContent')
+            .mockResolvedValue('remote content');
+
+        await (view as unknown as {
+            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
+        }).refreshFileStatus('notes/existing.md', { path: 'notes/existing.md', symlink: false });
+
+        expect(getFile).toHaveBeenCalledWith('notes/existing.md', 'main');
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.get('notes/existing.md')?.status).toBe('synced');
+    });
+});
+
 describe('SyncStatusView post-push status update', () => {
     beforeAll(() => { setupObsidianDOM(); });
 

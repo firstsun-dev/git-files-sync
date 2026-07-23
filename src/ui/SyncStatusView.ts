@@ -520,15 +520,22 @@ export class SyncStatusView extends ItemView {
      * Classifies a file's sync status. When the remote tree entry carries a git
      * blob SHA (the common case), this is a single local hash + comparison with
      * no network request (Phase 1 of the SHA-based refresh). Falls back to the
-     * previous full-content comparison via getFile() when a tree entry is
-     * missing a SHA, or wasn't found on the remote at all (new local file).
+     * full-content comparison via getFile() only when a tree entry exists but
+     * carries no SHA (providers whose tree listing omits it).
+     *
+     * A file with no tree entry at all isn't on the remote, so it is 'unsynced'
+     * by definition — fetching it would 404 once per file, which on a vault with
+     * many not-yet-pushed files floods the console with failed requests before
+     * every push.
      */
     private async refreshFileStatus(fileOrPath: TFile | string, remoteEntry: GitTreeEntry | undefined): Promise<void> {
         try {
             if (remoteEntry?.sha !== undefined) {
                 await this.refreshFileStatusBySha(fileOrPath, remoteEntry);
-            } else {
+            } else if (remoteEntry) {
                 await this.refreshFileStatusByContent(fileOrPath);
+            } else {
+                await this.markLocalOnlyUnsynced(fileOrPath);
             }
         } catch (e) {
             const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
@@ -575,6 +582,26 @@ export class SyncStatusView extends ItemView {
             if (target !== null) return target;
         }
         return this.readFileContent(fileOrPath, binary, isStr);
+    }
+
+    /**
+     * Status for a file the remote tree doesn't list at all. Local content is
+     * still read so the row can be pushed/diffed like any other, and the empty
+     * remote sha/content match what a 404 lookup used to yield.
+     */
+    private async markLocalOnlyUnsynced(fileOrPath: TFile | string): Promise<void> {
+        const isStr = typeof fileOrPath === 'string';
+        const path = isStr ? fileOrPath : fileOrPath.path;
+        const localContent = await this.readFileContent(fileOrPath, this.isBinary(path), isStr);
+
+        this.fileStatuses.set(path, {
+            file: isStr ? undefined : fileOrPath,
+            path,
+            status: 'unsynced',
+            localContent,
+            remoteContent: '',
+            remoteSha: '',
+        });
     }
 
     /** Fallback status check via full content fetch, for entries without a usable tree SHA. */

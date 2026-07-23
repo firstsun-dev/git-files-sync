@@ -4,6 +4,7 @@ import { SyncManager } from '../../src/logic/sync-manager';
 import { App, DataAdapter, TFile } from 'obsidian';
 import { GitLabFilesPushSettings } from '../../src/settings';
 import { GitServiceInterface } from '../../src/services/git-service-interface';
+import { gitBlobSha } from '../../src/utils/git-blob-sha';
 
 vi.mock('obsidian');
 
@@ -352,6 +353,9 @@ describe('SyncManager Batch Operations', () => {
                 // New path does not exist on the remote yet.
                 return { content: '', sha: '' };
             });
+            // Tree entry without a sha (a provider whose listing omits it), so the
+            // rename is confirmed by the content probe above.
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path: oldPath, symlink: false }]);
 
             const results = await manager.pushAllFiles([mockFile]);
 
@@ -379,6 +383,7 @@ describe('SyncManager Batch Operations', () => {
                 // A file already exists on the remote at the new path.
                 return { content: 'old remote content', sha: 'remote-existing-sha' };
             });
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path: oldPath, symlink: false }]);
 
             const results = await manager.pushAllFiles([mockFile]);
 
@@ -386,6 +391,34 @@ describe('SyncManager Batch Operations', () => {
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
                 newPath, 'content', 'main', `Rename ${oldPath} to ${newPath}`, 'remote-existing-sha'
             );
+        });
+
+        it('confirms a rename from the tree sha alone, without probing the old path', async () => {
+            // The tree already carries every blob's sha, and contentsEqual is exact
+            // equality, so a sha match is the same answer the content probe gives.
+            const oldPath = 'old.md';
+            const newPath = 'new.md';
+            const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
+            mockSettings.syncMetadata = {
+                [oldPath]: { lastSyncedSha: 'sha', lastSyncedAt: 0, lastKnownPath: oldPath }
+            };
+
+            vi.mocked(mockApp.vault.getFileByPath).mockImplementation(p => p === oldPath ? null : mockFile);
+            vi.mocked(mockApp.vault.read).mockResolvedValue('content');
+            vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: '' });
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: oldPath, symlink: false, sha: await gitBlobSha('content') }
+            ]);
+
+            const results = await manager.pushAllFiles([mockFile]);
+
+            expect(results.success).toBe(1);
+            expect(mockGitService.pushFile).toHaveBeenCalledWith(
+                newPath, 'content', 'main', `Rename ${oldPath} to ${newPath}`, ''
+            );
+            expect(mockGitService.getFile).not.toHaveBeenCalledWith(oldPath, 'main');
         });
 
         it('does not misclassify an unrelated push as a rename just because an orphaned metadata entry exists', async () => {
@@ -400,11 +433,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockApp.vault.read).mockResolvedValue('unrelated content');
             vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: pushedPath, sha: 'new-sha' });
-            // detectRename still checks the orphaned metadata entry's remote content directly.
-            vi.mocked(mockGitService.getFile).mockImplementation(async (path) => {
-                if (path === orphanedPath) return { content: 'totally different content', sha: 'orphaned-sha' };
-                return { content: '', sha: '' };
-            });
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: '' });
             // The pushed path's own remote state comes from the pre-fetched tree, not getFile.
             vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
                 { path: pushedPath, symlink: false, sha: 'remote-sha' }
@@ -417,6 +446,9 @@ describe('SyncManager Batch Operations', () => {
                 pushedPath, 'unrelated content', 'main', `Update ${mockFile.name} from Obsidian`, 'remote-sha'
             );
             expect(mockSettings.syncMetadata[orphanedPath]).toBeDefined();
+            // The tree doesn't list the orphaned path, so it can't be a rename
+            // source — probing it would be a guaranteed 404, once per pushed file.
+            expect(mockGitService.getFile).not.toHaveBeenCalledWith(orphanedPath, 'main');
         });
     });
 });
