@@ -9,19 +9,16 @@
 
 ## Current Objective
 
-- Two fixes this session, both committed onto `claude/fix-directory-symlink-pull-260713` (PR #51), **not yet pushed to remote**:
-  1. **feat-014** (commit `114a575`): GitHub's `pushBatch`/`deleteBatch` switched from the REST Git Data API's per-file blob-creation loop to a single GraphQL `createCommitOnBranch` mutation.
-  2. **feat-015** (commit `7676325`): fixed a false "modified" status shown right after a batch push, caused by re-fetching the remote tree too soon after a write (GitHub's tree-by-branch-name read can lag a moment behind a just-completed commit).
+- Implement issue [#64](https://github.com/firstsun-dev/git-files-sync/issues/64) (localize "what's new" update notifications) on branch `claude/conventional-perf-push-speed-9136c3`, which tracks `origin/codex/perf-github-push-260723` (already ahead of `main` by two `perf(push)` commits: `0445b17`, `f8a0a26`). Also prepare the "what's new" changelog entry for the next patch release (1.3.1) covering those push-speed perf commits, so it's ready when semantic-release cuts the release. **Not yet committed or pushed.**
 
 ## Completed This Session
 
-- [x] `githubGraphQL()` helper in `github-service.ts`; explicit handling for GraphQL's 200-status-with-`errors`-array failure mode.
-- [x] `BaseGitService.getLatestCommitSha()` extracted from `resolveGitHubStyleBaseTree()`.
-- [x] `SyncManager.pushAllFiles()` now returns `syncedPaths: Array<{path, sha?}>`, populated at all three push-success sites (batch chunk, sequential fallback, immediate symlink/rename push).
-- [x] `SyncStatusView.executeBatchOperation()` marks just-pushed paths `'synced'` directly via a new `applyOptimisticSyncedStatus()` instead of calling `refreshAllStatuses()` after a push. Pull is unchanged (still does a full refresh).
-- [x] Live-verified both fixes against a real GitHub repo (`firstsun-dev/obsidian-sync-test`) using a scratchpad script that bundles the actual `github-service.ts` with a thin `obsidian` stub (`requestUrl` backed by real `fetch`) — not just mocks.
-- [x] Filed issue #57 on `firstsun-dev/git-files-sync` (Project #6, P2, 4h): build a repeatable live-credential smoke test process across GitHub/GitLab/Gitea (this session only covered GitHub).
-- [x] Cleaned up harness state: archived feat-011/012/013 + issue #78 fix + status-badge UI work into `archive/2026-07.md` (progress.md had grown past its own 80-line cleanup threshold); trimmed `feature_list.json` evidence strings under 300 chars. Harness self-audit went from 96/100 to 100/100.
+- [x] Refactored `src/changelog.ts` into a `src/changelog/` package: `types.ts` (shared interfaces), `index.ts` (aggregator + `entryText()` locale resolver + `getUnseenReleases()`), and one folder per release (`1.2.1/`, `1.3.0/`, `1.3.1/`) each exporting a `release: ChangelogRelease` with inline `{ en, 'zh-tw', 'zh-cn' }` text per entry.
+- [x] First design pass put the changelog text as new keys in the shared `src/i18n/locales/{en,zh-tw,zh-cn}.ts` catalog — **user rejected this** because it makes those files grow unbounded every release. Reverted and moved to the per-version-folder design above instead.
+- [x] `WhatsNewModal.ts` and `settings.ts` (the "what's new" banner) now call `entryText(entry)` to resolve text for the active locale (falls back to `en`) instead of reading a hard-coded `entry.text` string.
+- [x] Added a `1.3.1` release entry (notable, all three locales) describing the push-speed improvements, so the modal/banner will surface it once the next release ships.
+- [x] Updated `tests/changelog.test.ts` and `tests/ui/WhatsNewModal.test.ts` fixtures to the new `text: { en: '...' }` shape.
+- [x] `node_modules` was empty at session start in this worktree — ran `npm install` before the gate (this also fixed a stale `1.2.1` → `1.3.0` version mismatch in `package-lock.json`'s `"version"` field).
 
 ## Verification Evidence
 
@@ -29,33 +26,32 @@
 |---|---|---|---|
 | Lint | `npx eslint .` | 0 errors | |
 | Type check + compat | `npm run build` | Pass | Includes Obsidian 1.11.0 compat typecheck |
-| Tests | `npx vitest run` | 344/344 passed | +3 new: 2 for `syncedPaths`, 1 more for the post-push status behavior (total 5 new across both fixes) |
-| Live smoke test | ad-hoc scratchpad scripts | Pass | feat-014: pushBatch/deleteBatch each produced one commit with correct content. feat-015: single empty file and two-identical-empty-file batches both wrote correct 0-byte blobs with matching git shas — confirmed the bug was read-side (tree fetch timing), not write-side |
+| Tests | `npx vitest run` | 351/351 passed | |
 | Manual (in Obsidian) | — | Not done | No Obsidian instance available in this environment |
 
 ## Files Changed (this session)
 
-- feat-014: `src/services/github-service.ts`, `src/services/git-service-base.ts`, `tests/services/github-service.test.ts`
-- feat-015: `src/logic/sync-manager.ts`, `src/ui/SyncStatusView.ts`, `tests/logic/sync-manager-batch.test.ts`, `tests/ui/SyncStatusView.test.ts`
-- Harness state: `progress.md`, `session-handoff.md`, `feature_list.json`, `archive/2026-07.md`
+- `src/changelog.ts` deleted → `src/changelog/{index,types}.ts`, `src/changelog/{1.2.1,1.3.0,1.3.1}/index.ts`
+- `src/ui/WhatsNewModal.ts`, `src/settings.ts`
+- `tests/changelog.test.ts`, `tests/ui/WhatsNewModal.test.ts`
+- `package-lock.json` (version field sync from `npm install`)
 
 ## Decisions Made
 
-- **GraphQL only for GitHub**: GitLab's Commits API already sends a whole batch in one call; Gitea has no GraphQL API. `GitServiceInterface` stays REST-based elsewhere.
-- **Optimistic local status update over re-fetching (feat-015)**: use data already known from the push itself rather than trusting an immediate remote read, which sidesteps GitHub's eventual-consistency window rather than just narrowing it with a delay/retry.
-- **Credential handling**: PATs must go into a scratchpad file the agent reads directly (`fs.readFileSync`), never typed as a `!`-prefixed command (still lands in the transcript) or passed as a Bash command-line argument (blocked by the permission classifier as credential materialization). Filed issue #57 to formalize this as the only documented path for future provider testing.
+- **Per-version folders, not the shared i18n catalog**: see above — direct user correction mid-session.
+- **No manual version bump**: `.releaserc.json`'s commit-analyzer maps `perf` → `patch`, so 1.3.0 → 1.3.1 happens automatically via `@semantic-release/exec` in CI when this merges to `main`. Didn't hand-edit `package.json`/`manifest.json`/`versions.json`.
 
 ## Blockers / Risks
 
-- **Commits `114a575` and `7676325` are local only** — not pushed to `origin/claude/fix-directory-symlink-pull-260713` yet. Confirm with the user before pushing.
-- PR #51 keeps growing (10+ issues' worth now) — still worth flagging before adding more.
+- Nothing committed yet. Need to confirm with the user before committing and before pushing to `origin/codex/perf-github-push-260723` (shared branch, no open PR currently).
+- Whether the final destination is a PR against `main` or a direct merge of `codex/perf-github-push-260723` — not yet decided with the user.
 
 ## Next Session Startup
 
 1. Read `CLAUDE.md`, `feature_list.json`, `progress.md`, then this file.
-2. Run `./init.sh` before editing.
-3. Check whether `114a575`/`7676325` have been pushed yet (`git log origin/claude/fix-directory-symlink-pull-260713..HEAD`); push first if not, after confirming with the user.
+2. Run `./init.sh` (or at least `npm install`) before editing — this worktree started with an empty `node_modules`.
+3. Check `git log origin/codex/perf-github-push-260723..HEAD` — if this session's changelog work is still uncommitted/unpushed, finish that first.
 
 ## Recommended Next Step
 
-- Push this session's two commits, then either re-sync `gh issue list` or move to issue #37 (Bitbucket provider support) per the previously agreed order.
+- Commit the changelog work with a Conventional Commits message (likely `feat(i18n): localize update notifications` scope, closes #64), confirm with the user, then push to `origin/codex/perf-github-push-260723`.

@@ -17,6 +17,8 @@ import { type PushResults } from '../logic/sync-manager';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
 
+type RemoteTreeSnapshot = { branch: string; rootPath: string; head: string; entries: GitTreeEntry[] };
+
 export class SyncStatusView extends ItemView {
     plugin: GitLabFilesPush;
     private readonly fileStatuses: Map<string, FileStatus> = new Map();
@@ -25,6 +27,7 @@ export class SyncStatusView extends ItemView {
     private statusFilter: FilterValue = 'all';
     private readonly selectedFiles: Set<string> = new Set();
     private lastSyncTime: number = 0;
+    private remoteTreeSnapshot?: RemoteTreeSnapshot;
 
     constructor(leaf: WorkspaceLeaf, plugin: GitLabFilesPush) {
         super(leaf);
@@ -321,6 +324,7 @@ export class SyncStatusView extends ItemView {
             const filesToCheck = this.getCheckableFiles(files.local, extra, files.hiddenLocalPaths);
             await this.performStatusCheck(filesToCheck, files.remoteMap);
 
+            this.saveRemoteTreeSnapshot(files.remoteHead, files.remoteEntries);
             this.lastSyncTime = Date.now();
             this.isRefreshing = false; // Set to false BEFORE final renderView
             this.renderView();
@@ -335,11 +339,12 @@ export class SyncStatusView extends ItemView {
     private async discoverFiles() {
         const allFiles = this.app.vault.getFiles();
         let local = this.plugin.filterFilesByVaultFolder(allFiles);
+        const remoteHead = await this.plugin.gitService.getBranchHead?.(this.plugin.settings.branch);
         // Unfiltered: getNormalizedRemotePath below applies the same rootPath
         // filter, and gitignore discovery needs the entries outside rootPath
         // (e.g. the repo-root .gitignore). Sharing this one tree saves
         // loadGitignores a second full-tree fetch on every refresh.
-        const remoteEntries = await this.plugin.gitService.listFilesDetailed(this.plugin.settings.branch, false);
+        const remoteEntries = await this.plugin.gitService.listFilesDetailed(remoteHead ?? this.plugin.settings.branch, false);
 
         await this.plugin.gitignoreManager.loadGitignores(remoteEntries);
 
@@ -369,6 +374,8 @@ export class SyncStatusView extends ItemView {
 
         return {
             local,
+            remoteEntries,
+            remoteHead,
             remoteMap,
             localMap: new Set([...local.map(f => f.path), ...filteredHiddenPaths]),
             allMap:   new Map<string, TFile>(allFiles.map(f => [f.path, f])),
@@ -524,22 +531,18 @@ export class SyncStatusView extends ItemView {
      * Classifies a file's sync status. When the remote tree entry carries a git
      * blob SHA (the common case), this is a single local hash + comparison with
      * no network request (Phase 1 of the SHA-based refresh). Falls back to the
-     * full-content comparison via getFile() only when a tree entry exists but
-     * carries no SHA (providers whose tree listing omits it).
-     *
-     * A file with no tree entry at all isn't on the remote, so it is 'unsynced'
-     * by definition — fetching it would 404 once per file, which on a vault with
-     * many not-yet-pushed files floods the console with failed requests before
-     * every push.
+     * previous full-content comparison via getFile() only when a tree entry
+     * exists but the provider did not supply its SHA. A missing tree entry is
+     * already conclusive: it is a new local-only file and needs no 404 probe.
      */
     private async refreshFileStatus(fileOrPath: TFile | string, remoteEntry: GitTreeEntry | undefined): Promise<void> {
         try {
-            if (remoteEntry?.sha !== undefined) {
+            if (remoteEntry === undefined) {
+                await this.refreshLocalOnlyStatus(fileOrPath);
+            } else if (remoteEntry.sha !== undefined) {
                 await this.refreshFileStatusBySha(fileOrPath, remoteEntry);
-            } else if (remoteEntry) {
-                await this.refreshFileStatusByContent(fileOrPath);
             } else {
-                await this.markLocalOnlyUnsynced(fileOrPath);
+                await this.refreshFileStatusByContent(fileOrPath);
             }
         } catch (e) {
             const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
@@ -550,6 +553,18 @@ export class SyncStatusView extends ItemView {
                 status: 'unsynced'
             });
         }
+    }
+
+    private async refreshLocalOnlyStatus(fileOrPath: TFile | string): Promise<void> {
+        const isStr = typeof fileOrPath === 'string';
+        const path = isStr ? fileOrPath : fileOrPath.path;
+        const localContent = await this.readFileContent(fileOrPath, this.isBinary(path), isStr);
+        this.fileStatuses.set(path, {
+            file: isStr ? undefined : fileOrPath,
+            path,
+            status: 'unsynced',
+            localContent,
+        });
     }
 
     private async refreshFileStatusBySha(fileOrPath: TFile | string, remoteEntry: GitTreeEntry): Promise<void> {
@@ -586,26 +601,6 @@ export class SyncStatusView extends ItemView {
             if (target !== null) return target;
         }
         return this.readFileContent(fileOrPath, binary, isStr);
-    }
-
-    /**
-     * Status for a file the remote tree doesn't list at all. Local content is
-     * still read so the row can be pushed/diffed like any other, and the empty
-     * remote sha/content match what a 404 lookup used to yield.
-     */
-    private async markLocalOnlyUnsynced(fileOrPath: TFile | string): Promise<void> {
-        const isStr = typeof fileOrPath === 'string';
-        const path = isStr ? fileOrPath : fileOrPath.path;
-        const localContent = await this.readFileContent(fileOrPath, this.isBinary(path), isStr);
-
-        this.fileStatuses.set(path, {
-            file: isStr ? undefined : fileOrPath,
-            path,
-            status: 'unsynced',
-            localContent,
-            remoteContent: '',
-            remoteSha: '',
-        });
     }
 
     /** Fallback status check via full content fetch, for entries without a usable tree SHA. */
@@ -732,13 +727,33 @@ export class SyncStatusView extends ItemView {
         }
     }
 
+    private saveRemoteTreeSnapshot(head: string | undefined, entries: GitTreeEntry[]): void {
+        this.remoteTreeSnapshot = head
+            ? { branch: this.plugin.settings.branch, rootPath: this.plugin.settings.rootPath, head, entries }
+            : undefined;
+    }
+
+    private async getReusableRemoteTree(): Promise<GitTreeEntry[] | undefined> {
+        const snapshot = this.remoteTreeSnapshot;
+        if (!snapshot || !this.plugin.gitService.getBranchHead || snapshot.branch !== this.plugin.settings.branch || snapshot.rootPath !== this.plugin.settings.rootPath) return undefined;
+
+        try {
+            const currentHead = await this.plugin.gitService.getBranchHead(snapshot.branch);
+            return currentHead === snapshot.head ? snapshot.entries : undefined;
+        } catch (error) {
+            logger.warn('Failed to validate remote tree snapshot; fetching a fresh tree for push.', error);
+            return undefined;
+        }
+    }
+
     private async executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string | TFile>): Promise<void> {
         const runVerb = op === 'push' ? t('main.verb.pushing') : t('main.verb.pulling');
         const prog = new Notice(t('main.progress.running', { verb: runVerb, total: files.length }), 0);
         try {
+            const remoteTree = await this.getReusableRemoteTree();
             const results = op === 'push'
-                ? await this.plugin.sync.pushAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pushing', { current: cur, total, name })))
-                : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pulling', { current: cur, total, name })));
+                ? await this.plugin.sync.pushAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pushing', { current: cur, total, name })), remoteTree)
+                : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pulling', { current: cur, total, name })), remoteTree);
 
             prog.hide();
             if (results.errors.length > 0) logger.error(`${op} errors:`, results.errors);

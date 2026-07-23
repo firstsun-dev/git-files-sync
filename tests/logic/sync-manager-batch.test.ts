@@ -419,6 +419,27 @@ describe('SyncManager Batch Operations', () => {
         });
     });
 
+    describe('batch push avoids remote 404 probes', () => {
+        it('skips stale rename metadata when the prefetched tree has no matching old path', async () => {
+            const oldPath = 'src/content/blog/.agents/skills/blog-master/SKILL.md';
+            const newPath = 'new.md';
+            const mockFile = Object.assign(new TFile(), { path: newPath, name: newPath });
+            mockSettings.syncMetadata = {
+                [oldPath]: { lastSyncedSha: 'stale', lastSyncedAt: 0, lastKnownPath: oldPath },
+            };
+            vi.mocked(mockApp.vault.getFileByPath).mockImplementation(path => path === oldPath ? null : mockFile);
+            vi.mocked(mockApp.vault.read).mockResolvedValue('new content');
+            vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([]);
+
+            await manager.pushAllFiles([mockFile]);
+
+            expect(mockGitService.getFile).not.toHaveBeenCalled();
+            expect(mockGitService.pushFile).toHaveBeenCalledWith(newPath, 'new content', 'main', expect.any(String), undefined);
+        });
+    });
+
     describe('batch push with rename detection', () => {
         it('should detect and handle rename during batch push', async () => {
             const oldPath = 'old.md';
@@ -432,8 +453,10 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockApp.vault.read).mockResolvedValue('content');
             vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            const oldSha = await gitBlobSha('content');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path: oldPath, symlink: false, sha: oldSha }]);
             vi.mocked(mockGitService.getFile).mockImplementation(async (path) => {
-                // Remote still has the old path with matching content: confirms a real rename.
+                // The old path is now confirmed by the pre-fetched tree; this mock is only used for the new path.
                 if (path === oldPath) return { content: 'content', sha: 'sha' };
                 // New path does not exist on the remote yet.
                 return { content: '', sha: '' };
@@ -462,8 +485,10 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockApp.vault.read).mockResolvedValue('content');
             vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            const oldSha = await gitBlobSha('content');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path: oldPath, symlink: false, sha: oldSha }]);
             vi.mocked(mockGitService.getFile).mockImplementation(async (path) => {
-                // Remote still has the old path with matching content: confirms a real rename.
+                // The old path is now confirmed by the pre-fetched tree; this mock is only used for the new path.
                 if (path === oldPath) return { content: 'content', sha: 'sha' };
                 // A file already exists on the remote at the new path.
                 return { content: 'old remote content', sha: 'remote-existing-sha' };

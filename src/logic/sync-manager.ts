@@ -148,19 +148,6 @@ export class SyncManager {
     }
 
     /**
-     * Tracked paths a rename could have come from: previously synced, still
-     * pointing at themselves, and no longer present in the vault.
-     */
-    private renameCandidates(file: TFile): string[] {
-        return Object.keys(this.settings.syncMetadata).filter(oldPath => {
-            const metadata = this.settings.syncMetadata[oldPath];
-            if (!metadata || metadata.lastKnownPath !== oldPath) return false;
-            if (oldPath === file.path) return false;
-            return !this.app.vault.getFileByPath(oldPath);
-        });
-    }
-
-    /**
      * A missing local file at a tracked path is only weak evidence of a rename —
      * any orphaned metadata entry (e.g. from a local delete) matches it too. Only
      * report a rename once the remote content at the old path still matches the
@@ -179,37 +166,32 @@ export class SyncManager {
         content: string | ArrayBuffer,
         treeByFullPath?: Map<string, GitTreeEntry>
     ): Promise<string | null> {
-        const candidates = this.renameCandidates(file);
-        if (candidates.length === 0) return null;
-
         const localSha = treeByFullPath ? await gitBlobSha(content) : undefined;
-        for (const oldPath of candidates) {
-            if (await this.isRenameSource(oldPath, content, localSha, treeByFullPath)) return oldPath;
+        for (const oldPath of Object.keys(this.settings.syncMetadata)) {
+            const metadata = this.settings.syncMetadata[oldPath];
+            if (!metadata || oldPath === file.path || metadata.lastKnownPath !== oldPath) continue;
+            if (this.app.vault.getFileByPath(oldPath)) continue;
+
+            const oldRepoPath = this.getNormalizedPath(oldPath);
+            const treeMatch = this.matchRenameFromTree(localSha, oldRepoPath, treeByFullPath);
+            if (treeMatch === true) return oldPath;
+            if (treeMatch === false) continue;
+
+            const remoteAtOldPath = await this.gitService.getFile(oldRepoPath, this.settings.branch);
+            if (remoteAtOldPath.sha && this.contentsEqual(content, remoteAtOldPath.content)) return oldPath;
         }
         return null;
     }
 
-    /** Whether the content being pushed is what the remote still holds at `oldPath`. */
-    private async isRenameSource(
-        oldPath: string,
-        content: string | ArrayBuffer,
+    private matchRenameFromTree(
         localSha: string | undefined,
-        treeByFullPath?: Map<string, GitTreeEntry>
-    ): Promise<boolean> {
-        const oldRepoPath = this.getNormalizedPath(oldPath);
-        const entry = treeByFullPath?.get(this.getFullPathForTree(oldRepoPath));
-
-        // The remote doesn't list the old path, so nothing moved from it.
-        if (treeByFullPath && !entry) return false;
-        // A symlink blob hashes its target path, not file content, so it can
-        // never be the source of a regular-file rename.
-        if (entry?.symlink) return false;
-        // Most providers' tree listings carry the blob sha; those that don't
-        // still need the content probe below.
-        if (entry?.sha) return entry.sha === localSha;
-
-        const remoteAtOldPath = await this.gitService.getFile(oldRepoPath, this.settings.branch);
-        return !!remoteAtOldPath.sha && this.contentsEqual(content, remoteAtOldPath.content);
+        oldRepoPath: string,
+        treeByFullPath: Map<string, GitTreeEntry> | undefined
+    ): boolean | undefined {
+        if (!treeByFullPath) return undefined;
+        const entry = treeByFullPath.get(this.getFullPathForTree(oldRepoPath));
+        if (!entry || entry.symlink) return false;
+        return entry.sha ? entry.sha === localSha : undefined;
     }
 
     private async handleRename(file: TFile, oldPath: string, content: string | ArrayBuffer): Promise<void> {
@@ -232,13 +214,8 @@ export class SyncManager {
             );
 
             // Update metadata
-            let newSha = result.sha;
-            if (!newSha) {
-                const newRemote = await this.gitService.getFile(repoPath, this.settings.branch);
-                newSha = newRemote.sha;
-            }
-            
-            if (newSha) await this.updateMetadata(file.path, newSha);
+            const newSha = result.sha ?? await gitBlobSha(content);
+            await this.updateMetadata(file.path, newSha);
 
             // Remove old metadata
             delete this.settings.syncMetadata[oldPath];
@@ -262,13 +239,8 @@ export class SyncManager {
         );
 
         // Update metadata
-        let newSha = result.sha;
-        if (!newSha) {
-            const newRemote = await this.gitService.getFile(repoPath, this.settings.branch);
-            newSha = newRemote.sha;
-        }
-
-        if (newSha) await this.updateMetadata(file.path, newSha);
+        const newSha = result.sha ?? await gitBlobSha(content);
+        await this.updateMetadata(file.path, newSha);
 
         if (!silent) new Notice(`Pushed ${file.name} to ${this.serviceName}`);
         return newSha;

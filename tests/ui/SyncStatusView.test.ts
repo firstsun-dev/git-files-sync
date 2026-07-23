@@ -210,33 +210,26 @@ describe('SyncStatusView.identifyExtraFiles folder/remote-record collisions', ()
     });
 });
 
-describe('SyncStatusView.refreshFileStatus for files absent from the remote tree', () => {
+describe('SyncStatusView local-only status', () => {
     beforeAll(() => { setupObsidianDOM(); });
 
-    // Regression test: a local file the remote tree doesn't list is 'unsynced' by
-    // definition. Fetching it to find that out is a guaranteed 404 per file, which
-    // floods the console on any vault with several not-yet-pushed files.
-    it('classifies it unsynced from local content alone, with no getFile request', async () => {
-        const getFile = vi.fn();
-        const { plugin, leaf } = makePlugin({ adapterExists: vi.fn().mockResolvedValue(true) });
-        (plugin.gitService as unknown as { getFile: typeof getFile }).getFile = getFile;
-
+    it('does not probe Contents API when the remote tree confirms a file is absent', async () => {
+        const getFile = vi.fn().mockResolvedValue({ content: '', sha: '' });
+        const plugin = {
+            settings: { branch: 'main', vaultFolder: '', rootPath: '' },
+            gitService: { getFile },
+            getNormalizedPath: (path: string) => path,
+        } as unknown as GitLabFilesPush;
+        const leaf = { app: { vault: { adapter: { read: vi.fn().mockResolvedValue('new content') } } } } as unknown as WorkspaceLeaf;
         const view = new SyncStatusView(leaf, plugin);
-        vi.spyOn(view as unknown as { readFileContent(f: unknown, b: boolean, s: boolean): Promise<string> }, 'readFileContent')
-            .mockResolvedValue('local only content');
 
         await (view as unknown as {
             refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
-        }).refreshFileStatus('notes/new.md', undefined);
+        }).refreshFileStatus('new.md', undefined);
 
-        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
-        expect(statuses.get('notes/new.md')).toMatchObject({
-            path: 'notes/new.md',
-            status: 'unsynced',
-            localContent: 'local only content',
-            remoteSha: '',
-        });
         expect(getFile).not.toHaveBeenCalled();
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.get('new.md')).toMatchObject({ path: 'new.md', status: 'unsynced', localContent: 'new content' });
     });
 
     // A tree entry that exists but carries no sha (providers whose listing omits
@@ -300,6 +293,44 @@ describe('SyncStatusView post-push status update', () => {
         expect(refreshSpy).not.toHaveBeenCalled();
         expect(statuses.get('a.md')).toEqual({ path: 'a.md', status: 'synced', localContent: '', remoteSha: 'sha-a' });
         expect(statuses.get('b.md')).toEqual({ path: 'b.md', status: 'synced', localContent: '', remoteSha: 'sha-b' });
+    });
+
+    it('reuses a snapshot only when the branch head is unchanged', async () => {
+        const pushAllFiles = vi.fn().mockResolvedValue({ success: 1, failed: 0, conflicts: 0, errors: [], syncedPaths: [] });
+        const tree: GitTreeEntry[] = [{ path: 'a.md', symlink: false, sha: 'sha-a' }];
+        const getBranchHead = vi.fn().mockResolvedValue('commit-1');
+        const plugin = {
+            settings: { branch: 'main', vaultFolder: '', rootPath: '' },
+            gitService: { getBranchHead }, sync: { pushAllFiles },
+        } as unknown as GitLabFilesPush;
+        const leaf = { app: { vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } } } as unknown as WorkspaceLeaf;
+        const view = new SyncStatusView(leaf, plugin);
+        (view as unknown as { remoteTreeSnapshot: unknown }).remoteTreeSnapshot = { branch: 'main', rootPath: '', head: 'commit-1', entries: tree };
+
+        await (view as unknown as {
+            executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string>): Promise<void>
+        }).executeBatchOperation('selected', 'push', ['a.md']);
+
+        expect(pushAllFiles).toHaveBeenCalledWith(['a.md'], expect.any(Function), tree);
+    });
+
+    it('fetches a fresh tree when the branch head changed after refresh', async () => {
+        const pushAllFiles = vi.fn().mockResolvedValue({ success: 1, failed: 0, conflicts: 0, errors: [], syncedPaths: [] });
+        const plugin = {
+            settings: { branch: 'main', vaultFolder: '', rootPath: '' },
+            gitService: { getBranchHead: vi.fn().mockResolvedValue('commit-2') }, sync: { pushAllFiles },
+        } as unknown as GitLabFilesPush;
+        const leaf = { app: { vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } } } as unknown as WorkspaceLeaf;
+        const view = new SyncStatusView(leaf, plugin);
+        (view as unknown as { remoteTreeSnapshot: unknown }).remoteTreeSnapshot = {
+            branch: 'main', rootPath: '', head: 'commit-1', entries: [{ path: 'a.md', symlink: false }],
+        };
+
+        await (view as unknown as {
+            executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string>): Promise<void>
+        }).executeBatchOperation('selected', 'push', ['a.md']);
+
+        expect(pushAllFiles).toHaveBeenCalledWith(['a.md'], expect.any(Function), undefined);
     });
 
     it('still does a full remote refresh after a pull (unaffected by this fix)', async () => {
