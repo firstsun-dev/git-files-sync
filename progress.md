@@ -12,9 +12,9 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-07-14 12:05
+**Last Updated:** 2026-07-23
 **Session ID:** current
-**Active Feature:** None — feat-014 and feat-015 both committed. Ready for the next issue.
+**Active Feature:** None — push stale-HEAD fix committed on `claude/git-file-sync-push-errors-9ffa82`.
 
 ## Status
 
@@ -25,6 +25,8 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] feat-015: fixed a false "modified" status right after batch push, caused by GitHub's tree-by-branch-name read lagging a just-completed write. `pushAllFiles` now returns `syncedPaths`; `SyncStatusView` marks those files synced directly instead of re-fetching the remote tree (commit `7676325`).
   - Both committed onto `claude/fix-directory-symlink-pull-260713`, **not yet pushed to remote**.
   - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 344/344 passed.
+- [x] Push failures reported as `GitHub GraphQL error: Expected branch to point to "<oid>" but it did not. Pull and try again.` (whole chunk failed, twice in a row, same oid). Two causes: the stale-HEAD retry pattern in `github-service.ts` never matched that wording, so no retry fired; and `expectedHeadOid` came from the REST `git/ref` read, which GitHub serves `private, max-age=60`, so retries would have resent the same cached oid anyway. `commitOnBranch` now reads the head over GraphQL, the pattern covers GitHub's real wording, exhaustion gives a branch-named message, and the REST read sends `Cache-Control: no-cache`. On `claude/git-file-sync-push-errors-9ffa82`, no PR opened yet.
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean (incl. Obsidian 1.11.0 compat); `npx vitest run` → 351/351 passed.
 
 ### What's In Progress
 

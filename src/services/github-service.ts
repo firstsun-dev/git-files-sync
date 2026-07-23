@@ -17,6 +17,27 @@ const CREATE_COMMIT_MUTATION = `
     }
 `;
 
+/**
+ * Reads a branch's head commit through GraphQL — the same backend
+ * createCommitOnBranch validates `expectedHeadOid` against.
+ */
+const BRANCH_HEAD_QUERY = `
+    query ($owner: String!, $name: String!, $qualifiedName: String!) {
+        repository(owner: $owner, name: $name) {
+            ref(qualifiedName: $qualifiedName) { target { oid } }
+        }
+    }
+`;
+
+/**
+ * Messages GitHub uses for a createCommitOnBranch call whose `expectedHeadOid`
+ * no longer matches the branch head. The wording differs by cause: a moved
+ * branch reports "Expected branch to point to \"<oid>\" but it did not. Pull and
+ * try again.", while a HEAD read that lags a just-completed write surfaces as
+ * "path does not exist in tree <oid>" instead.
+ */
+const STALE_HEAD_ERROR = /expected branch to point to|pull and try again|does not exist in tree|head sha was modified|does not match|expectedHeadOid/i;
+
 export class GitHubService extends BaseGitService implements GitServiceInterface {
     private owner: string = '';
     private repo: string = '';
@@ -121,19 +142,35 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
     }
 
     /**
+     * Resolves the branch head for `expectedHeadOid` via GraphQL rather than the
+     * REST git/ref read. GitHub serves REST responses with
+     * `Cache-Control: private, max-age=60`, so after a commit the ref endpoint
+     * can keep returning the previous oid for up to a minute — every retry would
+     * then resend the same stale oid and fail identically. GraphQL is a POST
+     * against the same backend the mutation validates against, so it is neither
+     * cached nor a lagging replica. Falls back to the REST read when GraphQL
+     * reports no such ref, so a missing branch still surfaces REST's 404.
+     */
+    private async getBranchHeadOid(branch: string): Promise<string> {
+        const data = await this.githubGraphQL<{ repository?: { ref?: { target?: { oid?: string } | null } | null } | null }>(
+            BRANCH_HEAD_QUERY,
+            { owner: this.owner, name: this.repo, qualifiedName: `refs/heads/${branch}` },
+        );
+        return data.repository?.ref?.target?.oid ?? await this.getLatestCommitSha(branch);
+    }
+
+    /**
      * Runs createCommitOnBranch, re-reading the branch HEAD and retrying on a
-     * stale-expectedHeadOid failure. GitHub's git/ref/heads/{branch} read (used
-     * to get expectedHeadOid) can briefly lag a just-completed write to the same
-     * branch — e.g. a push immediately followed by a delete — so the oid it
-     * returns may predate a file the caller is trying to add or remove, and
-     * GitHub reports that as "path does not exist in tree <oid>" rather than as
-     * an obvious staleness error. A short retry with a freshly re-read HEAD
-     * self-heals once GitHub's read catches up.
+     * stale-expectedHeadOid failure. The head can move under us between the read
+     * and the mutation — another client (or another chunk of the same push)
+     * committing to the same branch — and a HEAD read can also briefly lag a
+     * just-completed write to it, e.g. a push immediately followed by a delete.
+     * Either way a retry with a freshly re-read HEAD self-heals.
      */
     private async commitOnBranch(branch: string, message: string, fileChanges: Record<string, unknown>): Promise<string> {
         const maxAttempts = 3;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            const expectedHeadOid = await this.getLatestCommitSha(branch);
+            const expectedHeadOid = await this.getBranchHeadOid(branch);
             try {
                 const data = await this.githubGraphQL<{ createCommitOnBranch: { commit: { oid: string } } }>(CREATE_COMMIT_MUTATION, {
                     input: {
@@ -146,8 +183,13 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
                 return data.createCommitOnBranch.commit.oid;
             } catch (e) {
                 const errorMessage = e instanceof Error ? e.message : String(e);
-                const looksStale = /does not exist in tree|does not match|expectedHeadOid/i.test(errorMessage);
-                if (!looksStale || attempt === maxAttempts) throw e;
+                if (!STALE_HEAD_ERROR.test(errorMessage)) throw e;
+                if (attempt === maxAttempts) {
+                    throw new Error(
+                        `${errorMessage} — the remote branch "${branch}" kept moving during the push ` +
+                        `(${maxAttempts} attempts). Pull, then push again.`
+                    );
+                }
                 await new Promise(resolve => window.setTimeout(resolve, 500 * attempt));
             }
         }
