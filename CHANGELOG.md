@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/firstsun-dev/git-files-sync/compare/1.3.0...1.3.1) (2026-07-23)
+
+### Performance Improvements
+
+* **push:** avoid stale rename lookup requests ([f8a0a26](https://github.com/firstsun-dev/git-files-sync/commit/f8a0a269f1d8f8bda8271480c4b6078d608d6c25))
+* **push:** eliminate redundant GitHub requests ([0445b17](https://github.com/firstsun-dev/git-files-sync/commit/0445b170a2960e59812df04b7a8f93c62fb441c0))
+
 ## [1.3.0](https://github.com/firstsun-dev/git-files-sync/compare/1.2.1...1.3.0) (2026-07-14)
 
 ### Features
