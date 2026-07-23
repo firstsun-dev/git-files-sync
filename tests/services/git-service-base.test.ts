@@ -176,20 +176,17 @@ describe('BaseGitService', () => {
     describe('encodeContent / decodeContent round-trip', () => {
         it('should correctly encode and decode UTF-8 content', async () => {
             const original = 'Hello, 世界! 🌍';
-            vi.mocked(requestUrl).mockResolvedValue({
-                status: 200,
-                json: {
-                    content: { path: 'test.md' }
-                }
-            } as unknown as RequestUrlResponse);
+            vi.mocked(requestUrl)
+                // Branch head for expectedHeadOid, read over GraphQL.
+                .mockResolvedValueOnce({ status: 200, json: { data: { repository: { ref: { target: { oid: 'commit1' } } } } } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
 
-            // Push encodes content; we verify the encoded body decodes back to original
+            // GraphQL carries the same base64 content as the old Contents API path.
             await service.pushFile('test.md', original, 'main', 'test');
 
             const calls = vi.mocked(requestUrl).mock.calls;
-            const body = JSON.parse((calls[0]?.[0] as { body: string }).body) as { content: string };
-            // Decode what was sent and confirm round-trip
-            const decoded = atob(body.content.replace(/\s/g, ''));
+            const body = JSON.parse((calls[1]?.[0] as { body: string }).body) as { variables: { input: { fileChanges: { additions: Array<{ contents: string }> } } } };
+            const decoded = atob(body.variables.input.fileChanges.additions[0]?.contents.replace(/\s/g, '') ?? '');
             const bytes = new Uint8Array(decoded.length);
             for (let i = 0; i < decoded.length; i++) {
                 bytes[i] = decoded.codePointAt(i) ?? 0;

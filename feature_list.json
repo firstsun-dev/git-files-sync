@@ -121,6 +121,22 @@
       "dependencies": ["feat-014"],
       "status": "done",
       "evidence": "Commit 7676325. npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 344/344 passed."
+    },
+    {
+      "id": "feat-016",
+      "name": "perf(push): eliminate redundant GitHub requests + avoid stale rename lookup requests",
+      "description": "Two further push-speed perf commits landed on codex/perf-github-push-260723 before this session (pre-existing work, not authored in this session): 0445b17 eliminate redundant GitHub requests, f8a0a26 avoid stale rename lookup requests. perf(push) is patch-level under .releaserc.json's commit-analyzer, so these will bump 1.3.0 -> 1.3.1 on the next automated release.",
+      "dependencies": ["feat-015"],
+      "status": "done",
+      "evidence": "Commits 0445b17, f8a0a26 (pre-session)."
+    },
+    {
+      "id": "feat-017",
+      "name": "feat(i18n): localize update notifications (issue #64)",
+      "description": "The what's-new modal title/buttons were already i18n'd, but each release's entry text (src/changelog.ts) was hard-coded English. Restructured into src/changelog/ with one folder per version (1.2.1, 1.3.0, 1.3.1), each entry carrying inline {en, zh-tw, zh-cn} text resolved at render time by entryText() against the active locale (falls back to en). WhatsNewModal and the settings what's-new banner both switched from reading entry.text to entryText(entry). First pass put the text as new keys in the shared src/i18n/locales/*.ts catalog; user rejected that since it would make those files grow unbounded every release, so it was redesigned into the per-version-folder shape. Also added a 1.3.1 entry summarizing feat-016's push-speed work.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 351/351 passed."
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."

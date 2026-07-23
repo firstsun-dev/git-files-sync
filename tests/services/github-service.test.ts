@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitHubService } from '../../src/services/github-service';
+import type { PushTimingRecord } from '../../src/services/push-timing';
 import { requestUrl, RequestUrlResponse, RequestUrlParam } from 'obsidian';
 import { getLastRequestCall, mockRequest, sharedTestConnection, sharedGetFileErrorHandling, sharedGetRepoGitignores } from './service-test-helpers';
 
@@ -106,6 +107,47 @@ describe('GitHubService', () => {
         });
     });
 
+    describe('push timing diagnostics', () => {
+        it('emits a telemetry-free structured timing record only when a handler opts in', async () => {
+            const records: PushTimingRecord[] = [];
+            service.setPushTimingHandler(record => records.push(record));
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce(headOidResponse('commit1'))
+                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
+
+            await service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'push');
+
+            expect(records).toHaveLength(1);
+            expect(records[0]).toMatchObject({
+                strategy: 'github-graphql', fileCount: 1, rawBytes: 5, encodedBytes: 8,
+                providerProcessingMs: null, requestCount: 2,
+            });
+            expect(records[0]?.totalMs).toEqual(expect.any(Number));
+            expect(records[0]?.requestUploadMs).toEqual(expect.any(Number));
+            expect(records[0]?.responseParsingMs).toEqual(expect.any(Number));
+        });
+    });
+
+    describe('Git Data API benchmark control path', () => {
+        it('creates blobs concurrently, then one tree, commit, and ref update', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-a' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-b' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);
+
+            await expect(service.pushBatchViaGitDataApiForBenchmark([
+                { path: 'a.md', content: 'hello' }, { path: 'b.md', content: 'world' },
+            ], 'main', 'benchmark')).resolves.toEqual([
+                { path: 'a.md', sha: 'blob-a' }, { path: 'b.md', sha: 'blob-b' },
+            ]);
+            expect(requestUrl).toHaveBeenCalledTimes(7);
+        });
+    });
+
     describe('pushBatch', () => {
         it('returns [] and makes no requests for an empty item list', async () => {
             const result = await service.pushBatch([], 'main', 'push nothing');
@@ -113,11 +155,10 @@ describe('GitHubService', () => {
             expect(requestUrl).not.toHaveBeenCalled();
         });
 
-        it('commits N files in one GraphQL mutation via head query -> createCommitOnBranch -> tree', async () => {
+        it('commits N files with one head read and one GraphQL mutation', async () => {
             vi.mocked(requestUrl)
                 .mockResolvedValueOnce(headOidResponse('commit1')) // branch head query
-                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse) // mutation
-                .mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'a.md', type: 'blob', sha: 'blob-a' }, { path: 'b.md', type: 'blob', sha: 'blob-b' }], truncated: false } } as unknown as RequestUrlResponse); // fresh tree
+                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse); // mutation
 
             const result = await service.pushBatch(
                 [{ path: 'a.md', content: 'hello' }, { path: 'b.md', content: 'world' }],
@@ -125,10 +166,10 @@ describe('GitHubService', () => {
                 'Push 2 file(s) from Obsidian'
             );
 
-            expect(result).toEqual([{ path: 'a.md', sha: 'blob-a' }, { path: 'b.md', sha: 'blob-b' }]);
+            expect(result).toEqual([{ path: 'a.md' }, { path: 'b.md' }]);
 
             const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
-            expect(calls).toHaveLength(3);
+            expect(calls).toHaveLength(2);
             expect(calls[1]?.url).toBe('https://api.github.com/graphql');
             expect(calls[1]?.method).toBe('POST');
 
@@ -173,16 +214,15 @@ describe('GitHubService', () => {
                     .mockResolvedValueOnce(headOidResponse('stale-commit')) // branch head query (stale)
                     .mockResolvedValueOnce({ status: 200, json: { errors: [{ message: 'A path was requested for deletion, but that path does not exist in tree `stale-commit`' }] } } as unknown as RequestUrlResponse) // mutation fails
                     .mockResolvedValueOnce(headOidResponse('fresh-commit')) // branch head query (fresh, retry)
-                    .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse) // mutation succeeds
-                    .mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'a.md', type: 'blob', sha: 'blob-a' }], truncated: false } } as unknown as RequestUrlResponse); // fresh tree
+                    .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse); // mutation succeeds
 
                 const resultPromise = service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'Push 1 file(s) from Obsidian');
                 await vi.runAllTimersAsync();
                 const result = await resultPromise;
 
-                expect(result).toEqual([{ path: 'a.md', sha: 'blob-a' }]);
+                expect(result).toEqual([{ path: 'a.md' }]);
                 const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
-                expect(calls).toHaveLength(5);
+                expect(calls).toHaveLength(4);
                 const firstMutation = JSON.parse(calls[1]?.body as string) as { variables: { input: { expectedHeadOid: string } } };
                 const retryMutation = JSON.parse(calls[3]?.body as string) as { variables: { input: { expectedHeadOid: string } } };
                 expect(firstMutation.variables.input.expectedHeadOid).toBe('stale-commit');
@@ -204,13 +244,12 @@ describe('GitHubService', () => {
                     .mockResolvedValueOnce(headOidResponse('27f5f12')) // branch head query (already superseded)
                     .mockResolvedValueOnce({ status: 200, json: { errors: [{ message: 'Expected branch to point to "27f5f12" but it did not.  Pull and try again.' }] } } as unknown as RequestUrlResponse) // mutation fails
                     .mockResolvedValueOnce(headOidResponse('fresh-commit')) // branch head query (fresh, retry)
-                    .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse) // mutation succeeds
-                    .mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'a.md', type: 'blob', sha: 'blob-a' }], truncated: false } } as unknown as RequestUrlResponse); // fresh tree
+                    .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse); // mutation succeeds
 
                 const resultPromise = service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'Push 1 file(s) from Obsidian');
                 await vi.runAllTimersAsync();
 
-                expect(await resultPromise).toEqual([{ path: 'a.md', sha: 'blob-a' }]);
+                expect(await resultPromise).toEqual([{ path: 'a.md' }]);
                 const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
                 const retryMutation = JSON.parse(calls[3]?.body as string) as { variables: { input: { expectedHeadOid: string } } };
                 expect(retryMutation.variables.input.expectedHeadOid).toBe('fresh-commit');
@@ -224,8 +263,7 @@ describe('GitHubService', () => {
             // git/ref response would keep feeding the retry the same stale oid.
             vi.mocked(requestUrl)
                 .mockResolvedValueOnce(headOidResponse('commit1')) // branch head query
-                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse) // mutation
-                .mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'a.md', type: 'blob', sha: 'blob-a' }], truncated: false } } as unknown as RequestUrlResponse); // fresh tree
+                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse); // mutation
 
             await service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'Push 1 file(s) from Obsidian');
 
@@ -274,70 +312,21 @@ describe('GitHubService', () => {
             expect(requestUrl).toHaveBeenCalledTimes(2);
         });
 
-        it('retries the follow-up tree fetch when it is still missing a just-committed file', async () => {
-            // The tree-by-branch-name read used to recover blob shas after the
-            // commit succeeds is exposed to the same eventual-consistency lag as
-            // the expectedHeadOid read — it can briefly omit a file that was just
-            // written, rather than erroring outright.
-            vi.useFakeTimers();
-            try {
-                vi.mocked(requestUrl)
-                    .mockResolvedValueOnce(headOidResponse('commit1')) // branch head query
-                    .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse) // mutation succeeds
-                    .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse) // stale tree, missing a.md
-                    .mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'a.md', type: 'blob', sha: 'blob-a' }], truncated: false } } as unknown as RequestUrlResponse); // fresh tree
-
-                const resultPromise = service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'Push 1 file(s) from Obsidian');
-                await vi.runAllTimersAsync();
-                const result = await resultPromise;
-
-                expect(result).toEqual([{ path: 'a.md', sha: 'blob-a' }]);
-                expect(requestUrl).toHaveBeenCalledTimes(4);
-            } finally {
-                vi.useRealTimers();
-            }
-        });
     });
 
     describe('pushFile', () => {
-        it('should push new file correctly (no sha provided)', async () => {
-            vi.mocked(requestUrl).mockResolvedValueOnce({
-                status: 201,
-                json: { content: { path: 'new.md', sha: 'new-sha' } }
-            } as unknown as RequestUrlResponse);
+        it('commits one regular file through GraphQL instead of the Contents API', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce(headOidResponse('commit1'))
+                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
 
-            const result = await service.pushFile('new.md', 'new content', 'main', 'create');
+            await expect(service.pushFile('note.md', 'new content', 'main', 'update', 'old-sha')).resolves.toEqual({ path: 'note.md' });
 
-            expect(result).toEqual({ path: 'new.md', sha: 'new-sha' });
-            const call = getLastRequestCall();
-            expect(call.method).toBe('PUT');
-            expect(call.body).not.toContain('"sha":');
-        });
-
-        it('should omit blank sha so creating a new file does not 422', async () => {
-            // A 404 lookup yields sha === '' for new files; an empty sha sent to
-            // GitHub causes HTTP 422, so it must be dropped from the request body.
-            vi.mocked(requestUrl).mockResolvedValueOnce({
-                status: 201,
-                json: { content: { path: 'new.md', sha: 'new-sha' } }
-            } as unknown as RequestUrlResponse);
-
-            const result = await service.pushFile('new.md', 'content', 'main', 'create', '');
-
-            expect(result).toEqual({ path: 'new.md', sha: 'new-sha' });
-            const call = getLastRequestCall();
-            expect(call.body).not.toContain('"sha":');
-        });
-
-        it('should update existing file correctly (sha provided)', async () => {
-            mockRequest({ status: 200, json: { content: { path: 'existing.md', sha: 'updated-sha' } } });
-
-            const result = await service.pushFile('existing.md', 'updated content', 'main', 'update', 'old-sha');
-
-            expect(result).toEqual({ path: 'existing.md', sha: 'updated-sha' });
-            const call = getLastRequestCall();
-            expect(call.method).toBe('PUT');
-            expect(call.body).toContain('"sha":"old-sha"');
+            const calls = vi.mocked(requestUrl).mock.calls.map(call => call[0] as RequestUrlParam);
+            expect(calls).toHaveLength(2);
+            expect(calls[1]?.url).toBe('https://api.github.com/graphql');
+            const body = JSON.parse(calls[1]?.body as string) as { variables: { input: { fileChanges: { additions: Array<{ path: string; contents: string }> } } } };
+            expect(body.variables.input.fileChanges.additions).toEqual([{ path: 'note.md', contents: btoa('new content') }]);
         });
     });
 

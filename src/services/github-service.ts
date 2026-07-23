@@ -1,6 +1,7 @@
 import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
-import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
+import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE, BLOB_CREATE_CONCURRENCY } from './git-service-base';
 import { logger } from '../utils/logger';
+import { PushTimingCollector, PushTimingHandler, PushTimingRecord } from './push-timing';
 
 /**
  * Commits any mix of file additions/deletions in one request. Used instead of
@@ -41,6 +42,12 @@ const STALE_HEAD_ERROR = /expected branch to point to|pull and try again|does no
 export class GitHubService extends BaseGitService implements GitServiceInterface {
     private owner: string = '';
     private repo: string = '';
+    private pushTimingHandler?: PushTimingHandler;
+
+    /** Enables local diagnostic records; the plugin itself never enables this. */
+    setPushTimingHandler(handler?: PushTimingHandler): void {
+        this.pushTimingHandler = handler;
+    }
 
     updateConfig(token: string, owner: string, repo: string, rootPath: string = '') {
         this.token = token;
@@ -61,6 +68,10 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
 
     protected getGitDataApiBase(): string {
         return `https://api.github.com/repos/${this.owner}/${this.repo}`;
+    }
+
+    async getBranchHead(branch: string): Promise<string> {
+        return this.getLatestCommitSha(branch);
     }
 
     async getFile(path: string, branch: string): Promise<GitFile> {
@@ -85,21 +96,9 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         }
     }
 
-    async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
-        const url = this.getApiUrl(path);
-        const body: { message: string; content: string; branch: string; sha?: string } = {
-            message,
-            content: this.encodeContent(content),
-            branch,
-        };
-        // GitHub's Contents API rejects a blank sha with HTTP 422. Only include
-        // it when updating an existing file; a 404 lookup yields sha === '' for
-        // new files, which must be created without a sha.
-        if (sha) body.sha = sha;
-
-        const response = await this.safeRequest(url, 'PUT', body);
-        const data = this.parseJson<{ content: { path: string, sha: string } }>(response);
-        return { path: data.content.path, sha: data.content.sha };
+    async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, _existingSha?: string): Promise<{ path: string, sha?: string }> {
+        const [result] = await this.pushBatch([{ path, content }], branch, message);
+        return result ?? { path };
     }
 
     async pushSymlink(path: string, target: string, branch: string, message: string): Promise<{ path: string, sha?: string }> {
@@ -129,9 +128,11 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
      * rather than an HTTP error status, so this checks for that on top of
      * safeRequest's status-code check.
      */
-    private async githubGraphQL<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-        const response = await this.safeRequest('https://api.github.com/graphql', 'POST', { query, variables });
-        const body = this.parseJson<{ data?: T; errors?: Array<{ message: string }> }>(response);
+    private async githubGraphQL<T>(query: string, variables: Record<string, unknown>, timing?: PushTimingCollector): Promise<T> {
+        const request = () => this.safeRequest('https://api.github.com/graphql', 'POST', { query, variables });
+        const response = timing ? await timing.measureRequest(request) : await request();
+        const parse = () => this.parseJson<{ data?: T; errors?: Array<{ message: string }> }>(response);
+        const body = timing ? timing.measureParsing(parse) : parse();
         if (body.errors && body.errors.length > 0) {
             throw new Error(`GitHub GraphQL error: ${body.errors.map(e => e.message).join('; ')}`);
         }
@@ -167,10 +168,11 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
      * just-completed write to it, e.g. a push immediately followed by a delete.
      * Either way a retry with a freshly re-read HEAD self-heals.
      */
-    private async commitOnBranch(branch: string, message: string, fileChanges: Record<string, unknown>): Promise<string> {
+    private async commitOnBranch(branch: string, message: string, fileChanges: Record<string, unknown>, timing?: PushTimingCollector): Promise<string> {
         const maxAttempts = 3;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            const expectedHeadOid = await this.getBranchHeadOid(branch);
+            const getHead = () => this.getBranchHeadOid(branch);
+            const expectedHeadOid = timing ? await timing.measureRequest(getHead) : await getHead();
             try {
                 const data = await this.githubGraphQL<{ createCommitOnBranch: { commit: { oid: string } } }>(CREATE_COMMIT_MUTATION, {
                     input: {
@@ -179,7 +181,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
                         expectedHeadOid,
                         fileChanges,
                     },
-                });
+                }, timing);
                 return data.createCommitOnBranch.commit.oid;
             } catch (e) {
                 const errorMessage = e instanceof Error ? e.message : String(e);
@@ -199,31 +201,71 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
 
     async pushBatch(items: BatchPushItem[], branch: string, message: string): Promise<BatchPushResult[]> {
         if (items.length === 0) return [];
+        const timing = this.pushTimingHandler ? new PushTimingCollector() : undefined;
+        const preparationStartedAt = performance.now();
+        const preparedItems = items.map(item => ({ item, path: this.getFullPath(item.path) }));
+        const rawBytes = items.reduce((total, item) => total + this.getByteLength(item.content), 0);
+        const changePreparationMs = performance.now() - preparationStartedAt;
+        const encodingStartedAt = performance.now();
+        const additions = preparedItems.map(({ item, path }) => ({ path, contents: this.encodeContent(item.content) }));
+        const encodedBytes = additions.reduce((total, addition) => total + this.getByteLength(addition.contents), 0);
+        const encodingMs = performance.now() - encodingStartedAt;
+        let failure: unknown;
 
-        await this.commitOnBranch(branch, message, {
-            additions: items.map(item => ({
-                path: this.getFullPath(item.path),
-                contents: this.encodeContent(item.content),
-            })),
+        try {
+            await this.commitOnBranch(branch, message, { additions }, timing);
+            // The caller already marks committed paths as synced. Avoiding a
+            // full recursive tree read saves a request and sidesteps GitHub's
+            // briefly stale tree reads after a successful mutation.
+            return items.map(item => ({ path: item.path }));
+        } catch (error) {
+            failure = error;
+            throw error;
+        } finally {
+            this.emitPushTiming(timing, 'github-graphql', items.length, rawBytes, encodedBytes, changePreparationMs, encodingMs, failure);
+        }
+    }
+
+    /**
+     * Developer-only Git Data API control path for benchmark #61. Production
+     * pushes continue to use GraphQL because this path requires one blob POST
+     * per file. It is intentionally not part of GitServiceInterface.
+     */
+    async pushBatchViaGitDataApiForBenchmark(items: BatchPushItem[], branch: string, message: string): Promise<BatchPushResult[]> {
+        if (items.length === 0) return [];
+
+        const base = this.getGitDataApiBase();
+        const { latestCommitSha, baseTreeSha } = await this.resolveGitHubStyleBaseTree(branch);
+        const fullPaths = items.map(item => this.getFullPath(item.path));
+        const blobShas = await this.mapWithConcurrency(items, BLOB_CREATE_CONCURRENCY, async item => {
+            const response = await this.safeRequest(`${base}/git/blobs`, 'POST', {
+                content: this.encodeContent(item.content),
+                encoding: 'base64',
+            });
+            return this.parseJson<{ sha: string }>(response).sha;
         });
 
-        // createCommitOnBranch only returns the new commit's oid, not each
-        // file's blob sha, so read them back with a follow-up tree fetch
-        // (mirrors GitLab's pushBatch, which has the same limitation). That
-        // fetch is exposed to the same eventual-consistency lag the retry
-        // above works around, so a fresh tree can still be briefly missing an
-        // entry that was just committed; retry it too rather than silently
-        // returning an undefined sha for that file.
-        const fullPaths = items.map(item => this.getFullPath(item.path));
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            const freshTree = await this.listFilesDetailed(branch, false);
-            const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
-            const results = items.map((item, i) => ({ path: item.path, sha: shaByPath.get(fullPaths[i] as string) }));
-            if (results.every(r => r.sha) || attempt === 3) return results;
-            await new Promise(resolve => window.setTimeout(resolve, 500 * attempt));
-        }
-        // Unreachable: the loop always returns on its last iteration.
-        throw new Error('pushBatch: exhausted retries reading back blob shas');
+        await this.commitGitHubStyleTree(
+            base, branch, baseTreeSha, latestCommitSha,
+            fullPaths.map((path, index) => ({ path, mode: '100644', type: 'blob' as const, sha: blobShas[index] as string })),
+            message
+        );
+        return items.map((item, index) => ({ path: item.path, sha: blobShas[index] }));
+    }
+
+    private getByteLength(content: string | ArrayBuffer): number {
+        return typeof content === 'string' ? new TextEncoder().encode(content).byteLength : content.byteLength;
+    }
+
+    private getErrorMessage(error: unknown): string | undefined {
+        if (error === undefined) return undefined;
+        return error instanceof Error ? error.message : 'Non-Error push failure';
+    }
+
+    private emitPushTiming(timing: PushTimingCollector | undefined, strategy: PushTimingRecord['strategy'], fileCount: number, rawBytes: number, encodedBytes: number, changePreparationMs: number, encodingMs: number, error?: unknown): void {
+        if (!timing || !this.pushTimingHandler) return;
+        const failure = this.getErrorMessage(error);
+        this.pushTimingHandler(timing.createRecord(strategy, fileCount, rawBytes, encodedBytes, changePreparationMs, encodingMs, failure));
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
