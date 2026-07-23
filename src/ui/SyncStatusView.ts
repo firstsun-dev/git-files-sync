@@ -335,9 +335,13 @@ export class SyncStatusView extends ItemView {
     private async discoverFiles() {
         const allFiles = this.app.vault.getFiles();
         let local = this.plugin.filterFilesByVaultFolder(allFiles);
-        const remoteEntries = await this.plugin.gitService.listFilesDetailed(this.plugin.settings.branch);
+        // Unfiltered: getNormalizedRemotePath below applies the same rootPath
+        // filter, and gitignore discovery needs the entries outside rootPath
+        // (e.g. the repo-root .gitignore). Sharing this one tree saves
+        // loadGitignores a second full-tree fetch on every refresh.
+        const remoteEntries = await this.plugin.gitService.listFilesDetailed(this.plugin.settings.branch, false);
 
-        await this.plugin.gitignoreManager.loadGitignores();
+        await this.plugin.gitignoreManager.loadGitignores(remoteEntries);
 
         // Map remote paths to vault paths
         const remoteMap = new Map<string, GitTreeEntry>(); // vaultPath -> tree entry (path, symlink, sha)
