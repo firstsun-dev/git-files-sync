@@ -1,3 +1,15 @@
+## [1.4.0](https://github.com/firstsun-dev/git-files-sync/compare/1.3.2...1.4.0) (2026-07-23)
+
+### Features
+
+* **ui:** add path search, click-to-open, and a desktop diff pane ([c761951](https://github.com/firstsun-dev/git-files-sync/commit/c76195109f181e413afc18bdab15e45f49c4a378)), closes [#70](https://github.com/firstsun-dev/git-files-sync/issues/70) [#68](https://github.com/firstsun-dev/git-files-sync/issues/68) [#69](https://github.com/firstsun-dev/git-files-sync/issues/69) [#68](https://github.com/firstsun-dev/git-files-sync/issues/68) [#69](https://github.com/firstsun-dev/git-files-sync/issues/69) [#70](https://github.com/firstsun-dev/git-files-sync/issues/70)
+
+### Bug Fixes
+
+* **github:** read the snapshot's branch head over GraphQL ([0af0746](https://github.com/firstsun-dev/git-files-sync/commit/0af0746ac3f2da89b4d116567edcf2f994e7f01c))
+* **ui:** let desktop diff tab fill the full pane height ([72a2c97](https://github.com/firstsun-dev/git-files-sync/commit/72a2c976f7a8115d8e95adffbd87068222758464)), closes [#69](https://github.com/firstsun-dev/git-files-sync/issues/69)
+* **ui:** prune the selection to the filter instead of clearing it ([109a77f](https://github.com/firstsun-dev/git-files-sync/commit/109a77f6757e2e7af6a2879255e23a4260551c1d))
+
 ## [1.3.2](https://github.com/firstsun-dev/git-files-sync/compare/1.3.1...1.3.2) (2026-07-23)
 
 ### Bug Fixes
