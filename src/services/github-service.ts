@@ -70,8 +70,15 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         return `https://api.github.com/repos/${this.owner}/${this.repo}`;
     }
 
+    /**
+     * Read over GraphQL, like the commit path's own head read: the REST
+     * git/ref response is served `private, max-age=60`, so a cached one can
+     * report the pre-commit oid for up to a minute. A caller comparing this
+     * against a stored head — the remote-tree snapshot does exactly that —
+     * would then treat a tree that has since moved on as still current.
+     */
     async getBranchHead(branch: string): Promise<string> {
-        return this.getLatestCommitSha(branch);
+        return this.getBranchHeadOid(branch);
     }
 
     async getFile(path: string, branch: string): Promise<GitFile> {

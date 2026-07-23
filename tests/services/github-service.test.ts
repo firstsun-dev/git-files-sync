@@ -79,6 +79,32 @@ describe('GitHubService', () => {
         });
     });
 
+    describe('getBranchHead', () => {
+        it('reads the head over GraphQL, not the cacheable REST ref endpoint', async () => {
+            // The remote-tree snapshot compares this against a stored head, so a
+            // REST response cached under `private, max-age=60` would make a tree
+            // that has since moved on look current.
+            mockRequest(headOidResponse('head-oid'));
+
+            await expect(service.getBranchHead('main')).resolves.toBe('head-oid');
+
+            const call = getLastRequestCall();
+            expect(call.url).toBe('https://api.github.com/graphql');
+            expect(call.method).toBe('POST');
+            const body = JSON.parse(call.body as string) as { variables: { qualifiedName: string } };
+            expect(body.variables.qualifiedName).toBe('refs/heads/main');
+        });
+
+        it('falls back to the REST ref read when GraphQL reports no such ref', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { data: { repository: { ref: null } } } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'rest-oid' } } } as unknown as RequestUrlResponse);
+
+            await expect(service.getBranchHead('main')).resolves.toBe('rest-oid');
+            expect(getLastRequestCall().url).toContain('/git/ref/heads/main');
+        });
+    });
+
     describe('pushSymlink (Git Data API)', () => {
         it('creates a blob, tree (mode 120000), commit, and moves the ref', async () => {
             vi.mocked(requestUrl)
