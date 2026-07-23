@@ -190,13 +190,8 @@ export class SyncManager {
             );
 
             // Update metadata
-            let newSha = result.sha;
-            if (!newSha) {
-                const newRemote = await this.gitService.getFile(repoPath, this.settings.branch);
-                newSha = newRemote.sha;
-            }
-            
-            if (newSha) await this.updateMetadata(file.path, newSha);
+            const newSha = result.sha ?? await gitBlobSha(content);
+            await this.updateMetadata(file.path, newSha);
 
             // Remove old metadata
             delete this.settings.syncMetadata[oldPath];
@@ -220,13 +215,8 @@ export class SyncManager {
         );
 
         // Update metadata
-        let newSha = result.sha;
-        if (!newSha) {
-            const newRemote = await this.gitService.getFile(repoPath, this.settings.branch);
-            newSha = newRemote.sha;
-        }
-
-        if (newSha) await this.updateMetadata(file.path, newSha);
+        const newSha = result.sha ?? await gitBlobSha(content);
+        await this.updateMetadata(file.path, newSha);
 
         if (!silent) new Notice(`Pushed ${file.name} to ${this.serviceName}`);
         return newSha;
