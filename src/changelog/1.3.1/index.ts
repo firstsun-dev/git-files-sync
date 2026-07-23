@@ -6,9 +6,9 @@ export const release: ChangelogRelease = {
         {
             notable: true,
             text: {
-                en: 'Pushing files is now noticeably faster — redundant lookups before each push have been eliminated.',
-                'zh-tw': '推送檔案的速度明顯提升——推送前的多餘查詢已被移除。',
-                'zh-cn': '推送文件的速度明显提升——推送前的冗余查询已被移除。',
+                en: 'Pushing to GitHub is now noticeably faster — pushes route through GitHub\'s GraphQL API instead of one REST call per file, and a redundant lookup before each push has been removed.',
+                'zh-tw': '推送到 GitHub 的速度明顯提升——推送改走 GitHub 的 GraphQL API，不再是每個檔案各一次 REST 請求，並移除了推送前的多餘查詢。',
+                'zh-cn': '推送到 GitHub 的速度明显提升——推送改走 GitHub 的 GraphQL API，不再是每个文件各一次 REST 请求，并移除了推送前的冗余查询。',
             },
         },
     ],
