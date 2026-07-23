@@ -3,10 +3,10 @@ import { getUnseenReleases, type ChangelogRelease } from '../src/changelog';
 
 describe('getUnseenReleases', () => {
     const changelog: ChangelogRelease[] = [
-        { version: '1.0.0', entries: [{ text: 'Initial release' }] },
-        { version: '1.1.0', entries: [{ text: 'Feature A' }] },
-        { version: '1.2.0', entries: [{ text: 'Feature B', notable: true }] },
-        { version: '1.10.0', entries: [{ text: 'Feature C' }] },
+        { version: '1.0.0', entries: [{ text: { en: 'Initial release' } }] },
+        { version: '1.1.0', entries: [{ text: { en: 'Feature A' } }] },
+        { version: '1.2.0', entries: [{ text: { en: 'Feature B' }, notable: true }] },
+        { version: '1.10.0', entries: [{ text: { en: 'Feature C' } }] },
     ];
 
     it('returns only releases newer than lastSeenVersion', () => {

@@ -1,5 +1,5 @@
 import { App, Modal, ButtonComponent } from 'obsidian';
-import { type ChangelogRelease } from '../changelog';
+import { type ChangelogRelease, entryText } from '../changelog';
 import { t } from '../i18n';
 
 const CHANGELOG_URL = 'https://github.com/firstsun-dev/git-files-sync/blob/main/CHANGELOG.md';
@@ -21,7 +21,7 @@ export class WhatsNewModal extends Modal {
             const list = contentEl.createEl('ul', { cls: 'ssv-whats-new-list' });
             for (const entry of release.entries) {
                 const item = list.createEl('li', { cls: entry.notable ? 'ssv-whats-new-notable' : undefined });
-                item.setText(entry.text);
+                item.setText(entryText(entry));
             }
         }
 
