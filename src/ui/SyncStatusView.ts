@@ -143,10 +143,7 @@ export class SyncStatusView extends ItemView {
             const next = value.trim();
             if (next === this.searchQuery) return;
             this.searchQuery = next;
-            // Selection can't outlive a change to what's visible, or the action
-            // bar would count files the user can no longer see. Same rule the
-            // status tabs already follow.
-            this.selectedFiles.clear();
+            this.pruneSelectionToVisible();
             row.toggleClass('has-query', next.length > 0);
             this.renderView();
         };
@@ -186,6 +183,26 @@ export class SyncStatusView extends ItemView {
     private visibleStatuses(): FileStatus[] {
         const searched = this.searchedStatuses();
         return this.statusFilter === 'all' ? searched : searched.filter(s => s.status === this.statusFilter);
+    }
+
+    /**
+     * Keeps the invariant that the selection is always a subset of what's on
+     * screen, by dropping only the entries the current filter hides. Call it
+     * after any change to the search or the status tab.
+     *
+     * The alternative — letting the selection outlive the filter — puts a
+     * count on Push/Pull/Delete that the visible rows don't explain. Those
+     * actions overwrite the remote, overwrite local files, and delete remote
+     * files irreversibly, so acting on something off-screen is not a risk worth
+     * trading for the convenience of accumulating a selection across filters.
+     * Clearing the selection outright is the other extreme, and throws away
+     * ticks that the new filter would still have shown.
+     */
+    private pruneSelectionToVisible(): void {
+        const visible = new Set(this.visibleStatuses().map(s => s.path));
+        for (const path of this.selectedFiles) {
+            if (!visible.has(path)) this.selectedFiles.delete(path);
+        }
     }
 
     // ── Info strip ─────────────────────────────────────────────────
@@ -261,8 +278,11 @@ export class SyncStatusView extends ItemView {
             }
             setTooltip(btn, tab.label);
             btn.addEventListener('click', () => {
-                if (this.statusFilter !== tab.value) this.selectedFiles.clear();
+                // Was: clear the whole selection on any tab change. Pruning
+                // instead keeps the ticks the new tab still shows, under the
+                // same invariant the search filter follows.
                 this.statusFilter = tab.value;
+                this.pruneSelectionToVisible();
                 this.renderView();
             });
         }
@@ -288,8 +308,13 @@ export class SyncStatusView extends ItemView {
         }, {
             onRefresh:   () => void this.refreshAllStatuses(),
             onSelectAll: (select) => {
-                if (select) { for (const s of visible) this.selectedFiles.add(s.path); }
-                else { this.selectedFiles.clear(); }
+                // Symmetric with select, and both act only on what's on screen —
+                // consistent with the invariant that the selection never holds
+                // anything the current filter is hiding.
+                for (const s of visible) {
+                    if (select) this.selectedFiles.add(s.path);
+                    else this.selectedFiles.delete(s.path);
+                }
                 this.renderView();
             },
             onPush:   () => void this.pushSelected(),
