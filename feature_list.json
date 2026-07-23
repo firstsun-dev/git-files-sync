@@ -137,6 +137,30 @@
       "dependencies": [],
       "status": "done",
       "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 351/351 passed."
+    },
+    {
+      "id": "feat-018",
+      "name": "feat(ui): add a path search filter to the sync panel (issue #70)",
+      "description": "Text input above the tabs filtering rows by case-insensitive substring of the full path (so a folder prefix acts as a folder filter), debounced 150ms. Search ANDs with the status tab and tab counts recompute against the search results, so a match in another tab is visible rather than lost. Any change to the search or the status tab prunes selectedFiles down to the visible rows, keeping the invariant that the selection never holds anything the filter hides (Push/Pull/Delete all act on it and are irreversible). Originally shipped as a full clear on any query change, corrected after user feedback: that discarded ticks the new query still matched. Structural prerequisite: renderView() called container.empty() on the whole tree, so an input created inside it was destroyed on every keystroke and lost focus after one character - onOpen() now builds a persistent headerEl (info slot + search box) and bodyEl, and renderView() rebuilds only those two inner containers.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 395/395 passed. Not yet committed."
+    },
+    {
+      "id": "feat-019",
+      "name": "feat(ui): open the file from its path in the sync panel (issue #68)",
+      "description": "The row path was a plain span with no handler. It is now a link whose target follows where the file actually lives: local statuses open in Obsidian via workspace.getLeaf(newLeaf).openFile, remote-only opens the provider's web page via a new src/utils/remote-url.ts builder (GitHub/Gitea always; GitLab only when projectId is a namespace path, since a numeric id has no per-file web URL). Paths with no resolvable target - hidden files outside Obsidian's index, or provider settings that yield no URL - render as plain text rather than a dead link. Cmd/Ctrl+click opens in a new leaf via Keymap.isModEvent.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 395/395 passed. Not yet committed."
+    },
+    {
+      "id": "feat-020",
+      "name": "feat(ui): show diff in a dedicated pane on desktop (issue #69)",
+      "description": "New DiffView (sync-diff-view) registered in main.ts; on desktop the row's Diff button opens/reuses that pane instead of expanding inline, mobile keeps the inline panel. Cheap because renderDiffPanel was already a container-agnostic pure function and the split/unified switch is a container query - the pane carries its own container-type, so side-by-side appears with no CSS changes. Leaf reuse (getLeavesOfType then getLeaf('tab') only when absent) keeps the pane where the user drags it. Stale-pane guard: closeDiffPaneFor() detaches the pane when the file it shows is pushed or pulled, since it would otherwise keep rendering the pre-push diff while looking current.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 395/395 passed. Not yet committed."
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."

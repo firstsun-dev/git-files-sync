@@ -15,6 +15,9 @@ export const ICONS = {
     delete:   'trash-2',
     diff:     'file-diff',
     diffOpen: 'chevron-up',
+    // Search filter
+    search:   'search',
+    clear:    'x',
     // Info strip
     branch:   'git-branch',
     folder:   'folder',
