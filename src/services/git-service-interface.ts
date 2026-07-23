@@ -46,6 +46,8 @@ export interface GitServiceInterface {
     updateConfig(...args: unknown[]): void;
     getFile(path: string, branch: string): Promise<GitFile>;
     pushFile(path: string, content: string | ArrayBuffer, branch: string, commitMessage: string, existingSha?: string): Promise<{ path: string, sha?: string }>;
+    /** Returns the branch's current commit SHA when the provider can expose it cheaply. */
+    getBranchHead?(branch: string): Promise<string>;
     /** Checks the repository is reachable and the given branch exists. */
     testConnection(branch: string): Promise<ConnectionTestResult>;
     listFiles(branch: string, useFilter?: boolean): Promise<string[]>;
