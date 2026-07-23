@@ -1,3 +1,15 @@
+## [1.3.2](https://github.com/firstsun-dev/git-files-sync/compare/1.3.1...1.3.2) (2026-07-23)
+
+### Bug Fixes
+
+* **github:** retry batch pushes when the branch head moves ([65b5a3c](https://github.com/firstsun-dev/git-files-sync/commit/65b5a3c8d37f3fc31c3489194fafc228b2c50d0f))
+* **sync:** record a blob sha for batch-pushed files ([44716e3](https://github.com/firstsun-dev/git-files-sync/commit/44716e3b3a3e346e92e4fae1a4832c3a5e8ce28e))
+
+### Performance Improvements
+
+* **sync:** decide gitignore and pull work from the remote tree ([6ed91d9](https://github.com/firstsun-dev/git-files-sync/commit/6ed91d9051043d91a3603507083d44f17e5df3dd))
+* **sync:** stop probing paths the remote tree already rules out ([4b65fb7](https://github.com/firstsun-dev/git-files-sync/commit/4b65fb716d615cb38f5eedfbc7969ffdbb0bbb3a))
+
 ## [1.3.1](https://github.com/firstsun-dev/git-files-sync/compare/1.3.0...1.3.1) (2026-07-23)
 
 ### Performance Improvements
