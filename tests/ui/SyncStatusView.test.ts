@@ -231,6 +231,26 @@ describe('SyncStatusView local-only status', () => {
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         expect(statuses.get('new.md')).toMatchObject({ path: 'new.md', status: 'unsynced', localContent: 'new content' });
     });
+
+    // A tree entry that exists but carries no sha (providers whose listing omits
+    // it) still needs the content fetch — that path must stay intact.
+    it('still fetches content for a tree entry without a sha', async () => {
+        const getFile = vi.fn().mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+        const { plugin, leaf } = makePlugin({ adapterExists: vi.fn().mockResolvedValue(true) });
+        (plugin.gitService as unknown as { getFile: typeof getFile }).getFile = getFile;
+
+        const view = new SyncStatusView(leaf, plugin);
+        vi.spyOn(view as unknown as { readFileContent(f: unknown, b: boolean, s: boolean): Promise<string> }, 'readFileContent')
+            .mockResolvedValue('remote content');
+
+        await (view as unknown as {
+            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
+        }).refreshFileStatus('notes/existing.md', { path: 'notes/existing.md', symlink: false });
+
+        expect(getFile).toHaveBeenCalledWith('notes/existing.md', 'main');
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.get('notes/existing.md')?.status).toBe('synced');
+    });
 });
 
 describe('SyncStatusView post-push status update', () => {

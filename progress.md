@@ -14,7 +14,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 **Last Updated:** 2026-07-23
 **Session ID:** current
-**Active Feature:** feat-064 done. Ready for the next issue.
+**Active Feature:** None — this branch's push/perf fixes are merged with main and awaiting PR #72.
 
 ## Status
 
@@ -26,6 +26,12 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] Changelog content reorganized from a single growing `src/changelog.ts` into per-version folders (`src/changelog/1.2.1/`, `1.3.0/`, `1.3.1/`) — user explicitly asked for this instead of piling more keys into the shared `src/i18n/locales/*.ts` catalog, which would grow unbounded release over release.
 - [x] Added a `1.3.1` release entry (notable, i18n'd in en/zh-tw/zh-cn) summarizing the push-speed work, so the "what's new" modal covers it once semantic-release cuts 1.3.1.
 - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean (includes Obsidian 1.11.0 compat check); `npx vitest run` → 351/351 passed. (Ran `npm install` first — `node_modules` was empty at session start in this worktree.)
+- [x] Push failures reported as `GitHub GraphQL error: Expected branch to point to "<oid>" but it did not. Pull and try again.` (whole chunk failed, twice in a row, same oid). Two causes: the stale-HEAD retry pattern in `github-service.ts` never matched that wording, so no retry fired; and `expectedHeadOid` came from the REST `git/ref` read, which GitHub serves `private, max-age=60`, so retries would have resent the same cached oid anyway. `commitOnBranch` now reads the head over GraphQL, the pattern covers GitHub's real wording, exhaustion gives a branch-named message, and the REST read sends `Cache-Control: no-cache`. On `claude/git-file-sync-push-errors-9ffa82` (PR #72).
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean (incl. Obsidian 1.11.0 compat); `npx vitest run` → 351/351 passed.
+- [x] Console flooded with `Git Service 404 (not found)` before every push (separate from the fix above, pre-existing). Two sources, both probing paths already known to be absent from the pre-fetched remote tree: `SyncStatusView.refreshFileStatus` fell back to `getFile` for any file with no tree entry (a guaranteed 404 per not-yet-pushed file, every refresh), and `SyncManager.detectRename` probed every orphaned `syncMetadata` path once per file in the batch. Both now answer from the tree; the `getFile` fallback is kept only for tree entries that carry no sha.
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 354/354 passed.
+- [x] Audit of the remaining per-file request paths (follow-up to the 404 sweep): gitignore discovery remote-fetched speculative candidates (repo root + every rootPath ancestor) that exist nowhere, and `SyncStatusView` triggered a *second* full tree fetch per refresh by calling `loadGitignores()` without the tree it had just read; batch pull downloaded every file's content just to discover it was unchanged. Gitignore lookups now skip candidates a known tree doesn't list, the view shares its (now unfiltered) tree, and pull decides unchanged/conflict from tree shas, fetching content only when it will actually write.
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 360/360 passed.
 
 ### What's In Progress
 

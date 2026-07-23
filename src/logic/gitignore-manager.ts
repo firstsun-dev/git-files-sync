@@ -52,13 +52,18 @@ export class GitignoreManager {
         this.ignoreMap.clear();
 
         const gitignorePaths = await this.collectGitignorePaths(remoteTree);
+        // Candidates include speculative paths (the repo root, every rootPath
+        // ancestor) that often exist in neither place. A tree tells us which of
+        // those the remote actually has, so the rest skip a request that would
+        // only 404.
+        const remotePaths = remoteTree ? new Set(remoteTree.map(e => e.path)) : undefined;
 
         // Load content and build ignore instances
         for (const fullGitignorePath of gitignorePaths) {
             const dirPath = fullGitignorePath === '.gitignore'
                 ? ''
                 : fullGitignorePath.slice(0, -(('.gitignore'.length) + 1));
-            const content = await this.getGitignoreContent(fullGitignorePath);
+            const content = await this.getGitignoreContent(fullGitignorePath, remotePaths);
             if (content) {
                 this.ignoreMap.set(dirPath, ignore().add(content));
             }
@@ -143,47 +148,45 @@ export class GitignoreManager {
         return this.vaultFolder + '/' + normalizedPath;
     }
 
-    private async getGitignoreContent(fullGitignorePath: string): Promise<string | undefined> {
-        let content: string | undefined;
+    private async getGitignoreContent(fullGitignorePath: string, remotePaths?: Set<string>): Promise<string | undefined> {
+        const localPath = this.localGitignorePath(fullGitignorePath);
+        const local = localPath ? await this.readLocalGitignore(localPath) : undefined;
+        if (local !== undefined) return local;
 
-        // Determine local path relative to vault root
-        let normalized: string | null;
-        if (!this.rootPath) {
-            normalized = fullGitignorePath;
-        } else if (fullGitignorePath === this.rootPath + '/.gitignore' || fullGitignorePath.startsWith(this.rootPath + '/')) {
-            normalized = fullGitignorePath.substring(this.rootPath.length + 1);
-        } else if (fullGitignorePath === '.gitignore') {
-            // Repo root gitignore might not be in the vault sync area
-            normalized = null;
-        } else {
-            normalized = null;
+        // A known tree already says whether the remote has this one; skip the
+        // request for candidates it doesn't list rather than eating a 404.
+        if (remotePaths && !remotePaths.has(fullGitignorePath)) return undefined;
+
+        // Absolute path (leading /) bypasses rootPath.
+        try {
+            const remoteFile = await this.gitService.getFile('/' + fullGitignorePath, this.branch);
+            return remoteFile?.content ? remoteFile.content as string : undefined;
+        } catch {
+            // It's okay if some gitignores fail to fetch
+            return undefined;
         }
+    }
 
-        const localPath = normalized !== null ? this.getVaultPath(normalized) : null;
+    /** Vault path this .gitignore would live at, or null when it sits outside the synced area. */
+    private localGitignorePath(fullGitignorePath: string): string | null {
+        if (!this.rootPath) return this.getVaultPath(fullGitignorePath);
+        if (fullGitignorePath === this.rootPath + '/.gitignore' || fullGitignorePath.startsWith(this.rootPath + '/')) {
+            return this.getVaultPath(fullGitignorePath.substring(this.rootPath.length + 1));
+        }
+        // The repo root's .gitignore (and anything else above rootPath) is only
+        // ever on the remote.
+        return null;
+    }
 
-        // Try local first if it's within the vault
-        if (localPath) {
-            try {
-                if (await this.app.vault.adapter.exists(localPath)) {
-                    content = await this.app.vault.adapter.read(localPath);
-                }
-            } catch (e) {
-                logger.warn(`Failed to read local ${localPath}`, e);
+    private async readLocalGitignore(localPath: string): Promise<string | undefined> {
+        try {
+            if (await this.app.vault.adapter.exists(localPath)) {
+                return await this.app.vault.adapter.read(localPath);
             }
+        } catch (e) {
+            logger.warn(`Failed to read local ${localPath}`, e);
         }
-
-        // Fallback to remote (use absolute path starting with / to bypass rootPath)
-        if (content === undefined) {
-            try {
-                const remoteFile = await this.gitService.getFile('/' + fullGitignorePath, this.branch);
-                if (remoteFile?.content) {
-                    content = remoteFile.content as string;
-                }
-            } catch {
-                // It's okay if some gitignores fail to fetch
-            }
-        }
-        return content;
+        return undefined;
     }
 
     /**

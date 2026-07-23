@@ -285,10 +285,15 @@ export abstract class BaseGitService {
      * `git/ref/heads/{branch}` endpoint. Gitea's older versions require a
      * different branch-resolution endpoint, so it provides its own override
      * rather than using this helper.
+     *
+     * Sent with `Cache-Control: no-cache` because GitHub returns API responses
+     * as `private, max-age=60`: without it Electron's HTTP cache can answer this
+     * read with the pre-commit oid for up to a minute after a write, which then
+     * gets used as a base commit for the next one.
      */
     protected async getLatestCommitSha(branch: string): Promise<string> {
         const base = this.getGitDataApiBase();
-        const refResp = await this.safeRequest(`${base}/git/ref/heads/${branch}`, 'GET');
+        const refResp = await this.safeRequest(`${base}/git/ref/heads/${branch}`, 'GET', undefined, { 'Cache-Control': 'no-cache' });
         return this.parseJson<{ object: { sha: string } }>(refResp).object.sha;
     }
 

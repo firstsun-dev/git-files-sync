@@ -177,7 +177,8 @@ describe('BaseGitService', () => {
         it('should correctly encode and decode UTF-8 content', async () => {
             const original = 'Hello, 世界! 🌍';
             vi.mocked(requestUrl)
-                .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit1' } } } as unknown as RequestUrlResponse)
+                // Branch head for expectedHeadOid, read over GraphQL.
+                .mockResolvedValueOnce({ status: 200, json: { data: { repository: { ref: { target: { oid: 'commit1' } } } } } } as unknown as RequestUrlResponse)
                 .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
 
             // GraphQL carries the same base64 content as the old Contents API path.

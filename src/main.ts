@@ -336,7 +336,7 @@ export default class GitLabFilesPush extends Plugin {
 				}, tree)
 				: await this.sync.pullAllFiles(files, (current, total, fileName) => {
 					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pulling'), current, total, fileName }));
-				});
+				}, tree);
 
 			progressNotice.hide();
 
