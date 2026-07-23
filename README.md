@@ -1,7 +1,7 @@
 <div align="center">
 
 # Git File Sync
-*Sync only the notes you choose — not your whole vault — to GitHub, GitLab, or Gitea.*
+*Selective, file-by-file sync between your vault and GitHub, GitLab, or Gitea.*
 
 [![CI](https://img.shields.io/github/actions/workflow/status/firstsun-dev/git-files-sync/ci.yml?branch=main&style=for-the-badge)](https://github.com/firstsun-dev/git-files-sync/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/firstsun-dev/git-files-sync?style=for-the-badge&color=2ea44f)](https://github.com/firstsun-dev/git-files-sync/releases)
@@ -12,17 +12,7 @@
 
 </div>
 
-Most vault sync tools are all-or-nothing: connect a repo and the whole vault becomes Git-tracked. Git File Sync works the other way around — you pick individual notes or folders to publish, and everything else stays local and untouched. Nothing turns the vault itself into a Git repository; only the paths you select are pushed, pulled, diffed, and conflict-resolved against a real GitHub, GitLab, or Gitea repo.
-
-```
-My Vault/
-├── Journal/          ← private, never touched by the plugin
-├── Personal/         ← private, never touched by the plugin
-└── Projects/
-    └── my-project/    ← selected — synced to GitHub/GitLab/Gitea
-        ├── notes.md
-        └── spec.md
-```
+Push, pull, diff, and resolve conflicts — file by file, not whole-vault. Unlike full-vault sync solutions, Git File Sync gives you granular control over exactly what leaves your device, so you can keep personal notes private while sharing project files through a real Git repository.
 
 <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub" height="20"> <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab" height="20"> <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea" height="20">
 
