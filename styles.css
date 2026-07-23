@@ -515,11 +515,41 @@
    sidebar. */
 .sync-diff-view {
     padding: 10px 14px;
-    overflow: auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 
 .ssv-diff-pane {
     container-type: inline-size;
+}
+
+/* Desktop pane: let the diff fill the tab's full height instead of the
+   sidebar's capped max-height (mobile keeps the cap — see below). */
+.sync-diff-view .ssv-diff-pane-path {
+    flex-shrink: 0;
+}
+
+.sync-diff-view .ssv-diff-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.sync-diff-view .ssv-diff-split {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.sync-diff-view .ssv-diff-grid,
+.sync-diff-view .ssv-diff-unified {
+    flex: 1;
+    max-height: none;
+    min-height: 0;
 }
 
 .ssv-diff-pane-path {
