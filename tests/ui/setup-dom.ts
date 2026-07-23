@@ -65,6 +65,11 @@ export function setupObsidianDOM(): void {
         setText(text: string): void {
             (this as HTMLElement).textContent = text;
         },
+        setAttr(name: string, value: string | number | boolean | null): void {
+            const el = this as HTMLElement;
+            if (value === null || value === false) el.removeAttribute(name);
+            else el.setAttribute(name, String(value));
+        },
         empty(): void {
             (this as HTMLElement).replaceChildren();
         },

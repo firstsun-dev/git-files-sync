@@ -269,7 +269,25 @@ export const AbstractInputSuggest = class {
 export const requestUrl = vi.fn();
 export const setTooltip = vi.fn();
 export const setIcon = vi.fn();
-export const Platform = { isDesktopApp: true };
+// Real Keymap.isModEvent returns a PaneType or false; only the truthiness of
+// "a modifier was held" matters to callers here.
+export const Keymap = {
+  isModEvent: (evt?: { ctrlKey?: boolean; metaKey?: boolean } | null): boolean =>
+    Boolean(evt?.ctrlKey || evt?.metaKey),
+};
+// Mirrors Obsidian's debounce(): trailing-edge, with cancel()/run() attached.
+export const debounce = <T extends unknown[]>(cb: (...args: T) => unknown, timeout = 0) => {
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  const fn = (...args: T): void => {
+    if (handle) clearTimeout(handle);
+    handle = setTimeout(() => cb(...args), timeout);
+  };
+  fn.cancel = (): typeof fn => { if (handle) clearTimeout(handle); return fn; };
+  fn.run = (): typeof fn => fn;
+  return fn;
+};
+// Mutable so tests can exercise both the desktop and mobile branches.
+export const Platform = { isDesktopApp: true, isMobile: false };
 export const FileSystemAdapter = class {
   getBasePath() { return '/mock/path'; }
 };
