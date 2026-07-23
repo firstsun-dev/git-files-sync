@@ -153,7 +153,9 @@ describe('SyncStatusView search box wiring', () => {
         }
     });
 
-    it('clears the selection when the query changes', async () => {
+    // The selection must never hold anything the current filter hides: Push,
+    // Pull and Delete all act on it, and all three are irreversible.
+    it('drops selected files the new query hides', async () => {
         vi.useFakeTimers();
         try {
             const { view, input } = await openWithSearch(SAMPLE);
@@ -163,12 +165,40 @@ describe('SyncStatusView search box wiring', () => {
             type(input, 'project');
             vi.advanceTimersByTime(200);
 
-            // Selection can't outlive a change to what's on screen, or the
-            // action bar would count files the user can no longer see.
             expect(internals(view).selectedFiles.size).toBe(0);
         } finally {
             vi.useRealTimers();
         }
+    });
+
+    it('keeps selected files the new query still matches', async () => {
+        vi.useFakeTimers();
+        try {
+            const { view, input } = await openWithSearch(SAMPLE);
+            internals(view).selectedFiles.add('Notes/Projects/alpha.md');
+            internals(view).selectedFiles.add('readme.md');
+
+            type(input, 'project');
+            vi.advanceTimersByTime(200);
+
+            // alpha.md still matches, so ticking it then refining the search
+            // doesn't throw that tick away — the original bug was clearing
+            // everything unconditionally.
+            expect([...internals(view).selectedFiles]).toEqual(['Notes/Projects/alpha.md']);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('keeps selected files that the status tab still shows', async () => {
+        const { view } = await openWithSearch(SAMPLE);
+        internals(view).selectedFiles.add('Notes/Projects/beta.md');  // unsynced
+        internals(view).selectedFiles.add('Notes/daily.md');          // synced
+
+        internals(view).statusFilter = 'unsynced';
+        (view as unknown as { pruneSelectionToVisible(): void }).pruneSelectionToVisible();
+
+        expect([...internals(view).selectedFiles]).toEqual(['Notes/Projects/beta.md']);
     });
 
     it('resets the filter on Escape', async () => {

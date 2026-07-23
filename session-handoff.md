@@ -11,7 +11,7 @@
 
 ## Current Objective
 
-Designed a UX flow for rename/move in the sync panel, filed five issues from it, implemented three (feat-018/019/020 after renumbering around main). Committed and pushed; **[PR #71](https://github.com/firstsun-dev/git-files-sync/pull/71) is open against `main`** and has just been merged with `origin/main` to clear a conflict.
+Designed a UX flow for rename/move in the sync panel, filed five issues from it, implemented three (feat-018/019/020 after renumbering around main). Committed and pushed; **[PR #71](https://github.com/firstsun-dev/git-files-sync/pull/71) is open against `main`**, rebased onto `origin/main` to clear a conflict, so it is two linear commits.
 
 | # | Title | Pri | Est | State |
 |---|---|---|---|---|
@@ -25,7 +25,7 @@ Designed a UX flow for rename/move in the sync panel, filed five issues from it,
 
 ## Exact next step
 
-Re-run the full gate on the merge result, then merge PR #71. `main` moved during this session (PR #72 plus releases 1.3.1 and 1.3.2, including `src/changelog.ts` → `src/changelog/`); only the three harness/doc files conflicted, all source merged cleanly, but auto-merged source still needs verifying rather than assuming.
+Merge PR #71. `main` moved during this session (PR #72 plus releases 1.3.1 and 1.3.2, including `src/changelog.ts` → `src/changelog/`); only the three harness/doc files conflicted, all source rebased cleanly, and the full gate was re-run on the rebased result (410/410) rather than assumed.
 
 ## Verification at the stopping point
 

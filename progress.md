@@ -49,10 +49,10 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ### What's Next
 
-1. Resolve and merge [PR #71](https://github.com/firstsun-dev/git-files-sync/pull/71) — conflicted only in the three harness/doc files (`feature_list.json`, `progress.md`, `session-handoff.md`); all source merged cleanly.
+1. Merge [PR #71](https://github.com/firstsun-dev/git-files-sync/pull/71) — rebased onto `main`, linear history, two commits. The conflict was confined to the three harness/doc files (`feature_list.json`, `progress.md`, `session-handoff.md`); all source rebased cleanly.
 2. Issue [#66](https://github.com/firstsun-dev/git-files-sync/issues/66) (rename → real move, P1) and [#67](https://github.com/firstsun-dev/git-files-sync/issues/67) (folder-move collapse, depends on #66) are filed and designed but not started. #66 is the correctness one.
 3. Manual verification of feat-018/019/020 inside the actual Obsidian plugin UI — evidence so far is lint/build/unit tests only.
-4. **Archive the merged feat-016/017 + push-error entries above into `archive/2026-07.md`.** They are shipped (1.3.1, 1.3.2) and the cleanup cadence says they should not sit in "What's Done"; left in place here rather than rewriting another session's records during a merge.
+4. **Archive the merged feat-016/017 + push-error entries above into `archive/2026-07.md`.** They are shipped (1.3.1, 1.3.2) and the cleanup cadence says they should not sit in "What's Done"; left in place here rather than rewriting another session's records while resolving a conflict.
 5. New release folders (e.g. `src/changelog/1.4.0/`) still need one import line added to `src/changelog/index.ts`'s `CHANGELOG` array.
 6. Re-sync against `gh issue list --repo firstsun-dev/git-files-sync --state open`.
 
@@ -84,10 +84,10 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] Lint clean: `npx eslint .` → 0 errors
 - [x] Type check clean: `npm run build` → clean (includes the Obsidian 1.11.0 compat typecheck)
 - [x] Tests pass: `npx vitest run` → 397/397 passed (350 at the session's green baseline)
-- [ ] Post-merge re-verification against `origin/main` — see below
+- [x] Re-verified after rebasing onto `origin/main`: 410/410 passed, and the rebased tree is byte-identical to the merge result that run covered
 - [ ] Manual verification inside the actual Obsidian plugin UI — not yet done
 
 ## Notes for Next Session
 
 - Working branch: `claude/git-mv-convenience-26f64c` (worktree), PR #71 against `main`.
-- `main` moved on during this session (PR #72 + releases 1.3.1/1.3.2), including `src/changelog.ts` → `src/changelog/` and further push-path perf work. Source files merged without conflict, but the merge result needs its own full gate run before the PR is merged.
+- `main` moved on during this session (PR #72 + releases 1.3.1/1.3.2), including `src/changelog.ts` → `src/changelog/` and further push-path perf work. This branch was rebased onto it rather than merged, so PR #71 is two linear commits. Source rebased without conflict, and the full gate was re-run on the result rather than assumed.
