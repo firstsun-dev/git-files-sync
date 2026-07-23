@@ -3,7 +3,7 @@ import GitLabFilesPush, { type ConnectionStatus } from "./main";
 import {FolderSuggest} from "./ui/FolderSuggest";
 import {RemoteFolderSuggest} from "./ui/RemoteFolderSuggest";
 import { t, setLanguageOverride, type LanguageSetting } from "./i18n";
-import { CHANGELOG } from "./changelog";
+import { CHANGELOG, entryText } from "./changelog";
 
 // Minimal shape of Obsidian >= 1.13's SettingDefinitionItem. Declared locally so
 // the plugin still type-checks against older Obsidian typings (minAppVersion
@@ -171,7 +171,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		textEl.createEl('strong', { text: t('settings.whatsNewBanner.title', { version: currentVersion }) });
 		const list = textEl.createEl('ul', { cls: 'gfs-whats-new-banner-list' });
 		for (const entry of notableEntries) {
-			list.createEl('li', { text: entry.text });
+			list.createEl('li', { text: entryText(entry) });
 		}
 
 		const dismissBtn = banner.createEl('button', {

@@ -13,14 +13,14 @@ describe('WhatsNewModal', () => {
         {
             version: '1.3.0',
             entries: [
-                { text: 'Notable highlight', notable: true },
-                { text: 'Minor fix' },
+                { text: { en: 'Notable highlight' }, notable: true },
+                { text: { en: 'Minor fix' } },
             ],
         },
         {
             version: '1.2.1',
             entries: [
-                { text: 'Older release note' },
+                { text: { en: 'Older release note' } },
             ],
         },
     ];
