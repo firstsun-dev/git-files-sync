@@ -340,7 +340,11 @@ export class SyncStatusView extends ItemView {
         const allFiles = this.app.vault.getFiles();
         let local = this.plugin.filterFilesByVaultFolder(allFiles);
         const remoteHead = await this.plugin.gitService.getBranchHead?.(this.plugin.settings.branch);
-        const remoteEntries = await this.plugin.gitService.listFilesDetailed(remoteHead ?? this.plugin.settings.branch);
+        // Unfiltered: getNormalizedRemotePath below applies the same rootPath
+        // filter, and gitignore discovery needs the entries outside rootPath
+        // (e.g. the repo-root .gitignore). Sharing this one tree saves
+        // loadGitignores a second full-tree fetch on every refresh.
+        const remoteEntries = await this.plugin.gitService.listFilesDetailed(remoteHead ?? this.plugin.settings.branch, false);
 
         await this.plugin.gitignoreManager.loadGitignores(remoteEntries);
 
@@ -746,10 +750,10 @@ export class SyncStatusView extends ItemView {
         const runVerb = op === 'push' ? t('main.verb.pushing') : t('main.verb.pulling');
         const prog = new Notice(t('main.progress.running', { verb: runVerb, total: files.length }), 0);
         try {
-            const remoteTree = op === 'push' ? await this.getReusableRemoteTree() : undefined;
+            const remoteTree = await this.getReusableRemoteTree();
             const results = op === 'push'
                 ? await this.plugin.sync.pushAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pushing', { current: cur, total, name })), remoteTree)
-                : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pulling', { current: cur, total, name })));
+                : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pulling', { current: cur, total, name })), remoteTree);
 
             prog.hide();
             if (results.errors.length > 0) logger.error(`${op} errors:`, results.errors);
