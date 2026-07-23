@@ -140,6 +140,36 @@ describe('GitignoreManager', () => {
             expect(manager.isIgnored('sub/test.tmp')).toBe(true);
         });
 
+        it('does not fetch a candidate .gitignore the pre-fetched tree does not list', async () => {
+            // Candidates always include the repo root and every rootPath ancestor,
+            // whether or not they exist; with a tree in hand, fetching one the
+            // remote hasn't got is a guaranteed 404 on every refresh.
+            const rootedManager = new GitignoreManager(mockApp, mockGitService, branch, 'src/content');
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'dist/', sha: 'a' });
+
+            await rootedManager.loadGitignores([
+                { path: 'src/content/.gitignore', symlink: false, sha: 'a' },
+                { path: 'src/content/note.md', symlink: false, sha: 'b' },
+            ]);
+
+            expect(mockGitService.getFile).toHaveBeenCalledTimes(1);
+            expect(mockGitService.getFile).toHaveBeenCalledWith('/src/content/.gitignore', branch);
+            expect(rootedManager.isIgnored('dist/bundle.js')).toBe(true);
+        });
+
+        it('still fetches every candidate when no tree is supplied', async () => {
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+            vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue([]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: '' });
+
+            await manager.loadGitignores();
+
+            expect(mockGitService.getFile).toHaveBeenCalledWith('/.gitignore', branch);
+        });
+
         it('should pick up local-only subdirectory .gitignore not yet on remote', async () => {
             // Remote only knows about root .gitignore; sub/.gitignore exists locally but not pushed yet
             vi.mocked(mockGitService.getRepoGitignores).mockResolvedValue(['.gitignore']);

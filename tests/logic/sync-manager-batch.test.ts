@@ -229,6 +229,10 @@ describe('SyncManager Batch Operations', () => {
             
             vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote content', sha: 'new-sha' });
             vi.mocked(adapter.exists).mockResolvedValue(true);
+            // Tree entries without a sha, so the pull still goes through content.
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: 'file1.md', symlink: false }, { path: 'file2.md', symlink: false }
+            ]);
 
             const results = await manager.pullAllFiles(files);
 
@@ -237,12 +241,92 @@ describe('SyncManager Batch Operations', () => {
             expect(vi.mocked(mockApp.vault.modify)).toHaveBeenCalledWith(mockFile, 'remote content');
         });
 
+        it('skips downloading a file whose tree sha already matches the local content', async () => {
+            // An in-sync "pull all" used to fetch every file's content just to
+            // discover nothing changed — one request per file, whole vault.
+            const path = 'unchanged.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('same content');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: await gitBlobSha('same content') }
+            ]);
+
+            const results = await manager.pullAllFiles([path]);
+
+            expect(results.success).toBe(0);
+            expect(results.failed).toBe(0);
+            expect(mockGitService.getFile).not.toHaveBeenCalled();
+            expect(adapter.write).not.toHaveBeenCalled();
+            expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe(await gitBlobSha('same content'));
+        });
+
+        it('reports a diverged local file as a conflict without downloading it', async () => {
+            const path = 'conflicted.md';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'sha-at-last-sync', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('local edit');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'sha-changed-on-remote' }
+            ]);
+
+            const results = await manager.pullAllFiles([path]);
+
+            expect(results.conflicts).toBe(1);
+            expect(mockGitService.getFile).not.toHaveBeenCalled();
+            expect(adapter.write).not.toHaveBeenCalled();
+        });
+
+        it('still downloads when the local file differs and the remote has not moved', async () => {
+            const path = 'stale.md';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'remote-sha', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('older local copy');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'remote-sha' }
+            ]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+
+            const results = await manager.pullAllFiles([path]);
+
+            expect(results.success).toBe(1);
+            expect(mockGitService.getFile).toHaveBeenCalledWith(path, 'main');
+            expect(adapter.write).toHaveBeenCalledWith(path, 'remote content');
+        });
+
+        it('falls back to per-file fetches when the tree read fails', async () => {
+            const path = 'file.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('local');
+            vi.mocked(mockGitService.listFilesDetailed).mockRejectedValue(new Error('network down'));
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+
+            const results = await manager.pullAllFiles([path]);
+
+            expect(results.success).toBe(1);
+            expect(mockGitService.getFile).toHaveBeenCalledWith(path, 'main');
+        });
+
         it('should handle missing remote files during batch pull', async () => {
             const files = ['exists.md', 'missing.md'];
 
             vi.mocked(mockGitService.getFile)
                 .mockResolvedValueOnce({ content: 'content', sha: 'sha' })
                 .mockResolvedValueOnce({ content: '', sha: '' });
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: 'exists.md', symlink: false }
+            ]);
 
             const results = await manager.pullAllFiles(files);
 
@@ -306,6 +390,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(adapter.exists).mockResolvedValue(true);
             vi.mocked(adapter.read).mockResolvedValue('local edit');
             vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote edit', sha: 'sha-changed-on-remote' });
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path, symlink: false }]);
 
             const results = await manager.pullAllFiles([path]);
 

@@ -424,15 +424,30 @@ export class SyncManager {
         return this.processPushBatch(files, onProgress, remoteTree);
     }
 
-    async pullAllFiles(files: (TFile | string)[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
-        return this.processPullBatch(files, onProgress);
+    async pullAllFiles(
+        files: (TFile | string)[],
+        onProgress?: (current: number, total: number, fileName: string) => void,
+        remoteTree?: GitTreeEntry[]
+    ): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
+        return this.processPullBatch(files, onProgress, remoteTree);
     }
 
     private async processPullBatch(
         files: (TFile | string)[],
-        onProgress?: (current: number, total: number, fileName: string) => void
+        onProgress?: (current: number, total: number, fileName: string) => void,
+        remoteTree?: GitTreeEntry[]
     ): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
         const results = { success: 0, failed: 0, conflicts: 0, errors: [] as Array<{ file: string; error: string }> };
+
+        // One tree read decides which files actually need downloading; without it
+        // (a failed fetch) every file falls back to its own content request.
+        let treeByFullPath: Map<string, GitTreeEntry> | undefined;
+        try {
+            const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
+            treeByFullPath = new Map(tree.map(e => [e.path, e]));
+        } catch (e) {
+            logger.warn('Failed to fetch remote tree for pull; falling back to per-file fetches', e);
+        }
 
         for (let i = 0; i < files.length; i++) {
             const fileOrPath = files[i];
@@ -442,7 +457,7 @@ export class SyncManager {
             onProgress?.(i + 1, files.length, name);
 
             try {
-                const outcome = await this.processSingleBatchPull(fileOrPath, path, name, isString);
+                const outcome = await this.processSingleBatchPull(fileOrPath, path, name, isString, treeByFullPath);
                 if (outcome === 'done') results.success++;
                 else if (outcome === 'conflict') results.conflicts++;
             } catch (e) {
@@ -704,8 +719,22 @@ export class SyncManager {
         }
     }
 
-    private async processSingleBatchPull(fileOrPath: TFile | string, path: string, name: string, isString: boolean): Promise<BatchOutcome> {
+    private async processSingleBatchPull(
+        fileOrPath: TFile | string,
+        path: string,
+        name: string,
+        isString: boolean,
+        treeByFullPath?: Map<string, GitTreeEntry>
+    ): Promise<BatchOutcome> {
         const repoPath = this.getNormalizedPath(path);
+
+        if (treeByFullPath) {
+            const entry = treeByFullPath.get(this.getFullPathForTree(repoPath));
+            if (!entry) throw new Error('File not found in remote');
+            const decided = await this.classifyPullAgainstTreeEntry(fileOrPath, path, isString, entry);
+            if (decided) return decided;
+        }
+
         const remote = await this.gitService.getFile(repoPath, this.settings.branch);
         if (!remote.sha) throw new Error('File not found in remote');
 
@@ -727,5 +756,39 @@ export class SyncManager {
         const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
         await this.performPull(fileRep, remote.content, remote.sha, true, this.symlinkPullTarget(remote));
         return 'done';
+    }
+
+    /**
+     * The outcome of a pull that's decidable from the tree entry alone, or null
+     * when the file's content is genuinely needed. Downloading a file only to
+     * discover it already matches costs one request per file, so an in-sync
+     * "pull all" would re-fetch the whole vault; the entry's blob sha answers
+     * that locally, exactly as the push side already does.
+     */
+    private async classifyPullAgainstTreeEntry(
+        fileOrPath: TFile | string,
+        path: string,
+        isString: boolean,
+        entry: GitTreeEntry
+    ): Promise<BatchOutcome | null> {
+        // A symlink's blob is its target path, and an entry without a sha can't
+        // be compared — both still need the real fetch.
+        if (entry.symlink || !entry.sha) return null;
+        // Nothing local to compare against: it has to be written.
+        if (!await this.checkFileExists(path, isString)) return null;
+
+        const localSha = await gitBlobSha(await this.getFileContent(fileOrPath));
+        if (localSha === entry.sha) {
+            await this.updateMetadata(path, entry.sha);
+            return 'unchanged';
+        }
+
+        // Same conflict check as the content path below: local differs and the
+        // remote has moved since we last synced, so pulling would discard one of
+        // the two changes.
+        const lastSynced = this.settings.syncMetadata[path];
+        if (lastSynced && entry.sha !== lastSynced.lastSyncedSha) return 'conflict';
+
+        return null;
     }
 }

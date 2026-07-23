@@ -29,6 +29,8 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
   - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean (incl. Obsidian 1.11.0 compat); `npx vitest run` → 351/351 passed.
 - [x] Console flooded with `Git Service 404 (not found)` before every push (separate from the fix above, pre-existing). Two sources, both probing paths already known to be absent from the pre-fetched remote tree: `SyncStatusView.refreshFileStatus` fell back to `getFile` for any file with no tree entry (a guaranteed 404 per not-yet-pushed file, every refresh), and `SyncManager.detectRename` probed every orphaned `syncMetadata` path once per file in the batch. Both now answer from the tree; the `getFile` fallback is kept only for tree entries that carry no sha.
   - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 354/354 passed.
+- [x] Audit of the remaining per-file request paths (follow-up to the 404 sweep): gitignore discovery remote-fetched speculative candidates (repo root + every rootPath ancestor) that exist nowhere, and `SyncStatusView` triggered a *second* full tree fetch per refresh by calling `loadGitignores()` without the tree it had just read; batch pull downloaded every file's content just to discover it was unchanged. Gitignore lookups now skip candidates a known tree doesn't list, the view shares its (now unfiltered) tree, and pull decides unchanged/conflict from tree shas, fetching content only when it will actually write.
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean; `npx vitest run` → 360/360 passed.
 
 ### What's In Progress
 
