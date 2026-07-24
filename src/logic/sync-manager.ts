@@ -1,5 +1,5 @@
 import { TFile, App, Notice } from 'obsidian';
-import { GitServiceInterface, GitTreeEntry } from '../services/git-service-interface';
+import { GitServiceInterface, GitTreeEntry, GitFile } from '../services/git-service-interface';
 import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
 import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
@@ -78,32 +78,28 @@ export class SyncManager {
         this.gitService = gitService;
     }
 
-    async pushFile(fileOrPath: TFile | string) {
+    /**
+     * Returns a confirmed-synced result (with the new blob sha, when known) so
+     * an interactive single-file push can mark the file's UI status directly —
+     * the same "trust what we just wrote" approach batch push already uses via
+     * `syncedPaths` — instead of re-fetching the remote tree right after a
+     * write, which GitHub's tree-by-branch-name read can lag by a few seconds.
+     * Returns `undefined` when the outcome isn't a confirmed sync (file gone,
+     * remote symlink left untouched, or a conflict deferred to the modal).
+     */
+    async pushFile(fileOrPath: TFile | string): Promise<{ sha?: string } | undefined> {
         const { path, name, isString } = this.getFileInfo(fileOrPath);
         const repoPath = this.getNormalizedPath(path);
 
         if (!await this.checkFileExists(path, isString)) {
             new Notice(`File ${name} no longer exists in vault.`);
-            return;
+            return undefined;
         }
 
         try {
-            // Symbolic link handling: real → push as a symlink (GitHub), skip → ignore.
-            const symlinkTarget = readLocalSymlinkTarget(this.app, path);
-            if (symlinkTarget !== null && await this.handleSymlinkPush({ path, name }, symlinkTarget)) {
-                return;
-            }
-
-            const content = await this.getFileContent(fileOrPath);
-
-            // Check if this is a renamed file
-            if (!isString && fileOrPath instanceof TFile) {
-                const renamedFrom = await this.detectRename(fileOrPath, content);
-                if (renamedFrom) {
-                    await this.handleRename(fileOrPath, renamedFrom, content);
-                    return;
-                }
-            }
+            const shortCircuit = await this.tryPushAsSymlinkOrRename(fileOrPath, path, name, isString);
+            if (shortCircuit.handled) return shortCircuit.result;
+            const content = shortCircuit.content;
 
             // Conflict detection & equality check
             const remote = await this.gitService.getFile(repoPath, this.settings.branch);
@@ -112,39 +108,83 @@ export class SyncManager {
             // file. If the remote is a symlink, leave it untouched.
             if (remote.isSymlink) {
                 new Notice(`${name} is a symlink on the remote; not overwriting (use "real" symlink mode to manage links).`);
-                return;
+                return undefined;
             }
 
             if (remote.sha && this.contentsEqual(content, remote.content)) {
                 await this.updateMetadata(path, remote.sha);
                 new Notice(`${name} is already up to date.`);
-                return;
+                return { sha: remote.sha };
             }
 
             const lastSynced = this.settings.syncMetadata[path];
 
             if (remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
-                new SyncConflictModal(this.app, name, content as string, remote.content as string, (choice) => {
-                    void (async () => {
-                        try {
-                            const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
-                            if (choice === 'local') {
-                                await this.performPush({ path, name }, content, remote.sha);
-                            } else {
-                                await this.performPull(fileRep, remote.content, remote.sha, false, this.symlinkPullTarget(remote));
-                            }
-                        } catch (e) {
-                            this.handleError(`Failed to resolve conflict for ${name}`, e);
-                        }
-                    })();
-                }).open();
-                return;
+                this.openPushConflictModal(fileOrPath, { path, name }, content, remote);
+                return undefined;
             }
 
-            await this.performPush({ path, name }, content, remote.sha);
+            const sha = await this.performPush({ path, name }, content, remote.sha);
+            return { sha };
         } catch (e) {
             this.handleError(`Failed to push ${name} to ${this.serviceName}`, e);
+            return undefined;
         }
+    }
+
+    /**
+     * The first two branches of a push -- "is this a symlink?" and "is this a
+     * rename of a tracked path?" -- each short-circuit the whole operation with
+     * their own result. Split out of `pushFile` purely to keep that function's
+     * branching flat; on no short circuit, returns the local content it read
+     * (needed either way) so the caller doesn't read it twice.
+     */
+    private async tryPushAsSymlinkOrRename(
+        fileOrPath: TFile | string, path: string, name: string, isString: boolean
+    ): Promise<{ handled: true; result: { sha?: string } | undefined } | { handled: false; content: string | ArrayBuffer }> {
+        // Symbolic link handling: real → push as a symlink (GitHub), skip → ignore.
+        const symlinkTarget = readLocalSymlinkTarget(this.app, path);
+        if (symlinkTarget !== null) {
+            const symlinkOutcome = await this.handleSymlinkPush({ path, name }, symlinkTarget);
+            if (symlinkOutcome.handled) {
+                return { handled: true, result: symlinkOutcome.synced ? { sha: symlinkOutcome.sha } : undefined };
+            }
+        }
+
+        const content = await this.getFileContent(fileOrPath);
+
+        if (!isString && fileOrPath instanceof TFile) {
+            const renamedFrom = await this.detectRename(fileOrPath, content);
+            if (renamedFrom) {
+                const sha = await this.handleRename(fileOrPath, renamedFrom, content);
+                return { handled: true, result: { sha } };
+            }
+        }
+
+        return { handled: false, content };
+    }
+
+    /** Opens the local-vs-remote conflict modal for a push and applies whichever side the user picks. The choice resolves asynchronously, after `pushFile` has already returned. */
+    private openPushConflictModal(
+        fileOrPath: TFile | string,
+        file: { path: string; name: string },
+        content: string | ArrayBuffer,
+        remote: GitFile
+    ): void {
+        new SyncConflictModal(this.app, file.name, content as string, remote.content as string, (choice) => {
+            void (async () => {
+                try {
+                    const fileRep = typeof fileOrPath === 'string' ? file : fileOrPath;
+                    if (choice === 'local') {
+                        await this.performPush(file, content, remote.sha);
+                    } else {
+                        await this.performPull(fileRep, remote.content, remote.sha, false, this.symlinkPullTarget(remote));
+                    }
+                } catch (e) {
+                    this.handleError(`Failed to resolve conflict for ${file.name}`, e);
+                }
+            })();
+        }).open();
     }
 
     /**
@@ -213,7 +253,7 @@ export class SyncManager {
         return entry.sha ? entry.sha === localSha : undefined;
     }
 
-    private async handleRename(file: TFile, oldPath: string, content: string | ArrayBuffer): Promise<void> {
+    private async handleRename(file: TFile, oldPath: string, content: string | ArrayBuffer): Promise<string> {
         try {
             const repoPath = this.getNormalizedPath(file.path);
             const oldRepoPath = this.getNormalizedPath(oldPath);
@@ -241,6 +281,7 @@ export class SyncManager {
 
             await this.saveSettings();
             new Notice(`Renamed and pushed ${file.name} to ${this.serviceName}\nNote: Old file at ${oldPath} may need manual deletion from remote`);
+            return newSha;
         } catch (e) {
             this.handleError('Failed to handle rename', e);
             throw e; // Rethrow for batch processing
@@ -271,20 +312,21 @@ export class SyncManager {
      * skipped); returns false to let the caller fall through to a normal content
      * push ("follow", which reads through the link).
      */
-    private async handleSymlinkPush(file: {path: string, name: string}, target: string, silent = false): Promise<boolean> {
+    /** `handled`: the symlink flow owns this push, caller should not fall through to a normal push. `synced`: content is now confirmed synced (false for "skip" mode, where nothing was actually written). */
+    private async handleSymlinkPush(file: {path: string, name: string}, target: string, silent = false): Promise<{ handled: boolean; synced: boolean; sha?: string }> {
         const mode = getEffectiveSymlinkHandling(this.settings);
         if (mode === 'skip') {
             if (!silent) new Notice(`Skipped symlink ${file.name}.`);
-            return true;
+            return { handled: true, synced: false };
         }
         if (mode === 'real' && this.gitService.pushSymlink) {
             const repoPath = this.getNormalizedPath(file.path);
             const result = await this.gitService.pushSymlink(repoPath, target, this.settings.branch, `Update ${file.name} from Obsidian`);
             if (result.sha) await this.updateMetadata(file.path, result.sha);
             if (!silent) new Notice(`Pushed symlink ${file.name} to ${this.serviceName}`);
-            return true;
+            return { handled: true, synced: true, sha: result.sha };
         }
-        return false;
+        return { handled: false, synced: false };
     }
 
     /** The symlink target to recreate on pull, or undefined when the remote isn't a symlink. */
@@ -531,8 +573,9 @@ export class SyncManager {
 
         // Symbolic link handling: real → push as a symlink (GitHub), skip → ignore.
         const symlinkTarget = readLocalSymlinkTarget(this.app, path);
-        if (symlinkTarget !== null && await this.handleSymlinkPush({ path, name }, symlinkTarget, true)) {
-            return getEffectiveSymlinkHandling(this.settings) !== 'skip' ? 'done' : 'unchanged';
+        if (symlinkTarget !== null) {
+            const symlinkOutcome = await this.handleSymlinkPush({ path, name }, symlinkTarget, true);
+            if (symlinkOutcome.handled) return symlinkOutcome.synced ? 'done' : 'unchanged';
         }
 
         const content = await this.getFileContent(fileOrPath);

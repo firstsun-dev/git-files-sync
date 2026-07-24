@@ -477,20 +477,33 @@ export class SyncStatusView extends ItemView {
             this.renderView();
 
             if (op === 'push') {
-                await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
+                const result = await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
+                prog.hide();
+                if (result) {
+                    // Same approach as executeBatchOperation's applyOptimisticSyncedStatus:
+                    // trust what was just written instead of re-fetching the remote tree,
+                    // which can lag a successful write by a few seconds. Passing `undefined`
+                    // as refreshFileStatus's remoteEntry (the old code path) claims the file
+                    // isn't on the remote at all, which forces 'unsynced' right after a
+                    // successful push -- the bug being fixed here.
+                    this.applyOptimisticSyncedStatus([{ path: fileStatus.path, sha: result.sha }]);
+                } else {
+                    // Not a confirmed sync (file deleted, remote symlink left untouched, or a
+                    // conflict deferred to its modal) -- fall back to an accurate live check.
+                    await this.refreshFileStatusByContent(fileStatus.file || fileStatus.path);
+                }
             } else {
                 await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
+                prog.hide();
+                await this.refreshFileStatusByContent(fileStatus.file || fileStatus.path);
             }
 
-            prog.hide();
-            await new Promise(r => window.setTimeout(r, 500));
-            await this.refreshFileStatus(fileStatus.file || fileStatus.path, undefined);
             this.renderView();
         } catch (e) {
             prog.hide();
             const verb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
             new Notice(t('syncStatus.notice.opFailed', { verb, message: e instanceof Error ? e.message : String(e) }));
-            await this.refreshFileStatus(fileStatus.file || fileStatus.path, undefined);
+            await this.refreshFileStatusByContent(fileStatus.file || fileStatus.path);
             this.renderView();
         }
     }
