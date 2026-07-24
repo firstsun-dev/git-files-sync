@@ -744,6 +744,7 @@ export class SyncStatusView extends ItemView {
 
             const filesToCheck = this.getCheckableFiles(files.local, extra, files.hiddenLocalPaths);
             await this.performStatusCheck(filesToCheck, files.remoteMap);
+            await this.reconcileOutOfBandMoves(files.remoteMap);
 
             this.saveRemoteTreeSnapshot(files.remoteHead, files.remoteEntries);
             this.lastSyncTime = Date.now();
@@ -901,6 +902,74 @@ export class SyncStatusView extends ItemView {
             }
         }
         return extra;
+    }
+
+    /**
+     * Pairs an orphaned remote-only entry with a local-only file sharing its
+     * exact content — for moves that happened while the plugin wasn't
+     * observing the vault's live 'rename' event (Obsidian closed, an
+     * external tool or another device moved it, or the plugin hadn't
+     * finished loading yet). Live tracking in main.ts already covers every
+     * in-app move; this only fills the gap live tracking can't see.
+     *
+     * An orphan only counts if it still carries synced metadata pointing at
+     * that exact path — a brand-new remote file that happens to share
+     * content with an unrelated local draft must never be mistaken for a
+     * move. And a sha match only counts when it's unambiguous on both
+     * sides — a boilerplate/template file legitimately duplicated at
+     * several paths must not get paired at random.
+     */
+    private async reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void> {
+        const orphansBySha = this.orphanedMoveSourcesBySha(remoteMap);
+        if (orphansBySha.size === 0) return;
+
+        const candidatesBySha = await this.unsyncedMoveDestinationsBySha(remoteMap, orphansBySha);
+
+        for (const [sha, orphanPaths] of orphansBySha) {
+            if (orphanPaths.length !== 1) continue; // ambiguous on the remote side
+            const newPaths = candidatesBySha.get(sha);
+            if (!newPaths || newPaths.length !== 1) continue; // ambiguous or unmatched on the local side
+            const oldPath = orphanPaths[0] as string;
+            const newPath = newPaths[0] as string;
+            await this.plugin.sync.trackRename(newPath, oldPath);
+            this.fileStatuses.delete(oldPath);
+            await this.refreshFileStatus(newPath, remoteMap.get(newPath));
+        }
+    }
+
+    /** Every 'remote-only' row that still carries synced metadata at that exact path, grouped by its remote blob sha. */
+    private orphanedMoveSourcesBySha(remoteMap: Map<string, GitTreeEntry>): Map<string, string[]> {
+        const metadata = this.plugin.settings.syncMetadata ?? {};
+        const orphansBySha = new Map<string, string[]>();
+        for (const [path, status] of this.fileStatuses) {
+            if (status.status !== 'remote-only') continue;
+            const meta = metadata[path];
+            if (!meta || meta.lastKnownPath !== path || meta.renamedFrom) continue;
+            const entry = remoteMap.get(path);
+            if (!entry || entry.symlink || !entry.sha) continue;
+            const list = orphansBySha.get(entry.sha) ?? [];
+            list.push(path);
+            orphansBySha.set(entry.sha, list);
+        }
+        return orphansBySha;
+    }
+
+    /** Every 'unsynced' row with no remote entry of its own, grouped by its local blob sha — but only shas an orphan actually needs. */
+    private async unsyncedMoveDestinationsBySha(
+        remoteMap: Map<string, GitTreeEntry>,
+        orphansBySha: Map<string, string[]>
+    ): Promise<Map<string, string[]>> {
+        const candidatesBySha = new Map<string, string[]>();
+        for (const [path, status] of this.fileStatuses) {
+            if (status.status !== 'unsynced' || status.localContent === undefined) continue;
+            if (remoteMap.has(path)) continue; // has its own remote entry; not a move destination
+            const sha = await gitBlobSha(status.localContent);
+            if (!orphansBySha.has(sha)) continue;
+            const list = candidatesBySha.get(sha) ?? [];
+            list.push(path);
+            candidatesBySha.set(sha, list);
+        }
+        return candidatesBySha;
     }
 
     private addExtraToStatuses(extra: Array<TFile | string>): void {
