@@ -1,4 +1,4 @@
-import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchMoveItem } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE, BLOB_CREATE_CONCURRENCY } from './git-service-base';
 import { logger } from '../utils/logger';
 
@@ -98,6 +98,46 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
 
         return items.map((item, i) => ({ path: item.path, sha: blobShas[i] }));
+    }
+
+    /**
+     * A real `git mv`: additions get a new blob entry, moves get both a new
+     * blob entry at the new path and a `sha: null` entry removing the old
+     * one, all in the same tree/commit — same building block deleteBatch uses
+     * for its null-sha removals.
+     */
+    async commitBatch(additions: BatchPushItem[], moves: BatchMoveItem[], branch: string, message: string): Promise<BatchPushResult[]> {
+        if (additions.length === 0 && moves.length === 0) return [];
+        const base = this.getGitDataApiBase();
+        const { latestCommitSha, baseTreeSha } = await this.resolveBaseTree(branch);
+
+        const additionBlobShas = await this.mapWithConcurrency(additions, BLOB_CREATE_CONCURRENCY, async item => {
+            const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', {
+                content: this.encodeContent(item.content),
+                encoding: 'base64',
+            });
+            return this.parseJson<{ sha: string }>(blobResp).sha;
+        });
+        const moveBlobShas = await this.mapWithConcurrency(moves, BLOB_CREATE_CONCURRENCY, async item => {
+            const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', {
+                content: this.encodeContent(item.content),
+                encoding: 'base64',
+            });
+            return this.parseJson<{ sha: string }>(blobResp).sha;
+        });
+
+        const treeItems = [
+            ...additions.map((item, i) => ({ path: this.getFullPath(item.path), mode: '100644', type: 'blob' as const, sha: additionBlobShas[i] as string })),
+            ...moves.map((item, i) => ({ path: this.getFullPath(item.newPath), mode: '100644', type: 'blob' as const, sha: moveBlobShas[i] as string })),
+            ...moves.map(item => ({ path: this.getFullPath(item.oldPath), mode: '100644', type: 'blob' as const, sha: null })),
+        ];
+
+        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
+
+        return [
+            ...additions.map((item, i) => ({ path: item.path, sha: additionBlobShas[i] })),
+            ...moves.map((item, i) => ({ path: item.newPath, sha: moveBlobShas[i] })),
+        ];
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {

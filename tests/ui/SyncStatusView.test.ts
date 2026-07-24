@@ -215,6 +215,29 @@ describe('SyncStatusView.identifyExtraFiles folder/remote-record collisions', ()
 
         expect(extra).toEqual(['notes/hidden.md']);
     });
+
+    // The old path of a pending move is represented by the 'moved' row at its
+    // new path, not a separate remote-only row — otherwise every move would
+    // show a stale row whose most prominent button (Pull) undoes the move.
+    it('skips a remote-only row for a path that is the old side of a pending move', async () => {
+        const { plugin, leaf } = makePlugin();
+        plugin.settings.syncMetadata = {
+            'notes/new.md': { lastSyncedSha: 'sha', lastSyncedAt: 0, lastKnownPath: 'notes/new.md', renamedFrom: 'notes/old.md' },
+        };
+        const view = new SyncStatusView(leaf, plugin);
+
+        const remoteMap = new Map<string, GitTreeEntry>([
+            ['notes/old.md', { path: 'notes/old.md', symlink: false, sha: 'sha' }],
+        ]);
+
+        const extra = await (view as unknown as {
+            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>, pendingMoveOldPaths: Set<string>): Promise<unknown[]>
+        }).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set(['notes/old.md']));
+
+        expect(extra).toEqual([]);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.has('notes/old.md')).toBe(false);
+    });
 });
 
 describe('SyncStatusView local-only status', () => {
@@ -257,6 +280,24 @@ describe('SyncStatusView local-only status', () => {
         expect(getFile).toHaveBeenCalledWith('notes/existing.md', 'main');
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         expect(statuses.get('notes/existing.md')?.status).toBe('synced');
+    });
+
+    it('classifies a tracked pending move as "moved" from metadata alone, with no tree/content lookup', async () => {
+        const getFile = vi.fn();
+        const { plugin, leaf } = makePlugin();
+        plugin.settings.syncMetadata = {
+            'notes/new.md': { lastSyncedSha: 'sha', lastSyncedAt: 0, lastKnownPath: 'notes/new.md', renamedFrom: 'notes/old.md' },
+        };
+        (plugin.gitService as unknown as { getFile: typeof getFile }).getFile = getFile;
+        const view = new SyncStatusView(leaf, plugin);
+
+        await (view as unknown as {
+            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
+        }).refreshFileStatus('notes/new.md', { path: 'notes/new.md', symlink: false, sha: 'irrelevant' });
+
+        expect(getFile).not.toHaveBeenCalled();
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.get('notes/new.md')).toMatchObject({ path: 'notes/new.md', status: 'moved', movedFrom: 'notes/old.md' });
     });
 });
 

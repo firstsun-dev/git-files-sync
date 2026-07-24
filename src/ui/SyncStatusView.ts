@@ -252,6 +252,7 @@ export class SyncStatusView extends ItemView {
             modified: all.filter(s => s.status === 'modified').length,
             unsynced: all.filter(s => s.status === 'unsynced').length,
             'remote-only': all.filter(s => s.status === 'remote-only').length,
+            moved: all.filter(s => s.status === 'moved').length,
         };
 
         const tabs: Array<{ value: FilterValue; label: string }> = [
@@ -260,6 +261,9 @@ export class SyncStatusView extends ItemView {
             { value: 'modified',    label: t('syncStatus.tab.modified') },
             { value: 'unsynced',    label: t('syncStatus.tab.unsynced') },
             { value: 'remote-only', label: t('syncStatus.tab.remote-only') },
+            // Shown only when there's at least one moved row — most vaults
+            // never see one, and a permanent empty tab would just be clutter.
+            ...(counts.moved > 0 ? [{ value: 'moved' as const, label: t('syncStatus.tab.moved') }] : []),
         ];
 
         const tabsEl = container.createDiv({ cls: 'ssv-tabs' });
@@ -302,9 +306,12 @@ export class SyncStatusView extends ItemView {
             hasFiles:      this.fileStatuses.size > 0,
             allSelected,
             indeterminate: this.selectedFiles.size > 0 && !allSelected,
-            canPush:   selected.filter(s => s.status === 'modified' || s.status === 'unsynced').length,
+            canPush:   selected.filter(s => s.status === 'modified' || s.status === 'unsynced' || s.status === 'moved').length,
+            // Moved rows are excluded here too: a bulk Pull on a moved row
+            // would silently undo the move, so it only has a per-row revert
+            // action with its own confirm — see FileListItem's onRevertMove.
             canPull:   selected.filter(s => s.status === 'modified' || s.status === 'remote-only').length,
-            canDelete: selected.length,
+            canDelete: selected.filter(s => s.status !== 'moved').length,
         }, {
             onRefresh:   () => void this.refreshAllStatuses(),
             onSelectAll: (select) => {
@@ -339,7 +346,36 @@ export class SyncStatusView extends ItemView {
             onOpen:   (fs, newLeaf) => this.openFileFromRow(fs, newLeaf),
             canOpen:  (fs) => this.openTargetFor(fs) !== null,
             onOpenDiffPane: (fs) => void this.openDiffPane(fs),
+            onRevertMove: (fs) => void this.revertMove(fs),
         };
+    }
+
+    /**
+     * Undoes a pending move by moving the local file back to where it was
+     * last synced. Reuses the same trackRename mechanism a real vault rename
+     * goes through: moving back to the still-unpushed remote path is exactly
+     * the "rename cancels itself" case, so the pending move disappears.
+     */
+    private async revertMove(fileStatus: FileStatus): Promise<void> {
+        if (!fileStatus.movedFrom) return;
+        const confirmed = await this.showConfirmDialog(
+            t('syncStatus.confirmRevertMove', { from: fileStatus.path, to: fileStatus.movedFrom })
+        );
+        if (!confirmed) return;
+
+        try {
+            const file = fileStatus.file ?? this.app.vault.getFileByPath(fileStatus.path);
+            if (file instanceof TFile) {
+                await this.app.fileManager.renameFile(file, fileStatus.movedFrom);
+            } else {
+                await this.app.vault.adapter.rename(fileStatus.path, fileStatus.movedFrom);
+                await this.plugin.sync.trackRename(fileStatus.movedFrom, fileStatus.path);
+            }
+            new Notice(t('syncStatus.notice.moveReverted', { path: fileStatus.movedFrom }));
+            await this.refreshAllStatuses();
+        } catch (e) {
+            new Notice(t('syncStatus.notice.revertFailed', { message: e instanceof Error ? e.message : String(e) }));
+        }
     }
 
     /**
@@ -504,7 +540,7 @@ export class SyncStatusView extends ItemView {
             for (const hiddenPath of files.hiddenLocalPaths) {
                 this.fileStatuses.set(hiddenPath, { path: hiddenPath, status: 'checking' });
             }
-            const extra = await this.identifyExtraFiles(files.remoteMap, files.localMap, files.allMap);
+            const extra = await this.identifyExtraFiles(files.remoteMap, files.localMap, files.allMap, this.pendingMoveOldPaths());
             this.addExtraToStatuses(extra);
 
             // Re-render info/tabs but keep progress bar (renderView handles this)
@@ -635,10 +671,20 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    private async identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>) {
+    /** Every path a pending move's `renamedFrom` still points at — the remote's copy at each is represented by the moved row at its new path, not a separate remote-only row. */
+    private pendingMoveOldPaths(): Set<string> {
+        const paths = new Set<string>();
+        for (const meta of Object.values(this.plugin.settings.syncMetadata ?? {})) {
+            if (meta.renamedFrom) paths.add(meta.renamedFrom);
+        }
+        return paths;
+    }
+
+    private async identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>, pendingMoveOldPaths: Set<string> = new Set()) {
         const extra: Array<TFile | string> = [];
         for (const [vaultPath] of remoteMap.entries()) {
             if (localFilePaths.has(vaultPath)) continue;
+            if (pendingMoveOldPaths.has(vaultPath)) continue;
 
             let localFile = allLocalFileMap.get(vaultPath);
             if (!localFile) {
@@ -726,6 +772,21 @@ export class SyncStatusView extends ItemView {
      */
     private async refreshFileStatus(fileOrPath: TFile | string, remoteEntry: GitTreeEntry | undefined): Promise<void> {
         try {
+            const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
+            const renamedFrom = this.plugin.settings.syncMetadata?.[path]?.renamedFrom;
+            if (renamedFrom !== undefined) {
+                // A pending move is known from metadata alone — no tree lookup
+                // or content read needed, same as the perf goal for every other
+                // SHA-based classification here.
+                this.fileStatuses.set(path, {
+                    file: typeof fileOrPath === 'string' ? undefined : fileOrPath,
+                    path,
+                    status: 'moved',
+                    movedFrom: renamedFrom,
+                });
+                return;
+            }
+
             if (remoteEntry === undefined) {
                 await this.refreshLocalOnlyStatus(fileOrPath);
             } else if (remoteEntry.sha !== undefined) {
@@ -877,7 +938,7 @@ export class SyncStatusView extends ItemView {
         const targets = Array.from(this.fileStatuses.values()).filter(s => {
             if (filter === 'selected' && !this.selectedFiles.has(s.path)) return false;
             return op === 'push'
-                ? s.status === 'modified' || s.status === 'unsynced'
+                ? s.status === 'modified' || s.status === 'unsynced' || s.status === 'moved'
                 : s.status === 'modified' || s.status === 'remote-only';
         });
 
@@ -1007,7 +1068,10 @@ export class SyncStatusView extends ItemView {
 
     private partitionTargets(targets: FileStatus[]) {
         return {
-            local:  targets.filter(s => s.status !== 'remote-only'),
+            // Moved rows go through neither bucket: bulk delete on a moved row
+            // is ambiguous (delete the new local file? the pending remote
+            // move?) and isn't offered — see canDelete's count above.
+            local:  targets.filter(s => s.status !== 'remote-only' && s.status !== 'moved'),
             remote: targets.filter(s => s.status === 'remote-only')
         };
     }

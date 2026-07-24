@@ -349,6 +349,7 @@
 .ssv-file.status-modified  { border-left-color: var(--text-warning); }
 .ssv-file.status-unsynced  { border-left-color: var(--color-red); }
 .ssv-file.status-remote    { border-left-color: var(--color-blue); }
+.ssv-file.status-moved     { border-left-color: var(--color-purple); }
 .ssv-file.status-checking  { border-left-color: var(--background-modifier-border); }
 
 .ssv-file-row {
@@ -377,6 +378,7 @@
 .ssv-icon-modified { color: var(--text-warning); }
 .ssv-icon-unsynced { color: var(--color-red); }
 .ssv-icon-remote   { color: var(--color-blue); }
+.ssv-icon-moved    { color: var(--color-purple); }
 .ssv-icon-checking { color: var(--text-muted); }
 
 .ssv-file-path {
@@ -417,7 +419,20 @@
 .ssv-badge-modified { color: var(--text-warning); }
 .ssv-badge-unsynced { color: var(--color-red); }
 .ssv-badge-remote   { color: var(--color-blue); }
+.ssv-badge-moved    { color: var(--color-purple); }
 .ssv-badge-checking { color: var(--text-muted); }
+
+/* Old path of a pending move, shown struck-through beneath the new one. */
+.ssv-moved-from {
+    margin-left: 25px;
+    font-family: var(--font-monospace);
+    font-size: 0.72em;
+    color: var(--text-faint);
+    text-decoration: line-through;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 /* ── Per-file action row ────────────────────────────────────────── */
 .ssv-file-actions {

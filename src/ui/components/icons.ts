@@ -15,6 +15,8 @@ export const ICONS = {
     delete:   'trash-2',
     diff:     'file-diff',
     diffOpen: 'chevron-up',
+    moved:    'move',
+    revert:   'undo-2',
     // Search filter
     search:   'search',
     clear:    'x',

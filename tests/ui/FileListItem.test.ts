@@ -48,6 +48,7 @@ describe('renderFileItem', () => {
             onOpen:   vi.fn().mockReturnValue(true),
             canOpen:  vi.fn().mockReturnValue(true),
             onOpenDiffPane: vi.fn(),
+            onRevertMove: vi.fn(),
         };
     });
 

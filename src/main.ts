@@ -154,6 +154,18 @@ export default class GitLabFilesPush extends Plugin {
 			})
 		);
 
+		// Obsidian already knows the exact old path, so record the rename
+		// directly instead of reconstructing it later from content/tree
+		// comparisons. A file with no sync history yet is just a new file at a
+		// new name and needs no tracking.
+		this.registerEvent(
+			this.app.vault.on('rename', (file, oldPath) => {
+				if (file instanceof TFile) {
+					void this.sync.trackRename(file.path, oldPath);
+				}
+			})
+		);
+
 		await this.checkForUpdateNotice();
 	}
 

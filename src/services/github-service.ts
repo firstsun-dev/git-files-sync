@@ -1,4 +1,4 @@
-import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchMoveItem } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE, BLOB_CREATE_CONCURRENCY } from './git-service-base';
 import { logger } from '../utils/logger';
 import { PushTimingCollector, PushTimingHandler, PushTimingRecord } from './push-timing';
@@ -231,6 +231,30 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         } finally {
             this.emitPushTiming(timing, 'github-graphql', items.length, rawBytes, encodedBytes, changePreparationMs, encodingMs, failure);
         }
+    }
+
+    /**
+     * A real `git mv`: the new path's content and the old path's removal land
+     * in the same commit, via the same additions/deletions shape deleteBatch
+     * already uses. GitHub's diff view then detects it as a rename on its own
+     * (same blob content, one add + one delete) — no separate "move" concept
+     * needed in the mutation itself.
+     */
+    async commitBatch(additions: BatchPushItem[], moves: BatchMoveItem[], branch: string, message: string): Promise<BatchPushResult[]> {
+        if (additions.length === 0 && moves.length === 0) return [];
+
+        const allAdditions = [
+            ...additions.map(item => ({ path: this.getFullPath(item.path), contents: this.encodeContent(item.content) })),
+            ...moves.map(item => ({ path: this.getFullPath(item.newPath), contents: this.encodeContent(item.content) })),
+        ];
+        const deletions = moves.map(item => ({ path: this.getFullPath(item.oldPath) }));
+
+        await this.commitOnBranch(branch, message, { additions: allAdditions, deletions });
+
+        return [
+            ...additions.map(item => ({ path: item.path })),
+            ...moves.map(item => ({ path: item.newPath })),
+        ];
     }
 
     /**

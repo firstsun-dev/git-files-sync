@@ -494,13 +494,19 @@ describe('SyncManager Batch Operations', () => {
 
             const results = await manager.pushAllFiles([mockFile]);
 
+            // A real move (mockGitService has no commitBatch, so this is the
+            // sequential push-then-delete fallback): the new path is pushed
+            // and the old path is removed, in one logical "move" step.
             expect(results.success).toBe(1);
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
-                newPath, 'content', 'main', `Rename ${oldPath} to ${newPath}`, ''
+                newPath, 'content', 'main', `Move ${oldPath} to ${newPath}`
+            );
+            expect(mockGitService.deleteFile).toHaveBeenCalledWith(
+                oldPath, 'main', `Remove ${oldPath} (moved to ${newPath})`
             );
         });
 
-        it('should send existing sha when rename target already exists remotely (avoids 422)', async () => {
+        it('never silently overwrites when the rename target already exists remotely — surfaces a conflict instead', async () => {
             const oldPath = 'old.md';
             const newPath = 'new.md';
             const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
@@ -511,23 +517,20 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockApp.vault.getFileByPath).mockImplementation(p => p === oldPath ? null : mockFile);
             vi.mocked(mockApp.vault.read).mockResolvedValue('content');
             vi.mocked(mockApp.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
-            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: newPath, sha: 'new-sha' });
             const oldSha = await gitBlobSha('content');
-            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path: oldPath, symlink: false, sha: oldSha }]);
-            vi.mocked(mockGitService.getFile).mockImplementation(async (path) => {
-                // The old path is now confirmed by the pre-fetched tree; this mock is only used for the new path.
-                if (path === oldPath) return { content: 'content', sha: 'sha' };
-                // A file already exists on the remote at the new path.
-                return { content: 'old remote content', sha: 'remote-existing-sha' };
-            });
-            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path: oldPath, symlink: false }]);
+            // The tree confirms the rename (old path, matching content sha) and
+            // also shows a different file already sitting at the new path.
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: oldPath, symlink: false, sha: oldSha },
+                { path: newPath, symlink: false, sha: 'remote-existing-sha' },
+            ]);
 
             const results = await manager.pushAllFiles([mockFile]);
 
-            expect(results.success).toBe(1);
-            expect(mockGitService.pushFile).toHaveBeenCalledWith(
-                newPath, 'content', 'main', `Rename ${oldPath} to ${newPath}`, 'remote-existing-sha'
-            );
+            expect(results.conflicts).toBe(1);
+            expect(results.success).toBe(0);
+            expect(mockGitService.pushFile).not.toHaveBeenCalled();
+            expect(mockGitService.deleteFile).not.toHaveBeenCalled();
         });
 
         it('confirms a rename from the tree sha alone, without probing the old path', async () => {
@@ -536,8 +539,11 @@ describe('SyncManager Batch Operations', () => {
             const oldPath = 'old.md';
             const newPath = 'new.md';
             const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
+            const contentSha = await gitBlobSha('content');
             mockSettings.syncMetadata = {
-                [oldPath]: { lastSyncedSha: 'sha', lastSyncedAt: 0, lastKnownPath: oldPath }
+                // Matches the tree's current sha at the old path: the remote
+                // hasn't moved on since the last sync, so deleting it is safe.
+                [oldPath]: { lastSyncedSha: contentSha, lastSyncedAt: 0, lastKnownPath: oldPath }
             };
 
             vi.mocked(mockApp.vault.getFileByPath).mockImplementation(p => p === oldPath ? null : mockFile);
@@ -546,14 +552,17 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: newPath, sha: 'new-sha' });
             vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: '' });
             vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
-                { path: oldPath, symlink: false, sha: await gitBlobSha('content') }
+                { path: oldPath, symlink: false, sha: contentSha }
             ]);
 
             const results = await manager.pushAllFiles([mockFile]);
 
             expect(results.success).toBe(1);
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
-                newPath, 'content', 'main', `Rename ${oldPath} to ${newPath}`, ''
+                newPath, 'content', 'main', `Move ${oldPath} to ${newPath}`
+            );
+            expect(mockGitService.deleteFile).toHaveBeenCalledWith(
+                oldPath, 'main', `Remove ${oldPath} (moved to ${newPath})`
             );
             expect(mockGitService.getFile).not.toHaveBeenCalledWith(oldPath, 'main');
         });

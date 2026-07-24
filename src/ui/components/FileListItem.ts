@@ -32,6 +32,8 @@ export interface FileItemCallbacks {
      * can't fit; a pane gives it room. Mobile keeps the inline panel.
      */
     onOpenDiffPane: (fileStatus: FileStatus) => void;
+    /** Undoes a pending move: moves the local file back to fileStatus.movedFrom. */
+    onRevertMove: (fileStatus: FileStatus) => void;
 }
 
 // `icon` is a Lucide icon id (rendered via Obsidian's setIcon) so every status
@@ -42,6 +44,7 @@ export function statusMeta(status: FileStatus['status']) {
         case 'modified':    return { icon: ICONS.modified, label: t('syncStatus.tab.modified'),    iconCls: 'ssv-icon-modified', badgeCls: 'ssv-badge-modified', fileCls: 'status-modified' };
         case 'unsynced':    return { icon: ICONS.push,     label: t('syncStatus.tab.unsynced'),    iconCls: 'ssv-icon-unsynced', badgeCls: 'ssv-badge-unsynced', fileCls: 'status-unsynced' };
         case 'remote-only': return { icon: ICONS.pull,     label: t('syncStatus.tab.remote-only'), iconCls: 'ssv-icon-remote',   badgeCls: 'ssv-badge-remote',   fileCls: 'status-remote' };
+        case 'moved':       return { icon: ICONS.moved,    label: t('syncStatus.tab.moved'),       iconCls: 'ssv-icon-moved',    badgeCls: 'ssv-badge-moved',    fileCls: 'status-moved' };
         default:            return { icon: ICONS.checking, label: t('syncStatus.status.checking'), iconCls: 'ssv-icon-checking', badgeCls: 'ssv-badge-checking', fileCls: 'status-checking' };
     }
 }
@@ -63,6 +66,10 @@ export function renderFileItem(
     setIcon(row.createSpan({ cls: `ssv-file-icon ${iconCls}` }), icon);
     renderFilePath(row, fileStatus, callbacks);
     row.createSpan({ cls: `ssv-status-badge ${badgeCls}`, text: label });
+
+    if (fileStatus.status === 'moved' && fileStatus.movedFrom) {
+        fileEl.createDiv({ cls: 'ssv-moved-from', text: fileStatus.movedFrom });
+    }
 
     if (fileStatus.status !== 'synced' && fileStatus.status !== 'checking') {
         renderFileActions(fileEl, fileStatus, callbacks);
@@ -110,7 +117,7 @@ function renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus, callback
         else renderDiffPaneButton(actions, fileStatus, callbacks);
     }
 
-    if (fileStatus.status === 'modified' || fileStatus.status === 'unsynced') {
+    if (fileStatus.status === 'modified' || fileStatus.status === 'unsynced' || fileStatus.status === 'moved') {
         renderActionBtn(actions, ICONS.push, t('fileListItem.action.push'), t('fileListItem.tooltip.pushToRemote'), () => callbacks.onPush(fileStatus), 'push');
     }
 
@@ -120,6 +127,12 @@ function renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus, callback
 
     if (fileStatus.status === 'unsynced') {
         renderActionBtn(actions, ICONS.delete, t('fileListItem.action.remove'), t('fileListItem.tooltip.deleteLocalFile'), () => callbacks.onDelete(fileStatus), 'danger');
+    }
+
+    // Pull has no meaning on a moved row (it would silently undo the move);
+    // revert is the explicit, confirmed equivalent.
+    if (fileStatus.status === 'moved') {
+        renderActionBtn(actions, ICONS.revert, t('fileListItem.action.revert'), t('fileListItem.tooltip.revertMove'), () => callbacks.onRevertMove(fileStatus), 'danger');
     }
 }
 

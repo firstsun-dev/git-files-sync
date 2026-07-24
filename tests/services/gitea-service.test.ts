@@ -329,6 +329,46 @@ describe('GiteaService', () => {
         });
     });
 
+    describe('commitBatch', () => {
+        it('returns [] and makes no requests when both additions and moves are empty', async () => {
+            const result = await service.commitBatch([], [], 'main', 'nothing');
+            expect(result).toEqual([]);
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('adds a new blob for the moved path and a null-sha entry for the old one, in the same tree/commit', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { commit: { id: 'commit1' } } } as unknown as RequestUrlResponse) // resolve branch
+                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)    // get commit
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-a' } } as unknown as RequestUrlResponse)             // blob for addition
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-move' } } as unknown as RequestUrlResponse)          // blob for move's new content
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)              // create tree
+                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)            // create commit
+                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                           // update ref
+
+            const result = await service.commitBatch(
+                [{ path: 'a.md', content: 'hello' }],
+                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                'main',
+                'Push 1 file(s) and move 1 file(s) from Obsidian'
+            );
+
+            expect(result).toEqual([
+                { path: 'a.md', sha: 'blob-a' },
+                { path: 'new.md', sha: 'blob-move' },
+            ]);
+
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            expect(calls).toHaveLength(7);
+            const treeBody = JSON.parse(calls[4]?.body as string) as { tree: Array<{ path: string; sha: string | null }> };
+            expect(treeBody.tree).toEqual([
+                { path: 'a.md', mode: '100644', type: 'blob', sha: 'blob-a' },
+                { path: 'new.md', mode: '100644', type: 'blob', sha: 'blob-move' },
+                { path: 'old.md', mode: '100644', type: 'blob', sha: null },
+            ]);
+        });
+    });
+
     describe('testConnection', () => {
         sharedTestConnection(() => service);
 
