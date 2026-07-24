@@ -132,6 +132,7 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'syncStatus.confirmDeleteLocal': '刪除本機檔案「{path}」？將依您保存庫的「已刪除的檔案」設定處理。',
 	'syncStatus.notice.deleted': '已刪除 {path}',
 	'syncStatus.notice.deleteFailed': '刪除失敗：{message}',
+	'syncStatus.notice.opStarted': '{verb} {name}…',
 	'syncStatus.confirmRevertMove': '將「{from}」移回「{to}」？這會復原尚未推送的移動。',
 	'syncStatus.notice.moveReverted': '已復原移動，「{path}」已還原。',
 	'syncStatus.notice.revertFailed': '復原移動失敗：{message}',

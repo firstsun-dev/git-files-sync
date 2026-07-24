@@ -130,6 +130,7 @@ const en = {
 	'syncStatus.confirmDeleteLocal': 'Delete local file "{path}"? Handled per your vault\'s "Deleted files" setting.',
 	'syncStatus.notice.deleted': 'Deleted {path}',
 	'syncStatus.notice.deleteFailed': 'Failed to delete: {message}',
+	'syncStatus.notice.opStarted': '{verb} {name}…',
 	'syncStatus.confirmRevertMove': 'Move "{from}" back to "{to}"? This undoes the pending move.',
 	'syncStatus.notice.moveReverted': 'Reverted move; "{path}" is back where it was.',
 	'syncStatus.notice.revertFailed': 'Failed to revert move: {message}',
