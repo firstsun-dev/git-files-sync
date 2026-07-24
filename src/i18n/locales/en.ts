@@ -129,6 +129,7 @@ const en = {
 	'syncStatus.confirmDeleteLocal': 'Delete local file "{path}"? Handled per your vault\'s "Deleted files" setting.',
 	'syncStatus.notice.deleted': 'Deleted {path}',
 	'syncStatus.notice.deleteFailed': 'Failed to delete: {message}',
+	'syncStatus.notice.opStarted': '{verb} {name}…',
 	'syncStatus.notice.opFailed': '{verb} failed: {message}',
 	'syncStatus.notice.alreadyRefreshing': 'Already refreshing…',
 	'syncStatus.notice.refreshed': 'Checked {local} local + {remote} remote files',

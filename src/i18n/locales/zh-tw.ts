@@ -131,6 +131,7 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'syncStatus.confirmDeleteLocal': '刪除本機檔案「{path}」？將依您保存庫的「已刪除的檔案」設定處理。',
 	'syncStatus.notice.deleted': '已刪除 {path}',
 	'syncStatus.notice.deleteFailed': '刪除失敗：{message}',
+	'syncStatus.notice.opStarted': '{verb} {name}…',
 	'syncStatus.notice.opFailed': '{verb}失敗：{message}',
 	'syncStatus.notice.alreadyRefreshing': '正在重新整理中…',
 	'syncStatus.notice.refreshed': '已檢查 {local} 個本機檔案與 {remote} 個遠端檔案',

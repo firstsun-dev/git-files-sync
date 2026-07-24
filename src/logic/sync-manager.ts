@@ -166,14 +166,33 @@ export class SyncManager {
         content: string | ArrayBuffer,
         treeByFullPath?: Map<string, GitTreeEntry>
     ): Promise<string | null> {
-        const localSha = treeByFullPath ? await gitBlobSha(content) : undefined;
-        for (const oldPath of Object.keys(this.settings.syncMetadata)) {
+        const candidates = Object.keys(this.settings.syncMetadata).filter(oldPath => {
             const metadata = this.settings.syncMetadata[oldPath];
-            if (!metadata || oldPath === file.path || metadata.lastKnownPath !== oldPath) continue;
-            if (this.app.vault.getFileByPath(oldPath)) continue;
+            return !!metadata && oldPath !== file.path && metadata.lastKnownPath === oldPath
+                && !this.app.vault.getFileByPath(oldPath);
+        });
+        if (candidates.length === 0) return null;
 
+        // A single-file push (ribbon/command/context-menu/sync-view row) has no
+        // prefetched tree to hand in, unlike batch push. Fetching it once here
+        // (only when there's actually a candidate to check) replaces what used to
+        // be one live getFile() round trip per orphaned syncMetadata entry -- a
+        // silent, sequential delay that grew with however many stale entries had
+        // accumulated (e.g. files deleted outside Obsidian's vault events).
+        let tree = treeByFullPath;
+        if (!tree) {
+            try {
+                const entries = await this.gitService.listFilesDetailed(this.settings.branch, false);
+                tree = new Map(entries.map(e => [e.path, e]));
+            } catch (e) {
+                logger.warn('Failed to fetch remote tree for rename detection; falling back to per-candidate lookups', e);
+            }
+        }
+
+        const localSha = tree ? await gitBlobSha(content) : undefined;
+        for (const oldPath of candidates) {
             const oldRepoPath = this.getNormalizedPath(oldPath);
-            const treeMatch = this.matchRenameFromTree(localSha, oldRepoPath, treeByFullPath);
+            const treeMatch = this.matchRenameFromTree(localSha, oldRepoPath, tree);
             if (treeMatch === true) return oldPath;
             if (treeMatch === false) continue;
 

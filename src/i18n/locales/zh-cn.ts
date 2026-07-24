@@ -131,6 +131,7 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'syncStatus.confirmDeleteLocal': '删除本机文件「{path}」？将依您库的「已删除文件」设置处理。',
 	'syncStatus.notice.deleted': '已删除 {path}',
 	'syncStatus.notice.deleteFailed': '删除失败：{message}',
+	'syncStatus.notice.opStarted': '{verb} {name}…',
 	'syncStatus.notice.opFailed': '{verb}失败：{message}',
 	'syncStatus.notice.alreadyRefreshing': '正在刷新中…',
 	'syncStatus.notice.refreshed': '已检查 {local} 个本机文件与 {remote} 个远程文件',

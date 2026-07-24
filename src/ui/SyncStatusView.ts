@@ -464,6 +464,13 @@ export class SyncStatusView extends ItemView {
     }
 
     private async runSingleFile(fileStatus: FileStatus, op: 'push' | 'pull'): Promise<void> {
+        // Unlike the batch operations below, this had no "in progress" feedback at
+        // all -- only the row's icon flipped to `checking`. pushFile() can do a
+        // few sequential remote requests (conflict check, rename detection) before
+        // its own success/failure Notice fires, so a slow network made a push look
+        // like a no-op until a toast finally appeared.
+        const runVerb = op === 'push' ? t('main.verb.pushing') : t('main.verb.pulling');
+        const prog = new Notice(t('syncStatus.notice.opStarted', { verb: runVerb, name: fileStatus.path }), 0);
         try {
             fileStatus.status = 'checking';
             this.closeDiffPaneFor([fileStatus.path]);
@@ -475,10 +482,12 @@ export class SyncStatusView extends ItemView {
                 await this.plugin.sync.pullFile(fileStatus.file || fileStatus.path);
             }
 
+            prog.hide();
             await new Promise(r => window.setTimeout(r, 500));
             await this.refreshFileStatus(fileStatus.file || fileStatus.path, undefined);
             this.renderView();
         } catch (e) {
+            prog.hide();
             const verb = op === 'push' ? t('main.verb.push') : t('main.verb.pull');
             new Notice(t('syncStatus.notice.opFailed', { verb, message: e instanceof Error ? e.message : String(e) }));
             await this.refreshFileStatus(fileStatus.file || fileStatus.path, undefined);
