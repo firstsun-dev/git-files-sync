@@ -5,7 +5,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { logger } from '../utils/logger';
 import { type FileStatus, type FilterValue } from './types';
 import { renderActionBar } from './components/ActionBar';
-import { renderFileItem, statusMeta, type FileItemCallbacks } from './components/FileListItem';
+import { renderFileItem, renderMoveGroupItem, statusMeta, type FileItemCallbacks, type MoveGroupCallbacks } from './components/FileListItem';
 import { ICONS } from './components/icons';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 import { buildRemoteFileUrl } from '../utils/remote-url';
@@ -29,6 +29,8 @@ export class SyncStatusView extends ItemView {
     private statusFilter: FilterValue = 'all';
     private searchQuery = '';
     private readonly selectedFiles: Set<string> = new Set();
+    /** Group keys (see groupKey()) currently expanded to show their member rows. */
+    private readonly expandedMoveGroups: Set<string> = new Set();
     private lastSyncTime: number = 0;
     private remoteTreeSnapshot?: RemoteTreeSnapshot;
     // Persistent containers created once in onOpen(). renderView() rebuilds
@@ -252,7 +254,9 @@ export class SyncStatusView extends ItemView {
             modified: all.filter(s => s.status === 'modified').length,
             unsynced: all.filter(s => s.status === 'unsynced').length,
             'remote-only': all.filter(s => s.status === 'remote-only').length,
-            moved: all.filter(s => s.status === 'moved').length,
+            // Rows, not files: a collapsed 40-file folder move counts as 1, same
+            // as every other tab counting what's actually on screen.
+            moved: this.movedRowCount(all),
         };
 
         const tabs: Array<{ value: FilterValue; label: string }> = [
@@ -290,6 +294,16 @@ export class SyncStatusView extends ItemView {
                 this.renderView();
             });
         }
+    }
+
+    /** The 'moved' tab count: rows, not files — a collapsed folder-move group is 1 row. */
+    private movedRowCount(statuses: FileStatus[]): number {
+        const groups = this.collapsibleMoveGroups(statuses);
+        const groupedPaths = new Set<string>();
+        for (const group of groups.values()) for (const m of group.members) groupedPaths.add(m.path);
+
+        const ungroupedMoved = statuses.filter(s => s.status === 'moved' && !groupedPaths.has(s.path)).length;
+        return ungroupedMoved + groups.size;
     }
 
     // ── Action bar ─────────────────────────────────────────────────
@@ -473,10 +487,169 @@ export class SyncStatusView extends ItemView {
             return;
         }
 
+        const groups = this.collapsibleMoveGroups(statuses);
+        const groupedPaths = new Set<string>();
+        for (const group of groups.values()) for (const m of group.members) groupedPaths.add(m.path);
+
         const cb = this.fileItemCallbacks();
+        const renderedGroups = new Set<string>();
         for (const fs of statuses) {
-            renderFileItem(container, fs, this.selectedFiles.has(fs.path), cb);
+            if (groupedPaths.has(fs.path)) {
+                this.renderGroupedRowOnce(container, fs, groups, renderedGroups);
+            } else {
+                renderFileItem(container, fs, this.selectedFiles.has(fs.path), cb);
+            }
         }
+    }
+
+    /** Renders a collapsed folder-move row the first time one of its members is reached, then skips its later members. */
+    private renderGroupedRowOnce(
+        container: HTMLElement,
+        fs: FileStatus,
+        groups: Map<string, { oldPrefix: string; newPrefix: string; members: FileStatus[] }>,
+        renderedGroups: Set<string>
+    ): void {
+        const key = this.groupKey(fs);
+        if (key === null || renderedGroups.has(key)) return;
+        renderedGroups.add(key);
+
+        const group = groups.get(key);
+        if (!group) return;
+        renderMoveGroupItem(
+            container, key, group.oldPrefix, group.newPrefix, group.members,
+            group.members.every(m => this.selectedFiles.has(m.path)),
+            this.expandedMoveGroups.has(key),
+            this.moveGroupCallbacks()
+        );
+    }
+
+    // ── Folder-move collapsing (#67) ────────────────────────────
+
+    /**
+     * The (oldPrefix, newPrefix) pair a moved file belongs to, derived by
+     * matching path segments from the end: everything that still matches
+     * between the old and new path is the unchanged relative suffix, and
+     * whatever differs before that is the folder that moved. This generalizes
+     * to any nesting depth without needing to know the folder move's actual
+     * boundary up front — a file whose own name also changed (not just its
+     * folder) simply gets a prefix pair unique to itself, so it naturally
+     * never groups with anything else. JSON-encoded so the pair round-trips
+     * exactly through a Map key regardless of what characters the paths
+     * themselves contain.
+     */
+    private groupKey(fs: FileStatus): string | null {
+        const prefixes = this.groupPrefixes(fs);
+        return prefixes && JSON.stringify(prefixes);
+    }
+
+    private groupPrefixes(fs: FileStatus): { oldPrefix: string; newPrefix: string } | null {
+        if (!fs.movedFrom) return null;
+        const oldSegs = fs.movedFrom.split('/');
+        const newSegs = fs.path.split('/');
+        let i = oldSegs.length - 1;
+        let j = newSegs.length - 1;
+        while (i >= 1 && j >= 1 && oldSegs[i] === newSegs[j]) { i--; j--; }
+        return {
+            oldPrefix: oldSegs.slice(0, i + 1).join('/'),
+            newPrefix: newSegs.slice(0, j + 1).join('/'),
+        };
+    }
+
+    /**
+     * True when some currently-tracked file still lives under `oldPrefix`
+     * without having moved — i.e. only part of that folder's contents moved.
+     * Partial moves are exactly where the user needs the per-file detail, so
+     * a group failing this check is left as individual rows instead of being
+     * collapsed.
+     */
+    private isPartialMove(oldPrefix: string): boolean {
+        const prefix = `${oldPrefix}/`;
+        for (const fs of this.fileStatuses.values()) {
+            if (fs.status === 'moved') continue;
+            if (fs.path === oldPrefix || fs.path.startsWith(prefix)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Groups of 'moved' rows worth collapsing into a single folder row: more
+     * than one file sharing a (oldPrefix, newPrefix) pair, with nothing left
+     * behind under the old prefix. A group of one is just a plain moved row —
+     * collapsing it would add an expand affordance for nothing.
+     */
+    private collapsibleMoveGroups(statuses: FileStatus[]): Map<string, { oldPrefix: string; newPrefix: string; members: FileStatus[] }> {
+        const byKey = new Map<string, { oldPrefix: string; newPrefix: string; members: FileStatus[] }>();
+        for (const fs of statuses) {
+            if (fs.status !== 'moved') continue;
+            const prefixes = this.groupPrefixes(fs);
+            if (!prefixes) continue;
+            const key = JSON.stringify(prefixes);
+            const existing = byKey.get(key);
+            if (existing) existing.members.push(fs);
+            else byKey.set(key, { ...prefixes, members: [fs] });
+        }
+
+        const collapsible = new Map<string, { oldPrefix: string; newPrefix: string; members: FileStatus[] }>();
+        for (const [key, group] of byKey) {
+            if (group.members.length < 2) continue;
+            if (this.isPartialMove(group.oldPrefix)) continue;
+            collapsible.set(key, group);
+        }
+        return collapsible;
+    }
+
+    private moveGroupCallbacks(): MoveGroupCallbacks {
+        return {
+            onSelect: (members, selected) => {
+                for (const m of members) {
+                    if (selected) this.selectedFiles.add(m.path);
+                    else this.selectedFiles.delete(m.path);
+                }
+                this.renderView();
+            },
+            onPush: (members) => void this.pushMoveGroup(members),
+            onRevertMove: (members) => void this.revertMoveGroup(members),
+            onToggleExpand: (key) => {
+                if (this.expandedMoveGroups.has(key)) this.expandedMoveGroups.delete(key);
+                else this.expandedMoveGroups.add(key);
+                this.renderView();
+            },
+        };
+    }
+
+    /** Pushes every member of a collapsed folder-move row through the batch flow, so the whole group lands in one commit. */
+    private async pushMoveGroup(members: FileStatus[]): Promise<void> {
+        const files = members.map(m => m.file || m.path);
+        try {
+            const results = await this.plugin.sync.pushAllFiles(files);
+            this.applyOptimisticSyncedStatus(results.syncedPaths);
+            this.renderView();
+        } catch (e) {
+            new Notice(t('syncStatus.notice.opFailed', { verb: t('main.verb.push'), message: e instanceof Error ? e.message : String(e) }));
+        }
+    }
+
+    /** Reverts every member of a collapsed folder-move row — moves each local file back to where it was. */
+    private async revertMoveGroup(members: FileStatus[]): Promise<void> {
+        const confirmed = await this.showConfirmDialog(t('syncStatus.confirmRevertMoveGroup', { count: members.length }));
+        if (!confirmed) return;
+
+        for (const m of members) {
+            if (!m.movedFrom) continue;
+            try {
+                const file = m.file ?? this.app.vault.getFileByPath(m.path);
+                if (file instanceof TFile) {
+                    await this.app.fileManager.renameFile(file, m.movedFrom);
+                } else {
+                    await this.app.vault.adapter.rename(m.path, m.movedFrom);
+                    await this.plugin.sync.trackRename(m.movedFrom, m.path);
+                }
+            } catch (e) {
+                logger.warn(`Failed to revert move for ${m.path}`, e);
+            }
+        }
+        new Notice(t('syncStatus.notice.moveReverted', { path: `${members.length} file(s)` }));
+        await this.refreshAllStatuses();
     }
 
     // ── Single-file operations ──────────────────────────────────────

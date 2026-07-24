@@ -434,6 +434,24 @@
     white-space: nowrap;
 }
 
+/* ── Collapsed folder-move row ──────────────────────────────────── */
+.ssv-move-group-children {
+    margin-top: 6px;
+    margin-left: 41px; /* aligns under path, same as .ssv-file-actions */
+    border-left: 2px solid var(--background-modifier-border);
+    padding-left: 10px;
+}
+
+.ssv-move-group-child {
+    font-family: var(--font-monospace);
+    font-size: 0.74em;
+    color: var(--text-muted);
+    padding: 2px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ── Per-file action row ────────────────────────────────────────── */
 .ssv-file-actions {
     display: flex;

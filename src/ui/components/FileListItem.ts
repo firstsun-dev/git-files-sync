@@ -190,3 +190,57 @@ function renderActionBtn(actions: HTMLElement, icon: string, label: string, tool
     setTooltip(btn, tooltip);
     btn.addEventListener('click', onClick);
 }
+
+export interface MoveGroupCallbacks {
+    onSelect: (members: FileStatus[], selected: boolean) => void;
+    onPush: (members: FileStatus[]) => void;
+    onRevertMove: (members: FileStatus[]) => void;
+    onToggleExpand: (key: string) => void;
+}
+
+/**
+ * A whole-folder move collapsed to one row: "Archive/Projects/" with the
+ * struck-through old prefix beneath it, same visual language as a single
+ * moved row (FileListItem's .ssv-moved-from) but for a prefix instead of one
+ * path. Expanding lists the members as read-only sub-rows — "move half a
+ * folder" isn't a thing the user means from this row, so children get no
+ * individual checkboxes.
+ */
+export function renderMoveGroupItem(
+    container: HTMLElement,
+    key: string,
+    oldPrefix: string,
+    newPrefix: string,
+    members: FileStatus[],
+    isSelected: boolean,
+    isExpanded: boolean,
+    callbacks: MoveGroupCallbacks
+): void {
+    const fileEl = container.createDiv({ cls: 'ssv-file status-moved ssv-move-group' });
+    const row = fileEl.createDiv({ cls: 'ssv-file-row' });
+
+    const cb = row.createEl('input', { type: 'checkbox', cls: 'ssv-file-checkbox' });
+    cb.checked = isSelected;
+    cb.addEventListener('change', () => callbacks.onSelect(members, cb.checked));
+
+    setIcon(row.createSpan({ cls: 'ssv-file-icon ssv-icon-moved' }), ICONS.moved);
+    row.createSpan({ cls: 'ssv-file-path', text: `${newPrefix}/` });
+    row.createSpan({ cls: 'ssv-status-badge ssv-badge-moved', text: t('fileListItem.movedGroup.badge', { count: members.length }) });
+
+    fileEl.createDiv({ cls: 'ssv-moved-from', text: `${oldPrefix}/` });
+
+    const actions = fileEl.createDiv({ cls: 'ssv-file-actions' });
+    renderActionBtn(actions, ICONS.push, t('fileListItem.action.push'), t('fileListItem.tooltip.pushToRemote'), () => callbacks.onPush(members), 'push');
+
+    const expandLabel = isExpanded ? t('fileListItem.movedGroup.hide') : t('fileListItem.movedGroup.show', { count: members.length });
+    renderActionBtn(actions, isExpanded ? ICONS.diffOpen : ICONS.diff, expandLabel, expandLabel, () => callbacks.onToggleExpand(key), 'diff');
+
+    renderActionBtn(actions, ICONS.revert, t('fileListItem.action.revert'), t('fileListItem.tooltip.revertMove'), () => callbacks.onRevertMove(members), 'danger');
+
+    if (isExpanded) {
+        const childList = fileEl.createDiv({ cls: 'ssv-move-group-children' });
+        for (const member of members) {
+            childList.createDiv({ cls: 'ssv-move-group-child', text: member.path });
+        }
+    }
+}
