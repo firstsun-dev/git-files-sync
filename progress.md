@@ -14,25 +14,28 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 **Last Updated:** 2026-07-24
 **Session ID:** current
-**Active Feature:** None — feat-023 (issue #63, sync plan preview) is committed on `claude/sync-plan-preview-63`, branched off `prepare-1.5.0`, not yet pushed/PR'd.
+**Active Feature:** None — feat-023 (issue #63, sync plan preview) merged to `prepare-1.5.0` via PR #78. A follow-up fix for out-of-band move detection is committed locally on `local-prepare-1.5.0`, about to be pushed.
 
 ## Status
 
 ### What's Done
 
 - [x] feat-001..020, plus the perf/push-error follow-ups and PR #71 — see [archive/2026-07.md](./archive/2026-07.md).
-- [x] feat-021 (issue [#66](https://github.com/firstsun-dev/git-files-sync/issues/66)): renames commit as a real move (add + delete, one commit) instead of leaving a duplicate on the remote. Commit `aeb1ad0`.
-- [x] feat-022 (issue [#67](https://github.com/firstsun-dev/git-files-sync/issues/67)): a fully-moved folder collapses into one sync-panel row instead of one per file. Commit `1ba1293`.
-- Evidence for both: `npx eslint .` → 0 errors; `npm run build` → clean (incl. Obsidian 1.11.0 compat typecheck); `npx vitest run` → 430/430 passed.
+- [x] feat-021 (issue [#66](https://github.com/firstsun-dev/git-files-sync/issues/66)) and feat-022 (issue [#67](https://github.com/firstsun-dev/git-files-sync/issues/67)) — merged to `prepare-1.5.0`.
+- [x] `fix(sync): track a moved folder's files, not just moved files` — `ee217b1`, merged to `prepare-1.5.0`. Obsidian fires one `rename` event for a moved *folder* (not one per file); the handler only matched `TFile`, so dragging a whole folder tracked nothing.
+- [x] **New this session** — user reported the folder-move status still didn't show up after rebuilding with `ee217b1` and reinstalling into their vault. Root cause is a level deeper: the sync panel's status refresh only recognizes a move via the live-tracked `renamedFrom` metadata field set by the vault's `rename` event handler — it has no fallback for a move that happens while the plugin isn't observing that event (Obsidian closed, moved via OS/another device, or the move happened before the plugin finished loading). Such a move showed as a `remote-only` ghost (old path) plus an `unsynced` new file (new path), never `moved`.
+  - Reproduced first with a failing test (`SyncStatusView move detection without a live rename event`), confirmed it failed only on the intended assertion, all 434 other tests still green.
+  - Fix: `SyncStatusView.reconcileOutOfBandMoves()`, run once after `performStatusCheck` in `refreshAllStatuses`. Pairs a `remote-only` row that still carries synced metadata at that exact path with an `unsynced` row (no remote entry of its own) sharing the same git blob sha — no extra network calls, reuses the tree sha and local content already fetched for classification. Only pairs 1:1 unambiguous matches (a duplicated boilerplate file at multiple paths is left alone); confirmed matches call the existing `SyncManager.trackRename` so the result is indistinguishable from a live-tracked move (same push/revert/folder-grouping behavior).
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean (incl. Obsidian 1.11.0 compat typecheck); `npx vitest run` → 435/435 passed.
 
 ### What's In Progress
 
-- Nothing actively in progress.
+- Above fix is committed locally, rebased onto `prepare-1.5.0` (which now also has feat-023/PR #78), about to be pushed.
 
 ### What's Next
 
-1. Push `claude/rename-as-move-66-67` and open a PR against `main`.
-2. Manual verification of feat-021/022 inside the actual Obsidian plugin UI — evidence so far is lint/build/unit tests only. Worth checking specifically: renaming a synced note (single commit, old path gone from remote), dragging a multi-file folder (collapsed row, single commit on push), and the Revert action on both a single moved row and a collapsed group.
+1. Push the out-of-band move detection fix to `prepare-1.5.0`.
+2. Manual verification of the folder-move fixes inside the actual Obsidian plugin UI is still outstanding for feat-021/022 and both rounds of the folder-move bug fix.
 3. feat-004: SonarQube findings review (issue #45) — not started.
 4. feat-010: Bitbucket support (issue #37) — not started, depends on feat-009 (done).
 5. Re-sync against `gh issue list --repo firstsun-dev/git-files-sync --state open`.

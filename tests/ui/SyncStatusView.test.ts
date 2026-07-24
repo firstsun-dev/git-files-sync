@@ -22,6 +22,7 @@ function makePlugin(overrides: {
     deleteBatch?: ReturnType<typeof vi.fn>;
     adapterExists?: ReturnType<typeof vi.fn>;
     adapterStat?: ReturnType<typeof vi.fn>;
+    adapterRead?: ReturnType<typeof vi.fn>;
     getAbstractFileByPath?: ReturnType<typeof vi.fn>;
 } = {}): { plugin: GitLabFilesPush; leaf: WorkspaceLeaf; deleteFile: ReturnType<typeof vi.fn> } {
     const vaultFolder = overrides.vaultFolder ?? '';
@@ -33,14 +34,31 @@ function makePlugin(overrides: {
             adapter: {
                 exists: overrides.adapterExists ?? vi.fn().mockResolvedValue(false),
                 stat: overrides.adapterStat ?? vi.fn().mockResolvedValue(null),
+                read: overrides.adapterRead ?? vi.fn().mockResolvedValue(''),
             },
             getAbstractFileByPath: overrides.getAbstractFileByPath ?? vi.fn().mockReturnValue(null),
         },
     };
 
+    const settings: { branch: string; vaultFolder: string; syncMetadata?: Record<string, { lastSyncedSha: string; lastSyncedAt: number; lastKnownPath: string; renamedFrom?: string }> } = { branch: 'main', vaultFolder };
     const plugin = {
-        settings: { branch: 'main', vaultFolder },
+        settings,
         gitService: { deleteFile, deleteBatch: overrides.deleteBatch },
+        sync: {
+            // Mirrors SyncManager.trackRename closely enough for these tests:
+            // moves the metadata entry to the new path and records renamedFrom.
+            async trackRename(newPath: string, oldPath: string): Promise<void> {
+                const meta = settings.syncMetadata?.[oldPath];
+                if (!meta) return;
+                delete settings.syncMetadata![oldPath];
+                const remotePath = meta.renamedFrom ?? oldPath;
+                settings.syncMetadata![newPath] = {
+                    ...meta,
+                    lastKnownPath: newPath,
+                    ...(newPath === remotePath ? {} : { renamedFrom: remotePath }),
+                };
+            },
+        },
         getNormalizedPath(path: string): string {
             if (!vaultFolder) return path;
             const prefix = `${vaultFolder}/`;
@@ -372,6 +390,59 @@ describe('SyncStatusView local-only status', () => {
         expect(getFile).not.toHaveBeenCalled();
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         expect(statuses.get('notes/new.md')).toMatchObject({ path: 'notes/new.md', status: 'moved', movedFrom: 'notes/old.md' });
+    });
+});
+
+// A move that happens while the plugin isn't observing the vault's live
+// 'rename' event (Obsidian was closed, the move came from another device/OS
+// tool, or the plugin hadn't loaded yet) leaves no `renamedFrom` in metadata.
+// The status refresh path has no fallback for this: identifyExtraFiles only
+// treats a remote path as the old side of a move via pendingMoveOldPaths,
+// which is built purely from live-tracked `renamedFrom` entries — never from
+// comparing content. So the old path is misclassified 'remote-only' and the
+// new path 'unsynced', instead of both being recognized as a 'moved' pair.
+describe('SyncStatusView move detection without a live rename event', () => {
+    beforeAll(() => { setupObsidianDOM(); });
+
+    it('still classifies an out-of-band folder move as moved, not remote-only + unsynced', async () => {
+        const { gitBlobSha } = await import('../../src/utils/git-blob-sha');
+        const content = 'same content, moved without the plugin watching';
+        const sha = await gitBlobSha(content);
+
+        const adapterRead = vi.fn().mockResolvedValue(content);
+        const { plugin, leaf } = makePlugin({ adapterRead });
+        // Sync metadata still points at the old path — no renamedFrom, because
+        // the vault 'rename' event never fired for this move.
+        plugin.settings.syncMetadata = {
+            'Notes/Projects/a.md': { lastSyncedSha: sha, lastSyncedAt: 0, lastKnownPath: 'Notes/Projects/a.md' },
+        };
+        const view = new SyncStatusView(leaf, plugin);
+
+        const remoteMap = new Map<string, GitTreeEntry>([
+            ['Notes/Projects/a.md', { path: 'Notes/Projects/a.md', symlink: false, sha }],
+        ]);
+
+        // No pendingMoveOldPaths, since none was ever live-tracked.
+        const extra = await (view as unknown as {
+            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>, pendingMoveOldPaths: Set<string>): Promise<unknown[]>
+        }).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set());
+
+        // The file now lives at Archive/Projects/a.md locally, with no remote entry yet.
+        await (view as unknown as {
+            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
+        }).refreshFileStatus('Archive/Projects/a.md', undefined);
+
+        await (view as unknown as {
+            reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void>
+        }).reconcileOutOfBandMoves(remoteMap);
+
+        expect(extra).toEqual([]);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.get('Archive/Projects/a.md')).toMatchObject({
+            status: 'moved',
+            movedFrom: 'Notes/Projects/a.md',
+        });
+        expect(statuses.has('Notes/Projects/a.md')).toBe(false);
     });
 });
 
