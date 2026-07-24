@@ -1,14 +1,24 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSyncManagerMocks, makeBuf, SyncManagerMocks } from './sync-manager-test-helpers';
+import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
 
 vi.mock('obsidian');
+// Every push/pull now shows a plan for review before applying; auto-confirm
+// it here since these tests exercise binary content handling, not the modal.
+vi.mock('../../src/ui/SyncPlanModal');
 
 describe('SyncManager – binary file handling', () => {
     let mocks: SyncManagerMocks;
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(SyncPlanModal).mockImplementation(function (
+            this: SyncPlanModal, _app: unknown, _plan: unknown, _direction: SyncPlanDirection, onConfirm: () => void
+        ) {
+            onConfirm();
+            return this;
+        } as never);
         mocks = createSyncManagerMocks();
     });
 

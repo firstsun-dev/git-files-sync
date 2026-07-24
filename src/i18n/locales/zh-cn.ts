@@ -150,9 +150,9 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'syncStatus.notice.opCompleted': '{verb}完成，刷新中…',
 	'syncStatus.notice.nothingToDelete': '没有可删除的项目',
 	'syncStatus.notice.noFilesSelected': '尚未选取任何文件',
-	'syncStatus.confirmDelete.localAndRemote': '要删除 {local} 个本机文件（依库的回收站设置处理）与 {remote} 个远程文件（无法恢复）吗？',
 	'syncStatus.confirmDelete.localOnly': '要删除 {local} 个本机文件吗？将依您库的「已删除文件」设置处理。',
 	'syncStatus.confirmDelete.remoteOnly': '要删除 {remote} 个远程文件吗？此操作无法恢复。',
+	'syncStatus.confirmDelete.alsoLocal': '同时会删除 {local} 个本地文件，处理方式取决于你的库“已删除的文件”设置。',
 	'syncStatus.notice.deleteResult.partial': '已删除 {succeeded}/{total} 个，{failed} 个失败。',
 	'syncStatus.notice.deleteResult.partialWithMessage': '已删除 {succeeded}/{total} 个，{failed} 个失败：{message}',
 	'syncStatus.notice.deleteResult.success': '已删除 {total} 个文件',
@@ -215,6 +215,18 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'syncConflictModal.keepRemote': '保留远程',
 	'syncConflictModal.keepRemote.tooltip': '以远程内容覆盖本机',
 	'syncConflictModal.cancel': '取消',
+
+	'syncPlanModal.title.push': '查看推送计划',
+	'syncPlanModal.title.pull': '查看拉取计划',
+	'syncPlanModal.title.delete': '查看删除计划',
+	'syncPlanModal.section.additions': '新增',
+	'syncPlanModal.section.modifications': '修改',
+	'syncPlanModal.section.moves': '移动',
+	'syncPlanModal.section.deletions': '删除',
+	'syncPlanModal.deletionWarning': '此操作将永久删除远程上的 {count} 个文件，且无法撤销。',
+	'syncPlanModal.movedFrom': '从 {path} 移动而来',
+	'syncPlanModal.confirm': '应用',
+	'syncPlanModal.cancel': '取消',
 };
 
 export default zhCn;
