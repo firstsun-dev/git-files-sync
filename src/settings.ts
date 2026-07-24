@@ -18,6 +18,13 @@ export interface SyncMetadata {
 	lastSyncedSha: string;
 	lastSyncedAt: number;
 	lastKnownPath?: string;
+	/**
+	 * Set when the vault's 'rename' event moved this entry from another path
+	 * and the move hasn't been pushed yet. Always the path still live on the
+	 * remote — a chain of renames (A→B→C) collapses to this pointing at A, not
+	 * the most recent hop, so pushing deletes the right remote path.
+	 */
+	renamedFrom?: string;
 }
 
 export type GitServiceType = 'gitlab' | 'github' | 'gitea';

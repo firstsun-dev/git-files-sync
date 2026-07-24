@@ -126,6 +126,14 @@
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     flex-shrink: 0;
+    /* When labels are still shown (container wide enough that the
+       icon-only fallback below hasn't kicked in) six-plus tabs can still
+       overflow before wrapping/hiding text. The scrollbar itself is
+       hidden for a cleaner look, so without this the cut-off edge reads
+       as "broken" rather than "scroll for more" — a soft fade signals
+       there's more to scroll to. */
+    -webkit-mask-image: linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent);
+    mask-image: linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent);
 }
 
 .ssv-tabs::-webkit-scrollbar { display: none; }
@@ -176,6 +184,11 @@
     gap: 8px;
     flex-wrap: wrap;
     overflow-x: visible;
+    /* Mobile wraps to a second row instead of scrolling, so the edge fade
+       (meant for the horizontal-scroll case) would just clip the wrapped
+       rows for no reason — turn it off. */
+    -webkit-mask-image: none;
+    mask-image: none;
 }
 
 .is-mobile .ssv-tab {
@@ -349,6 +362,7 @@
 .ssv-file.status-modified  { border-left-color: var(--text-warning); }
 .ssv-file.status-unsynced  { border-left-color: var(--color-red); }
 .ssv-file.status-remote    { border-left-color: var(--color-blue); }
+.ssv-file.status-moved     { border-left-color: var(--color-purple); }
 .ssv-file.status-checking  { border-left-color: var(--background-modifier-border); }
 
 .ssv-file-row {
@@ -377,6 +391,7 @@
 .ssv-icon-modified { color: var(--text-warning); }
 .ssv-icon-unsynced { color: var(--color-red); }
 .ssv-icon-remote   { color: var(--color-blue); }
+.ssv-icon-moved    { color: var(--color-purple); }
 .ssv-icon-checking { color: var(--text-muted); }
 
 .ssv-file-path {
@@ -417,7 +432,38 @@
 .ssv-badge-modified { color: var(--text-warning); }
 .ssv-badge-unsynced { color: var(--color-red); }
 .ssv-badge-remote   { color: var(--color-blue); }
+.ssv-badge-moved    { color: var(--color-purple); }
 .ssv-badge-checking { color: var(--text-muted); }
+
+/* Old path of a pending move, shown struck-through beneath the new one. */
+.ssv-moved-from {
+    margin-left: 25px;
+    font-family: var(--font-monospace);
+    font-size: 0.72em;
+    color: var(--text-faint);
+    text-decoration: line-through;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Collapsed folder-move row ──────────────────────────────────── */
+.ssv-move-group-children {
+    margin-top: 6px;
+    margin-left: 41px; /* aligns under path, same as .ssv-file-actions */
+    border-left: 2px solid var(--background-modifier-border);
+    padding-left: 10px;
+}
+
+.ssv-move-group-child {
+    font-family: var(--font-monospace);
+    font-size: 0.74em;
+    color: var(--text-muted);
+    padding: 2px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 /* ── Per-file action row ────────────────────────────────────────── */
 .ssv-file-actions {

@@ -161,6 +161,22 @@
       "dependencies": [],
       "status": "done",
       "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 395/395 passed. Not yet committed."
+    },
+    {
+      "id": "feat-021",
+      "name": "feat(sync): commit renames as a real move with a dedicated moved status (issue #66)",
+      "description": "Renaming a file previously pushed a copy to the new path and left the old file on the remote forever. main.ts now tracks vault 'rename' events live via new SyncManager.trackRename, moving syncMetadata to the new path and recording renamedFrom (a chain of renames collapses to one pending move; renaming back to the still-synced path cancels it). handleRename performs a real move - new path added, old path removed, one commit - via new optional GitServiceInterface.commitBatch (GitHub: createCommitOnBranch additions+deletions; GitLab: Commits API action:'move'; Gitea: tree with a fresh blob + null-sha removal), falling back to sequential push-then-delete otherwise. Two safety checks: a target that already exists on the remote is never silently overwritten, and an old path whose remote content moved on since the last sync is never silently deleted. Moves fold into the push-all batch flow (toMove alongside toPush) for one commit per run. UI: new FileStatus 'moved' + movedFrom, classified from syncMetadata alone (no network call), rendered as one row (struck-through old path, Push + Revert actions, excluded from bulk Pull/Delete), with a conditional 'moved' filter tab.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "Commit aeb1ad0 - npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 425/425 passed."
+    },
+    {
+      "id": "feat-022",
+      "name": "feat(ui): collapse folder moves into a single row (issue #67)",
+      "description": "Depends on feat-021. Moving a folder previously produced one 'moved' row per file. SyncStatusView now groups 'moved' rows by an (oldPrefix, newPrefix) pair found by matching path segments from the end (the topmost divergence point is the folder that moved), collapsing to one row only when every tracked file under the old prefix actually moved (isPartialMove) and the group has more than one member. New renderMoveGroupItem (FileListItem.ts) shows the new/old prefix, a Push button that routes every member through the existing pushAllFiles batch flow (one commit for the whole group), an expand toggle listing members as read-only sub-rows, and a Revert action. The 'moved' tab count is rows, not files.",
+      "dependencies": ["feat-021"],
+      "status": "done",
+      "evidence": "Commit 1ba1293 - npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 430/430 passed."
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."

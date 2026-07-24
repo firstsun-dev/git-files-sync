@@ -43,6 +43,7 @@ const mockGitLab = {
     pushFile: vi.fn(),
     getFile: vi.fn(),
     listFilesDetailed: vi.fn().mockResolvedValue([]),
+    deleteFile: vi.fn(),
 } as unknown as GitLabService;
 
 const mockSettings: GitLabFilesPushSettings = {
@@ -326,18 +327,23 @@ describe('SyncManager', () => {
 
             await manager.pushFile(mockFile);
 
+            // A real move: the new path is added and the old path is removed
+            // (mockGitLab has no commitBatch, so this is the sequential
+            // push-then-delete fallback).
             expect(mockGitLab.pushFile).toHaveBeenCalledWith(
                 newPath,
                 'content',
                 'main',
-                `Rename ${oldPath} to ${newPath}`,
-                ''
+                `Move ${oldPath} to ${newPath}`
+            );
+            expect(mockGitLab.deleteFile).toHaveBeenCalledWith(
+                oldPath, 'main', `Remove ${oldPath} (moved to ${newPath})`
             );
             expect(mockSettings.syncMetadata[oldPath]).toBeUndefined();
             expect(mockSettings.syncMetadata[newPath]?.lastSyncedSha).toBe('new-sha');
         });
 
-        it('should send the existing sha when the renamed-to path already exists remotely (avoids 422 "file already exists")', async () => {
+        it('never silently overwrites when the renamed-to path already exists remotely — leaves the pending move for manual resolution', async () => {
             const oldPath = 'old.md';
             const newPath = 'new.md';
             const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
@@ -360,22 +366,17 @@ describe('SyncManager', () => {
             vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
                 // Remote still has the old path with matching content: confirms a real rename.
                 if (path === oldPath) return { content: 'content', sha: 'old-sha' };
-                // A file already exists on the remote at the new path (e.g. from a prior push).
+                // A different file already exists on the remote at the new path.
                 return { content: 'old remote content', sha: 'remote-existing-sha' };
             });
-            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
 
             await manager.pushFile(mockFile);
 
-            expect(mockGitLab.pushFile).toHaveBeenCalledWith(
-                newPath,
-                'content',
-                'main',
-                `Rename ${oldPath} to ${newPath}`,
-                'remote-existing-sha'
-            );
-            expect(mockSettings.syncMetadata[oldPath]).toBeUndefined();
-            expect(mockSettings.syncMetadata[newPath]?.lastSyncedSha).toBe('new-sha');
+            // Never a silent overwrite: nothing is pushed or deleted, and the
+            // pending move is left in place so the user can resolve it.
+            expect(mockGitLab.pushFile).not.toHaveBeenCalled();
+            expect(mockGitLab.deleteFile).not.toHaveBeenCalled();
+            expect(mockSettings.syncMetadata[oldPath]?.lastSyncedSha).toBe('old-sha');
         });
 
         it('does not misclassify an unrelated push as a rename just because an orphaned metadata entry exists', async () => {
@@ -456,6 +457,51 @@ describe('SyncManager', () => {
             // pushed. The 5 orphaned candidates must be resolved via a single prefetched
             // tree (listFilesDetailed), not 5 separate live getFile lookups.
             expect(mockGitLab.getFile).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('trackRename', () => {
+        it('does nothing for a file with no sync history — just a new file at a new name', async () => {
+            await manager.trackRename('new.md', 'old.md');
+            expect(mockSettings.syncMetadata['new.md']).toBeUndefined();
+            expect(mockSettings.syncMetadata['old.md']).toBeUndefined();
+        });
+
+        it('moves the metadata entry and records renamedFrom', async () => {
+            mockSettings.syncMetadata['old.md'] = { lastSyncedSha: 'sha1', lastSyncedAt: 111, lastKnownPath: 'old.md' };
+
+            await manager.trackRename('new.md', 'old.md');
+
+            expect(mockSettings.syncMetadata['old.md']).toBeUndefined();
+            expect(mockSettings.syncMetadata['new.md']).toEqual({
+                lastSyncedSha: 'sha1', lastSyncedAt: 111, lastKnownPath: 'new.md', renamedFrom: 'old.md',
+            });
+        });
+
+        it('collapses a chained rename A→B→C to a single pending move A→C', async () => {
+            mockSettings.syncMetadata['a.md'] = { lastSyncedSha: 'sha1', lastSyncedAt: 111, lastKnownPath: 'a.md' };
+
+            await manager.trackRename('b.md', 'a.md');
+            await manager.trackRename('c.md', 'b.md');
+
+            expect(mockSettings.syncMetadata['a.md']).toBeUndefined();
+            expect(mockSettings.syncMetadata['b.md']).toBeUndefined();
+            expect(mockSettings.syncMetadata['c.md']).toEqual({
+                lastSyncedSha: 'sha1', lastSyncedAt: 111, lastKnownPath: 'c.md', renamedFrom: 'a.md',
+            });
+        });
+
+        it('cancels the pending move when renamed back to the still-synced path', async () => {
+            mockSettings.syncMetadata['a.md'] = { lastSyncedSha: 'sha1', lastSyncedAt: 111, lastKnownPath: 'a.md' };
+
+            await manager.trackRename('b.md', 'a.md');
+            await manager.trackRename('a.md', 'b.md');
+
+            expect(mockSettings.syncMetadata['b.md']).toBeUndefined();
+            expect(mockSettings.syncMetadata['a.md']).toEqual({
+                lastSyncedSha: 'sha1', lastSyncedAt: 111, lastKnownPath: 'a.md',
+            });
+            expect(mockSettings.syncMetadata['a.md']?.renamedFrom).toBeUndefined();
         });
     });
 

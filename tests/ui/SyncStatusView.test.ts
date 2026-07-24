@@ -215,6 +215,29 @@ describe('SyncStatusView.identifyExtraFiles folder/remote-record collisions', ()
 
         expect(extra).toEqual(['notes/hidden.md']);
     });
+
+    // The old path of a pending move is represented by the 'moved' row at its
+    // new path, not a separate remote-only row — otherwise every move would
+    // show a stale row whose most prominent button (Pull) undoes the move.
+    it('skips a remote-only row for a path that is the old side of a pending move', async () => {
+        const { plugin, leaf } = makePlugin();
+        plugin.settings.syncMetadata = {
+            'notes/new.md': { lastSyncedSha: 'sha', lastSyncedAt: 0, lastKnownPath: 'notes/new.md', renamedFrom: 'notes/old.md' },
+        };
+        const view = new SyncStatusView(leaf, plugin);
+
+        const remoteMap = new Map<string, GitTreeEntry>([
+            ['notes/old.md', { path: 'notes/old.md', symlink: false, sha: 'sha' }],
+        ]);
+
+        const extra = await (view as unknown as {
+            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>, pendingMoveOldPaths: Set<string>): Promise<unknown[]>
+        }).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set(['notes/old.md']));
+
+        expect(extra).toEqual([]);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.has('notes/old.md')).toBe(false);
+    });
 });
 
 describe('SyncStatusView local-only status', () => {
@@ -257,6 +280,24 @@ describe('SyncStatusView local-only status', () => {
         expect(getFile).toHaveBeenCalledWith('notes/existing.md', 'main');
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         expect(statuses.get('notes/existing.md')?.status).toBe('synced');
+    });
+
+    it('classifies a tracked pending move as "moved" from metadata alone, with no tree/content lookup', async () => {
+        const getFile = vi.fn();
+        const { plugin, leaf } = makePlugin();
+        plugin.settings.syncMetadata = {
+            'notes/new.md': { lastSyncedSha: 'sha', lastSyncedAt: 0, lastKnownPath: 'notes/new.md', renamedFrom: 'notes/old.md' },
+        };
+        (plugin.gitService as unknown as { getFile: typeof getFile }).getFile = getFile;
+        const view = new SyncStatusView(leaf, plugin);
+
+        await (view as unknown as {
+            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
+        }).refreshFileStatus('notes/new.md', { path: 'notes/new.md', symlink: false, sha: 'irrelevant' });
+
+        expect(getFile).not.toHaveBeenCalled();
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.get('notes/new.md')).toMatchObject({ path: 'notes/new.md', status: 'moved', movedFrom: 'notes/old.md' });
     });
 });
 
@@ -393,5 +434,102 @@ describe('SyncStatusView post-push status update', () => {
 
         expect(pullAllFiles).toHaveBeenCalledTimes(1);
         expect(refreshSpy).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('SyncStatusView folder-move collapsing (#67)', () => {
+    beforeAll(() => { setupObsidianDOM(); });
+
+    type CollapsibleGroups = Map<string, { oldPrefix: string; newPrefix: string; members: FileStatus[] }>;
+
+    function movedStatus(path: string, movedFrom: string): FileStatus {
+        return { path, status: 'moved', movedFrom };
+    }
+
+    it('collapses every file of a fully-moved folder into a single group', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = [
+            movedStatus('Archive/Projects/a.md', 'Notes/Projects/a.md'),
+            movedStatus('Archive/Projects/b.md', 'Notes/Projects/b.md'),
+            movedStatus('Archive/Projects/sub/c.md', 'Notes/Projects/sub/c.md'),
+        ];
+
+        const groups = (view as unknown as {
+            collapsibleMoveGroups(statuses: FileStatus[]): CollapsibleGroups
+        }).collapsibleMoveGroups(statuses);
+
+        expect(groups.size).toBe(1);
+        const [group] = [...groups.values()];
+        // The differing segment alone: everything after "Notes"/"Archive"
+        // (including nested "sub/") matches, so that's the common suffix.
+        expect(group).toMatchObject({ oldPrefix: 'Notes', newPrefix: 'Archive' });
+        expect(group?.members).toHaveLength(3);
+    });
+
+    it('does not collapse a partial move — a file left behind under the old prefix keeps the group expanded', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses = new Map([
+            ['Archive/Projects/a.md', movedStatus('Archive/Projects/a.md', 'Notes/Projects/a.md')],
+            ['Archive/Projects/b.md', movedStatus('Archive/Projects/b.md', 'Notes/Projects/b.md')],
+            // Left behind: still at the old prefix, never moved.
+            ['Notes/Projects/c.md', { path: 'Notes/Projects/c.md', status: 'synced' }],
+        ]);
+        const statuses = [...(view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses.values()];
+
+        const groups = (view as unknown as {
+            collapsibleMoveGroups(statuses: FileStatus[]): CollapsibleGroups
+        }).collapsibleMoveGroups(statuses);
+
+        expect(groups.size).toBe(0);
+    });
+
+    it('does not collapse a single moved file — a group of one stays a plain moved row', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = [movedStatus('Archive/a.md', 'Notes/a.md')];
+
+        const groups = (view as unknown as {
+            collapsibleMoveGroups(statuses: FileStatus[]): CollapsibleGroups
+        }).collapsibleMoveGroups(statuses);
+
+        expect(groups.size).toBe(0);
+    });
+
+    it('does not merge a file that was renamed as well as moved into the folder group', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = [
+            movedStatus('Archive/Projects/a.md', 'Notes/Projects/a.md'),
+            movedStatus('Archive/Projects/b.md', 'Notes/Projects/b.md'),
+            // Same folder move, but this file's own name also changed.
+            movedStatus('Archive/Projects/renamed.md', 'Notes/Projects/original.md'),
+        ];
+
+        const groups = (view as unknown as {
+            collapsibleMoveGroups(statuses: FileStatus[]): CollapsibleGroups
+        }).collapsibleMoveGroups(statuses);
+
+        expect(groups.size).toBe(1);
+        const [group] = [...groups.values()];
+        expect(group?.members.map(m => m.path).sort()).toEqual(['Archive/Projects/a.md', 'Archive/Projects/b.md']);
+    });
+
+    it('counts a collapsed group as one row in the moved tab count, not one per file', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = [
+            movedStatus('Archive/Projects/a.md', 'Notes/Projects/a.md'),
+            movedStatus('Archive/Projects/b.md', 'Notes/Projects/b.md'),
+            movedStatus('Elsewhere/solo.md', 'Somewhere/solo.md'),
+        ];
+
+        const count = (view as unknown as {
+            movedRowCount(statuses: FileStatus[]): number
+        }).movedRowCount(statuses);
+
+        // The 2-file folder group is 1 row, plus 1 ungrouped moved row = 2.
+        expect(count).toBe(2);
     });
 });
