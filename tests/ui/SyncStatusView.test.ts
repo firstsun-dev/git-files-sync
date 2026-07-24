@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { SyncStatusView } from '../../src/ui/SyncStatusView';
 import { WorkspaceLeaf, Notice } from 'obsidian';
@@ -5,6 +6,8 @@ import type GitLabFilesPush from '../../src/main';
 import { setupObsidianDOM } from './setup-dom';
 import type { FileStatus } from '../../src/ui/types';
 import type { GitTreeEntry } from '../../src/services/git-service-interface';
+import { SyncPlanModal } from '../../src/ui/SyncPlanModal';
+import { ConfirmModal } from '../../src/ui/ConfirmModal';
 
 // The diff pane is a separate view; none of these fixtures open one, so the
 // stale-pane cleanup just finds nothing.
@@ -170,6 +173,77 @@ describe('SyncStatusView remote deletion', () => {
         expect(deleteFile).toHaveBeenCalledWith('a.md', 'main', expect.any(String));
         expect(deleteFile).toHaveBeenCalledWith('b.md', 'main', expect.any(String));
         expect(errors).toHaveLength(0);
+    });
+
+    // The modal is opened internally by confirmDeletion, so there's no
+    // reference to it up front; wrap `open` to capture `this` (the real
+    // instance, still rendered for real) as it's constructed.
+    function captureNextSyncPlanModal(): { contentEl: HTMLElement } {
+        const captured: { contentEl: HTMLElement } = { contentEl: undefined as unknown as HTMLElement };
+        const original = SyncPlanModal.prototype.open;
+        vi.spyOn(SyncPlanModal.prototype, 'open').mockImplementationOnce(function (this: SyncPlanModal & { contentEl: HTMLElement }) {
+            captured.contentEl = this.contentEl;
+            return original.call(this);
+        });
+        return captured;
+    }
+
+    it('shows the plan-review modal (not a plain confirm) before any remote deletion', async () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const captured = captureNextSyncPlanModal();
+
+        const confirmPromise = (view as unknown as {
+            confirmDeletion(local: FileStatus[], remote: FileStatus[]): Promise<boolean>
+        }).confirmDeletion([], [{ path: 'gone.md', status: 'remote-only' }]);
+
+        const deletionPath = captured.contentEl.querySelector('.sync-plan-section.is-destructive .sync-plan-file-path');
+        expect(deletionPath?.textContent).toBe('gone.md');
+
+        const applyBtn = Array.from(captured.contentEl.querySelectorAll('button')).find(b => b.textContent === 'Apply');
+        applyBtn?.dispatchEvent(new Event('click'));
+
+        expect(await confirmPromise).toBe(true);
+    });
+
+    it('resolves false when the remote-deletion plan is cancelled', async () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const captured = captureNextSyncPlanModal();
+
+        const confirmPromise = (view as unknown as {
+            confirmDeletion(local: FileStatus[], remote: FileStatus[]): Promise<boolean>
+        }).confirmDeletion([], [{ path: 'gone.md', status: 'remote-only' }]);
+
+        const cancelBtn = Array.from(captured.contentEl.querySelectorAll('button')).find(b => b.textContent === 'Cancel');
+        cancelBtn?.dispatchEvent(new Event('click'));
+
+        expect(await confirmPromise).toBe(false);
+    });
+
+    it('uses the plain confirm dialog (no plan) for a local-only deletion', async () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const openSpy = vi.spyOn(SyncPlanModal.prototype, 'open');
+        openSpy.mockClear();
+
+        const originalConfirmOpen = ConfirmModal.prototype.open;
+        let confirmContentEl: HTMLElement | undefined;
+        vi.spyOn(ConfirmModal.prototype, 'open').mockImplementationOnce(function (this: ConfirmModal & { contentEl: HTMLElement }) {
+            confirmContentEl = this.contentEl;
+            return originalConfirmOpen.call(this);
+        });
+
+        const confirmPromise = (view as unknown as {
+            confirmDeletion(local: FileStatus[], remote: FileStatus[]): Promise<boolean>
+        }).confirmDeletion([{ path: 'local.md', status: 'synced' }], []);
+
+        expect(openSpy).not.toHaveBeenCalled();
+
+        const confirmBtn = Array.from(confirmContentEl!.querySelectorAll('button')).find(b => b.textContent === 'Confirm');
+        confirmBtn?.dispatchEvent(new Event('click'));
+
+        expect(await confirmPromise).toBe(true);
     });
 });
 

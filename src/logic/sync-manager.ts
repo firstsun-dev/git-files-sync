@@ -3,6 +3,8 @@ import { GitServiceInterface, GitTreeEntry, GitFile, BatchMoveItem } from '../se
 import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
 import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
+import { SyncPlanModal, SyncPlanDirection } from '../ui/SyncPlanModal';
+import { SyncPlan, SyncPlanEntry, isSyncPlanEmpty } from '../ui/types';
 import { logger } from '../utils/logger';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 import { readLocalSymlinkTarget, createLocalSymlink } from '../utils/symlink';
@@ -10,6 +12,9 @@ import { gitBlobSha } from '../utils/git-blob-sha';
 
 /** Result of syncing one file within a batch push/pull. */
 type BatchOutcome = 'done' | 'unchanged' | 'conflict';
+
+/** Result of classifying one file for a plan preview -- like BatchOutcome, but read-only and distinguishing additions/modifications/moves for display. */
+type PlanClassification = { kind: 'addition' | 'modification' | 'move' | 'unchanged' | 'conflict' | 'skip'; movedFrom?: string };
 
 /** A file classified as needing a push, queued for the grouped batch-commit call. */
 type ToPushEntry = { path: string; name: string; repoPath: string; content: string | ArrayBuffer; existingSha?: string };
@@ -110,6 +115,27 @@ export class SyncManager {
         this.gitService = gitService;
     }
 
+    /** A plan with exactly one entry, for a single-file push/pull's confirm step. */
+    private singleEntryPlan(kind: 'addition' | 'modification', path: string, name: string): SyncPlan {
+        const plan: SyncPlan = { additions: [], modifications: [], deletions: [], moves: [] };
+        const entry: SyncPlanEntry = { path, name };
+        (kind === 'addition' ? plan.additions : plan.modifications).push(entry);
+        return plan;
+    }
+
+    /**
+     * Shows the plan for review and resolves once the user confirms or
+     * cancels. A plan with nothing to apply (e.g. every candidate file was
+     * already in sync or skipped as a conflict) resolves immediately without
+     * showing anything — there is nothing to review.
+     */
+    private confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean> {
+        if (isSyncPlanEmpty(plan)) return Promise.resolve(true);
+        return new Promise(resolve => {
+            new SyncPlanModal(this.app, plan, direction, () => resolve(true), () => resolve(false)).open();
+        });
+    }
+
     /**
      * Returns a confirmed-synced result (with the new blob sha, when known) so
      * an interactive single-file push can mark the file's UI status directly —
@@ -155,6 +181,9 @@ export class SyncManager {
                 this.openPushConflictModal(fileOrPath, { path, name }, content, remote);
                 return undefined;
             }
+
+            const confirmed = await this.confirmPlan(this.singleEntryPlan(remote.sha ? 'modification' : 'addition', path, name), 'push');
+            if (!confirmed) return undefined;
 
             const sha = await this.performPush({ path, name }, content, remote.sha);
             return { sha };
@@ -445,6 +474,9 @@ export class SyncManager {
                 return;
             }
 
+            const confirmed = await this.confirmPlan(this.singleEntryPlan(exists ? 'modification' : 'addition', path, name), 'pull');
+            if (!confirmed) return;
+
             const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
             await this.performPull(fileRep, remote.content, remote.sha);
         } catch (e) {
@@ -524,7 +556,12 @@ export class SyncManager {
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
     ): Promise<PushResults> {
-        return this.processPushBatch(files, onProgress, remoteTree);
+        const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
+        const plan = await this.planPushBatch(files, tree);
+        if (!isSyncPlanEmpty(plan) && !await this.confirmPlan(plan, 'push')) {
+            return { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
+        }
+        return this.processPushBatch(files, onProgress, tree);
     }
 
     async pullAllFiles(
@@ -532,7 +569,166 @@ export class SyncManager {
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
     ): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
-        return this.processPullBatch(files, onProgress, remoteTree);
+        let tree = remoteTree;
+        if (!tree) {
+            try {
+                tree = await this.gitService.listFilesDetailed(this.settings.branch, false);
+            } catch (e) {
+                logger.warn('Failed to fetch remote tree for pull; falling back to per-file fetches', e);
+            }
+        }
+        const plan = await this.planPullBatch(files, tree);
+        if (!isSyncPlanEmpty(plan) && !await this.confirmPlan(plan, 'pull')) {
+            return { success: 0, failed: 0, conflicts: 0, errors: [] };
+        }
+        return this.processPullBatch(files, onProgress, tree);
+    }
+
+    /** Computes what a push-all would do, without writing anything, for the plan-review modal. */
+    async planPushBatch(files: (TFile | string)[], remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
+        const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
+        const treeByFullPath = new Map<string, GitTreeEntry>(tree.map(e => [e.path, e]));
+        const hasOrphans = this.hasOrphanedRenameMetadata();
+
+        const plan: SyncPlan = { additions: [], modifications: [], deletions: [], moves: [] };
+        for (const fileOrPath of files) {
+            if (!fileOrPath) continue;
+            const { path, name, isString } = this.getFileInfo(fileOrPath);
+            try {
+                const result = await this.classifyPushForPlan(fileOrPath, path, name, isString, treeByFullPath, hasOrphans);
+                this.addPlanEntry(plan, result.kind, path, name, result.movedFrom);
+            } catch (e) {
+                logger.warn(`Skipping ${path} from push plan preview`, e);
+            }
+        }
+        return plan;
+    }
+
+    /** Computes what a pull-all would do, without writing anything, for the plan-review modal. */
+    async planPullBatch(files: (TFile | string)[], remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
+        let treeByFullPath: Map<string, GitTreeEntry> | undefined;
+        if (remoteTree) {
+            treeByFullPath = new Map(remoteTree.map(e => [e.path, e]));
+        }
+
+        const plan: SyncPlan = { additions: [], modifications: [], deletions: [], moves: [] };
+        for (const fileOrPath of files) {
+            if (!fileOrPath) continue;
+            const { path, name, isString } = this.getFileInfo(fileOrPath);
+            try {
+                const kind = await this.classifyPullForPlan(fileOrPath, path, isString, treeByFullPath);
+                this.addPlanEntry(plan, kind, path, name);
+            } catch (e) {
+                logger.warn(`Skipping ${path} from pull plan preview`, e);
+            }
+        }
+        return plan;
+    }
+
+    private addPlanEntry(plan: SyncPlan, kind: string, path: string, name: string, movedFrom?: string): void {
+        const entry: SyncPlanEntry = { path, name, movedFrom };
+        if (kind === 'addition') plan.additions.push(entry);
+        else if (kind === 'modification') plan.modifications.push(entry);
+        else if (kind === 'move') plan.moves.push(entry);
+        // 'unchanged' / 'conflict' / 'skip' aren't part of what would be applied.
+    }
+
+    /**
+     * Read-only mirror of classifyPushCandidate's decision, for the plan
+     * preview: reuses queueMove (already pure — its only side effect is
+     * pushing into the scratch array passed in) and classifyAgainstTreeEntry
+     * in dry-run mode, so the two safety checks that guard a real move can't
+     * silently drift out of sync with what the plan shows.
+     */
+    private async classifyPushForPlan(
+        fileOrPath: TFile | string,
+        path: string,
+        name: string,
+        isString: boolean,
+        treeByFullPath: Map<string, GitTreeEntry>,
+        hasOrphans: boolean
+    ): Promise<PlanClassification> {
+        if (!await this.checkFileExists(path, isString)) return { kind: 'skip' };
+
+        const symlinkTarget = readLocalSymlinkTarget(this.app, path);
+        if (symlinkTarget !== null) {
+            const symlinkResult = this.classifySymlinkForPushPlan(path, treeByFullPath);
+            if (symlinkResult) return symlinkResult;
+            // 'follow' (or 'real' without provider support): falls through to a normal content push.
+        }
+
+        const content = await this.getFileContent(fileOrPath);
+        const repoPath = this.getNormalizedPath(path);
+
+        if (!isString && fileOrPath instanceof TFile) {
+            const moveResult = await this.classifyMoveForPushPlan(fileOrPath, path, name, content, treeByFullPath, hasOrphans);
+            if (moveResult) return moveResult;
+        }
+
+        const treeEntry = treeByFullPath.get(this.getFullPathForTree(repoPath));
+        const outcome = await this.classifyAgainstTreeEntry(path, content, treeEntry, true);
+        if (outcome === 'queued') return { kind: treeEntry ? 'modification' : 'addition' };
+        // classifyAgainstTreeEntry's dry-run path only ever resolves to
+        // 'unchanged' or 'conflict' -- 'done' belongs to the symlink branch,
+        // already handled above.
+        return { kind: outcome === 'conflict' ? 'conflict' : 'unchanged' };
+    }
+
+    private classifySymlinkForPushPlan(path: string, treeByFullPath: Map<string, GitTreeEntry>): PlanClassification | undefined {
+        const mode = getEffectiveSymlinkHandling(this.settings);
+        if (mode === 'skip') return { kind: 'unchanged' };
+        if (mode !== 'real' || !this.gitService.pushSymlink) return undefined;
+
+        const repoPath = this.getNormalizedPath(path);
+        const treeEntry = treeByFullPath.get(this.getFullPathForTree(repoPath));
+        return { kind: treeEntry ? 'modification' : 'addition' };
+    }
+
+    /** Undefined means "not a tracked rename" -- the caller falls through to a normal content classification. */
+    private async classifyMoveForPushPlan(
+        file: TFile,
+        path: string,
+        name: string,
+        content: string | ArrayBuffer,
+        treeByFullPath: Map<string, GitTreeEntry>,
+        hasOrphans: boolean
+    ): Promise<PlanClassification | undefined> {
+        const trackedOldPath = this.settings.syncMetadata[path]?.renamedFrom;
+        const renamedFrom = trackedOldPath ?? (hasOrphans ? await this.detectRename(file, content, treeByFullPath) : null);
+        if (!renamedFrom) return undefined;
+
+        const scratch: ToMoveEntry[] = [];
+        const outcome = this.queueMove(path, name, renamedFrom, content, treeByFullPath, scratch);
+        return outcome === 'queued' ? { kind: 'move', movedFrom: renamedFrom } : { kind: 'conflict' };
+    }
+
+    /**
+     * Read-only mirror of the pull classification path, for the plan preview.
+     * Only ever reads the pre-fetched tree's blob sha -- never a network
+     * fetch, so a plan preview can't double the number of remote reads a
+     * pull-all already makes. A symlink entry, an entry with no sha, or no
+     * tree at all can't be compared locally, so those are optimistically
+     * bucketed as "modification"; the real pull path (unchanged) still does
+     * the authoritative check when applied.
+     */
+    private async classifyPullForPlan(
+        fileOrPath: TFile | string,
+        path: string,
+        isString: boolean,
+        treeByFullPath?: Map<string, GitTreeEntry>
+    ): Promise<'addition' | 'modification' | 'unchanged' | 'conflict' | 'skip'> {
+        const repoPath = this.getNormalizedPath(path);
+        const entry = treeByFullPath?.get(this.getFullPathForTree(repoPath));
+        if (treeByFullPath && !entry) return 'skip';
+
+        if (!await this.checkFileExists(path, isString)) return 'addition';
+        if (!entry?.sha || entry.symlink) return 'modification';
+
+        const localSha = await gitBlobSha(await this.getFileContent(fileOrPath));
+        if (localSha === entry.sha) return 'unchanged';
+        const lastSynced = this.settings.syncMetadata[path];
+        if (lastSynced && entry.sha !== lastSynced.lastSyncedSha) return 'conflict';
+        return 'modification';
     }
 
     private async processPullBatch(
@@ -731,7 +927,8 @@ export class SyncManager {
     private async classifyAgainstTreeEntry(
         path: string,
         content: string | ArrayBuffer,
-        treeEntry: GitTreeEntry | undefined
+        treeEntry: GitTreeEntry | undefined,
+        dryRun = false
     ): Promise<BatchOutcome | 'queued'> {
         // Don't convert a remote symlink into a regular file.
         if (treeEntry?.symlink) return 'unchanged';
@@ -740,7 +937,7 @@ export class SyncManager {
         if (treeEntry?.sha) {
             const localSha = await gitBlobSha(content);
             if (localSha === treeEntry.sha) {
-                await this.updateMetadata(path, treeEntry.sha);
+                if (!dryRun) await this.updateMetadata(path, treeEntry.sha);
                 return 'unchanged';
             }
         }
