@@ -1,4 +1,4 @@
-import { Plugin, TFile, MarkdownView, Notice, Platform, setTooltip, setIcon } from 'obsidian';
+import { Plugin, TFile, TFolder, MarkdownView, Notice, Platform, setTooltip, setIcon } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getServiceName } from "./settings";
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
@@ -158,15 +158,41 @@ export default class GitLabFilesPush extends Plugin {
 		// directly instead of reconstructing it later from content/tree
 		// comparisons. A file with no sync history yet is just a new file at a
 		// new name and needs no tracking.
+		//
+		// Moving a *folder* fires exactly one 'rename' event, with `file` as
+		// the TFolder itself — Obsidian does not also fire one per contained
+		// file. Without handling that case, dragging a whole folder tracked
+		// nothing at all (the `instanceof TFile` check silently skipped the
+		// only event that fired), so no file under it ever showed as moved.
 		this.registerEvent(
 			this.app.vault.on('rename', (file, oldPath) => {
 				if (file instanceof TFile) {
 					void this.sync.trackRename(file.path, oldPath);
+				} else if (file instanceof TFolder) {
+					void this.trackFolderRename(file, oldPath);
 				}
 			})
 		);
 
 		await this.checkForUpdateNotice();
+	}
+
+	/**
+	 * Tracks a folder move as one trackRename call per file now living under
+	 * it, computing each file's old path by swapping the folder's new path
+	 * prefix for its old one. `vault.getFiles()` walks the whole vault
+	 * (including nested subfolders under the moved one), so this covers
+	 * arbitrary nesting depth in one pass, same as SyncStatusView's
+	 * folder-move grouping later reassembles it into a single row.
+	 */
+	private async trackFolderRename(folder: TFolder, oldFolderPath: string): Promise<void> {
+		const newPrefix = folder.path + '/';
+		const oldPrefix = oldFolderPath + '/';
+		const files = this.app.vault.getFiles().filter(f => f.path.startsWith(newPrefix));
+		for (const file of files) {
+			const oldPath = oldPrefix + file.path.slice(newPrefix.length);
+			await this.sync.trackRename(file.path, oldPath);
+		}
 	}
 
 	private async checkForUpdateNotice(): Promise<void> {
