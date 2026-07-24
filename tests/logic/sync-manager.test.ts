@@ -5,6 +5,7 @@ import { SyncManager } from '../../src/logic/sync-manager';
 // Mock dependencies
 import { App, TFile } from 'obsidian';
 import { SyncConflictModal } from '../../src/ui/SyncConflictModal';
+import { gitBlobSha } from '../../src/utils/git-blob-sha';
 
 vi.mock('../../src/ui/SyncConflictModal');
 import { GitLabService } from '../../src/services/gitlab-service';
@@ -41,6 +42,7 @@ const mockApp = {
 const mockGitLab = {
     pushFile: vi.fn(),
     getFile: vi.fn(),
+    listFilesDetailed: vi.fn().mockResolvedValue([]),
     deleteFile: vi.fn(),
 } as unknown as GitLabService;
 
@@ -313,6 +315,8 @@ describe('SyncManager', () => {
             });
 
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
+            const contentSha = await gitBlobSha('content');
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: oldPath, sha: contentSha, symlink: false }]);
             vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
                 // Remote still has the old path with the same content: confirms a real rename.
                 if (path === oldPath) return { content: 'content', sha: 'old-sha' };
@@ -357,6 +361,8 @@ describe('SyncManager', () => {
             });
 
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
+            const contentSha = await gitBlobSha('content');
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: oldPath, sha: contentSha, symlink: false }]);
             vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
                 // Remote still has the old path with matching content: confirms a real rename.
                 if (path === oldPath) return { content: 'content', sha: 'old-sha' };
@@ -416,6 +422,41 @@ describe('SyncManager', () => {
             );
             // The orphaned entry must be left alone -- it wasn't the source of this push.
             expect(mockSettings.syncMetadata[orphanedPath]).toBeDefined();
+        });
+
+        it('does not fire one remote getFile request per orphaned metadata entry on a single-file push', async () => {
+            // Regression test: an interactive single-file push (ribbon/command/context-menu/
+            // sync-view row) calls detectRename without a prefetched tree, so it used to check
+            // every orphaned syncMetadata entry with its own live getFile() call in a sequential
+            // loop -- each one a network round trip -- before the actual push even started.
+            // With several stale entries (e.g. files deleted outside Obsidian's vault events)
+            // this adds up to a long, silent delay with no "in progress" feedback.
+            const pushedPath = 'note.md';
+            const mockFile = Object.assign(new TFile(), { path: pushedPath, name: 'note.md' });
+
+            for (let i = 0; i < 5; i++) {
+                const orphanedPath = `orphan-${i}.md`;
+                mockSettings.syncMetadata[orphanedPath] = {
+                    lastSyncedSha: `orphan-sha-${i}`,
+                    lastSyncedAt: Date.now(),
+                    lastKnownPath: orphanedPath
+                };
+            }
+
+            vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation((path) => {
+                if (path === pushedPath) return mockFile;
+                return null; // every orphaned path is gone from the vault
+            });
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('new content');
+            vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'old content', sha: 'remote-sha' });
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: pushedPath, sha: 'new-sha' });
+
+            await manager.pushFile(mockFile);
+
+            // Exactly one getFile call: the conflict check for the file actually being
+            // pushed. The 5 orphaned candidates must be resolved via a single prefetched
+            // tree (listFilesDetailed), not 5 separate live getFile lookups.
+            expect(mockGitLab.getFile).toHaveBeenCalledTimes(1);
         });
     });
 

@@ -132,6 +132,7 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'syncStatus.confirmDeleteLocal': '删除本机文件「{path}」？将依您库的「已删除文件」设置处理。',
 	'syncStatus.notice.deleted': '已删除 {path}',
 	'syncStatus.notice.deleteFailed': '删除失败：{message}',
+	'syncStatus.notice.opStarted': '{verb} {name}…',
 	'syncStatus.confirmRevertMove': '将“{from}”移回“{to}”？这会撤销尚未推送的移动。',
 	'syncStatus.notice.moveReverted': '已撤销移动，“{path}”已还原。',
 	'syncStatus.notice.revertFailed': '撤销移动失败：{message}',

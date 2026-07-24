@@ -343,6 +343,39 @@ describe('SyncStatusView post-push status update', () => {
         expect(statuses.get('b.md')).toEqual({ path: 'b.md', status: 'synced', localContent: '', remoteSha: 'sha-b' });
     });
 
+    // Regression test: runSingleFile used to call refreshFileStatus(file, undefined)
+    // after a successful push. Passing `undefined` as the remoteEntry means "this
+    // path isn't on the remote at all", which forces status back to 'unsynced'
+    // right after a successful push. The fix applies the same optimistic-sync
+    // approach as the batch path above instead of re-deriving status from a
+    // (misleading) "not on remote" signal.
+    it('marks a single pushed file synced from the push result instead of forcing unsynced', async () => {
+        const pushFile = vi.fn().mockResolvedValue({ sha: 'new-sha' });
+        const getFile = vi.fn();
+
+        const plugin = {
+            settings: { branch: 'main', vaultFolder: '' },
+            gitService: { getFile },
+            sync: { pushFile },
+        } as unknown as GitLabFilesPush;
+        const app = { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } };
+        const leaf = { app } as unknown as WorkspaceLeaf;
+        const view = new SyncStatusView(leaf, plugin);
+
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        const fileStatus: FileStatus = { path: 'note.md', status: 'modified', localContent: 'x' };
+        statuses.set('note.md', fileStatus);
+
+        await (view as unknown as {
+            runSingleFile(fileStatus: FileStatus, op: 'push' | 'pull'): Promise<void>
+        }).runSingleFile(fileStatus, 'push');
+
+        expect(pushFile).toHaveBeenCalledTimes(1);
+        // No live remote re-check when the push result already confirms sync.
+        expect(getFile).not.toHaveBeenCalled();
+        expect(statuses.get('note.md')).toMatchObject({ path: 'note.md', status: 'synced', remoteSha: 'new-sha' });
+    });
+
     it('reuses a snapshot only when the branch head is unchanged', async () => {
         const pushAllFiles = vi.fn().mockResolvedValue({ success: 1, failed: 0, conflicts: 0, errors: [], syncedPaths: [] });
         const tree: GitTreeEntry[] = [{ path: 'a.md', symlink: false, sha: 'sha-a' }];
