@@ -177,6 +177,14 @@
       "dependencies": ["feat-021"],
       "status": "done",
       "evidence": "Commit 1ba1293 - npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 430/430 passed."
+    },
+    {
+      "id": "feat-023",
+      "name": "feat: add sync plan preview before applying changes (issue #63)",
+      "description": "Terraform-style plan/review/apply for every push, pull, and remote deletion -- single-file or batch. New SyncPlan type (additions/modifications/deletions/moves) and SyncPlanModal render the counts and paths for review, with deletions in their own visually distinct/warned section; Apply/Cancel resolve a promise gating the real write. SyncManager gained read-only plan classifiers (classifyPushForPlan reuses queueMove and a dryRun-guarded classifyAgainstTreeEntry; classifyPullForPlan reads only the pre-fetched tree's blob sha, never a network fetch, to avoid doubling pull-all's remote reads) feeding planPushBatch/planPullBatch; pushFile/pullFile show a single-entry plan inline before performPush/performPull. SyncStatusView.confirmDeletion uses SyncPlanModal for any remote deletion (falls back to the existing plain ConfirmModal when the batch is local-only). Conflict resolution (SyncConflictModal) and the rename/move push path are unchanged -- both already carry their own review/safety gates, so this doesn't stack a second modal on top.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "npx eslint . -> 0 errors; npm run build -> clean (incl. Obsidian 1.11.0 compat); npx vitest run -> 449/449 passed. Branch claude/sync-plan-preview-63 off prepare-1.5.0."
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."

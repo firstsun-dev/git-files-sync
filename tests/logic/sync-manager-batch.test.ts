@@ -5,8 +5,12 @@ import { App, DataAdapter, TFile } from 'obsidian';
 import { GitLabFilesPushSettings } from '../../src/settings';
 import { GitServiceInterface } from '../../src/services/git-service-interface';
 import { gitBlobSha } from '../../src/utils/git-blob-sha';
+import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
 
 vi.mock('obsidian');
+// Every push/pull-all now shows a plan for review before applying;
+// auto-confirm it here since these tests exercise batch mechanics, not the modal.
+vi.mock('../../src/ui/SyncPlanModal');
 
 describe('SyncManager Batch Operations', () => {
     let manager: SyncManager;
@@ -16,6 +20,12 @@ describe('SyncManager Batch Operations', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(SyncPlanModal).mockImplementation(function (
+            this: SyncPlanModal, _app: unknown, _plan: unknown, _direction: SyncPlanDirection, onConfirm: () => void
+        ) {
+            onConfirm();
+            return this;
+        } as never);
 
         const mockAdapter = {
             exists: vi.fn(),
@@ -595,6 +605,71 @@ describe('SyncManager Batch Operations', () => {
             // The tree doesn't list the orphaned path, so it can't be a rename
             // source — probing it would be a guaranteed 404, once per pushed file.
             expect(mockGitService.getFile).not.toHaveBeenCalledWith(orphanedPath, 'main');
+        });
+    });
+
+    describe('batch plan preview (issue #63)', () => {
+        it('shows a plan classifying additions and modifications before a push-all applies', async () => {
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockImplementation(async (p) => (p === 'new.md' ? 'new content' : 'changed content'));
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: 'existing.md', symlink: false, sha: await gitBlobSha('old content') }
+            ]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: '' });
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: 'path', sha: 'new-sha' });
+
+            const results = await manager.pushAllFiles(['new.md', 'existing.md']);
+
+            expect(SyncPlanModal).toHaveBeenCalledWith(
+                mockApp,
+                {
+                    additions: [{ path: 'new.md', name: 'new.md' }],
+                    modifications: [{ path: 'existing.md', name: 'existing.md' }],
+                    deletions: [],
+                    moves: [],
+                },
+                'push',
+                expect.any(Function),
+                expect.any(Function)
+            );
+            expect(results.success).toBe(2);
+        });
+
+        it('does not apply a push-all when the plan is cancelled', async () => {
+            vi.mocked(SyncPlanModal).mockImplementation(function (
+                this: SyncPlanModal, _app: unknown, _plan: unknown, _direction: SyncPlanDirection, _onConfirm: () => void, onCancel?: () => void
+            ) {
+                onCancel?.();
+                return this;
+            } as never);
+
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('new content');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([]);
+            const pushFileSpy = vi.mocked(mockGitService.pushFile);
+
+            const results = await manager.pushAllFiles(['new.md']);
+
+            expect(results.success).toBe(0);
+            expect(pushFileSpy).not.toHaveBeenCalled();
+        });
+
+        it('skips the plan modal entirely when nothing would be pushed', async () => {
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            const content = 'same content';
+            vi.mocked(adapter.read).mockResolvedValue(content);
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: 'same.md', symlink: false, sha: await gitBlobSha(content) }
+            ]);
+
+            const results = await manager.pushAllFiles(['same.md']);
+
+            expect(SyncPlanModal).not.toHaveBeenCalled();
+            expect(results.success).toBe(0);
+            expect(results.failed).toBe(0);
         });
     });
 });

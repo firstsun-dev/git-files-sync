@@ -14,7 +14,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 **Last Updated:** 2026-07-24
 **Session ID:** current
-**Active Feature:** None — feat-021/feat-022 (issues #66, #67) are committed on `claude/rename-as-move-66-67`, not yet pushed/PR'd.
+**Active Feature:** None — feat-023 (issue #63, sync plan preview) is committed on `claude/sync-plan-preview-63`, branched off `prepare-1.5.0`, not yet pushed/PR'd.
 
 ## Status
 

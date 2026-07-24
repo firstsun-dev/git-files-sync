@@ -148,9 +148,9 @@ const en = {
 	'syncStatus.notice.opCompleted': '{verb} completed. Refreshing…',
 	'syncStatus.notice.nothingToDelete': 'Nothing to delete',
 	'syncStatus.notice.noFilesSelected': 'No files selected',
-	'syncStatus.confirmDelete.localAndRemote': "Delete {local} local file(s) (per your vault's trash setting) and {remote} remote file(s) (cannot be undone)?",
 	'syncStatus.confirmDelete.localOnly': 'Delete {local} local file(s)? They\'ll be handled per your vault\'s "Deleted files" setting.',
 	'syncStatus.confirmDelete.remoteOnly': 'Delete {remote} remote file(s)? This cannot be undone.',
+	'syncStatus.confirmDelete.alsoLocal': "Also deletes {local} local file(s), handled per your vault's \"Deleted files\" setting.",
 	'syncStatus.notice.deleteResult.partial': 'Deleted {succeeded}/{total}. {failed} failed.',
 	'syncStatus.notice.deleteResult.partialWithMessage': 'Deleted {succeeded}/{total}. {failed} failed: {message}',
 	'syncStatus.notice.deleteResult.success': 'Deleted {total} files',
@@ -213,6 +213,18 @@ const en = {
 	'syncConflictModal.keepRemote': 'Keep remote',
 	'syncConflictModal.keepRemote.tooltip': 'Overwrite local with remote content',
 	'syncConflictModal.cancel': 'Cancel',
+
+	'syncPlanModal.title.push': 'Review push plan',
+	'syncPlanModal.title.pull': 'Review pull plan',
+	'syncPlanModal.title.delete': 'Review deletion',
+	'syncPlanModal.section.additions': 'Additions',
+	'syncPlanModal.section.modifications': 'Modifications',
+	'syncPlanModal.section.moves': 'Moves',
+	'syncPlanModal.section.deletions': 'Deletions',
+	'syncPlanModal.deletionWarning': 'This permanently deletes {count} file(s) on the remote. This cannot be undone.',
+	'syncPlanModal.movedFrom': 'moved from {path}',
+	'syncPlanModal.confirm': 'Apply',
+	'syncPlanModal.cancel': 'Cancel',
 };
 
 export default en;
