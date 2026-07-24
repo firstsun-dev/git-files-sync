@@ -2,8 +2,9 @@ import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, debounce, setIcon, se
 import GitLabFilesPush from '../main';
 import { getServiceName, getEffectiveSymlinkHandling, type SymlinkHandling } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
+import { SyncPlanModal } from './SyncPlanModal';
 import { logger } from '../utils/logger';
-import { type FileStatus, type FilterValue } from './types';
+import { type FileStatus, type FilterValue, type SyncPlan } from './types';
 import { renderActionBar } from './components/ActionBar';
 import { renderFileItem, renderMoveGroupItem, statusMeta, type FileItemCallbacks, type MoveGroupCallbacks } from './components/FileListItem';
 import { ICONS } from './components/icons';
@@ -1230,7 +1231,7 @@ export class SyncStatusView extends ItemView {
 
         const { local, remote } = this.partitionTargets(targets);
         if (local.length === 0 && remote.length === 0) { new Notice(t('syncStatus.notice.nothingToDelete')); return; }
-        if (!await this.confirmDeletion(local.length, remote.length)) return;
+        if (!await this.confirmDeletion(local, remote)) return;
 
         const total = local.length + remote.length;
         const prog = new Notice(t('syncStatus.progress.deleting', { total }), 0);
@@ -1271,21 +1272,25 @@ export class SyncStatusView extends ItemView {
         };
     }
 
-    private async confirmDeletion(localCount: number, remoteCount: number): Promise<boolean> {
+    private async confirmDeletion(local: FileStatus[], remote: FileStatus[]): Promise<boolean> {
         // Local deletes go through Obsidian's own trash handling, whose actual
         // destination (vault .trash/, OS trash, or permanent) depends on the
         // user's "Deleted files" setting — not something this plugin can read.
         // So local wording defers to that setting rather than promising
-        // recoverability; remote deletes are unconditionally permanent.
-        let msg = '';
-        if (localCount > 0 && remoteCount > 0) {
-            msg = t('syncStatus.confirmDelete.localAndRemote', { local: localCount, remote: remoteCount });
-        } else if (localCount > 0) {
-            msg = t('syncStatus.confirmDelete.localOnly', { local: localCount });
-        } else {
-            msg = t('syncStatus.confirmDelete.remoteOnly', { remote: remoteCount });
+        // recoverability; remote deletes are unconditionally permanent, so
+        // those get the full plan-review modal instead of a plain confirm.
+        if (remote.length === 0) {
+            return this.showConfirmDialog(t('syncStatus.confirmDelete.localOnly', { local: local.length }));
         }
-        return this.showConfirmDialog(msg);
+
+        const plan: SyncPlan = {
+            additions: [], modifications: [], moves: [],
+            deletions: remote.map(s => ({ path: s.path, name: s.file?.name ?? s.path.split('/').pop() ?? s.path }))
+        };
+        const description = local.length > 0 ? t('syncStatus.confirmDelete.alsoLocal', { local: local.length }) : undefined;
+        return new Promise(resolve => {
+            new SyncPlanModal(this.app, plan, 'delete', () => resolve(true), () => resolve(false), description).open();
+        });
     }
 
     private async performLocalDeletion(local: FileStatus[], total: number, prog: Notice, errors: { path: string, message: string }[]): Promise<void> {

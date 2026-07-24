@@ -934,6 +934,88 @@
     gap: 10px;
 }
 
+/* ── Sync Plan Modal ────────────────────────────────────────────── */
+.sync-plan-modal.modal {
+    width: min(640px, 92vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.sync-plan-description {
+    color: var(--text-muted);
+    font-size: 0.9em;
+    margin: -4px 0 12px;
+}
+
+.sync-plan-sections {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.sync-plan-section {
+    margin-bottom: 16px;
+}
+
+.sync-plan-section-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.sync-plan-section-icon {
+    display: flex;
+    color: var(--text-muted);
+}
+
+.sync-plan-section.is-destructive .sync-plan-section-heading,
+.sync-plan-section.is-destructive .sync-plan-section-icon {
+    color: var(--text-error);
+}
+
+.sync-plan-warning {
+    color: var(--text-error);
+    font-size: 0.85em;
+    margin-bottom: 6px;
+}
+
+.sync-plan-file-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--background-secondary);
+    border-radius: 5px;
+}
+
+.sync-plan-section.is-destructive .sync-plan-file-list {
+    border: 1px solid var(--text-error);
+}
+
+.sync-plan-file-item {
+    padding: 4px 10px;
+    font-family: var(--font-monospace);
+    font-size: 0.82em;
+    word-break: break-all;
+    display: flex;
+    flex-direction: column;
+}
+
+.sync-plan-file-moved-from {
+    color: var(--text-muted);
+    font-size: 0.9em;
+}
+
+.sync-plan-buttons {
+    padding-top: 12px;
+    border-top: 1px solid var(--background-modifier-border);
+    flex-shrink: 0;
+}
+
 .ssv-whats-new-list {
     margin: 0 0 12px;
     padding-left: 20px;

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SyncManager } from '../../src/logic/sync-manager';
 
 import { App, TFile } from 'obsidian';
+import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
 import type { GitServiceInterface } from '../../src/services/git-service-interface';
 import type { GitLabFilesPushSettings } from '../../src/settings';
 
@@ -13,6 +14,9 @@ vi.mock('obsidian', () => ({
     },
     App: class {},
 }));
+// Every push/pull now shows a plan for review before applying; auto-confirm
+// it here since these tests exercise push/pull path-mapping, not the modal.
+vi.mock('../../src/ui/SyncPlanModal');
 
 const mockApp = {
     vault: {
@@ -64,6 +68,12 @@ describe('SyncManager Mapping', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(SyncPlanModal).mockImplementation(function (
+            this: SyncPlanModal, _app: unknown, _plan: unknown, _direction: SyncPlanDirection, onConfirm: () => void
+        ) {
+            onConfirm();
+            return this;
+        } as never);
         mockSettings.syncMetadata = {};
         manager = new SyncManager(mockApp, mockGitService, mockSettings);
     });

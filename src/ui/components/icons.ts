@@ -8,6 +8,7 @@ export const ICONS = {
     // Status / action
     synced:   'check',
     modified: 'pencil',
+    addition: 'file-plus',
     push:     'arrow-up',
     pull:     'arrow-down',
     checking: 'refresh-cw',

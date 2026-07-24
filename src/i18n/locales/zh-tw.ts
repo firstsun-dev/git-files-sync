@@ -150,9 +150,9 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'syncStatus.notice.opCompleted': '{verb}完成，重新整理中…',
 	'syncStatus.notice.nothingToDelete': '沒有可刪除的項目',
 	'syncStatus.notice.noFilesSelected': '尚未選取任何檔案',
-	'syncStatus.confirmDelete.localAndRemote': '要刪除 {local} 個本機檔案（依保存庫的垃圾桶設定處理）與 {remote} 個遠端檔案（無法復原）嗎？',
 	'syncStatus.confirmDelete.localOnly': '要刪除 {local} 個本機檔案嗎？將依您保存庫的「已刪除的檔案」設定處理。',
 	'syncStatus.confirmDelete.remoteOnly': '要刪除 {remote} 個遠端檔案嗎？此操作無法復原。',
+	'syncStatus.confirmDelete.alsoLocal': '同時會刪除 {local} 個本機檔案，處理方式依你的保存庫「已刪除的檔案」設定而定。',
 	'syncStatus.notice.deleteResult.partial': '已刪除 {succeeded}/{total} 個，{failed} 個失敗。',
 	'syncStatus.notice.deleteResult.partialWithMessage': '已刪除 {succeeded}/{total} 個，{failed} 個失敗：{message}',
 	'syncStatus.notice.deleteResult.success': '已刪除 {total} 個檔案',
@@ -215,6 +215,18 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'syncConflictModal.keepRemote': '保留遠端',
 	'syncConflictModal.keepRemote.tooltip': '以遠端內容覆蓋本機',
 	'syncConflictModal.cancel': '取消',
+
+	'syncPlanModal.title.push': '檢視推送計畫',
+	'syncPlanModal.title.pull': '檢視拉取計畫',
+	'syncPlanModal.title.delete': '檢視刪除計畫',
+	'syncPlanModal.section.additions': '新增',
+	'syncPlanModal.section.modifications': '修改',
+	'syncPlanModal.section.moves': '移動',
+	'syncPlanModal.section.deletions': '刪除',
+	'syncPlanModal.deletionWarning': '此操作將永久刪除遠端上的 {count} 個檔案，且無法復原。',
+	'syncPlanModal.movedFrom': '從 {path} 移動而來',
+	'syncPlanModal.confirm': '套用',
+	'syncPlanModal.cancel': '取消',
 };
 
 export default zhTw;
