@@ -126,6 +126,14 @@
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     flex-shrink: 0;
+    /* When labels are still shown (container wide enough that the
+       icon-only fallback below hasn't kicked in) six-plus tabs can still
+       overflow before wrapping/hiding text. The scrollbar itself is
+       hidden for a cleaner look, so without this the cut-off edge reads
+       as "broken" rather than "scroll for more" — a soft fade signals
+       there's more to scroll to. */
+    -webkit-mask-image: linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent);
+    mask-image: linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent);
 }
 
 .ssv-tabs::-webkit-scrollbar { display: none; }
@@ -176,6 +184,11 @@
     gap: 8px;
     flex-wrap: wrap;
     overflow-x: visible;
+    /* Mobile wraps to a second row instead of scrolling, so the edge fade
+       (meant for the horizontal-scroll case) would just clip the wrapped
+       rows for no reason — turn it off. */
+    -webkit-mask-image: none;
+    mask-image: none;
 }
 
 .is-mobile .ssv-tab {
