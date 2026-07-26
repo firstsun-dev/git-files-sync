@@ -71,23 +71,8 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Files Modified This Session
 
-- `src/ui/SyncStatusView.ts` — header/body split, search filter, selection pruning, open-target resolution, diff-pane open/close
-- `src/ui/DiffView.ts` (new), `src/main.ts` — the desktop diff pane and its registration
-- `src/utils/remote-url.ts` (new) — provider web URLs
-- `src/ui/components/FileListItem.ts`, `src/ui/components/icons.ts`, `styles.css` — link rendering, platform-branched diff button, styles
-- `src/i18n/locales/{en,zh-tw,zh-cn}.ts` — new keys
-- `tests/setup.ts`, `tests/ui/setup-dom.ts` — mock gaps found by the new tests (`debounce`, `Keymap`, `setAttr`, mutable `Platform.isMobile`)
-- `tests/ui/SyncStatusView.search.test.ts`, `tests/ui/SyncStatusView.openFile.test.ts`, `tests/ui/DiffView.test.ts`, `tests/utils/remote-url.test.ts` (new); `tests/ui/FileListItem.test.ts`, `tests/ui/SyncStatusView.test.ts` (updated fixtures)
+<!-- see git log for full file list; this section is intentionally minimal -->
 
 ## Evidence of Completion
 
-- [x] Lint clean: `npx eslint .` → 0 errors
-- [x] Type check clean: `npm run build` → clean (includes the Obsidian 1.11.0 compat typecheck)
-- [x] Tests pass: `npx vitest run` → 397/397 passed (350 at the session's green baseline)
-- [x] Re-verified after rebasing onto `origin/main`: 410/410 passed, and the rebased tree is byte-identical to the merge result that run covered
 - [ ] Manual verification inside the actual Obsidian plugin UI — not yet done
-
-## Notes for Next Session
-
-- Working branch: `claude/git-mv-convenience-26f64c` (worktree), PR #71 against `main`.
-- `main` moved on during this session (PR #72 + releases 1.3.1/1.3.2), including `src/changelog.ts` → `src/changelog/` and further push-path perf work. This branch was rebased onto it rather than merged, so PR #71 is two linear commits. Source rebased without conflict, and the full gate was re-run on the result rather than assumed.
