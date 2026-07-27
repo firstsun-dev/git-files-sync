@@ -7,43 +7,38 @@
   accumulating history instead of handing off.
 -->
 
-**Date:** 2026-07-24 · **Branch:** `claude/rename-as-move-66-67` (worktree at `.claude/worktrees/lively-marinating-feigenbaum`)
+**Date:** 2026-07-27 · **Branch:** `local-prepare-1.5.0` (worktree at `.claude/worktrees/lively-marinating-feigenbaum`, tracks `github/prepare-1.5.0`)
 
 ## Current Objective
 
-Implemented issues [#66](https://github.com/firstsun-dev/git-files-sync/issues/66) and [#67](https://github.com/firstsun-dev/git-files-sync/issues/67), both filed and designed in the prior session (that session's `session-handoff.md` named them as the exact next step). Two commits on `claude/rename-as-move-66-67`, **not yet pushed, no PR opened**.
+User asked to finish troubleshooting a leftover debug-logging trail in this worktree and wrap up with a PR. The trail (uncommitted `logger.warn` calls in `main.ts`'s vault `delete`/`rename`/`trackFolderRename` handlers, added after `c806e22` and never cleaned up) pointed at a real bug in the out-of-band move detection `c806e22` had just added.
 
-| Commit | What |
-|---|---|
-| `aeb1ad0` | feat(sync): commit renames as a real move with a dedicated moved status (#66) |
-| `1ba1293` | feat(ui): collapse folder moves into a single row (#67) |
+## What was found and fixed
 
-#66: a rename now tracks live via a new `vault.on('rename', ...)` handler in `main.ts` calling `SyncManager.trackRename`, which moves the `syncMetadata` entry to the new path and records `renamedFrom`. A push then commits a real move — new path added, old path removed, one commit — via new optional `GitServiceInterface.commitBatch` (GitHub: `additions`+`deletions` in one `createCommitOnBranch`; GitLab: the Commits API's native `action: 'move'`; Gitea: one tree with a fresh blob and a null-sha removal), falling back to sequential push-then-delete for providers without it. Two safety checks: a target that already exists on the remote is never silently overwritten, and an old path whose remote content changed since the last sync is never silently deleted. New `'moved'` `FileStatus` with `movedFrom`, a struck-through-old-path row with Push + Revert actions, excluded from bulk Pull/Delete, with a conditional `'moved'` tab.
+`main.ts`'s generic `vault.on('delete', ...)` handler called `this.sync.clearMetadata(file.path)` for every delete Obsidian reported. An out-of-band move (external tool, cloud sync client, mobile) often reaches Obsidian's watcher as a bare delete of the old path with no correlated rename event. That handler raced ahead of the next sync-panel refresh and destroyed the exact `syncMetadata` entry `SyncStatusView.reconcileOutOfBandMoves()` (from `c806e22`) needs to recognize the pair — silently reproducing the original #66 bug (permanent `remote-only` ghost + plain `unsynced` new file, never `moved`) for exactly the case that reconciler exists to catch.
 
-#67: `SyncStatusView` groups `'moved'` rows by matching path segments from the end (the topmost divergence point is the folder that moved), collapsing to one row only when every tracked file under the old prefix actually moved and the group has more than one member. New `renderMoveGroupItem` in `FileListItem.ts` shows the group, expands to read-only child rows, and pushes the whole group through the existing batch flow (one commit). The `'moved'` tab count is rows, not files.
+Confirmed with a failing-first test before changing any source (`tests/ui/SyncStatusView.test.ts`, "cannot recognize an out-of-band move once its old-path metadata has already been cleared"): clears the old path's metadata to simulate the delete handler firing first, then calls `reconcileOutOfBandMoves` and asserts the pair is never recognized — passed against the unfixed code.
+
+Fix: removed the eager `clearMetadata` call from that listener. It's no longer needed for performance (`detectRename`'s orphan scan reads an already-fetched tree, not a live lookup, since an earlier perf pass) — the sync panel's own explicit delete actions still clear their own metadata directly, which is the only place a delete is confirmed *not* to be a move.
+
+The pre-existing uncommitted debug logging (`src/main.ts`, `tests/main.test.ts`) was discarded (`git checkout --`) once its job — pointing at this bug — was done; it added no test coverage of its own.
 
 ## Exact next step
 
-Push the branch and open a PR against `main`:
-```
-git push -u origin claude/rename-as-move-66-67
-gh pr create --repo firstsun-dev/git-files-sync ...
-```
-Then manually verify inside the actual Obsidian plugin UI (not yet done this session) — specifically: rename a synced note and push (single commit, old path gone from remote, no "may need manual deletion" notice); drag a multi-file folder and push (one collapsed row, single commit); Revert on both a single moved row and a collapsed group.
+Open a PR from `prepare-1.5.0` → `main` on `firstsun-dev/git-files-sync`. This branch carries #63 (sync plan preview), #66 + #67 (real move on rename, folder-move collapsing), and this session's fix, none of which have a PR yet. Conventional-commit title, mention it closes #63/#66/#67, and flag in the description that manual verification inside a real Obsidian instance is still outstanding (noted below).
 
 ## Verification at the stopping point
 
 ```
 npx eslint .    → 0 errors
 npm run build   → clean (incl. Obsidian 1.11.0 compat typecheck)
-npx vitest run  → 430/430 passed   (green baseline at session start was 412)
+npx vitest run  → 451/451 passed
 ```
 
-Not verified: manual use inside the actual Obsidian UI.
+Not verified: manual use inside the actual Obsidian UI. This matters more than usual here — the bug just fixed is specifically about how Obsidian's vault watcher orders `delete`/`rename` events for out-of-band moves, which can't be simulated headlessly with confidence.
 
 ## Things a next session should not re-derive
 
-- `SyncManager.trackRename` always records `renamedFrom` as the still-*unpushed* remote path (not the most recent rename hop): on a further rename it reads the *existing* `renamedFrom` off the metadata being moved and carries that forward, rather than overwriting it with the immediate old path. This is what makes a chained rename A→B→C collapse into a single pending A→C move, and what makes renaming back to that exact path cancel the pending move entirely.
-- The folder-move grouping algorithm (`SyncStatusView.groupPrefixes`) matches path segments from the *end*, stopping at the first divergence (with index ≥ 1, so the prefix is never empty). For a move like `Notes/Projects/a.md` → `Archive/Projects/a.md`, this yields the pair `("Notes", "Archive")`, not `("Notes/Projects", "Archive/Projects")` — the algorithm finds the *minimal* boundary where the path actually changed, since `Projects/a.md` is common to both sides. This is a deliberate, defensible choice (see `tests/ui/SyncStatusView.test.ts`'s "folder-move collapsing" describe block) but differs from the literal folder name shown in issue #67's ASCII mockup; the acceptance criteria don't require exact mockup text, only that one row → one commit for a full folder move.
-- `queueMove` in `sync-manager.ts` (the batch-push path) determines both "target already exists" and "safe to delete old path" purely from the pre-fetched remote tree — no `getFile` network calls — mirroring the perf goals of the existing SHA-based batch classification. The single-file `handleRename` path still uses live `getFile` calls since it has no pre-fetched tree to consult.
-- `GitServiceInterface.commitBatch` is a new, separate optional method — not a refactor of `pushBatch`/`deleteBatch`. It takes `(additions, moves, branch, message)` and is only used where sync-manager actually needs both kinds of change in one commit (a push-all mixing edits and moves, and a single-file move). Existing `pushBatch`/`deleteBatch` call sites and tests are untouched.
+- If a future "move not detected" report comes in, check `main.ts`'s vault event handlers first for anything that might clear `syncMetadata` before `reconcileOutOfBandMoves` or `SyncManager.trackRename` gets to read it — both silently no-op on missing metadata by design, so a handler ordering race is invisible until someone traces it.
+- `clearMetadata` still has two legitimate call sites: `SyncStatusView.handleLocalDelete` and `performLocalDeletion` — both are the sync panel's own explicit, user-confirmed delete actions, not generic vault listeners, so clearing there is correct and intentional.
+- Local `main` git ref in this repo can be stale relative to `github/main` — always diff against `github/main` (after `git fetch github`), not local `main`, when checking whether a branch is ahead/behind.

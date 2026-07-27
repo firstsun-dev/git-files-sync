@@ -444,6 +444,50 @@ describe('SyncStatusView move detection without a live rename event', () => {
         });
         expect(statuses.has('Notes/Projects/a.md')).toBe(false);
     });
+
+    // Regression test for the hazard behind the out-of-band fix above: an
+    // external move often reaches Obsidian's vault watcher as a bare delete of
+    // the old path (no correlated rename), so any code path that reacts to
+    // that delete by wiping syncMetadata[oldPath] destroys the exact evidence
+    // this reconciler needs. If that race wins, the move degenerates back into
+    // the original #66 bug: a permanent 'remote-only' ghost plus a plain
+    // 'unsynced' new file, never paired as 'moved'.
+    it('cannot recognize an out-of-band move once its old-path metadata has already been cleared', async () => {
+        const { gitBlobSha } = await import('../../src/utils/git-blob-sha');
+        const content = 'moved while a delete handler raced ahead and cleared metadata first';
+        const sha = await gitBlobSha(content);
+
+        const adapterRead = vi.fn().mockResolvedValue(content);
+        const { plugin, leaf } = makePlugin({ adapterRead });
+        plugin.settings.syncMetadata = {
+            'Notes/Projects/a.md': { lastSyncedSha: sha, lastSyncedAt: 0, lastKnownPath: 'Notes/Projects/a.md' },
+        };
+        const view = new SyncStatusView(leaf, plugin);
+
+        const remoteMap = new Map<string, GitTreeEntry>([
+            ['Notes/Projects/a.md', { path: 'Notes/Projects/a.md', symlink: false, sha }],
+        ]);
+
+        await (view as unknown as {
+            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>, pendingMoveOldPaths: Set<string>): Promise<unknown[]>
+        }).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set());
+
+        await (view as unknown as {
+            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
+        }).refreshFileStatus('Archive/Projects/a.md', undefined);
+
+        // Simulates a vault 'delete' handler firing for the old path before
+        // this refresh's reconciliation pass gets to run.
+        delete plugin.settings.syncMetadata['Notes/Projects/a.md'];
+
+        await (view as unknown as {
+            reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void>
+        }).reconcileOutOfBandMoves(remoteMap);
+
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.get('Notes/Projects/a.md')).toMatchObject({ status: 'remote-only' });
+        expect(statuses.get('Archive/Projects/a.md')).not.toMatchObject({ status: 'moved' });
+    });
 });
 
 describe('SyncStatusView post-push status update', () => {

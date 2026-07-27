@@ -141,18 +141,18 @@ export default class GitLabFilesPush extends Plugin {
 			})
 		);
 
-		// A file deleted outside the plugin's own delete UI (e.g. from Obsidian's
-		// file explorer) would otherwise leave its syncMetadata entry behind
-		// forever; detectRename's rename-matching scan treats every such orphan
-		// as a rename candidate and does a live remote lookup for it on every
-		// future single-file push, so clear it as soon as Obsidian reports the delete.
-		this.registerEvent(
-			this.app.vault.on('delete', (file) => {
-				if (file instanceof TFile) {
-					void this.sync.clearMetadata(file.path);
-				}
-			})
-		);
+		// Deliberately no vault 'delete' listener clearing syncMetadata here.
+		// An out-of-band move (external tool, cloud sync, mobile) often reaches
+		// Obsidian's watcher as a bare delete of the old path with no correlated
+		// rename event, so eagerly wiping syncMetadata[oldPath] on every delete
+		// would destroy the exact evidence SyncStatusView.reconcileOutOfBandMoves
+		// needs on the next refresh to recognize it as a move rather than a
+		// permanent 'remote-only' ghost -- reintroducing the #66 bug for exactly
+		// the case that reconciler exists to catch. A genuine, intentional local
+		// delete (via the sync panel's own delete action) clears its own
+		// metadata directly; an unrelated stale entry left behind by a real
+		// delete costs nothing further; detectRename's candidate scan reads it
+		// from an already-fetched tree, not a live lookup.
 
 		// Obsidian already knows the exact old path, so record the rename
 		// directly instead of reconstructing it later from content/tree
