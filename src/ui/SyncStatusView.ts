@@ -17,6 +17,7 @@ import { type GitTreeEntry } from '../services/git-service-interface';
 import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
 import { t, type TranslationKey } from '../i18n';
 import { type PushResults } from '../logic/sync-manager';
+import { SyncStatusService } from '../logic/sync-status-service';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
 
@@ -34,6 +35,7 @@ export class SyncStatusView extends ItemView {
     private readonly expandedMoveGroups: Set<string> = new Set();
     private lastSyncTime: number = 0;
     private remoteTreeSnapshot?: RemoteTreeSnapshot;
+    private readonly statusService = new SyncStatusService();
     // Persistent containers created once in onOpen(). renderView() rebuilds
     // only what's inside them, so the search input (which lives in the header,
     // outside both) is never destroyed mid-typing.
@@ -898,7 +900,10 @@ export class SyncStatusView extends ItemView {
                 // stale symlink push) now collides with a real local folder of
                 // the same name — either way there's no readable local file to
                 // compare, so it's remote-only.
-                this.fileStatuses.set(vaultPath, { path: vaultPath, status: 'remote-only' });
+                this.fileStatuses.set(vaultPath, {
+                    path: vaultPath,
+                    status: this.statusService.classify({ localExists: false, remoteExists: true }),
+                });
             }
         }
         return extra;
@@ -1050,13 +1055,14 @@ export class SyncStatusView extends ItemView {
 
         const localContent = await this.readFileContent(file, this.isBinary(file.path), false);
 
-        if (existing.remoteSha === undefined) {
-            this.fileStatuses.set(file.path, { ...existing, localContent });
-        } else {
-            const localSha = await gitBlobSha(localContent);
-            const status = localSha === existing.remoteSha ? 'synced' : 'modified';
-            this.fileStatuses.set(file.path, { ...existing, status, localContent });
-        }
+        const status = existing.remoteSha === undefined
+            ? this.statusService.classify({ localExists: true, remoteExists: false })
+            : this.statusService.classify({
+                localExists: true,
+                remoteExists: true,
+                contentsEqual: await gitBlobSha(localContent) === existing.remoteSha,
+            });
+        this.fileStatuses.set(file.path, { ...existing, status, localContent });
 
         this.renderView();
     }
@@ -1093,7 +1099,12 @@ export class SyncStatusView extends ItemView {
 
         const renamedFrom = this.plugin.settings.syncMetadata?.[file.path]?.renamedFrom;
         if (renamedFrom !== undefined) {
-            this.fileStatuses.set(file.path, { file, path: file.path, status: 'moved', movedFrom: renamedFrom });
+            this.fileStatuses.set(file.path, {
+                file,
+                path: file.path,
+                status: this.statusService.classify({ movedFrom: renamedFrom }),
+                movedFrom: renamedFrom,
+            });
         } else {
             this.fileStatuses.set(file.path, { ...existing, file, path: file.path });
         }
@@ -1120,7 +1131,7 @@ export class SyncStatusView extends ItemView {
                 this.fileStatuses.set(path, {
                     file: typeof fileOrPath === 'string' ? undefined : fileOrPath,
                     path,
-                    status: 'moved',
+                    status: this.statusService.classify({ movedFrom: renamedFrom }),
                     movedFrom: renamedFrom,
                 });
                 return;
@@ -1139,7 +1150,7 @@ export class SyncStatusView extends ItemView {
             this.fileStatuses.set(path, {
                 file: typeof fileOrPath === 'string' ? undefined : fileOrPath,
                 path,
-                status: 'unsynced'
+                status: this.statusService.classify({ localExists: true, remoteExists: false })
             });
         }
     }
@@ -1151,7 +1162,7 @@ export class SyncStatusView extends ItemView {
         this.fileStatuses.set(path, {
             file: isStr ? undefined : fileOrPath,
             path,
-            status: 'unsynced',
+            status: this.statusService.classify({ localExists: true, remoteExists: false }),
             localContent,
         });
     }
@@ -1166,7 +1177,11 @@ export class SyncStatusView extends ItemView {
         const localContent = await this.readLocalContentForSha(fileOrPath, isStr, binary, remoteEntry.symlink, symlinkMode);
         const localSha = await gitBlobSha(localContent);
 
-        const status = localSha === remoteEntry.sha ? 'synced' : 'modified';
+        const status = this.statusService.classify({
+            localExists: true,
+            remoteExists: true,
+            contentsEqual: localSha === remoteEntry.sha,
+        });
         // A file can reach 'synced' here purely because its content already
         // matches the remote -- e.g. it was never pushed/pulled through this
         // plugin (cloned in, or coincidentally identical). Without recording
@@ -1216,7 +1231,13 @@ export class SyncStatusView extends ItemView {
         const repoPath = this.plugin.getNormalizedPath(path);
         const remote = await this.plugin.gitService.getFile(repoPath, this.plugin.settings.branch);
 
-        const status = this.determineFileStatus(localContent, remote);
+        const status = remote.sha
+            ? this.statusService.classify({
+                localExists: true,
+                remoteExists: true,
+                contentsEqual: this.contentsEqual(localContent, remote.content),
+            })
+            : this.statusService.classify({ localExists: true, remoteExists: false });
 
         // Same backfill as refreshFileStatusBySha's synced branch -- see its
         // comment for why a content-only match must still be recorded.
@@ -1263,12 +1284,6 @@ export class SyncStatusView extends ItemView {
         }
         // This should not happen if isStr is false and fileOrPath is TFile
         throw new Error('Expected TFile when isStr is false');
-    }
-
-    private determineFileStatus(localContent: string | ArrayBuffer, remote: { sha?: string; content?: string | ArrayBuffer }): FileStatus['status'] {
-        if (!remote.sha) return 'unsynced';
-        if (remote.content && this.contentsEqual(localContent, remote.content)) return 'synced';
-        return 'modified';
     }
 
     private isBinary(path: string): boolean { return isBinaryPath(path); }
@@ -1326,7 +1341,7 @@ export class SyncStatusView extends ItemView {
             this.fileStatuses.set(path, {
                 ...existing,
                 path,
-                status: 'synced',
+                status: this.statusService.classify({ localExists: true, remoteExists: true, contentsEqual: true }),
                 remoteSha: sha ?? existing?.remoteSha,
             });
         }

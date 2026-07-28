@@ -1,9 +1,10 @@
 import { TFile } from 'obsidian';
+import type { SyncStatus } from '../logic/sync-status-service';
 
 export interface FileStatus {
     file?: TFile;
     path: string;
-    status: 'synced' | 'modified' | 'unsynced' | 'remote-only' | 'checking' | 'moved';
+    status: SyncStatus | 'checking';
     localContent?: string | ArrayBuffer;
     remoteContent?: string | ArrayBuffer;
     remoteSha?: string;
