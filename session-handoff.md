@@ -7,8 +7,7 @@
 
 - `c610dde`: extracted the pure `SyncStatusService` classifier.
 - `9cefb25`: moved the status map and subscriptions into that service. `SyncManager.status` is the plugin-wide instance; `updateMetadata()` publishes `synced` with the confirmed SHA. A live Sync Status View subscribes to the same state, so Ribbon/context-menu pushes update it without a manual refresh.
-- `SyncStatusView` retains presentation-only state (filters, selection, expanded folder groups) and uses the service for all file-status reads/writes.
-- Move remains conservative: a row is only `moved` when `renamedFrom` metadata exists or the existing unique-SHA out-of-band reconciliation creates it. A never-pushed file stays `unsynced` after rename.
+- `e586fc2`: regression test for an unpushed file rename. `SyncManager.trackRename()` must leave absent metadata absent; the panel then carries the new path as `unsynced` (Local only), without `movedFrom`.
 
 ## Verification
 
