@@ -216,14 +216,39 @@
 /* ── Action bar ─────────────────────────────────────────────────── */
 .ssv-action-bar {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    flex-direction: column;
+    gap: 6px;
     padding: 6px 10px;
     border-bottom: 1px solid var(--background-modifier-border);
-    flex-wrap: wrap;
     flex-shrink: 0;
     background: var(--background-primary);
 }
+
+.ssv-action-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+}
+
+.ssv-tree-options {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding-left: 4px;
+}
+
+.ssv-tree-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 0.80em;
+    cursor: pointer;
+}
+
+.ssv-tree-option input { margin: 0; cursor: pointer; }
 
 @container (max-width: 450px) {
     .ssv-btn-label { display: none; }
@@ -246,6 +271,8 @@
     gap: 8px;
     padding: 10px;
 }
+
+.is-mobile .ssv-action-bar-row { flex-wrap: wrap; gap: 8px; }
 
 .is-mobile .ssv-bar-spacer {
     display: none;
@@ -320,6 +347,63 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
+}
+
+/* ── Tree folders ──────────────────────────────────────────────── */
+.ssv-tree-children {
+    margin-left: 16px;
+    border-left: 1px solid var(--background-modifier-border);
+}
+
+.ssv-tree-folder-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 34px;
+    padding: 6px 12px 6px 5px;
+    border-bottom: 1px solid var(--background-modifier-border-hover);
+    color: var(--text-normal);
+}
+
+.ssv-tree-folder-row:hover { background: var(--background-modifier-hover); }
+
+.ssv-folder-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--font-monospace);
+    font-size: 18px;
+    line-height: 1;
+}
+
+.ssv-folder-checkbox {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.ssv-tree-folder-icon {
+    display: flex;
+    color: var(--text-warning);
+}
+
+.ssv-tree-folder-icon .svg-icon { width: 16px; height: 16px; }
+
+.ssv-tree-folder-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.84em;
+    font-weight: 600;
 }
 
 /* ── Empty / loading states ─────────────────────────────────────── */
