@@ -91,6 +91,33 @@ describe('SyncManager', () => {
         manager = new SyncManager(mockApp, mockGitLab, mockSettings);
     });
 
+    it('publishes a confirmed synced status whenever it records sync metadata', async () => {
+        manager.status.set({ path: 'note.md', status: 'modified', remoteSha: 'old-sha' });
+
+        await manager.updateMetadata('note.md', 'new-sha');
+
+        expect(manager.status.get('note.md')).toMatchObject({ status: 'synced', remoteSha: 'new-sha' });
+    });
+
+    it('does not read or push a file excluded by the configured ignore predicate', async () => {
+        const ignoredManager = new SyncManager(
+            mockApp,
+            mockGitLab,
+            mockSettings,
+            undefined,
+            (path) => path === 'private.md',
+        );
+        const file = Object.assign(new TFile(), { path: 'private.md', name: 'private.md' });
+        const readSpy = vi.spyOn(mockApp.vault, 'read').mockResolvedValue('secret');
+        const remoteSpy = vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
+
+        await ignoredManager.pushFile(file);
+
+        expect(readSpy).not.toHaveBeenCalled();
+        expect(remoteSpy).not.toHaveBeenCalled();
+        expect(mockGitLab.pushFile).not.toHaveBeenCalled();
+    });
+
     it('should push file content correctly', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
         const readSpy = vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
@@ -306,7 +333,7 @@ describe('SyncManager', () => {
     });
 
     describe('Renames and Moves', () => {
-        it('should detect and handle file rename', async () => {
+        it('detects and handles a file rename from legacy metadata without lastKnownPath', async () => {
             const oldPath = 'old.md';
             const newPath = 'new.md';
             const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
@@ -315,7 +342,6 @@ describe('SyncManager', () => {
             mockSettings.syncMetadata[oldPath] = {
                 lastSyncedSha: 'old-sha',
                 lastSyncedAt: Date.now(),
-                lastKnownPath: oldPath
             };
 
             // Mock: old file no longer exists in vault
