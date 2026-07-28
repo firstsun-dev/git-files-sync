@@ -20,6 +20,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] `feat(sync): auto-refresh status on startup`: enabled by default with a settings toggle; Synced tab is last and Synced rows are bottom-most on All.
 - [x] `feat(ui): Sync Status tree view`: paths are grouped into collapsible folders, and folder checkboxes select all visible descendant files with an indeterminate state for partial selection. The option row below Refresh toggles tree view and, when enabled, Show synced. Folder disclosure uses unboxed `+` / `−` signs.
 - [x] `fix(ui): show diff for moved-and-edited files`: moved rows retain the source path's remote SHA and current local content, so Diff compares the old remote file to the moved file even after further edits.
+- [x] `feat(changelog): add 1.5.0 What's New copy`: added the six approved highlights in English, Traditional Chinese, and Simplified Chinese, plus a link to the GitHub repository from the What's New modal.
 
 ### What's In Progress
 
@@ -36,4 +37,5 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] `npm run build` — passes, including Obsidian 1.11.0 compatibility typecheck
 - [x] `npx vitest run` — 33 files, 490 tests passed
 - [x] `npx vitest run` — 31 files, 478 tests passed
+- [x] `npx vitest run` — 33 files, 494 tests passed
 - [ ] Manual verification inside Obsidian — outstanding

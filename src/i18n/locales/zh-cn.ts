@@ -110,6 +110,7 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'confirmModal.cancel': '取消',
 
 	'whatsNew.title': '新功能',
+	'whatsNew.viewOnGitHub': '在 GitHub 上查看',
 	'whatsNew.viewChangelog': '查看完整更新日志',
 	'whatsNew.gotIt': '知道了',
 
