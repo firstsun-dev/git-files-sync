@@ -164,17 +164,41 @@ export default class GitLabFilesPush extends Plugin {
 		// file. Without handling that case, dragging a whole folder tracked
 		// nothing at all (the `instanceof TFile` check silently skipped the
 		// only event that fired), so no file under it ever showed as moved.
+		//
+		// Once tracked, also update any open sync panel live -- otherwise the
+		// row stays showing its pre-move state (or the old/new path pair as
+		// separate rows) until the next manual refresh.
 		this.registerEvent(
 			this.app.vault.on('rename', (file, oldPath) => {
 				if (file instanceof TFile) {
-					void this.sync.trackRename(file.path, oldPath);
+					void this.sync.trackRename(file.path, oldPath).then(() => {
+						this.notifySyncStatusViews(view => view.handleFileRenamed(file, oldPath));
+					});
 				} else if (file instanceof TFolder) {
 					void this.trackFolderRename(file, oldPath);
 				}
 			})
 		);
 
+		// A saved edit inside the configured vault folder should update that
+		// row's status live rather than leaving it stale until the next manual
+		// refresh. Reuses whatever sync panel views are currently open; no-op
+		// when the panel isn't open or the file isn't in scope.
+		this.registerEvent(
+			this.app.vault.on('modify', (file) => {
+				if (file instanceof TFile && this.filterPathByVaultFolder(file.path)) {
+					this.notifySyncStatusViews(view => void view.handleFileModified(file));
+				}
+			})
+		);
+
 		await this.checkForUpdateNotice();
+	}
+
+	private notifySyncStatusViews(callback: (view: SyncStatusView) => void): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(SYNC_STATUS_VIEW_TYPE)) {
+			if (leaf.view instanceof SyncStatusView) callback(leaf.view);
+		}
 	}
 
 	/**
@@ -192,6 +216,7 @@ export default class GitLabFilesPush extends Plugin {
 		for (const file of files) {
 			const oldPath = oldPrefix + file.path.slice(newPrefix.length);
 			await this.sync.trackRename(file.path, oldPath);
+			this.notifySyncStatusViews(view => view.handleFileRenamed(file, oldPath));
 		}
 	}
 

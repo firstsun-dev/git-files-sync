@@ -12,9 +12,9 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-07-27
+**Last Updated:** 2026-07-28
 **Session ID:** current
-**Active Feature:** None — issue #66's remaining correctness gap (below) is fixed and pushed to `prepare-1.5.0`. No PR opened yet for that branch; opening one now is the exact next step.
+**Active Feature:** None — draft [PR #79](https://github.com/firstsun-dev/git-files-sync/pull/79) (`prepare-1.5.0` → `main`, #63/#66/#67 + the delete-race fix) and draft [PR #80](https://github.com/firstsun-dev/git-files-sync/pull/80) (`sync-status-live-update` → `prepare-1.5.0`, the live-status-on-edit/move feature below) are both open, neither merged yet.
 
 ## Status
 
@@ -24,24 +24,27 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] feat-021 (issue [#66](https://github.com/firstsun-dev/git-files-sync/issues/66)) and feat-022 (issue [#67](https://github.com/firstsun-dev/git-files-sync/issues/67)) — merged to `prepare-1.5.0`.
 - [x] `fix(sync): track a moved folder's files, not just moved files` — `ee217b1`, merged to `prepare-1.5.0`. Obsidian fires one `rename` event for a moved *folder* (not one per file); the handler only matched `TFile`, so dragging a whole folder tracked nothing.
 - [x] `fix(sync): detect a folder move even when the plugin missed the live rename event` — `c806e22`, merged to `prepare-1.5.0`. Added `SyncStatusView.reconcileOutOfBandMoves()`, pairing an orphaned `remote-only` row with an `unsynced` row sharing the same git blob sha, for moves that happened while the plugin's `rename` listener wasn't observing (Obsidian closed, moved externally, or before load).
-- [x] **This session** — found and fixed the reason `c806e22`'s reconciler could still fail silently: `main.ts`'s generic `vault.on('delete', ...)` handler called `clearMetadata(path)` for *every* delete Obsidian reported. An out-of-band move (external tool, cloud sync, mobile) frequently reaches Obsidian's watcher as a bare delete of the old path with no correlated rename event — that handler raced ahead of the next status refresh and wiped exactly the `syncMetadata` entry `reconcileOutOfBandMoves` needs (it requires the orphan to still carry synced metadata at that exact path). Once cleared, the move degenerates back into the original #66 bug: permanent `remote-only` ghost + plain `unsynced` new file, never `moved`. `SyncManager.trackRename` has the identical hazard (`if (!metadata) return;` — silent no-op).
-  - Root cause confirmed with a failing-first test: `tests/ui/SyncStatusView.test.ts` — "cannot recognize an out-of-band move once its old-path metadata has already been cleared" — clears the old path's metadata (simulating the delete handler firing first) before calling `reconcileOutOfBandMoves`, and asserts the pair is never recognized. Passed against the *unfixed* code, confirming the hazard was real before touching `main.ts`.
-  - Fix: removed the eager `clearMetadata` call from that generic vault `delete` listener entirely. The performance rationale it was originally written for (avoid `detectRename`'s per-orphan network probe) no longer applies — `detectRename` now answers from an already-fetched tree, not a live lookup. The sync panel's own explicit delete actions (`handleLocalDelete`, `performLocalDeletion`) still clear their own metadata directly, since those are genuine, user-confirmed, no-move-possible deletes.
-  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean (incl. Obsidian 1.11.0 compat typecheck); `npx vitest run` → 451/451 passed (up from 435 at session start; +1 new regression test, the rest from an already-pushed commit this session picked up).
-  - Accepted trade-off, not a bug: a genuinely-deleted (never moved) file's `syncMetadata` entry now lingers until the user acts on its `remote-only` row, instead of being cleared immediately. This costs no correctness (status classification never depended on metadata presence) and no extra network calls — only a small amount of settings-file storage.
+- [x] `fix(sync): stop clearing rename metadata on generic vault delete events` — `c9d0cde`, pushed to `prepare-1.5.0`, now in draft PR #79. Found and fixed the reason `c806e22`'s reconciler could still fail silently: `main.ts`'s generic `vault.on('delete', ...)` handler called `clearMetadata(path)` for *every* delete Obsidian reported, racing ahead of `reconcileOutOfBandMoves` and destroying the exact metadata it needs when an out-of-band move reaches Obsidian's watcher as a bare delete with no correlated rename. Confirmed with a failing-first test before the fix; the eager clear is now removed entirely (no longer needed for performance either, since `detectRename` reads an already-fetched tree).
+- [x] **This session** — new feature (not tied to an existing issue), draft [PR #80](https://github.com/firstsun-dev/git-files-sync/pull/80) against `prepare-1.5.0`: the sync panel updates a row live instead of staying stale until the next manual refresh, in two cases:
+  - **Edit**: `main.ts` registers `vault.on('modify', ...)`, gated by the existing `filterPathByVaultFolder` scope check (the "target folder"), forwarding to `SyncStatusView.handleFileModified(file)`. Re-derives `'synced'`/`'modified'` from a local git-blob-hash comparison against the `remoteSha` already cached on that row — no network call.
+  - **Rename/move** (added after the user reported moving files/folders didn't update the panel either): `main.ts`'s existing `vault.on('rename', ...)` handler now also calls a new `SyncStatusView.handleFileRenamed(file, oldPath)` once `SyncManager.trackRename` (or, per file, `trackFolderRename`) has updated `syncMetadata` — reads that already-settled state (a `renamedFrom` if one was just recorded) to move the row to the new path as `'moved'`, or carry an unsynced/never-synced row over as-is. Also drops the row if the new path fell outside the configured vault folder. A shared `notifySyncStatusViews()` helper replaced the duplicated leaf-iteration code in both listeners.
+  - Both leave `'moved'` rows alone on edit (an edit doesn't undo a pending move) and skip any path mid-`'checking'` (an in-flight refresh will settle it) or not currently tracked (discovering new files needs the remote tree, out of scope for a per-event hook).
+  - Evidence: `npx eslint .` → 0 errors; `npm run build` → clean (incl. Obsidian 1.11.0 compat typecheck); `npx vitest run` → 460/460 passed (451 `prepare-1.5.0` baseline + 9 new tests: 4 for `handleFileModified`, 5 for `handleFileRenamed`, plus one assertion added to the existing `trackFolderRename` test).
+  - On branch `sync-status-live-update`, based on `prepare-1.5.0` per explicit user request (not `main` — keeps this in the same release train as #63/#66/#67 instead of a second parallel PR against `main`).
 
 ### What's In Progress
 
-- Nothing actively in progress — ready to open the PR for `prepare-1.5.0`.
+- `sync-status-live-update` (PR #80) is gate-clean; the rename/move follow-up commit above still needs to be pushed (was committed and verified but not yet pushed at end of session).
 
 ### What's Next
 
-1. Open a PR from `prepare-1.5.0` → `main` (closes #63, #66, #67).
-2. Manual verification of the rename/move UI inside the actual Obsidian plugin is still outstanding for all of feat-021/022 and both rounds of the folder-move bug fix — there is no headless way to confirm Obsidian's real event ordering (in-app drag vs. external-tool move) matches what's assumed here; flag this in the PR description.
-3. Issue #57 (live-credential smoke test before merging push/pull/delete changes) is open and directly relevant to this PR's scope — worth considering before merging.
-4. feat-004: SonarQube findings review (issue #45) — not started.
-5. feat-010: Bitbucket support (issue #37) — not started, depends on feat-009 (done).
-6. Re-sync against `gh issue list --repo firstsun-dev/git-files-sync --state open`.
+1. Push the rename/move follow-up commit on `sync-status-live-update` (PR #80 will update automatically).
+2. Get [PR #79](https://github.com/firstsun-dev/git-files-sync/pull/79) (`prepare-1.5.0` → `main`) merged, then [PR #80](https://github.com/firstsun-dev/git-files-sync/pull/80) — #80 is based on #79's branch, so it should follow, not race, #79.
+3. Manual verification inside the actual Obsidian plugin is still outstanding for all of feat-021/022, both rounds of the folder-move bug fix, and this session's live-update feature — there is no headless way to confirm Obsidian's real event ordering/timing (in-app drag vs. external-tool move, how promptly `'modify'` fires) matches what's assumed here; flagged in both PR descriptions.
+4. Issue #57 (live-credential smoke test before merging push/pull/delete changes) is open and directly relevant to this batch of changes — worth considering before merging.
+5. feat-004: SonarQube findings review (issue #45) — not started.
+6. feat-010: Bitbucket support (issue #37) — not started, depends on feat-009 (done).
+7. Re-sync against `gh issue list --repo firstsun-dev/git-files-sync --state open`.
 
 ## Blockers / Risks
 

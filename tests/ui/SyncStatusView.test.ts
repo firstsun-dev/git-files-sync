@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { SyncStatusView } from '../../src/ui/SyncStatusView';
-import { WorkspaceLeaf, Notice } from 'obsidian';
+import { WorkspaceLeaf, Notice, TFile } from 'obsidian';
 import type GitLabFilesPush from '../../src/main';
 import { setupObsidianDOM } from './setup-dom';
 import type { FileStatus } from '../../src/ui/types';
@@ -65,6 +65,11 @@ function makePlugin(overrides: {
             if (path.startsWith(prefix)) return path.substring(prefix.length);
             if (path === vaultFolder) return '';
             return path;
+        },
+        filterPathByVaultFolder(path: string): boolean {
+            if (!vaultFolder) return true;
+            const prefix = `${vaultFolder}/`;
+            return path.startsWith(prefix) || path === vaultFolder;
         },
     } as unknown as GitLabFilesPush;
 
@@ -487,6 +492,135 @@ describe('SyncStatusView move detection without a live rename event', () => {
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         expect(statuses.get('Notes/Projects/a.md')).toMatchObject({ status: 'remote-only' });
         expect(statuses.get('Archive/Projects/a.md')).not.toMatchObject({ status: 'moved' });
+    });
+});
+
+describe('SyncStatusView.handleFileModified', () => {
+    beforeAll(() => { setupObsidianDOM(); });
+
+    it('flips a synced row to modified when the edited content no longer matches the known remote sha', async () => {
+        const adapterRead = vi.fn().mockResolvedValue('edited content');
+        const { plugin, leaf } = makePlugin({ adapterRead });
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('note.md', { path: 'note.md', status: 'synced', localContent: 'old content', remoteSha: 'sha-of-old-content' });
+
+        const file = Object.assign(new TFile(), { path: 'note.md' });
+        await view.handleFileModified(file);
+
+        expect(statuses.get('note.md')).toMatchObject({ status: 'modified', localContent: 'edited content' });
+    });
+
+    it('leaves a moved row alone -- content edits do not undo a pending move', async () => {
+        const adapterRead = vi.fn().mockResolvedValue('edited content');
+        const { plugin, leaf } = makePlugin({ adapterRead });
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('new.md', { path: 'new.md', status: 'moved', movedFrom: 'old.md' });
+
+        const file = Object.assign(new TFile(), { path: 'new.md' });
+        await view.handleFileModified(file);
+
+        expect(adapterRead).not.toHaveBeenCalled();
+        expect(statuses.get('new.md')).toMatchObject({ status: 'moved', movedFrom: 'old.md' });
+    });
+
+    it('leaves a remote-only row alone -- there is no local file for it to have changed', async () => {
+        const adapterRead = vi.fn().mockResolvedValue('content');
+        const { plugin, leaf } = makePlugin({ adapterRead });
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('remote-only.md', { path: 'remote-only.md', status: 'remote-only' });
+
+        const file = Object.assign(new TFile(), { path: 'remote-only.md' });
+        await view.handleFileModified(file);
+
+        expect(adapterRead).not.toHaveBeenCalled();
+        expect(statuses.get('remote-only.md')).toMatchObject({ status: 'remote-only' });
+    });
+
+    it('ignores a path the panel is not currently tracking', async () => {
+        const adapterRead = vi.fn().mockResolvedValue('content');
+        const { plugin, leaf } = makePlugin({ adapterRead });
+        const view = new SyncStatusView(leaf, plugin);
+
+        const file = Object.assign(new TFile(), { path: 'untracked.md' });
+        await view.handleFileModified(file);
+
+        expect(adapterRead).not.toHaveBeenCalled();
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.has('untracked.md')).toBe(false);
+    });
+});
+
+describe('SyncStatusView.handleFileRenamed', () => {
+    beforeAll(() => { setupObsidianDOM(); });
+
+    it('moves a synced row to the new path as \'moved\', reading the renamedFrom trackRename just recorded', () => {
+        const { plugin, leaf } = makePlugin();
+        plugin.settings.syncMetadata = { 'old.md': { lastSyncedSha: 'sha-1', lastSyncedAt: 0, lastKnownPath: 'old.md' } };
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('old.md', { path: 'old.md', status: 'synced', remoteSha: 'sha-1' });
+
+        // Mirrors what main.ts does: SyncManager.trackRename runs first (moving
+        // the metadata entry and setting renamedFrom), then the view is notified.
+        void plugin.sync.trackRename('new.md', 'old.md');
+        const file = Object.assign(new TFile(), { path: 'new.md' });
+        view.handleFileRenamed(file, 'old.md');
+
+        expect(statuses.has('old.md')).toBe(false);
+        expect(statuses.get('new.md')).toMatchObject({ status: 'moved', movedFrom: 'old.md' });
+    });
+
+    it('carries an unsynced row over at the new path when the file was never synced', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('draft-old.md', { path: 'draft-old.md', status: 'unsynced', localContent: 'draft' });
+
+        const file = Object.assign(new TFile(), { path: 'draft-new.md' });
+        view.handleFileRenamed(file, 'draft-old.md');
+
+        expect(statuses.has('draft-old.md')).toBe(false);
+        expect(statuses.get('draft-new.md')).toMatchObject({ status: 'unsynced', localContent: 'draft' });
+    });
+
+    it('drops the row entirely when the rename moves the file out of the configured vault folder', () => {
+        const { plugin, leaf } = makePlugin({ vaultFolder: 'scoped' });
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('scoped/old.md', { path: 'scoped/old.md', status: 'synced', remoteSha: 'sha-1' });
+
+        const file = Object.assign(new TFile(), { path: 'outside/new.md' });
+        view.handleFileRenamed(file, 'scoped/old.md');
+
+        expect(statuses.has('scoped/old.md')).toBe(false);
+        expect(statuses.has('outside/new.md')).toBe(false);
+    });
+
+    it('ignores a rename mid-refresh -- the in-flight refresh will settle it', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('old.md', { path: 'old.md', status: 'checking' });
+
+        const file = Object.assign(new TFile(), { path: 'new.md' });
+        view.handleFileRenamed(file, 'old.md');
+
+        expect(statuses.get('old.md')).toMatchObject({ status: 'checking' });
+        expect(statuses.has('new.md')).toBe(false);
+    });
+
+    it('ignores a rename the panel is not currently tracking', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+
+        const file = Object.assign(new TFile(), { path: 'new.md' });
+        view.handleFileRenamed(file, 'untracked-old.md');
+
+        expect(statuses.has('new.md')).toBe(false);
     });
 });
 

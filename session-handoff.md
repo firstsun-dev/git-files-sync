@@ -7,38 +7,34 @@
   accumulating history instead of handing off.
 -->
 
-**Date:** 2026-07-27 · **Branch:** `local-prepare-1.5.0` (worktree at `.claude/worktrees/lively-marinating-feigenbaum`, tracks `github/prepare-1.5.0`)
+**Date:** 2026-07-28 · **Branch:** `sync-status-live-update` (worktree at `.claude/worktrees/sync-status-live-update`), based on `github/prepare-1.5.0`
 
 ## Current Objective
 
-User asked to finish troubleshooting a leftover debug-logging trail in this worktree and wrap up with a PR. The trail (uncommitted `logger.warn` calls in `main.ts`'s vault `delete`/`rename`/`trackFolderRename` handlers, added after `c806e22` and never cleaned up) pointed at a real bug in the out-of-band move detection `c806e22` had just added.
+User asked (in Chinese) for the sync panel to update a row live when its file changes and it's inside the target folder. Shipped as draft [PR #80](https://github.com/firstsun-dev/git-files-sync/pull/80) (`sync-status-live-update` → `prepare-1.5.0`, at user's explicit request — not `main`, since `prepare-1.5.0` already carries the unmerged #63/#66/#67 work in draft PR #79):
 
-## What was found and fixed
-
-`main.ts`'s generic `vault.on('delete', ...)` handler called `this.sync.clearMetadata(file.path)` for every delete Obsidian reported. An out-of-band move (external tool, cloud sync client, mobile) often reaches Obsidian's watcher as a bare delete of the old path with no correlated rename event. That handler raced ahead of the next sync-panel refresh and destroyed the exact `syncMetadata` entry `SyncStatusView.reconcileOutOfBandMoves()` (from `c806e22`) needs to recognize the pair — silently reproducing the original #66 bug (permanent `remote-only` ghost + plain `unsynced` new file, never `moved`) for exactly the case that reconciler exists to catch.
-
-Confirmed with a failing-first test before changing any source (`tests/ui/SyncStatusView.test.ts`, "cannot recognize an out-of-band move once its old-path metadata has already been cleared"): clears the old path's metadata to simulate the delete handler firing first, then calls `reconcileOutOfBandMoves` and asserts the pair is never recognized — passed against the unfixed code.
-
-Fix: removed the eager `clearMetadata` call from that listener. It's no longer needed for performance (`detectRename`'s orphan scan reads an already-fetched tree, not a live lookup, since an earlier perf pass) — the sync panel's own explicit delete actions still clear their own metadata directly, which is the only place a delete is confirmed *not* to be a move.
-
-The pre-existing uncommitted debug logging (`src/main.ts`, `tests/main.test.ts`) was discarded (`git checkout --`) once its job — pointing at this bug — was done; it added no test coverage of its own.
+1. **Edit** (first commit, `3373262`, already pushed): `main.ts` registers `vault.on('modify', ...)`, gated by `filterPathByVaultFolder` (the "target folder" = the `vaultFolder` setting), forwarding to `SyncStatusView.handleFileModified(file)`. Re-derives `'synced'`/`'modified'` from a local git-blob-hash comparison against the `remoteSha` already cached on the row — no network call.
+2. **Rename/move** (second commit, made this session, **committed but not yet pushed** — see "Exact next step"): user reported moving files/folders still didn't update the panel. `main.ts`'s existing `vault.on('rename', ...)` handler now also calls new `SyncStatusView.handleFileRenamed(file, oldPath)` after `SyncManager.trackRename`/`trackFolderRename` has updated `syncMetadata`, reading that already-settled state to move the row to `'moved'` at the new path (or carry an unsynced/never-synced row over, or drop it if the rename moved the file out of the vault folder). Added a `notifySyncStatusViews()` helper in `main.ts` to de-duplicate the leaf-iteration code both listeners needed.
 
 ## Exact next step
 
-Open a PR from `prepare-1.5.0` → `main` on `firstsun-dev/git-files-sync`. This branch carries #63 (sync plan preview), #66 + #67 (real move on rename, folder-move collapsing), and this session's fix, none of which have a PR yet. Conventional-commit title, mention it closes #63/#66/#67, and flag in the description that manual verification inside a real Obsidian instance is still outstanding (noted below).
+Push the rename/move commit — PR #80 will pick it up automatically:
+```
+git push github sync-status-live-update
+```
 
 ## Verification at the stopping point
 
 ```
 npx eslint .    → 0 errors
 npm run build   → clean (incl. Obsidian 1.11.0 compat typecheck)
-npx vitest run  → 451/451 passed
+npx vitest run  → 460/460 passed
 ```
 
-Not verified: manual use inside the actual Obsidian UI. This matters more than usual here — the bug just fixed is specifically about how Obsidian's vault watcher orders `delete`/`rename` events for out-of-band moves, which can't be simulated headlessly with confidence.
+Not verified: manual use inside the actual Obsidian UI — whether `'modify'`/`'rename'` fire promptly enough in practice, and whether a folder-drag's per-file `handleFileRenamed` calls read `syncMetadata` correctly mid-loop (each `trackRename` await happens before the next file's, so this should be safe, but it's untested against real Obsidian timing).
 
 ## Things a next session should not re-derive
 
-- If a future "move not detected" report comes in, check `main.ts`'s vault event handlers first for anything that might clear `syncMetadata` before `reconcileOutOfBandMoves` or `SyncManager.trackRename` gets to read it — both silently no-op on missing metadata by design, so a handler ordering race is invisible until someone traces it.
-- `clearMetadata` still has two legitimate call sites: `SyncStatusView.handleLocalDelete` and `performLocalDeletion` — both are the sync panel's own explicit, user-confirmed delete actions, not generic vault listeners, so clearing there is correct and intentional.
-- Local `main` git ref in this repo can be stale relative to `github/main` — always diff against `github/main` (after `git fetch github`), not local `main`, when checking whether a branch is ahead/behind.
+- **Root cause of the repeated "stale local main" problem, finally found**: this repo has two remotes. `origin` (`code.firstsun.org`, self-hosted) is what local branches like `main` track by default and it is stale (still years... days behind). `github` (`github.com`) is the actually-current one, where PRs live. `EnterWorktree`'s "fresh" mode branches off local `main`, i.e. off the stale `origin` state. **Always branch/rebase against `github/<branch>` (after `git fetch github`), never local `main` or `origin/main`, in this repo.**
+- `handleFileModified`/`handleFileRenamed` deliberately do *not* handle discovering a brand-new file (a `'create'` event) — that needs the remote tree, which is what a full refresh is for. Both only ever update a path already present in `fileStatuses`.
+- `clearMetadata` still has two legitimate call sites: `SyncStatusView.handleLocalDelete` and `performLocalDeletion` — both are the sync panel's own explicit, user-confirmed delete actions, not generic vault listeners, so clearing there is correct and intentional (unrelated to this session's feature, but adjacent code worth knowing about).
