@@ -19,6 +19,7 @@ describe('GitLabFilesPush.trackFolderRename', () => {
         const fakePlugin = {
             app: { vault: { getFiles: () => files } },
             sync: { trackRename },
+            notifySyncStatusViews: vi.fn(),
         };
 
         const folder = Object.assign(new TFolder(), { path: 'Archive/Projects' });
@@ -30,6 +31,9 @@ describe('GitLabFilesPush.trackFolderRename', () => {
         expect(trackRename).toHaveBeenCalledTimes(2);
         expect(trackRename).toHaveBeenCalledWith('Archive/Projects/a.md', 'Notes/Projects/a.md');
         expect(trackRename).toHaveBeenCalledWith('Archive/Projects/sub/b.md', 'Notes/Projects/sub/b.md');
+        // The sync panel is notified per file too, so a folder drag updates it
+        // live instead of leaving every affected row stale until a manual refresh.
+        expect(fakePlugin.notifySyncStatusViews).toHaveBeenCalledTimes(2);
     });
 
     it('does nothing when no files live under the moved folder', async () => {
@@ -37,6 +41,7 @@ describe('GitLabFilesPush.trackFolderRename', () => {
         const fakePlugin = {
             app: { vault: { getFiles: () => [] } },
             sync: { trackRename },
+            notifySyncStatusViews: vi.fn(),
         };
         const folder = Object.assign(new TFolder(), { path: 'Empty' });
 
