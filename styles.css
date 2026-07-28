@@ -204,19 +204,6 @@
     background: rgba(255, 255, 255, 0.22);
 }
 
-.ssv-show-synced {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 6px;
-    color: var(--text-muted);
-    font-size: 0.78em;
-    white-space: nowrap;
-    cursor: pointer;
-}
-
-.ssv-show-synced input { margin: 0; cursor: pointer; }
-
 .ssv-filter-select { display: none; }
 
 .is-mobile .ssv-filter-select {
@@ -226,21 +213,42 @@
     margin: 10px;
 }
 
-.is-mobile .ssv-show-synced {
-    margin: 0 10px 8px;
-}
-
 /* ── Action bar ─────────────────────────────────────────────────── */
 .ssv-action-bar {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    flex-direction: column;
+    gap: 6px;
     padding: 6px 10px;
     border-bottom: 1px solid var(--background-modifier-border);
-    flex-wrap: wrap;
     flex-shrink: 0;
     background: var(--background-primary);
 }
+
+.ssv-action-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+}
+
+.ssv-tree-options {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding-left: 4px;
+}
+
+.ssv-tree-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 0.80em;
+    cursor: pointer;
+}
+
+.ssv-tree-option input { margin: 0; cursor: pointer; }
 
 @container (max-width: 450px) {
     .ssv-btn-label { display: none; }
@@ -263,6 +271,8 @@
     gap: 8px;
     padding: 10px;
 }
+
+.is-mobile .ssv-action-bar-row { flex-wrap: wrap; gap: 8px; }
 
 .is-mobile .ssv-bar-spacer {
     display: none;
@@ -368,9 +378,10 @@
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
+    font-family: var(--font-monospace);
+    font-size: 18px;
+    line-height: 1;
 }
-
-.ssv-folder-toggle .svg-icon { width: 15px; height: 15px; }
 
 .ssv-folder-checkbox {
     width: 16px;

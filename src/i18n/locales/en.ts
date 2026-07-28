@@ -126,6 +126,7 @@ const en = {
 	'syncStatus.tab.remote-only': 'Remote',
 	'syncStatus.tab.moved': 'Moved',
 	'syncStatus.showSynced': 'Show synced',
+	'syncStatus.treeView': 'Tree view',
 	'syncStatus.filterByStatus': 'Filter files by status',
 	'syncStatus.noFilesForFilter': 'No {filter} files',
 	'syncStatus.search.placeholder': 'Filter by path…',

@@ -197,10 +197,10 @@
     {
       "id": "feat-025",
       "name": "feat(ui): tree view and synced toggle in Sync Status",
-      "description": "Render Sync Status paths as a collapsible hierarchy with tri-state folder selection. All hides Synced rows by default and offers an explicit Show synced checkbox; the Synced tab remains available.",
+      "description": "Render Sync Status paths as a collapsible hierarchy with tri-state folder selection. The controls below Refresh toggle tree view on/off and, while tree view is enabled, whether All shows Synced rows; the Synced tab remains available.",
       "dependencies": ["feat-024"],
       "status": "in-progress",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 484/484 passed; manual Obsidian verification outstanding."
+      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 490/490 passed; manual Obsidian verification outstanding."
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."

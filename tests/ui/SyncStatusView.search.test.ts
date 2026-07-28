@@ -30,6 +30,7 @@ function makeView(statuses: FileStatus[]): SyncStatusView {
 type Internals = {
     searchQuery: string;
     statusFilter: FilterValue;
+    treeViewEnabled: boolean;
     showSyncedInAll: boolean;
     selectedFiles: Set<string>;
     searchedStatuses(): FileStatus[];
@@ -68,6 +69,13 @@ describe('SyncStatusView search filter', () => {
     it('includes synced files in All when the show-synced checkbox is enabled', () => {
         const view = makeView(SAMPLE);
         internals(view).showSyncedInAll = true;
+
+        expect(internals(view).visibleStatuses()).toHaveLength(SAMPLE.length);
+    });
+
+    it('restores the flat All view with synced files when tree view is disabled', () => {
+        const view = makeView(SAMPLE);
+        internals(view).treeViewEnabled = false;
 
         expect(internals(view).visibleStatuses()).toHaveLength(SAMPLE.length);
     });
@@ -203,7 +211,7 @@ describe('SyncStatusView search box wiring', () => {
 
     it('shows synced search matches after opting in from All', async () => {
         const { root, view } = await openWithSearch(SAMPLE);
-        const checkbox = root.querySelector<HTMLInputElement>('.ssv-show-synced input')!;
+        const checkbox = root.querySelector<HTMLInputElement>('.ssv-show-synced-toggle')!;
 
         expect(checkbox).toBeTruthy();
         checkbox.checked = true;
@@ -211,6 +219,18 @@ describe('SyncStatusView search box wiring', () => {
 
         expect(internals(view).showSyncedInAll).toBe(true);
         expect(internals(view).visibleStatuses()).toHaveLength(SAMPLE.length);
+    });
+
+    it('can switch back to the flat list from the tree options row', async () => {
+        const { root, view } = await openWithSearch(SAMPLE);
+        const checkbox = root.querySelector<HTMLInputElement>('.ssv-tree-view-toggle')!;
+
+        checkbox.checked = false;
+        checkbox.dispatchEvent(new Event('change'));
+
+        expect(internals(view).treeViewEnabled).toBe(false);
+        expect(root.querySelector('.ssv-tree-folder')).toBeNull();
+        expect(root.querySelector('.ssv-show-synced-toggle')).toBeNull();
     });
 
     it('renders paths as a tree and selects the visible files in a folder', async () => {

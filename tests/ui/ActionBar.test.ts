@@ -6,7 +6,7 @@ beforeAll(() => { setupObsidianDOM(); });
 
 const baseProps = (overrides?: Partial<ActionBarProps>): ActionBarProps => ({
     hasFiles: true, allSelected: false, indeterminate: false,
-    canPush: 1, canPull: 1, canDelete: 1,
+    canPush: 1, canPull: 1, canDelete: 1, treeViewEnabled: true, showSynced: false,
     ...overrides,
 });
 
@@ -22,6 +22,8 @@ describe('renderActionBar', () => {
             onPush:      vi.fn(),
             onPull:      vi.fn(),
             onDelete:    vi.fn(),
+            onTreeViewChange: vi.fn(),
+            onShowSyncedChange: vi.fn(),
         };
     });
 
@@ -53,6 +55,34 @@ describe('renderActionBar', () => {
     });
 
     describe('when hasFiles is true', () => {
+        it('renders tree options below the action row', () => {
+            renderActionBar(container, baseProps(), callbacks);
+
+            expect(container.querySelector('.ssv-tree-options')).not.toBeNull();
+            expect(container.querySelector('.ssv-tree-options .ssv-tree-view-toggle')).not.toBeNull();
+            expect(container.querySelector('.ssv-tree-options .ssv-show-synced-toggle')).not.toBeNull();
+        });
+
+        it('only shows the synced control while tree view is enabled', () => {
+            renderActionBar(container, baseProps({ treeViewEnabled: false }), callbacks);
+
+            expect(container.querySelector('.ssv-show-synced-toggle')).toBeNull();
+        });
+
+        it('reports tree and synced toggle changes', () => {
+            renderActionBar(container, baseProps(), callbacks);
+            const treeView = container.querySelector<HTMLInputElement>('.ssv-tree-view-toggle')!;
+            const showSynced = container.querySelector<HTMLInputElement>('.ssv-show-synced-toggle')!;
+
+            treeView.checked = false;
+            treeView.dispatchEvent(new Event('change'));
+            showSynced.checked = true;
+            showSynced.dispatchEvent(new Event('change'));
+
+            expect(callbacks.onTreeViewChange).toHaveBeenCalledWith(false);
+            expect(callbacks.onShowSyncedChange).toHaveBeenCalledWith(true);
+        });
+
         it('renders push, pull, and delete buttons', () => {
             renderActionBar(container, baseProps(), callbacks);
             expect(container.querySelector('.ssv-btn-push')).not.toBeNull();
