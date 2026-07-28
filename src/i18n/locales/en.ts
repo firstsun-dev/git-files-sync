@@ -27,6 +27,8 @@ const en = {
 	'settings.vaultFolder.name': 'Vault folder',
 	'settings.vaultFolder.desc': 'Optional: only sync files in this vault folder (e.g. "sync" to only sync files in the sync folder)',
 	'settings.vaultFolder.placeholder': 'Leave empty to sync all files',
+	'settings.autoRefreshOnStartup.name': 'Refresh status on startup',
+	'settings.autoRefreshOnStartup.desc': 'Automatically refresh the Sync Status View when Obsidian finishes loading',
 
 	'settings.ignorePatterns.name': 'Ignore patterns',
 	'settings.ignorePatterns.desc': 'Optional: .gitignore-style patterns (one per line) to exclude local files from sync, in addition to the repository\'s own .gitignore.',
@@ -123,6 +125,7 @@ const en = {
 	'syncStatus.tab.unsynced': 'Local only',
 	'syncStatus.tab.remote-only': 'Remote',
 	'syncStatus.tab.moved': 'Moved',
+	'syncStatus.filterByStatus': 'Filter files by status',
 	'syncStatus.noFilesForFilter': 'No {filter} files',
 	'syncStatus.search.placeholder': 'Filter by path…',
 	'syncStatus.search.clear': 'Clear filter',

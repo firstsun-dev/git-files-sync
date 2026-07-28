@@ -5,7 +5,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-07-28
-**Active Feature:** None — shared sync-status state is complete on `codex/sync-status-service-1-5`, based on `github/prepare-1.5.0`.
+**Active Feature:** `feat-024` — auto-refresh status on startup and status ordering, prepared for PR into `prepare-1.5.0`.
 
 ## Status
 
@@ -17,6 +17,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] `test(sync): guard never-pushed rename status` (`e586fc2`): verifies `trackRename` leaves missing metadata absent and the view carries the renamed row as Local only, never as moved.
 - [x] `fix(sync): honor ignore patterns for direct push` (`61ca728`): the Ribbon, context-menu, and command single-file Push paths now stop before a vault read or remote call when a user ignore pattern matches. Batch Push filters ignored paths too; saving relevant settings rebuilds the ignore matcher immediately.
 - [x] `fix(sync): reconcile moves from legacy metadata` (`ed04867`): an out-of-band move after restart now treats a missing legacy `lastKnownPath` as the metadata record key, allowing the unique SHA-matched Local only + Remote only pair to become a safe Move.
+- [x] `feat(sync): auto-refresh status on startup`: enabled by default with a settings toggle; Synced tab is last and Synced rows are bottom-most on All.
 
 ### What's In Progress
 
@@ -24,13 +25,12 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ### What's Next
 
-1. Push `codex/sync-status-service-1-5` and open a PR into `prepare-1.5.0` when ready.
-2. Manually verify the sync panel in Obsidian: new local/remote files, edited synced file, in-app file/folder move, external move with no rename event (including a pre-`lastKnownPath` metadata entry), and a direct Push of a file matching a newly-added user ignore pattern.
-3. Issue #57 live-credential smoke test remains relevant before merging push/pull/delete work.
+1. Manually verify startup refresh and the setting toggle in Obsidian.
+2. Issue #57 live-credential smoke test remains relevant before merging push/pull/delete work.
 
 ## Evidence of Completion
 
 - [x] `npx eslint .` — 0 errors
 - [x] `npm run build` — passes, including Obsidian 1.11.0 compatibility typecheck
-- [x] `npx vitest run` — 31 files, 472 tests passed
+- [x] `npx vitest run` — 31 files, 474 tests passed
 - [ ] Manual verification inside Obsidian — outstanding

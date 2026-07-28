@@ -69,8 +69,10 @@ export interface GitLabFilesPushSettings {
     lastSeenVersion: string;
     /** Version whose "what's new" banner in the settings tab has been dismissed, if any. */
     bannerDismissedVersion: string;
-    /** UI language. 'system' follows Obsidian's display language, falling back to English if unsupported. */
-    language: LanguageSetting;
+	/** UI language. 'system' follows Obsidian's display language, falling back to English if unsupported. */
+	language: LanguageSetting;
+	/** Refresh the sync status automatically after Obsidian finishes loading. */
+	autoRefreshOnStartup: boolean;
 }
 
 export function getServiceName(settings: GitLabFilesPushSettings): string {
@@ -112,7 +114,8 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	ignorePatterns: '',
 	lastSeenVersion: '',
 	bannerDismissedVersion: '',
-	language: 'system'
+	language: 'system',
+	autoRefreshOnStartup: true
 }
 
 const CONNECTION_TEST_DEBOUNCE_MS = 800;
@@ -327,6 +330,16 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					});
 				FolderSuggest.attach(this.app, text.inputEl);
 			});
+
+		new Setting(containerEl)
+			.setName(t('settings.autoRefreshOnStartup.name'))
+			.setDesc(t('settings.autoRefreshOnStartup.desc'))
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.autoRefreshOnStartup)
+				.onChange((value) => {
+					this.plugin.settings.autoRefreshOnStartup = value;
+					void this.plugin.saveSettings();
+				}));
 
 		new Setting(containerEl)
 			.setName(t('settings.ignorePatterns.name'))
