@@ -8,6 +8,7 @@ import type { FileStatus } from '../../src/ui/types';
 import type { GitTreeEntry } from '../../src/services/git-service-interface';
 import { SyncPlanModal } from '../../src/ui/SyncPlanModal';
 import { ConfirmModal } from '../../src/ui/ConfirmModal';
+import { gitBlobSha } from '../../src/utils/git-blob-sha';
 
 // The diff pane is a separate view; none of these fixtures open one, so the
 // stale-pane cleanup just finds nothing.
@@ -57,6 +58,11 @@ function makePlugin(overrides: {
                     lastKnownPath: newPath,
                     ...(newPath === remotePath ? {} : { renamedFrom: remotePath }),
                 };
+            },
+            // Mirrors SyncManager.updateMetadata.
+            async updateMetadata(path: string, sha: string): Promise<void> {
+                settings.syncMetadata = settings.syncMetadata ?? {};
+                settings.syncMetadata[path] = { lastSyncedSha: sha, lastSyncedAt: 0, lastKnownPath: path };
             },
         },
         getNormalizedPath(path: string): string {
@@ -377,6 +383,63 @@ describe('SyncStatusView local-only status', () => {
         expect(getFile).toHaveBeenCalledWith('notes/existing.md', 'main');
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         expect(statuses.get('notes/existing.md')?.status).toBe('synced');
+    });
+
+    // Root cause of a real report: a file whose content already matches the
+    // remote (e.g. never pushed/pulled through this plugin -- cloned in, or
+    // coincidentally identical) showed 'synced' in the panel but had no
+    // syncMetadata entry. Renaming/moving it then found no metadata at the old
+    // path, so SyncManager.trackRename silently no-opped and the move showed
+    // as a stray remote-only + unsynced pair instead of 'moved'. Classifying a
+    // file as 'synced' must backfill syncMetadata so a later move is tracked.
+    it('backfills syncMetadata when a sha-based comparison finds a file already synced', async () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        vi.spyOn(view as unknown as { readLocalContentForSha(...args: unknown[]): Promise<string> }, 'readLocalContentForSha')
+            .mockResolvedValue('same content');
+
+        await (view as unknown as {
+            refreshFileStatusBySha(fileOrPath: string, remoteEntry: GitTreeEntry): Promise<void>
+        }).refreshFileStatusBySha('notes/pre-existing.md', { path: 'notes/pre-existing.md', symlink: false, sha: await gitBlobSha('same content') });
+
+        expect(plugin.settings.syncMetadata?.['notes/pre-existing.md']).toMatchObject({ lastKnownPath: 'notes/pre-existing.md' });
+    });
+
+    it('backfills syncMetadata when a content-based comparison finds a file already synced', async () => {
+        const getFile = vi.fn().mockResolvedValue({ content: 'same content', sha: 'remote-sha' });
+        const { plugin, leaf } = makePlugin({ adapterExists: vi.fn().mockResolvedValue(true) });
+        (plugin.gitService as unknown as { getFile: typeof getFile }).getFile = getFile;
+
+        const view = new SyncStatusView(leaf, plugin);
+        vi.spyOn(view as unknown as { readFileContent(f: unknown, b: boolean, s: boolean): Promise<string> }, 'readFileContent')
+            .mockResolvedValue('same content');
+
+        await (view as unknown as {
+            refreshFileStatusByContent(fileOrPath: string): Promise<void>
+        }).refreshFileStatusByContent('notes/pre-existing.md');
+
+        expect(plugin.settings.syncMetadata?.['notes/pre-existing.md']).toMatchObject({ lastSyncedSha: 'remote-sha' });
+    });
+
+    it('end-to-end: a rename right after a sha-based synced classification is tracked as moved, not a stray remote-only + unsynced pair', async () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        vi.spyOn(view as unknown as { readLocalContentForSha(...args: unknown[]): Promise<string> }, 'readLocalContentForSha')
+            .mockResolvedValue('same content');
+        const sha = await gitBlobSha('same content');
+
+        // First refresh: the file was never pushed/pulled through the plugin,
+        // but its content already matches remote -- classified 'synced' from a
+        // clean slate, same as a freshly opened vault.
+        await (view as unknown as {
+            refreshFileStatusBySha(fileOrPath: string, remoteEntry: GitTreeEntry): Promise<void>
+        }).refreshFileStatusBySha('notes/old.md', { path: 'notes/old.md', symlink: false, sha });
+
+        // Then the user renames it inside Obsidian -- mirrors main.ts's rename handler.
+        await plugin.sync.trackRename('notes/new.md', 'notes/old.md');
+
+        expect(plugin.settings.syncMetadata?.['notes/old.md']).toBeUndefined();
+        expect(plugin.settings.syncMetadata?.['notes/new.md']).toMatchObject({ renamedFrom: 'notes/old.md' });
     });
 
     it('classifies a tracked pending move as "moved" from metadata alone, with no tree/content lookup', async () => {
