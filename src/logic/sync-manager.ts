@@ -1,18 +1,27 @@
 import { TFile, App, Notice } from 'obsidian';
-import { GitServiceInterface, GitTreeEntry, GitFile } from '../services/git-service-interface';
+import { GitServiceInterface, GitTreeEntry, GitFile, BatchMoveItem } from '../services/git-service-interface';
 import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
-import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling } from '../settings';
+import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling, isSyncMetadataAtPath } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
+import { SyncPlanModal, SyncPlanDirection } from '../ui/SyncPlanModal';
+import { SyncPlan, SyncPlanEntry, isSyncPlanEmpty } from '../ui/types';
 import { logger } from '../utils/logger';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 import { readLocalSymlinkTarget, createLocalSymlink } from '../utils/symlink';
 import { gitBlobSha } from '../utils/git-blob-sha';
+import { SyncStatusService } from './sync-status-service';
 
 /** Result of syncing one file within a batch push/pull. */
 type BatchOutcome = 'done' | 'unchanged' | 'conflict';
 
+/** Result of classifying one file for a plan preview -- like BatchOutcome, but read-only and distinguishing additions/modifications/moves for display. */
+type PlanClassification = { kind: 'addition' | 'modification' | 'move' | 'unchanged' | 'conflict' | 'skip'; movedFrom?: string };
+
 /** A file classified as needing a push, queued for the grouped batch-commit call. */
 type ToPushEntry = { path: string; name: string; repoPath: string; content: string | ArrayBuffer; existingSha?: string };
+
+/** A renamed file classified as a safe move, queued for the grouped batch-commit call. */
+type ToMoveEntry = { path: string; name: string; repoPath: string; oldPath: string; oldRepoPath: string; content: string | ArrayBuffer };
 
 /**
  * Result of a batch push. `syncedPaths` lists every path that's now confirmed
@@ -36,12 +45,23 @@ export class SyncManager {
     private gitService: GitServiceInterface;
     private readonly settings: GitLabFilesPushSettings;
     private readonly onSaveSettings?: () => Promise<void>;
+    private readonly isPathIgnored: (path: string) => boolean;
+    readonly status: SyncStatusService;
 
-    constructor(app: App, gitService: GitServiceInterface, settings: GitLabFilesPushSettings, onSaveSettings?: () => Promise<void>) {
+    constructor(
+        app: App,
+        gitService: GitServiceInterface,
+        settings: GitLabFilesPushSettings,
+        onSaveSettings?: () => Promise<void>,
+        isPathIgnored: (path: string) => boolean = () => false,
+        status: SyncStatusService = new SyncStatusService(),
+    ) {
         this.app = app;
         this.gitService = gitService;
         this.settings = settings;
         this.onSaveSettings = onSaveSettings;
+        this.isPathIgnored = isPathIgnored;
+        this.status = status;
     }
 
     private get serviceName(): string {
@@ -55,12 +75,42 @@ export class SyncManager {
             lastKnownPath: path
         };
         await this.saveSettings();
+        this.status.markSynced(path, sha);
     }
 
     /** Drop sync metadata for a path that's been deleted, so it can't be mistaken for a rename source later. */
     public async clearMetadata(path: string): Promise<void> {
         if (!(path in this.settings.syncMetadata)) return;
         delete this.settings.syncMetadata[path];
+        await this.saveSettings();
+    }
+
+    /**
+     * Records a vault 'rename' event so a later push recognizes it as a real
+     * move — no content probing or remote lookup needed, Obsidian already
+     * told us the exact old path. A file with no tracked metadata was never
+     * synced, so there's nothing to carry forward: it's just a new file at a
+     * new name.
+     *
+     * A chain of renames (A→B→C) collapses to a single pending move by always
+     * recording the still-unpushed remote path, not the most recent hop; and
+     * renaming back to that path (B→A) cancels the pending move entirely,
+     * since the file is once again exactly what's on the remote.
+     */
+    public async trackRename(newPath: string, oldPath: string): Promise<void> {
+        const metadata = this.settings.syncMetadata[oldPath];
+        if (!metadata) return;
+
+        delete this.settings.syncMetadata[oldPath];
+        const remotePath = metadata.renamedFrom ?? oldPath;
+
+        this.settings.syncMetadata[newPath] = {
+            lastSyncedSha: metadata.lastSyncedSha,
+            lastSyncedAt: metadata.lastSyncedAt,
+            lastKnownPath: newPath,
+            ...(newPath === remotePath ? {} : { renamedFrom: remotePath }),
+        };
+
         await this.saveSettings();
     }
 
@@ -78,6 +128,27 @@ export class SyncManager {
         this.gitService = gitService;
     }
 
+    /** A plan with exactly one entry, for a single-file push/pull's confirm step. */
+    private singleEntryPlan(kind: 'addition' | 'modification', path: string, name: string): SyncPlan {
+        const plan: SyncPlan = { additions: [], modifications: [], deletions: [], moves: [] };
+        const entry: SyncPlanEntry = { path, name };
+        (kind === 'addition' ? plan.additions : plan.modifications).push(entry);
+        return plan;
+    }
+
+    /**
+     * Shows the plan for review and resolves once the user confirms or
+     * cancels. A plan with nothing to apply (e.g. every candidate file was
+     * already in sync or skipped as a conflict) resolves immediately without
+     * showing anything — there is nothing to review.
+     */
+    private confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean> {
+        if (isSyncPlanEmpty(plan)) return Promise.resolve(true);
+        return new Promise(resolve => {
+            new SyncPlanModal(this.app, plan, direction, () => resolve(true), () => resolve(false)).open();
+        });
+    }
+
     /**
      * Returns a confirmed-synced result (with the new blob sha, when known) so
      * an interactive single-file push can mark the file's UI status directly —
@@ -90,6 +161,11 @@ export class SyncManager {
     async pushFile(fileOrPath: TFile | string): Promise<{ sha?: string } | undefined> {
         const { path, name, isString } = this.getFileInfo(fileOrPath);
         const repoPath = this.getNormalizedPath(path);
+
+        if (this.isPathIgnored(path)) {
+            new Notice(`Skipped ${name}: it matches an ignore pattern.`);
+            return undefined;
+        }
 
         if (!await this.checkFileExists(path, isString)) {
             new Notice(`File ${name} no longer exists in vault.`);
@@ -124,6 +200,9 @@ export class SyncManager {
                 return undefined;
             }
 
+            const confirmed = await this.confirmPlan(this.singleEntryPlan(remote.sha ? 'modification' : 'addition', path, name), 'push');
+            if (!confirmed) return undefined;
+
             const sha = await this.performPush({ path, name }, content, remote.sha);
             return { sha };
         } catch (e) {
@@ -153,11 +232,15 @@ export class SyncManager {
 
         const content = await this.getFileContent(fileOrPath);
 
+        // A path already carrying renamedFrom was tracked live by the vault
+        // 'rename' handler, so it's known for free; only fall back to the
+        // content-based scan for renames the plugin missed (e.g. it was
+        // disabled at the time).
         if (!isString && fileOrPath instanceof TFile) {
-            const renamedFrom = await this.detectRename(fileOrPath, content);
+            const renamedFrom = this.settings.syncMetadata[path]?.renamedFrom ?? await this.detectRename(fileOrPath, content);
             if (renamedFrom) {
                 const sha = await this.handleRename(fileOrPath, renamedFrom, content);
-                return { handled: true, result: { sha } };
+                return { handled: true, result: sha !== undefined ? { sha } : undefined };
             }
         }
 
@@ -208,7 +291,7 @@ export class SyncManager {
     ): Promise<string | null> {
         const candidates = Object.keys(this.settings.syncMetadata).filter(oldPath => {
             const metadata = this.settings.syncMetadata[oldPath];
-            return !!metadata && oldPath !== file.path && metadata.lastKnownPath === oldPath
+            return oldPath !== file.path && isSyncMetadataAtPath(metadata, oldPath)
                 && !this.app.vault.getFileByPath(oldPath);
         });
         if (candidates.length === 0) return null;
@@ -253,39 +336,73 @@ export class SyncManager {
         return entry.sha ? entry.sha === localSha : undefined;
     }
 
-    private async handleRename(file: TFile, oldPath: string, content: string | ArrayBuffer): Promise<string> {
+    /**
+     * Commits a rename as a real move: the new path is added and the old path
+     * is removed in one commit (via commitBatch where the provider supports
+     * it, otherwise a sequential push-then-delete). Two safety checks guard
+     * against destroying data:
+     *
+     * - The target path must not already exist on the remote — that would be
+     *   a silent overwrite of someone else's file, so this bails out entirely
+     *   (returning undefined, nothing pushed) and leaves the pending move in
+     *   place for the user to resolve.
+     * - The old path's remote content must still match what was last synced
+     *   there. If it doesn't, someone changed the remote since — deleting it
+     *   would discard a change we've never seen, so the new content is still
+     *   pushed (nothing local is lost) but the old path is left alone.
+     *
+     * Returns the new path's blob sha on a confirmed push, so pushFile can
+     * mark the file synced directly instead of re-fetching the remote tree.
+     */
+    private async handleRename(file: TFile, oldPath: string, content: string | ArrayBuffer): Promise<string | undefined> {
         try {
             const repoPath = this.getNormalizedPath(file.path);
             const oldRepoPath = this.getNormalizedPath(oldPath);
+            const metadata = this.settings.syncMetadata[file.path] ?? this.settings.syncMetadata[oldPath];
 
-            // The new path may already exist on the remote (e.g. a prior push, or a
-            // stale rename match); if so we must send its sha or the API rejects the
-            // request as a duplicate create.
             const existingAtNewPath = await this.gitService.getFile(repoPath, this.settings.branch);
+            if (existingAtNewPath.sha) {
+                new Notice(`Can't move ${file.name}: "${repoPath}" already exists on ${this.serviceName}. Resolve manually, then push again.`);
+                return undefined;
+            }
 
-            // Push the file to the new location
-            const result = await this.gitService.pushFile(
-                repoPath,
-                content,
-                this.settings.branch,
-                `Rename ${oldRepoPath} to ${repoPath}`,
-                existingAtNewPath.sha
-            );
+            const remoteAtOldPath = await this.gitService.getFile(oldRepoPath, this.settings.branch);
+            const safeToDeleteOld = !remoteAtOldPath.sha || !metadata?.lastSyncedSha || remoteAtOldPath.sha === metadata.lastSyncedSha;
 
-            // Update metadata
-            const newSha = result.sha ?? await gitBlobSha(content);
+            const newSha = await this.commitMove(repoPath, oldRepoPath, content, safeToDeleteOld && !!remoteAtOldPath.sha);
+
             await this.updateMetadata(file.path, newSha);
-
-            // Remove old metadata
             delete this.settings.syncMetadata[oldPath];
-
             await this.saveSettings();
-            new Notice(`Renamed and pushed ${file.name} to ${this.serviceName}\nNote: Old file at ${oldPath} may need manual deletion from remote`);
+
+            if (safeToDeleteOld) {
+                new Notice(`Moved ${file.name} on ${this.serviceName}`);
+            } else {
+                new Notice(`Pushed ${file.name} to ${this.serviceName}, but "${oldPath}" changed on ${this.serviceName} since the last sync and was left in place. Resolve manually.`);
+            }
             return newSha;
         } catch (e) {
             this.handleError('Failed to handle rename', e);
             throw e; // Rethrow for batch processing
         }
+    }
+
+    /** Commits one move (single-file flow only; the batch flow groups many moves into one commit via commitBatch directly). */
+    private async commitMove(repoPath: string, oldRepoPath: string, content: string | ArrayBuffer, deleteOld: boolean): Promise<string> {
+        if (this.gitService.commitBatch) {
+            const message = deleteOld ? `Move ${oldRepoPath} to ${repoPath}` : `Add ${repoPath}`;
+            const moves: BatchMoveItem[] = deleteOld ? [{ oldPath: oldRepoPath, newPath: repoPath, content }] : [];
+            const additions = deleteOld ? [] : [{ path: repoPath, content }];
+            const [result] = await this.gitService.commitBatch(additions, moves, this.settings.branch, message);
+            return result?.sha ?? await gitBlobSha(content);
+        }
+
+        const pushResult = await this.gitService.pushFile(repoPath, content, this.settings.branch, `Move ${oldRepoPath} to ${repoPath}`);
+        const newSha = pushResult.sha ?? await gitBlobSha(content);
+        if (deleteOld) {
+            await this.gitService.deleteFile(oldRepoPath, this.settings.branch, `Remove ${oldRepoPath} (moved to ${repoPath})`);
+        }
+        return newSha;
     }
 
     private async performPush(file: {path: string, name: string}, content: string | ArrayBuffer, existingSha?: string, silent = false): Promise<string | undefined> {
@@ -375,6 +492,9 @@ export class SyncManager {
                 return;
             }
 
+            const confirmed = await this.confirmPlan(this.singleEntryPlan(exists ? 'modification' : 'addition', path, name), 'pull');
+            if (!confirmed) return;
+
             const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
             await this.performPull(fileRep, remote.content, remote.sha);
         } catch (e) {
@@ -454,7 +574,16 @@ export class SyncManager {
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
     ): Promise<PushResults> {
-        return this.processPushBatch(files, onProgress, remoteTree);
+        const syncableFiles = files.filter(file => file && !this.isPathIgnored(this.getFileInfo(file).path));
+        if (syncableFiles.length === 0) {
+            return { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
+        }
+        const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
+        const plan = await this.planPushBatch(syncableFiles, tree);
+        if (!isSyncPlanEmpty(plan) && !await this.confirmPlan(plan, 'push')) {
+            return { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
+        }
+        return this.processPushBatch(syncableFiles, onProgress, tree);
     }
 
     async pullAllFiles(
@@ -462,7 +591,166 @@ export class SyncManager {
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
     ): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
-        return this.processPullBatch(files, onProgress, remoteTree);
+        let tree = remoteTree;
+        if (!tree) {
+            try {
+                tree = await this.gitService.listFilesDetailed(this.settings.branch, false);
+            } catch (e) {
+                logger.warn('Failed to fetch remote tree for pull; falling back to per-file fetches', e);
+            }
+        }
+        const plan = await this.planPullBatch(files, tree);
+        if (!isSyncPlanEmpty(plan) && !await this.confirmPlan(plan, 'pull')) {
+            return { success: 0, failed: 0, conflicts: 0, errors: [] };
+        }
+        return this.processPullBatch(files, onProgress, tree);
+    }
+
+    /** Computes what a push-all would do, without writing anything, for the plan-review modal. */
+    async planPushBatch(files: (TFile | string)[], remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
+        const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
+        const treeByFullPath = new Map<string, GitTreeEntry>(tree.map(e => [e.path, e]));
+        const hasOrphans = this.hasOrphanedRenameMetadata();
+
+        const plan: SyncPlan = { additions: [], modifications: [], deletions: [], moves: [] };
+        for (const fileOrPath of files) {
+            if (!fileOrPath) continue;
+            const { path, name, isString } = this.getFileInfo(fileOrPath);
+            try {
+                const result = await this.classifyPushForPlan(fileOrPath, path, name, isString, treeByFullPath, hasOrphans);
+                this.addPlanEntry(plan, result.kind, path, name, result.movedFrom);
+            } catch (e) {
+                logger.warn(`Skipping ${path} from push plan preview`, e);
+            }
+        }
+        return plan;
+    }
+
+    /** Computes what a pull-all would do, without writing anything, for the plan-review modal. */
+    async planPullBatch(files: (TFile | string)[], remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
+        let treeByFullPath: Map<string, GitTreeEntry> | undefined;
+        if (remoteTree) {
+            treeByFullPath = new Map(remoteTree.map(e => [e.path, e]));
+        }
+
+        const plan: SyncPlan = { additions: [], modifications: [], deletions: [], moves: [] };
+        for (const fileOrPath of files) {
+            if (!fileOrPath) continue;
+            const { path, name, isString } = this.getFileInfo(fileOrPath);
+            try {
+                const kind = await this.classifyPullForPlan(fileOrPath, path, isString, treeByFullPath);
+                this.addPlanEntry(plan, kind, path, name);
+            } catch (e) {
+                logger.warn(`Skipping ${path} from pull plan preview`, e);
+            }
+        }
+        return plan;
+    }
+
+    private addPlanEntry(plan: SyncPlan, kind: string, path: string, name: string, movedFrom?: string): void {
+        const entry: SyncPlanEntry = { path, name, movedFrom };
+        if (kind === 'addition') plan.additions.push(entry);
+        else if (kind === 'modification') plan.modifications.push(entry);
+        else if (kind === 'move') plan.moves.push(entry);
+        // 'unchanged' / 'conflict' / 'skip' aren't part of what would be applied.
+    }
+
+    /**
+     * Read-only mirror of classifyPushCandidate's decision, for the plan
+     * preview: reuses queueMove (already pure — its only side effect is
+     * pushing into the scratch array passed in) and classifyAgainstTreeEntry
+     * in dry-run mode, so the two safety checks that guard a real move can't
+     * silently drift out of sync with what the plan shows.
+     */
+    private async classifyPushForPlan(
+        fileOrPath: TFile | string,
+        path: string,
+        name: string,
+        isString: boolean,
+        treeByFullPath: Map<string, GitTreeEntry>,
+        hasOrphans: boolean
+    ): Promise<PlanClassification> {
+        if (!await this.checkFileExists(path, isString)) return { kind: 'skip' };
+
+        const symlinkTarget = readLocalSymlinkTarget(this.app, path);
+        if (symlinkTarget !== null) {
+            const symlinkResult = this.classifySymlinkForPushPlan(path, treeByFullPath);
+            if (symlinkResult) return symlinkResult;
+            // 'follow' (or 'real' without provider support): falls through to a normal content push.
+        }
+
+        const content = await this.getFileContent(fileOrPath);
+        const repoPath = this.getNormalizedPath(path);
+
+        if (!isString && fileOrPath instanceof TFile) {
+            const moveResult = await this.classifyMoveForPushPlan(fileOrPath, path, name, content, treeByFullPath, hasOrphans);
+            if (moveResult) return moveResult;
+        }
+
+        const treeEntry = treeByFullPath.get(this.getFullPathForTree(repoPath));
+        const outcome = await this.classifyAgainstTreeEntry(path, content, treeEntry, true);
+        if (outcome === 'queued') return { kind: treeEntry ? 'modification' : 'addition' };
+        // classifyAgainstTreeEntry's dry-run path only ever resolves to
+        // 'unchanged' or 'conflict' -- 'done' belongs to the symlink branch,
+        // already handled above.
+        return { kind: outcome === 'conflict' ? 'conflict' : 'unchanged' };
+    }
+
+    private classifySymlinkForPushPlan(path: string, treeByFullPath: Map<string, GitTreeEntry>): PlanClassification | undefined {
+        const mode = getEffectiveSymlinkHandling(this.settings);
+        if (mode === 'skip') return { kind: 'unchanged' };
+        if (mode !== 'real' || !this.gitService.pushSymlink) return undefined;
+
+        const repoPath = this.getNormalizedPath(path);
+        const treeEntry = treeByFullPath.get(this.getFullPathForTree(repoPath));
+        return { kind: treeEntry ? 'modification' : 'addition' };
+    }
+
+    /** Undefined means "not a tracked rename" -- the caller falls through to a normal content classification. */
+    private async classifyMoveForPushPlan(
+        file: TFile,
+        path: string,
+        name: string,
+        content: string | ArrayBuffer,
+        treeByFullPath: Map<string, GitTreeEntry>,
+        hasOrphans: boolean
+    ): Promise<PlanClassification | undefined> {
+        const trackedOldPath = this.settings.syncMetadata[path]?.renamedFrom;
+        const renamedFrom = trackedOldPath ?? (hasOrphans ? await this.detectRename(file, content, treeByFullPath) : null);
+        if (!renamedFrom) return undefined;
+
+        const scratch: ToMoveEntry[] = [];
+        const outcome = this.queueMove(path, name, renamedFrom, content, treeByFullPath, scratch);
+        return outcome === 'queued' ? { kind: 'move', movedFrom: renamedFrom } : { kind: 'conflict' };
+    }
+
+    /**
+     * Read-only mirror of the pull classification path, for the plan preview.
+     * Only ever reads the pre-fetched tree's blob sha -- never a network
+     * fetch, so a plan preview can't double the number of remote reads a
+     * pull-all already makes. A symlink entry, an entry with no sha, or no
+     * tree at all can't be compared locally, so those are optimistically
+     * bucketed as "modification"; the real pull path (unchanged) still does
+     * the authoritative check when applied.
+     */
+    private async classifyPullForPlan(
+        fileOrPath: TFile | string,
+        path: string,
+        isString: boolean,
+        treeByFullPath?: Map<string, GitTreeEntry>
+    ): Promise<'addition' | 'modification' | 'unchanged' | 'conflict' | 'skip'> {
+        const repoPath = this.getNormalizedPath(path);
+        const entry = treeByFullPath?.get(this.getFullPathForTree(repoPath));
+        if (treeByFullPath && !entry) return 'skip';
+
+        if (!await this.checkFileExists(path, isString)) return 'addition';
+        if (!entry?.sha || entry.symlink) return 'modification';
+
+        const localSha = await gitBlobSha(await this.getFileContent(fileOrPath));
+        if (localSha === entry.sha) return 'unchanged';
+        const lastSynced = this.settings.syncMetadata[path];
+        if (lastSynced && entry.sha !== lastSynced.lastSyncedSha) return 'conflict';
+        return 'modification';
     }
 
     private async processPullBatch(
@@ -516,6 +804,13 @@ export class SyncManager {
         const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
         const treeByFullPath = new Map<string, GitTreeEntry>(tree.map(e => [e.path, e]));
         const toPush: ToPushEntry[] = [];
+        const toMove: ToMoveEntry[] = [];
+        // Computed once per batch rather than per file: the fallback rename
+        // scan is only worth running at all when some metadata entry has no
+        // matching local file. Most files carry a tracked renamedFrom (set live
+        // by the vault 'rename' handler) or aren't renamed at all, so this
+        // avoids an Object.keys(syncMetadata) walk for every file in the batch.
+        const hasOrphans = this.hasOrphanedRenameMetadata();
 
         for (let i = 0; i < files.length; i++) {
             const fileOrPath = files[i];
@@ -525,17 +820,18 @@ export class SyncManager {
             onProgress?.(i + 1, files.length, name);
 
             try {
-                const outcome = await this.classifyPushCandidate(fileOrPath, path, name, isString, treeByFullPath, toPush);
+                const outcome = await this.classifyPushCandidate(fileOrPath, path, name, isString, treeByFullPath, toPush, toMove, hasOrphans);
                 if (outcome === 'done') {
                     results.success++;
-                    // Symlink/rename pushes are committed immediately outside the
+                    // Symlink pushes are committed immediately outside the
                     // toPush queue, so the new sha isn't known here — the caller
                     // still gets to mark the path synced, just without a sha update.
                     results.syncedPaths.push({ path });
                 }
                 else if (outcome === 'conflict') results.conflicts++;
-                // 'unchanged' and 'queued' don't move any of the counters directly:
-                // 'unchanged' never did, and 'queued' is resolved by commitPushBatch below.
+                // 'unchanged' and 'queued'/'queued-move' don't move any of the
+                // counters directly: 'unchanged' never did, and the queued
+                // outcomes are resolved by commitPushBatch below.
             } catch (e) {
                 logger.error(`Failed to push ${path}:`, e);
                 results.failed++;
@@ -543,8 +839,8 @@ export class SyncManager {
             }
         }
 
-        if (toPush.length > 0) {
-            await this.commitPushBatch(toPush, results);
+        if (toPush.length > 0 || toMove.length > 0) {
+            await this.commitPushBatch(toPush, toMove, results);
         }
 
         await this.saveSettings();
@@ -553,13 +849,23 @@ export class SyncManager {
         return results;
     }
 
+    /** Whether any syncMetadata entry no longer has a matching local file — the only case detectRename's fallback scan can find anything. */
+    private hasOrphanedRenameMetadata(): boolean {
+        for (const trackedPath of Object.keys(this.settings.syncMetadata)) {
+            const metadata = this.settings.syncMetadata[trackedPath];
+            if (!isSyncMetadataAtPath(metadata, trackedPath)) continue;
+            if (!this.app.vault.getFileByPath(trackedPath)) return true;
+        }
+        return false;
+    }
+
     /**
      * Classifies one file for the batch-push flow using a purely local
      * comparison (git blob sha vs. the pre-fetched remote tree's blob sha) —
-     * no getFile network call. Symlinks and confirmed renames are pushed
-     * immediately (as today) and never queued; everything else is either
-     * resolved immediately ('unchanged'/'conflict') or appended to `toPush`
-     * for the grouped commit.
+     * no getFile network call. Symlinks are pushed immediately and never
+     * queued; a confirmed rename is queued into `toMove` so it lands in the
+     * same commit as everything else; everything else is either resolved
+     * immediately ('unchanged'/'conflict') or appended to `toPush`.
      */
     private async classifyPushCandidate(
         fileOrPath: TFile | string,
@@ -567,7 +873,9 @@ export class SyncManager {
         name: string,
         isString: boolean,
         treeByFullPath: Map<string, GitTreeEntry>,
-        toPush: ToPushEntry[]
+        toPush: ToPushEntry[],
+        toMove: ToMoveEntry[],
+        hasOrphans: boolean
     ): Promise<BatchOutcome | 'queued'> {
         if (!await this.checkFileExists(path, isString)) throw new Error('File no longer exists');
 
@@ -581,13 +889,15 @@ export class SyncManager {
         const content = await this.getFileContent(fileOrPath);
         const repoPath = this.getNormalizedPath(path);
 
-        // Rename detection, resolved against the already-fetched tree so a batch
-        // of N files doesn't re-probe every orphaned metadata path N times.
+        // Rename detection: a tracked renamedFrom is free (set live by the
+        // vault 'rename' handler); the content-based scan is only a fallback
+        // for renames the plugin missed, and only worth running when an
+        // orphaned metadata entry actually exists.
         if (!isString && fileOrPath instanceof TFile) {
-            const renamedFrom = await this.detectRename(fileOrPath, content, treeByFullPath);
+            const trackedOldPath = this.settings.syncMetadata[path]?.renamedFrom;
+            const renamedFrom = trackedOldPath ?? (hasOrphans ? await this.detectRename(fileOrPath, content, treeByFullPath) : null);
             if (renamedFrom) {
-                await this.handleRename(fileOrPath, renamedFrom, content);
-                return 'done';
+                return this.queueMove(path, name, renamedFrom, content, treeByFullPath, toMove);
             }
         }
 
@@ -600,6 +910,37 @@ export class SyncManager {
     }
 
     /**
+     * Decides a confirmed rename's outcome purely from the pre-fetched tree —
+     * no network call — and queues it for the grouped commit. Mirrors the two
+     * safety checks handleRename applies to the single-file flow: a target
+     * that already exists on the remote is never silently overwritten, and an
+     * old path whose remote content has moved on since the last sync is never
+     * silently deleted. Both surface as 'conflict' so the batch can't quietly
+     * clobber either side the way a plain content push already refuses to.
+     */
+    private queueMove(
+        path: string,
+        name: string,
+        oldPath: string,
+        content: string | ArrayBuffer,
+        treeByFullPath: Map<string, GitTreeEntry>,
+        toMove: ToMoveEntry[]
+    ): BatchOutcome | 'queued' {
+        const repoPath = this.getNormalizedPath(path);
+        const oldRepoPath = this.getNormalizedPath(oldPath);
+
+        if (treeByFullPath.get(this.getFullPathForTree(repoPath))) return 'conflict';
+
+        const oldEntry = treeByFullPath.get(this.getFullPathForTree(oldRepoPath));
+        const metadata = this.settings.syncMetadata[path] ?? this.settings.syncMetadata[oldPath];
+        const safeToDeleteOld = !oldEntry?.sha || !metadata?.lastSyncedSha || oldEntry.sha === metadata.lastSyncedSha;
+        if (oldEntry?.sha && !safeToDeleteOld) return 'conflict';
+
+        toMove.push({ path, name, repoPath, oldPath, oldRepoPath, content });
+        return 'queued';
+    }
+
+    /**
      * Decides a non-symlink, non-renamed file's outcome purely from a
      * pre-fetched tree entry and a locally-computed git blob sha — no network
      * call. Split out of classifyPushCandidate to keep both under the
@@ -608,7 +949,8 @@ export class SyncManager {
     private async classifyAgainstTreeEntry(
         path: string,
         content: string | ArrayBuffer,
-        treeEntry: GitTreeEntry | undefined
+        treeEntry: GitTreeEntry | undefined,
+        dryRun = false
     ): Promise<BatchOutcome | 'queued'> {
         // Don't convert a remote symlink into a regular file.
         if (treeEntry?.symlink) return 'unchanged';
@@ -617,7 +959,7 @@ export class SyncManager {
         if (treeEntry?.sha) {
             const localSha = await gitBlobSha(content);
             if (localSha === treeEntry.sha) {
-                await this.updateMetadata(path, treeEntry.sha);
+                if (!dryRun) await this.updateMetadata(path, treeEntry.sha);
                 return 'unchanged';
             }
         }
@@ -650,15 +992,40 @@ export class SyncManager {
         return cleanRoot + repoPath;
     }
 
-    /** Commits every queued file in one or more grouped batch-commit calls. */
-    private async commitPushBatch(toPush: ToPushEntry[], results: PushResults): Promise<void> {
-        if (!this.gitService.pushBatch) {
+    /**
+     * Commits every queued file (and every queued move) in one or more
+     * grouped batch-commit calls. When both are present they're chunked and
+     * committed together via commitBatch, so a push-all that both edits and
+     * moves files produces one commit per chunk, not one commit per kind.
+     */
+    private async commitPushBatch(toPush: ToPushEntry[], toMove: ToMoveEntry[], results: PushResults): Promise<void> {
+        if (toMove.length === 0) {
+            if (!this.gitService.pushBatch) {
+                await this.pushSequentialFallback(toPush, results);
+                return;
+            }
+            for (let i = 0; i < toPush.length; i += MAX_BATCH_PUSH_SIZE) {
+                await this.commitOneChunk(toPush.slice(i, i + MAX_BATCH_PUSH_SIZE), results);
+            }
+            return;
+        }
+
+        if (!this.gitService.commitBatch) {
+            // Sequential fallback for providers without an atomic multi-file
+            // commit: each move is its own push-then-delete (mirrors the
+            // single-file flow), and plain pushes go through the existing
+            // sequential fallback.
+            await this.moveSequentialFallback(toMove, results);
             await this.pushSequentialFallback(toPush, results);
             return;
         }
 
-        for (let i = 0; i < toPush.length; i += MAX_BATCH_PUSH_SIZE) {
-            await this.commitOneChunk(toPush.slice(i, i + MAX_BATCH_PUSH_SIZE), results);
+        const combined: Array<{ kind: 'push'; entry: ToPushEntry } | { kind: 'move'; entry: ToMoveEntry }> = [
+            ...toPush.map(entry => ({ kind: 'push' as const, entry })),
+            ...toMove.map(entry => ({ kind: 'move' as const, entry })),
+        ];
+        for (let i = 0; i < combined.length; i += MAX_BATCH_PUSH_SIZE) {
+            await this.commitCombinedChunk(combined.slice(i, i + MAX_BATCH_PUSH_SIZE), results);
         }
     }
 
@@ -668,6 +1035,24 @@ export class SyncManager {
         for (const f of toPush) {
             try {
                 const sha = await this.performPush({ path: f.path, name: f.name }, f.content, f.existingSha, true);
+                results.success++;
+                results.syncedPaths.push({ path: f.path, sha });
+            } catch (e) {
+                results.failed++;
+                results.errors.push({ file: f.path, error: e instanceof Error ? e.message : String(e) });
+            }
+        }
+    }
+
+    /** Provider doesn't support commitBatch — each queued move becomes its own push-then-delete commit. */
+    private async moveSequentialFallback(toMove: ToMoveEntry[], results: PushResults): Promise<void> {
+        for (const f of toMove) {
+            try {
+                const pushResult = await this.gitService.pushFile(f.repoPath, f.content, this.settings.branch, `Move ${f.oldRepoPath} to ${f.repoPath}`);
+                const sha = pushResult.sha ?? await gitBlobSha(f.content);
+                await this.gitService.deleteFile(f.oldRepoPath, this.settings.branch, `Remove ${f.oldRepoPath} (moved to ${f.repoPath})`);
+                await this.updateMetadata(f.path, sha);
+                delete this.settings.syncMetadata[f.oldPath];
                 results.success++;
                 results.syncedPaths.push({ path: f.path, sha });
             } catch (e) {
@@ -705,6 +1090,53 @@ export class SyncManager {
             for (const f of chunk) {
                 results.failed++;
                 results.errors.push({ file: f.path, error: message });
+            }
+        }
+    }
+
+    private combinedChunkCommitMessage(pushCount: number, moveCount: number): string {
+        if (moveCount === 0) return `Push ${pushCount} file(s) from Obsidian`;
+        if (pushCount === 0) return `Move ${moveCount} file(s) from Obsidian`;
+        return `Push ${pushCount} file(s) and move ${moveCount} file(s) from Obsidian`;
+    }
+
+    /** Commits a chunk mixing plain pushes and moves in one commitBatch call — one commit for the whole chunk regardless of kind. */
+    private async commitCombinedChunk(
+        chunk: Array<{ kind: 'push'; entry: ToPushEntry } | { kind: 'move'; entry: ToMoveEntry }>,
+        results: PushResults
+    ): Promise<void> {
+        const pushEntries = chunk.filter((c): c is { kind: 'push'; entry: ToPushEntry } => c.kind === 'push').map(c => c.entry);
+        const moveEntries = chunk.filter((c): c is { kind: 'move'; entry: ToMoveEntry } => c.kind === 'move').map(c => c.entry);
+
+        try {
+            const commitMessage = this.combinedChunkCommitMessage(pushEntries.length, moveEntries.length);
+
+            const batchResults = await this.gitService.commitBatch!(
+                pushEntries.map(f => ({ path: f.repoPath, content: f.content, existedRemotely: !!f.existingSha })),
+                moveEntries.map(f => ({ oldPath: f.oldRepoPath, newPath: f.repoPath, content: f.content })),
+                this.settings.branch,
+                commitMessage
+            );
+            const shaByPath = new Map(batchResults.map(r => [r.path, r.sha]));
+
+            for (const f of pushEntries) {
+                const sha = shaByPath.get(f.repoPath) ?? await gitBlobSha(f.content);
+                await this.updateMetadata(f.path, sha);
+                results.success++;
+                results.syncedPaths.push({ path: f.path, sha });
+            }
+            for (const f of moveEntries) {
+                const sha = shaByPath.get(f.repoPath) ?? await gitBlobSha(f.content);
+                await this.updateMetadata(f.path, sha);
+                delete this.settings.syncMetadata[f.oldPath];
+                results.success++;
+                results.syncedPaths.push({ path: f.path, sha });
+            }
+        } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            for (const c of chunk) {
+                results.failed++;
+                results.errors.push({ file: c.entry.path, error: message });
             }
         }
     }

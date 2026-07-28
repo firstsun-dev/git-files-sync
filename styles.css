@@ -126,6 +126,14 @@
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     flex-shrink: 0;
+    /* When labels are still shown (container wide enough that the
+       icon-only fallback below hasn't kicked in) six-plus tabs can still
+       overflow before wrapping/hiding text. The scrollbar itself is
+       hidden for a cleaner look, so without this the cut-off edge reads
+       as "broken" rather than "scroll for more" — a soft fade signals
+       there's more to scroll to. */
+    -webkit-mask-image: linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent);
+    mask-image: linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent);
 }
 
 .ssv-tabs::-webkit-scrollbar { display: none; }
@@ -176,6 +184,11 @@
     gap: 8px;
     flex-wrap: wrap;
     overflow-x: visible;
+    /* Mobile wraps to a second row instead of scrolling, so the edge fade
+       (meant for the horizontal-scroll case) would just clip the wrapped
+       rows for no reason — turn it off. */
+    -webkit-mask-image: none;
+    mask-image: none;
 }
 
 .is-mobile .ssv-tab {
@@ -191,17 +204,51 @@
     background: rgba(255, 255, 255, 0.22);
 }
 
+.ssv-filter-select { display: none; }
+
+.is-mobile .ssv-filter-select {
+    display: block;
+    width: calc(100% - 20px);
+    min-height: 36px;
+    margin: 10px;
+}
+
 /* ── Action bar ─────────────────────────────────────────────────── */
 .ssv-action-bar {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    flex-direction: column;
+    gap: 6px;
     padding: 6px 10px;
     border-bottom: 1px solid var(--background-modifier-border);
-    flex-wrap: wrap;
     flex-shrink: 0;
     background: var(--background-primary);
 }
+
+.ssv-action-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+}
+
+.ssv-tree-options {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding-left: 4px;
+}
+
+.ssv-tree-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 0.80em;
+    cursor: pointer;
+}
+
+.ssv-tree-option input { margin: 0; cursor: pointer; }
 
 @container (max-width: 450px) {
     .ssv-btn-label { display: none; }
@@ -224,6 +271,8 @@
     gap: 8px;
     padding: 10px;
 }
+
+.is-mobile .ssv-action-bar-row { flex-wrap: wrap; gap: 8px; }
 
 .is-mobile .ssv-bar-spacer {
     display: none;
@@ -300,6 +349,63 @@
     overflow-x: hidden;
 }
 
+/* ── Tree folders ──────────────────────────────────────────────── */
+.ssv-tree-children {
+    margin-left: 16px;
+    border-left: 1px solid var(--background-modifier-border);
+}
+
+.ssv-tree-folder-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 34px;
+    padding: 6px 12px 6px 5px;
+    border-bottom: 1px solid var(--background-modifier-border-hover);
+    color: var(--text-normal);
+}
+
+.ssv-tree-folder-row:hover { background: var(--background-modifier-hover); }
+
+.ssv-folder-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--font-monospace);
+    font-size: 18px;
+    line-height: 1;
+}
+
+.ssv-folder-checkbox {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.ssv-tree-folder-icon {
+    display: flex;
+    color: var(--text-warning);
+}
+
+.ssv-tree-folder-icon .svg-icon { width: 16px; height: 16px; }
+
+.ssv-tree-folder-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.84em;
+    font-weight: 600;
+}
+
 /* ── Empty / loading states ─────────────────────────────────────── */
 .ssv-empty {
     padding: 36px 20px;
@@ -349,6 +455,7 @@
 .ssv-file.status-modified  { border-left-color: var(--text-warning); }
 .ssv-file.status-unsynced  { border-left-color: var(--color-red); }
 .ssv-file.status-remote    { border-left-color: var(--color-blue); }
+.ssv-file.status-moved     { border-left-color: var(--color-purple); }
 .ssv-file.status-checking  { border-left-color: var(--background-modifier-border); }
 
 .ssv-file-row {
@@ -377,6 +484,7 @@
 .ssv-icon-modified { color: var(--text-warning); }
 .ssv-icon-unsynced { color: var(--color-red); }
 .ssv-icon-remote   { color: var(--color-blue); }
+.ssv-icon-moved    { color: var(--color-purple); }
 .ssv-icon-checking { color: var(--text-muted); }
 
 .ssv-file-path {
@@ -417,7 +525,38 @@
 .ssv-badge-modified { color: var(--text-warning); }
 .ssv-badge-unsynced { color: var(--color-red); }
 .ssv-badge-remote   { color: var(--color-blue); }
+.ssv-badge-moved    { color: var(--color-purple); }
 .ssv-badge-checking { color: var(--text-muted); }
+
+/* Old path of a pending move, shown struck-through beneath the new one. */
+.ssv-moved-from {
+    margin-left: 25px;
+    font-family: var(--font-monospace);
+    font-size: 0.72em;
+    color: var(--text-faint);
+    text-decoration: line-through;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Collapsed folder-move row ──────────────────────────────────── */
+.ssv-move-group-children {
+    margin-top: 6px;
+    margin-left: 41px; /* aligns under path, same as .ssv-file-actions */
+    border-left: 2px solid var(--background-modifier-border);
+    padding-left: 10px;
+}
+
+.ssv-move-group-child {
+    font-family: var(--font-monospace);
+    font-size: 0.74em;
+    color: var(--text-muted);
+    padding: 2px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 /* ── Per-file action row ────────────────────────────────────────── */
 .ssv-file-actions {
@@ -886,6 +1025,88 @@
 .conflict-buttons .setting-item-control {
     display: flex;
     gap: 10px;
+}
+
+/* ── Sync Plan Modal ────────────────────────────────────────────── */
+.sync-plan-modal.modal {
+    width: min(640px, 92vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.sync-plan-description {
+    color: var(--text-muted);
+    font-size: 0.9em;
+    margin: -4px 0 12px;
+}
+
+.sync-plan-sections {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.sync-plan-section {
+    margin-bottom: 16px;
+}
+
+.sync-plan-section-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.sync-plan-section-icon {
+    display: flex;
+    color: var(--text-muted);
+}
+
+.sync-plan-section.is-destructive .sync-plan-section-heading,
+.sync-plan-section.is-destructive .sync-plan-section-icon {
+    color: var(--text-error);
+}
+
+.sync-plan-warning {
+    color: var(--text-error);
+    font-size: 0.85em;
+    margin-bottom: 6px;
+}
+
+.sync-plan-file-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--background-secondary);
+    border-radius: 5px;
+}
+
+.sync-plan-section.is-destructive .sync-plan-file-list {
+    border: 1px solid var(--text-error);
+}
+
+.sync-plan-file-item {
+    padding: 4px 10px;
+    font-family: var(--font-monospace);
+    font-size: 0.82em;
+    word-break: break-all;
+    display: flex;
+    flex-direction: column;
+}
+
+.sync-plan-file-moved-from {
+    color: var(--text-muted);
+    font-size: 0.9em;
+}
+
+.sync-plan-buttons {
+    padding-top: 12px;
+    border-top: 1px solid var(--background-modifier-border);
+    flex-shrink: 0;
 }
 
 .ssv-whats-new-list {

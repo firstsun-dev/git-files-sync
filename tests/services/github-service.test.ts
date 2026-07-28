@@ -542,6 +542,55 @@ describe('GitHubService', () => {
         });
     });
 
+    describe('commitBatch', () => {
+        it('returns [] and makes no requests when both additions and moves are empty', async () => {
+            const result = await service.commitBatch([], [], 'main', 'nothing');
+            expect(result).toEqual([]);
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('commits additions and moves together as one add+delete mutation — a real git mv', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce(headOidResponse('commit1')) // branch head query
+                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse); // mutation
+
+            const result = await service.commitBatch(
+                [{ path: 'a.md', content: 'hello' }],
+                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                'main',
+                'Push 1 file(s) and move 1 file(s) from Obsidian'
+            );
+
+            expect(result).toEqual([{ path: 'a.md' }, { path: 'new.md' }]);
+
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            const mutationBody = JSON.parse(calls[1]?.body as string) as {
+                variables: { input: { fileChanges: { additions: Array<{ path: string; contents: string }>; deletions: Array<{ path: string }> } } };
+            };
+            const fileChanges = mutationBody.variables.input.fileChanges;
+            expect(fileChanges.additions).toEqual([
+                { path: 'a.md', contents: btoa('hello') },
+                { path: 'new.md', contents: btoa('moved content') },
+            ]);
+            expect(fileChanges.deletions).toEqual([{ path: 'old.md' }]);
+        });
+
+        it('commits a move with no plain additions as a single add+delete pair', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce(headOidResponse('commit1'))
+                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
+
+            const result = await service.commitBatch(
+                [],
+                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                'main',
+                'Move 1 file(s) from Obsidian'
+            );
+
+            expect(result).toEqual([{ path: 'new.md' }]);
+        });
+    });
+
     describe('testConnection', () => {
         sharedTestConnection(() => service);
 

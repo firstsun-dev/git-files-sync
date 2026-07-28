@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getUnseenReleases, type ChangelogRelease } from '../src/changelog';
+import { CHANGELOG, getUnseenReleases, type ChangelogRelease } from '../src/changelog';
 
 describe('getUnseenReleases', () => {
     const changelog: ChangelogRelease[] = [
@@ -30,5 +30,18 @@ describe('getUnseenReleases', () => {
 
     it('returns everything when lastSeenVersion is empty', () => {
         expect(getUnseenReleases(changelog, '').length).toBe(4);
+    });
+});
+
+describe('1.5.0 release notes', () => {
+    it('provides all six highlights in every supported language', () => {
+        const release = CHANGELOG.find(entry => entry.version === '1.5.0');
+
+        expect(release?.entries).toHaveLength(6);
+        for (const entry of release?.entries ?? []) {
+            expect(entry.text.en).toBeTruthy();
+            expect(entry.text['zh-tw']).toBeTruthy();
+            expect(entry.text['zh-cn']).toBeTruthy();
+        }
     });
 });

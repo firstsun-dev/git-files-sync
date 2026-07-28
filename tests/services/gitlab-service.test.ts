@@ -266,6 +266,42 @@ describe('GitLabService', () => {
         });
     });
 
+    describe('commitBatch', () => {
+        it('returns [] and makes no requests when both additions and moves are empty', async () => {
+            const result = await service.commitBatch([], [], 'main', 'nothing');
+            expect(result).toEqual([]);
+            expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('uses the Commits API native action: move for renames, alongside create/update for plain additions', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse) // POST commits
+                .mockResolvedValueOnce({ status: 200, json: [
+                    { path: 'a.md', type: 'blob', id: 'new-sha-a' },
+                    { path: 'new.md', type: 'blob', id: 'new-sha-move' },
+                ] } as unknown as RequestUrlResponse); // follow-up listFilesDetailed
+
+            const result = await service.commitBatch(
+                [{ path: 'a.md', content: 'hello', existedRemotely: true }],
+                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                'main',
+                'Push 1 file(s) and move 1 file(s) from Obsidian'
+            );
+
+            expect(result).toEqual([
+                { path: 'a.md', sha: 'new-sha-a' },
+                { path: 'new.md', sha: 'new-sha-move' },
+            ]);
+
+            const commitCall = vi.mocked(requestUrl).mock.calls[0]?.[0] as { body: string };
+            const body = JSON.parse(commitCall.body) as { actions: Array<{ action: string; file_path: string; previous_path?: string; content: string; encoding: string }> };
+            expect(body.actions).toEqual([
+                { action: 'update', file_path: 'a.md', content: btoa('hello'), encoding: 'base64' },
+                { action: 'move', file_path: 'new.md', previous_path: 'old.md', content: btoa('moved content'), encoding: 'base64' },
+            ]);
+        });
+    });
+
     describe('testConnection', () => {
         sharedTestConnection(() => service);
 

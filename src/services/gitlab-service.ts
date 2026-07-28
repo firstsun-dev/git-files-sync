@@ -1,4 +1,4 @@
-import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult } from './git-service-interface';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchMoveItem } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
 
 export class GitLabService extends BaseGitService implements GitServiceInterface {
@@ -75,6 +75,42 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         const freshTree = await this.listFilesDetailed(branch, false);
         const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
         return items.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) }));
+    }
+
+    /**
+     * A real `git mv`: additions and moves land in one commit via the Commits
+     * API's native `action: 'move'`, which GitLab records as an actual rename
+     * (previous_path) rather than a same-content add+delete pair.
+     */
+    async commitBatch(additions: BatchPushItem[], moves: BatchMoveItem[], branch: string, message: string): Promise<BatchPushResult[]> {
+        if (additions.length === 0 && moves.length === 0) return [];
+        const encodedProjectId = encodeURIComponent(this.projectId);
+        const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/commits`;
+
+        const actions = [
+            ...additions.map(item => ({
+                action: item.existedRemotely ? 'update' : 'create',
+                file_path: this.getFullPath(item.path),
+                content: this.encodeContent(item.content),
+                encoding: 'base64',
+            })),
+            ...moves.map(item => ({
+                action: 'move',
+                file_path: this.getFullPath(item.newPath),
+                previous_path: this.getFullPath(item.oldPath),
+                content: this.encodeContent(item.content),
+                encoding: 'base64',
+            })),
+        ];
+
+        await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
+
+        const freshTree = await this.listFilesDetailed(branch, false);
+        const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
+        return [
+            ...additions.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) })),
+            ...moves.map(item => ({ path: item.newPath, sha: shaByPath.get(this.getFullPath(item.newPath)) })),
+        ];
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {

@@ -48,6 +48,7 @@ describe('renderFileItem', () => {
             onOpen:   vi.fn().mockReturnValue(true),
             canOpen:  vi.fn().mockReturnValue(true),
             onOpenDiffPane: vi.fn(),
+            onRevertMove: vi.fn(),
         };
     });
 
@@ -126,6 +127,20 @@ describe('renderFileItem', () => {
         it('renders a diff button for any modified file, even without preloaded content', () => {
             const fs = makeFileStatus('modified', { file: mockFile });
             renderFileItem(container, fs, false, callbacks);
+            expect(container.querySelector('.ssv-action-btn.diff')).not.toBeNull();
+        });
+    });
+
+    describe('moved file with content changes', () => {
+        it('renders a diff button so the moved file can be compared with its old remote path', () => {
+            const fs = makeFileStatus('moved', {
+                file: mockFile,
+                movedFrom: 'docs/old-name.md',
+                remoteSha: 'old-content-sha',
+            });
+
+            renderFileItem(container, fs, false, callbacks);
+
             expect(container.querySelector('.ssv-action-btn.diff')).not.toBeNull();
         });
     });

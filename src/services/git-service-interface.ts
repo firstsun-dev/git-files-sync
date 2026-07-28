@@ -42,6 +42,15 @@ export interface BatchPushResult {
     sha?: string;
 }
 
+/** One renamed file to commit as a real move: adds `newPath`, removes `oldPath`. */
+export interface BatchMoveItem {
+    /** Path relative to rootPath, as last synced on the remote. */
+    oldPath: string;
+    /** Path relative to rootPath, where the file now lives. */
+    newPath: string;
+    content: string | ArrayBuffer;
+}
+
 export interface GitServiceInterface {
     updateConfig(...args: unknown[]): void;
     getFile(path: string, branch: string): Promise<GitFile>;
@@ -67,6 +76,15 @@ export interface GitServiceInterface {
      * caller can mark every item in the attempted batch as failed.
      */
     pushBatch?(items: BatchPushItem[], branch: string, commitMessage: string): Promise<BatchPushResult[]>;
+    /**
+     * Commits file additions and real renames (add new path, remove old path)
+     * together in one commit. Optional: only providers with a way to write
+     * multiple changes atomically implement it; callers must fall back to a
+     * sequential push-then-delete per move when it's absent. Returns a result
+     * for every item in `additions` then every item in `moves`, in that order.
+     * Must be atomic: on failure it throws rather than partially committing.
+     */
+    commitBatch?(additions: BatchPushItem[], moves: BatchMoveItem[], branch: string, commitMessage: string): Promise<BatchPushResult[]>;
     deleteFile(path: string, branch: string, commitMessage: string): Promise<void>;
     /**
      * Delete many files in a single commit. Optional: only providers with a way
