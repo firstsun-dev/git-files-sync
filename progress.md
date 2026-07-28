@@ -75,3 +75,8 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - `GitServiceInterface.commitBatch` is deliberately separate from `pushBatch`/`deleteBatch`: it takes `(additions, moves, branch, message)` and covers only the cases sync-manager actually needs it for (a push-all mixing edits and moves, and a single-file move).
 - `SyncManager.trackRename` always records `renamedFrom` as the still-*unpushed* remote path, not the most recent rename hop — that's what makes a chained rename (A→B→C) collapse to a single A→C move, and what makes renaming back to that exact path (B→A) cancel the pending move entirely.
 - If a future session sees another "move not detected" report, check `main.ts`'s vault event handlers first for anything that might clear `syncMetadata` before `reconcileOutOfBandMoves` or `trackRename` gets to read it — that class of bug is exactly what this session found once already.
+<!-- see git log for full file list; this section is intentionally minimal -->
+
+## Evidence of Completion
+
+- [ ] Manual verification inside the actual Obsidian plugin UI — not yet done
