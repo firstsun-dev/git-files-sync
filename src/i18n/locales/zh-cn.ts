@@ -128,6 +128,7 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'syncStatus.tab.remote-only': '远程',
 	'syncStatus.tab.moved': '已移动',
 	'syncStatus.showSynced': '显示已同步',
+	'syncStatus.treeView': '树状视图',
 	'syncStatus.filterByStatus': '按状态筛选文件',
 	'syncStatus.noFilesForFilter': '没有{filter}的文件',
 	'syncStatus.search.placeholder': '按路径过滤…',

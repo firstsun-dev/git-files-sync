@@ -30,6 +30,7 @@ export class SyncStatusView extends ItemView {
     private isRefreshing = false;
     private refreshProgress = { current: 0, total: 0 };
     private statusFilter: FilterValue = 'all';
+    private treeViewEnabled = true;
     private showSyncedInAll = false;
     private searchQuery = '';
     private readonly selectedFiles: Set<string> = new Set();
@@ -204,7 +205,13 @@ export class SyncStatusView extends ItemView {
 	private visibleStatuses(): FileStatus[] {
 		const searched = this.searchedStatuses();
 		if (this.statusFilter !== 'all') return searched.filter(s => s.status === this.statusFilter);
+		if (!this.treeViewEnabled) return this.sortAllStatuses(searched);
 		return this.showSyncedInAll ? searched : searched.filter(s => s.status !== 'synced');
+	}
+
+	/** The legacy flat view keeps completed entries out of the way. */
+	private sortAllStatuses(statuses: FileStatus[]): FileStatus[] {
+		return [...statuses].sort((left, right) => Number(left.status === 'synced') - Number(right.status === 'synced'));
 	}
 
     /**
@@ -269,7 +276,7 @@ export class SyncStatusView extends ItemView {
         // hunt through tabs for a file the search has already found.
         const all = this.searchedStatuses();
         const counts: Record<FilterValue, number> = {
-            all: this.showSyncedInAll ? all.length : all.filter(s => s.status !== 'synced').length,
+            all: !this.treeViewEnabled || this.showSyncedInAll ? all.length : all.filter(s => s.status !== 'synced').length,
             synced: all.filter(s => s.status === 'synced').length,
             modified: all.filter(s => s.status === 'modified').length,
             unsynced: all.filter(s => s.status === 'unsynced').length,
@@ -313,7 +320,6 @@ export class SyncStatusView extends ItemView {
             btn.addEventListener('click', () => this.applyStatusFilter(tab.value));
         }
 
-        if (this.statusFilter === 'all') this.renderShowSyncedToggle(tabsEl);
     }
 
     private renderMobileFilter(
@@ -333,19 +339,6 @@ export class SyncStatusView extends ItemView {
         }
         select.value = this.statusFilter;
         select.addEventListener('change', () => this.applyStatusFilter(select.value as FilterValue));
-        if (this.statusFilter === 'all') this.renderShowSyncedToggle(container);
-    }
-
-    private renderShowSyncedToggle(container: HTMLElement): void {
-        const label = container.createEl('label', { cls: 'ssv-show-synced' });
-        const checkbox = label.createEl('input', { type: 'checkbox' });
-        checkbox.checked = this.showSyncedInAll;
-        label.createSpan({ text: t('syncStatus.showSynced') });
-        checkbox.addEventListener('change', () => {
-            this.showSyncedInAll = checkbox.checked;
-            this.pruneSelectionToVisible();
-            this.renderView();
-        });
     }
 
     /** Apply a status filter while preserving selections still visible in it. */
@@ -385,6 +378,8 @@ export class SyncStatusView extends ItemView {
             // action with its own confirm — see FileListItem's onRevertMove.
             canPull:   selected.filter(s => s.status === 'modified' || s.status === 'remote-only').length,
             canDelete: selected.filter(s => s.status !== 'moved').length,
+            treeViewEnabled: this.treeViewEnabled,
+            showSynced: this.showSyncedInAll,
         }, {
             onRefresh:   () => void this.refreshAllStatuses(),
             onSelectAll: (select) => {
@@ -400,6 +395,16 @@ export class SyncStatusView extends ItemView {
             onPush:   () => void this.pushSelected(),
             onPull:   () => void this.pullSelected(),
             onDelete: () => void this.deleteSelected(),
+            onTreeViewChange: (enabled) => {
+                this.treeViewEnabled = enabled;
+                this.pruneSelectionToVisible();
+                this.renderView();
+            },
+            onShowSyncedChange: (show) => {
+                this.showSyncedInAll = show;
+                this.pruneSelectionToVisible();
+                this.renderView();
+            },
         });
     }
 
@@ -546,7 +551,21 @@ export class SyncStatusView extends ItemView {
             return;
         }
 
-        this.renderTreeNodes(container, buildStatusTree(statuses).children);
+        if (this.treeViewEnabled) this.renderTreeNodes(container, buildStatusTree(statuses).children);
+        else this.renderFlatFileList(container, statuses);
+    }
+
+    private renderFlatFileList(container: HTMLElement, statuses: FileStatus[]): void {
+        const groups = this.collapsibleMoveGroups(statuses);
+        const groupedPaths = new Set<string>();
+        for (const group of groups.values()) for (const member of group.members) groupedPaths.add(member.path);
+
+        const callbacks = this.fileItemCallbacks();
+        const renderedGroups = new Set<string>();
+        for (const status of statuses) {
+            if (groupedPaths.has(status.path)) this.renderGroupedRowOnce(container, status, groups, renderedGroups);
+            else renderFileItem(container, status, this.selectedFiles.has(status.path), callbacks);
+        }
     }
 
     private renderTreeNodes(container: HTMLElement, nodes: StatusTreeNode[]): void {

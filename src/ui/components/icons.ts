@@ -21,9 +21,6 @@ export const ICONS = {
     // Search filter
     search:   'search',
     clear:    'x',
-    // Tree folders
-    expand:   'chevron-right',
-    collapse: 'chevron-down',
     // Info strip
     branch:   'git-branch',
     folder:   'folder',

@@ -52,4 +52,11 @@ describe('renderFolderItem', () => {
 
         expect(callbacks.onToggle).toHaveBeenCalledWith('Projects');
     });
+
+    it('uses a plain minus sign for an expanded folder', () => {
+        renderFolderItem(container, folder, new Set(), true, callbacks);
+
+        expect(container.querySelector('.ssv-folder-toggle')?.textContent).toBe('−');
+        expect(container.querySelector('.ssv-folder-toggle svg')).toBeNull();
+    });
 });

@@ -36,7 +36,7 @@ function renderDisclosureButton(
         cls: 'ssv-folder-toggle',
         attr: { 'aria-expanded': String(isExpanded) },
     });
-    setIcon(button.createSpan(), isExpanded ? ICONS.collapse : ICONS.expand);
+    button.setText(isExpanded ? '−' : '+');
     button.addEventListener('click', () => callbacks.onToggle(folder.path));
 }
 
