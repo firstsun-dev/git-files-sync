@@ -1,3 +1,47 @@
+## [1.5.0](https://github.com/firstsun-dev/git-files-sync/compare/1.4.0...1.5.0) (2026-07-28)
+
+### Features
+
+* add sync plan preview before applying changes ([#63](https://github.com/firstsun-dev/git-files-sync/issues/63)) ([1f227b2](https://github.com/firstsun-dev/git-files-sync/commit/1f227b24d3f9ba14ec68c5864e5507162ebfb1c1))
+* **changelog:** add 1.5.0 update notes ([4385dcb](https://github.com/firstsun-dev/git-files-sync/commit/4385dcbc6bddf21bea9cca6fc4685fb87a66f85f))
+* initial release ([118aaee](https://github.com/firstsun-dev/git-files-sync/commit/118aaeed31c45b3b39d4b7f8a314502d159750c2))
+* initial release ([80a9111](https://github.com/firstsun-dev/git-files-sync/commit/80a91117cbf5c2610cae040a3d8c541dd5ad355a))
+* **sync:** commit renames as a real move with a dedicated moved status ([7eb1141](https://github.com/firstsun-dev/git-files-sync/commit/7eb11418d4f94c3ad3a244ed59d41c2048f9aa7f))
+* **sync:** refresh status on startup ([22c5ace](https://github.com/firstsun-dev/git-files-sync/commit/22c5ace905be2aa2259b4856df1fe7532e568d3c))
+* **sync:** update a file's sync status live when it's edited in scope ([3373262](https://github.com/firstsun-dev/git-files-sync/commit/3373262f9328a646ddf008859c44414cd32f19f3))
+* **sync:** update sync status live when a file is renamed or moved ([ae227a9](https://github.com/firstsun-dev/git-files-sync/commit/ae227a9154527880b02815a7edf949294650c01a))
+* **ui:** add sync status tree view ([4426b24](https://github.com/firstsun-dev/git-files-sync/commit/4426b24bb62f9aef9e5c3d1e971aba921ff2f337))
+* **ui:** collapse folder moves into a single row ([49a8816](https://github.com/firstsun-dev/git-files-sync/commit/49a881680beefc3c115b01540ed3bcea2eb0bb30))
+* **ui:** use status dropdown on mobile ([eeef970](https://github.com/firstsun-dev/git-files-sync/commit/eeef970ca13955173040bb47fafac0a64de48401))
+
+### Bug Fixes
+
+* **sync:** backfill syncMetadata when a status refresh finds a file already synced ([1646ead](https://github.com/firstsun-dev/git-files-sync/commit/1646eadc8bc2952c5eef88568002ed46aafe0cde))
+* **sync:** detect a folder move even when the plugin missed the live rename event ([c806e22](https://github.com/firstsun-dev/git-files-sync/commit/c806e22ab6b6283c954e4bb568b62d5602389a0a))
+* **sync:** honor ignore patterns for direct push ([61ca728](https://github.com/firstsun-dev/git-files-sync/commit/61ca7288ad788f2eba0f34657c637dd09afbad20))
+* synchronize manifest version with git tag and assets ([d9eab83](https://github.com/firstsun-dev/git-files-sync/commit/d9eab830244d9f6477385f8aa2030a9b9bf5efcf))
+* **sync:** keep a single-file push's status as synced, not unsynced ([690b8ee](https://github.com/firstsun-dev/git-files-sync/commit/690b8ee92f70100912d91d440a2157148008109d))
+* **sync:** reconcile moves from legacy metadata ([ed04867](https://github.com/firstsun-dev/git-files-sync/commit/ed0486724956bef8d3230f2be0f1fc6ffa15c5e0))
+* **sync:** show progress toast and avoid N sequential rename checks on single-file push ([217dcf5](https://github.com/firstsun-dev/git-files-sync/commit/217dcf57d9c805df12df604cd524eef099de761d))
+* **sync:** stop clearing rename metadata on generic vault delete events ([c9d0cde](https://github.com/firstsun-dev/git-files-sync/commit/c9d0cde29719d0ddae014e83a6f3440a29463624)), closes [#66](https://github.com/firstsun-dev/git-files-sync/issues/66)
+* **sync:** track a moved folder's files, not just moved files ([ee217b1](https://github.com/firstsun-dev/git-files-sync/commit/ee217b151d8785cf69a37fda8a3f0c70e1c412b1)), closes [#66](https://github.com/firstsun-dev/git-files-sync/issues/66) [#67](https://github.com/firstsun-dev/git-files-sync/issues/67)
+* trigger release to publish updated manifest ([ab538d8](https://github.com/firstsun-dev/git-files-sync/commit/ab538d8495ebb955dba1865c1e16668d7817bb71))
+* **ui:** show diff for moved files ([9f82d36](https://github.com/firstsun-dev/git-files-sync/commit/9f82d369057d50ee982edacd0fcf460c88210454))
+
+### Documentation
+
+* record direct push ignore guard ([fe084b4](https://github.com/firstsun-dev/git-files-sync/commit/fe084b465ab0e96b9ea41eba3bcddb1672848f84))
+* record legacy move reconciliation ([3e65e63](https://github.com/firstsun-dev/git-files-sync/commit/3e65e63626173852b6f2407daee058c532443ae1))
+* record rename regression coverage ([c648712](https://github.com/firstsun-dev/git-files-sync/commit/c64871235b5239fc35b0a08fe2175b46e8f8222e))
+* record shared sync status state ([7510ce7](https://github.com/firstsun-dev/git-files-sync/commit/7510ce7b620712f1786fa36b49fec4e2cf0231e8))
+* record sync status refactor handoff ([ac6eec6](https://github.com/firstsun-dev/git-files-sync/commit/ac6eec684e1aee01058204d64fa84aa40ef9499c))
+
+### Code Refactoring
+
+* **sync-status:** centralize status classification ([c610dde](https://github.com/firstsun-dev/git-files-sync/commit/c610dde309cdd5209e866a4749da471df67aa253))
+* **sync-status:** share status state with sync manager ([9cefb25](https://github.com/firstsun-dev/git-files-sync/commit/9cefb25e7319d32a9f264e8d96a352f13b446ace))
+* **ui:** move tree view controls ([e47d44b](https://github.com/firstsun-dev/git-files-sync/commit/e47d44b61956bef55c5e4b3aa06a7c2ebdd1a59a))
+
 ## [1.4.0](https://github.com/firstsun-dev/git-files-sync/compare/1.3.2...1.4.0) (2026-07-23)
 
 ### Features
