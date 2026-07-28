@@ -5,17 +5,17 @@
 
 ## Completed
 
-- Safely fast-forwarded the detached worktree from `github/prepare-1.5.0` to `bfa8119`; do not use the stale `origin` remote for this repository.
-- Added pure `SyncStatusService` (`c610dde`) as the only policy for `moved`, `synced`, `modified`, `unsynced` (Local only), and `remote-only`.
-- `SyncStatusView` delegates all domain-status decisions to the service: refresh SHA/content comparison, local-only/remote-only discovery, tracked rename, live modify event, and optimistic post-push state. `checking` deliberately remains view-local loading state.
-- Added five table-driven classifier tests.
+- `c610dde`: extracted the pure `SyncStatusService` classifier.
+- `9cefb25`: moved the status map and subscriptions into that service. `SyncManager.status` is the plugin-wide instance; `updateMetadata()` publishes `synced` with the confirmed SHA. A live Sync Status View subscribes to the same state, so Ribbon/context-menu pushes update it without a manual refresh.
+- `SyncStatusView` retains presentation-only state (filters, selection, expanded folder groups) and uses the service for all file-status reads/writes.
+- Move remains conservative: a row is only `moved` when `renamedFrom` metadata exists or the existing unique-SHA out-of-band reconciliation creates it. A never-pushed file stays `unsynced` after rename.
 
 ## Verification
 
 ```
 npx eslint .    -> 0 errors
 npm run build   -> passes (including Obsidian 1.11.0 compatibility)
-npx vitest run  -> 31 files, 468 tests passed
+npx vitest run  -> 31 files, 470 tests passed
 ```
 
 ## Exact Next Step

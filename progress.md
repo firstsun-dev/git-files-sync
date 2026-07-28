@@ -5,7 +5,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-07-28
-**Active Feature:** None — sync-status policy centralization is complete on `codex/sync-status-service-1-5`, based on `github/prepare-1.5.0`.
+**Active Feature:** None — shared sync-status state is complete on `codex/sync-status-service-1-5`, based on `github/prepare-1.5.0`.
 
 ## Status
 
@@ -13,6 +13,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 - [x] feat-001..023 and the move-detection fixes — see [archive/2026-07.md](./archive/2026-07.md).
 - [x] `refactor(sync-status): centralize status classification` (`c610dde`): introduced a pure `SyncStatusService` and routed full refresh, fallback content comparison, live edits, rename/move, remote-only discovery, and optimistic push completion through its one status policy.
+- [x] `refactor(sync-status): share status state with sync manager` (`9cefb25`): the service owns the shared status map and publishes snapshots; SyncManager records confirmed syncs there, and SyncStatusView subscribes instead of holding its own map.
 
 ### What's In Progress
 
@@ -28,5 +29,5 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 - [x] `npx eslint .` — 0 errors
 - [x] `npm run build` — passes, including Obsidian 1.11.0 compatibility typecheck
-- [x] `npx vitest run` — 31 files, 468 tests passed
+- [x] `npx vitest run` — 31 files, 470 tests passed
 - [ ] Manual verification inside Obsidian — outstanding
