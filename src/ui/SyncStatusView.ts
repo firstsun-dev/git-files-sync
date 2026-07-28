@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, debounce, setIcon, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
-import { getServiceName, getEffectiveSymlinkHandling, type SymlinkHandling } from '../settings';
+import { getServiceName, getEffectiveSymlinkHandling, isSyncMetadataAtPath, type SymlinkHandling } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
 import { SyncPlanModal } from './SyncPlanModal';
 import { logger } from '../utils/logger';
@@ -960,7 +960,7 @@ export class SyncStatusView extends ItemView {
         for (const [path, status] of this.fileStatuses) {
             if (status.status !== 'remote-only') continue;
             const meta = metadata[path];
-            if (!meta || meta.lastKnownPath !== path || meta.renamedFrom) continue;
+            if (!isSyncMetadataAtPath(meta, path) || meta.renamedFrom) continue;
             const entry = remoteMap.get(path);
             if (!entry || entry.symlink || !entry.sha) continue;
             const list = orphansBySha.get(entry.sha) ?? [];
