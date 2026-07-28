@@ -99,6 +99,25 @@ describe('SyncManager', () => {
         expect(manager.status.get('note.md')).toMatchObject({ status: 'synced', remoteSha: 'new-sha' });
     });
 
+    it('does not read or push a file excluded by the configured ignore predicate', async () => {
+        const ignoredManager = new SyncManager(
+            mockApp,
+            mockGitLab,
+            mockSettings,
+            undefined,
+            (path) => path === 'private.md',
+        );
+        const file = Object.assign(new TFile(), { path: 'private.md', name: 'private.md' });
+        const readSpy = vi.spyOn(mockApp.vault, 'read').mockResolvedValue('secret');
+        const remoteSpy = vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
+
+        await ignoredManager.pushFile(file);
+
+        expect(readSpy).not.toHaveBeenCalled();
+        expect(remoteSpy).not.toHaveBeenCalled();
+        expect(mockGitLab.pushFile).not.toHaveBeenCalled();
+    });
+
     it('should push file content correctly', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
         const readSpy = vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');

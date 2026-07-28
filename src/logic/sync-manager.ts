@@ -45,6 +45,7 @@ export class SyncManager {
     private gitService: GitServiceInterface;
     private readonly settings: GitLabFilesPushSettings;
     private readonly onSaveSettings?: () => Promise<void>;
+    private readonly isPathIgnored: (path: string) => boolean;
     readonly status: SyncStatusService;
 
     constructor(
@@ -52,12 +53,14 @@ export class SyncManager {
         gitService: GitServiceInterface,
         settings: GitLabFilesPushSettings,
         onSaveSettings?: () => Promise<void>,
+        isPathIgnored: (path: string) => boolean = () => false,
         status: SyncStatusService = new SyncStatusService(),
     ) {
         this.app = app;
         this.gitService = gitService;
         this.settings = settings;
         this.onSaveSettings = onSaveSettings;
+        this.isPathIgnored = isPathIgnored;
         this.status = status;
     }
 
@@ -158,6 +161,11 @@ export class SyncManager {
     async pushFile(fileOrPath: TFile | string): Promise<{ sha?: string } | undefined> {
         const { path, name, isString } = this.getFileInfo(fileOrPath);
         const repoPath = this.getNormalizedPath(path);
+
+        if (this.isPathIgnored(path)) {
+            new Notice(`Skipped ${name}: it matches an ignore pattern.`);
+            return undefined;
+        }
 
         if (!await this.checkFileExists(path, isString)) {
             new Notice(`File ${name} no longer exists in vault.`);
@@ -566,12 +574,16 @@ export class SyncManager {
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
     ): Promise<PushResults> {
+        const syncableFiles = files.filter(file => file && !this.isPathIgnored(this.getFileInfo(file).path));
+        if (syncableFiles.length === 0) {
+            return { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
+        }
         const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
-        const plan = await this.planPushBatch(files, tree);
+        const plan = await this.planPushBatch(syncableFiles, tree);
         if (!isSyncPlanEmpty(plan) && !await this.confirmPlan(plan, 'push')) {
             return { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
         }
-        return this.processPushBatch(files, onProgress, tree);
+        return this.processPushBatch(syncableFiles, onProgress, tree);
     }
 
     async pullAllFiles(
