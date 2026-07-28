@@ -41,7 +41,7 @@ function makePlugin(overrides: {
         },
     };
 
-    const settings: { branch: string; vaultFolder: string; syncMetadata?: Record<string, { lastSyncedSha: string; lastSyncedAt: number; lastKnownPath: string; renamedFrom?: string }> } = { branch: 'main', vaultFolder };
+    const settings: { branch: string; vaultFolder: string; syncMetadata?: Record<string, { lastSyncedSha: string; lastSyncedAt: number; lastKnownPath?: string; renamedFrom?: string }> } = { branch: 'main', vaultFolder };
     const plugin = {
         settings,
         gitService: { deleteFile, deleteBatch: overrides.deleteBatch },
@@ -513,6 +513,40 @@ describe('SyncStatusView move detection without a live rename event', () => {
         expect(statuses.has('Notes/Projects/a.md')).toBe(false);
     });
 
+    it('recognizes an out-of-band move from legacy metadata without lastKnownPath after restart', async () => {
+        const { gitBlobSha } = await import('../../src/utils/git-blob-sha');
+        const content = 'same content, moved after a plugin restart';
+        const sha = await gitBlobSha(content);
+
+        const adapterRead = vi.fn().mockResolvedValue(content);
+        const { plugin, leaf } = makePlugin({ adapterRead });
+        // Metadata written before lastKnownPath was introduced remains after a
+        // restart. Its object key is the only reliable legacy path.
+        plugin.settings.syncMetadata = {
+            'Notes/old-name.md': { lastSyncedSha: sha, lastSyncedAt: 0 },
+        };
+        const view = new SyncStatusView(leaf, plugin);
+        const remoteMap = new Map<string, GitTreeEntry>([
+            ['Notes/old-name.md', { path: 'Notes/old-name.md', symlink: false, sha }],
+        ]);
+
+        await (view as unknown as {
+            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>, pendingMoveOldPaths: Set<string>): Promise<unknown[]>
+        }).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set());
+        await (view as unknown as {
+            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
+        }).refreshFileStatus('Archive/new-name.md', undefined);
+        await (view as unknown as {
+            reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void>
+        }).reconcileOutOfBandMoves(remoteMap);
+
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.get('Archive/new-name.md')).toMatchObject({
+            status: 'moved',
+            movedFrom: 'Notes/old-name.md',
+        });
+    });
+
     // Regression test for the hazard behind the out-of-band fix above: an
     // external move often reaches Obsidian's vault watcher as a bare delete of
     // the old path (no correlated rename), so any code path that reacts to
@@ -636,17 +670,26 @@ describe('SyncStatusView.handleFileRenamed', () => {
         expect(statuses.get('new.md')).toMatchObject({ status: 'moved', movedFrom: 'old.md' });
     });
 
-    it('carries an unsynced row over at the new path when the file was never synced', () => {
+    it('keeps a never-pushed file local-only after its rename records no metadata', async () => {
         const { plugin, leaf } = makePlugin();
         const view = new SyncStatusView(leaf, plugin);
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         statuses.set('draft-old.md', { path: 'draft-old.md', status: 'unsynced', localContent: 'draft' });
 
+        // main.ts always asks SyncManager to track a vault rename first. A
+        // never-pushed file has no sync metadata, so this must stay a no-op:
+        // treating its rename as a move would later delete an unrelated remote
+        // path if one happened to exist.
+        await plugin.sync.trackRename('draft-new.md', 'draft-old.md');
+        expect(plugin.settings.syncMetadata).toBeUndefined();
+
         const file = Object.assign(new TFile(), { path: 'draft-new.md' });
         view.handleFileRenamed(file, 'draft-old.md');
 
         expect(statuses.has('draft-old.md')).toBe(false);
-        expect(statuses.get('draft-new.md')).toMatchObject({ status: 'unsynced', localContent: 'draft' });
+        const renamed = statuses.get('draft-new.md');
+        expect(renamed).toMatchObject({ status: 'unsynced', localContent: 'draft' });
+        expect(renamed).not.toHaveProperty('movedFrom');
     });
 
     it('drops the row entirely when the rename moves the file out of the configured vault folder', () => {
@@ -856,13 +899,12 @@ describe('SyncStatusView folder-move collapsing (#67)', () => {
     it('does not collapse a partial move — a file left behind under the old prefix keeps the group expanded', () => {
         const { plugin, leaf } = makePlugin();
         const view = new SyncStatusView(leaf, plugin);
-        (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses = new Map([
-            ['Archive/Projects/a.md', movedStatus('Archive/Projects/a.md', 'Notes/Projects/a.md')],
-            ['Archive/Projects/b.md', movedStatus('Archive/Projects/b.md', 'Notes/Projects/b.md')],
-            // Left behind: still at the old prefix, never moved.
-            ['Notes/Projects/c.md', { path: 'Notes/Projects/c.md', status: 'synced' }],
-        ]);
-        const statuses = [...(view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses.values()];
+        const statusStore = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statusStore.set('Archive/Projects/a.md', movedStatus('Archive/Projects/a.md', 'Notes/Projects/a.md'));
+        statusStore.set('Archive/Projects/b.md', movedStatus('Archive/Projects/b.md', 'Notes/Projects/b.md'));
+        // Left behind: still at the old prefix, never moved.
+        statusStore.set('Notes/Projects/c.md', { path: 'Notes/Projects/c.md', status: 'synced' });
+        const statuses = [...statusStore.values()];
 
         const groups = (view as unknown as {
             collapsibleMoveGroups(statuses: FileStatus[]): CollapsibleGroups

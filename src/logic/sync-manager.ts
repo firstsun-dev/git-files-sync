@@ -1,7 +1,7 @@
 import { TFile, App, Notice } from 'obsidian';
 import { GitServiceInterface, GitTreeEntry, GitFile, BatchMoveItem } from '../services/git-service-interface';
 import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
-import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling } from '../settings';
+import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling, isSyncMetadataAtPath } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
 import { SyncPlanModal, SyncPlanDirection } from '../ui/SyncPlanModal';
 import { SyncPlan, SyncPlanEntry, isSyncPlanEmpty } from '../ui/types';
@@ -9,6 +9,7 @@ import { logger } from '../utils/logger';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 import { readLocalSymlinkTarget, createLocalSymlink } from '../utils/symlink';
 import { gitBlobSha } from '../utils/git-blob-sha';
+import { SyncStatusService } from './sync-status-service';
 
 /** Result of syncing one file within a batch push/pull. */
 type BatchOutcome = 'done' | 'unchanged' | 'conflict';
@@ -44,12 +45,23 @@ export class SyncManager {
     private gitService: GitServiceInterface;
     private readonly settings: GitLabFilesPushSettings;
     private readonly onSaveSettings?: () => Promise<void>;
+    private readonly isPathIgnored: (path: string) => boolean;
+    readonly status: SyncStatusService;
 
-    constructor(app: App, gitService: GitServiceInterface, settings: GitLabFilesPushSettings, onSaveSettings?: () => Promise<void>) {
+    constructor(
+        app: App,
+        gitService: GitServiceInterface,
+        settings: GitLabFilesPushSettings,
+        onSaveSettings?: () => Promise<void>,
+        isPathIgnored: (path: string) => boolean = () => false,
+        status: SyncStatusService = new SyncStatusService(),
+    ) {
         this.app = app;
         this.gitService = gitService;
         this.settings = settings;
         this.onSaveSettings = onSaveSettings;
+        this.isPathIgnored = isPathIgnored;
+        this.status = status;
     }
 
     private get serviceName(): string {
@@ -63,6 +75,7 @@ export class SyncManager {
             lastKnownPath: path
         };
         await this.saveSettings();
+        this.status.markSynced(path, sha);
     }
 
     /** Drop sync metadata for a path that's been deleted, so it can't be mistaken for a rename source later. */
@@ -148,6 +161,11 @@ export class SyncManager {
     async pushFile(fileOrPath: TFile | string): Promise<{ sha?: string } | undefined> {
         const { path, name, isString } = this.getFileInfo(fileOrPath);
         const repoPath = this.getNormalizedPath(path);
+
+        if (this.isPathIgnored(path)) {
+            new Notice(`Skipped ${name}: it matches an ignore pattern.`);
+            return undefined;
+        }
 
         if (!await this.checkFileExists(path, isString)) {
             new Notice(`File ${name} no longer exists in vault.`);
@@ -273,7 +291,7 @@ export class SyncManager {
     ): Promise<string | null> {
         const candidates = Object.keys(this.settings.syncMetadata).filter(oldPath => {
             const metadata = this.settings.syncMetadata[oldPath];
-            return !!metadata && oldPath !== file.path && metadata.lastKnownPath === oldPath
+            return oldPath !== file.path && isSyncMetadataAtPath(metadata, oldPath)
                 && !this.app.vault.getFileByPath(oldPath);
         });
         if (candidates.length === 0) return null;
@@ -556,12 +574,16 @@ export class SyncManager {
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
     ): Promise<PushResults> {
+        const syncableFiles = files.filter(file => file && !this.isPathIgnored(this.getFileInfo(file).path));
+        if (syncableFiles.length === 0) {
+            return { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
+        }
         const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
-        const plan = await this.planPushBatch(files, tree);
+        const plan = await this.planPushBatch(syncableFiles, tree);
         if (!isSyncPlanEmpty(plan) && !await this.confirmPlan(plan, 'push')) {
             return { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
         }
-        return this.processPushBatch(files, onProgress, tree);
+        return this.processPushBatch(syncableFiles, onProgress, tree);
     }
 
     async pullAllFiles(
@@ -831,7 +853,7 @@ export class SyncManager {
     private hasOrphanedRenameMetadata(): boolean {
         for (const trackedPath of Object.keys(this.settings.syncMetadata)) {
             const metadata = this.settings.syncMetadata[trackedPath];
-            if (!metadata || metadata.lastKnownPath !== trackedPath) continue;
+            if (!isSyncMetadataAtPath(metadata, trackedPath)) continue;
             if (!this.app.vault.getFileByPath(trackedPath)) return true;
         }
         return false;

@@ -27,6 +27,14 @@ export interface SyncMetadata {
 	renamedFrom?: string;
 }
 
+/**
+ * Metadata written before `lastKnownPath` was introduced used its record key
+ * as the path. Keep that format eligible for rename reconciliation.
+ */
+export function isSyncMetadataAtPath(metadata: SyncMetadata | undefined, path: string): metadata is SyncMetadata {
+	return metadata !== undefined && (metadata.lastKnownPath === undefined || metadata.lastKnownPath === path);
+}
+
 export type GitServiceType = 'gitlab' | 'github' | 'gitea';
 
 /**
