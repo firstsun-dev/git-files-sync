@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { SyncStatusView } from '../../src/ui/SyncStatusView';
-import { WorkspaceLeaf } from 'obsidian';
+import { Platform, WorkspaceLeaf } from 'obsidian';
 import type GitLabFilesPush from '../../src/main';
 import { setupObsidianDOM } from './setup-dom';
 import type { FileStatus, FilterValue } from '../../src/ui/types';
@@ -33,6 +33,7 @@ type Internals = {
     selectedFiles: Set<string>;
     searchedStatuses(): FileStatus[];
     visibleStatuses(): FileStatus[];
+    renderTabs(container: HTMLElement): void;
 };
 
 const internals = (view: SyncStatusView): Internals => view as unknown as Internals;
@@ -51,6 +52,46 @@ describe('SyncStatusView search filter', () => {
     it('returns everything when the query is empty', () => {
         const view = makeView(SAMPLE);
         expect(internals(view).searchedStatuses()).toHaveLength(SAMPLE.length);
+    });
+
+    it('puts synced files at the bottom of the All list', () => {
+        const view = makeView(SAMPLE);
+
+        expect(internals(view).visibleStatuses().map(s => s.path)).toEqual([
+            'Notes/Projects/alpha.md',
+            'Notes/Projects/beta.md',
+            'Archive/PROJECT-old.md',
+            'Notes/daily.md',
+            'readme.md',
+        ]);
+    });
+
+    it('renders the Synced tab last', () => {
+        const view = makeView(SAMPLE);
+        const tabs = document.createElement('div');
+
+        internals(view).renderTabs(tabs);
+
+        expect(Array.from(tabs.querySelectorAll('.ssv-tab-label')).map(el => el.textContent?.trim())).toEqual([
+            'All', 'Changed', 'Local only', 'Remote', 'Synced',
+        ]);
+    });
+
+    it('uses a status dropdown on mobile while keeping desktop tabs', () => {
+        const view = makeView(SAMPLE);
+        const filter = document.createElement('div');
+        Platform.isMobile = true;
+
+        internals(view).renderTabs(filter);
+
+        const select = filter.querySelector<HTMLSelectElement>('.ssv-filter-select');
+        expect(select).toBeTruthy();
+        expect(filter.querySelector('.ssv-tabs')).toBeNull();
+        expect(Array.from(select!.options).map(option => option.text)).toEqual([
+            'All (5)', 'Changed (1)', 'Local only (1)', 'Remote (1)', 'Synced (2)',
+        ]);
+
+        Platform.isMobile = false;
     });
 
     it('matches a case-insensitive substring of the path', () => {

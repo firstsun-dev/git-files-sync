@@ -199,7 +199,17 @@ export default class GitLabFilesPush extends Plugin {
 			})
 		);
 
+		this.app.workspace.onLayoutReady(() => {
+			if (this.settings.autoRefreshOnStartup) void this.refreshSyncStatusOnStartup();
+		});
+
 		await this.checkForUpdateNotice();
+	}
+
+	private async refreshSyncStatusOnStartup(): Promise<void> {
+		await this.activateSyncStatusView();
+		const leaf = this.app.workspace.getLeavesOfType(SYNC_STATUS_VIEW_TYPE)[0];
+		if (leaf?.view instanceof SyncStatusView) await leaf.view.refreshAllStatuses();
 	}
 
 	private notifySyncStatusViews(callback: (view: SyncStatusView) => void): void {

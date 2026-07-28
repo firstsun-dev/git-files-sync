@@ -71,7 +71,8 @@ const mockSettings: GitLabFilesPushSettings = {
     ignorePatterns: '',
     lastSeenVersion: '',
     bannerDismissedVersion: '',
-    language: 'system'
+    language: 'system',
+    autoRefreshOnStartup: true
 };
 
 describe('SyncManager', () => {
