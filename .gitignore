@@ -27,5 +27,8 @@ tsconfig.compat.generated.json
 # Claude worktrees
 .claude/
 
+# Session handoff — per-checkout scratch, never merged
+session-handoff.md
+
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
