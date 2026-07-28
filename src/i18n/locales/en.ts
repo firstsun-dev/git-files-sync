@@ -108,6 +108,7 @@ const en = {
 	'confirmModal.cancel': 'Cancel',
 
 	'whatsNew.title': "What's new",
+	'whatsNew.viewOnGitHub': 'View on GitHub',
 	'whatsNew.viewChangelog': 'View full changelog',
 	'whatsNew.gotIt': 'Got it',
 

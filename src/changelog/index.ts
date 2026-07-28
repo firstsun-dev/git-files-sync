@@ -1,6 +1,7 @@
 import { compareVersions } from '../utils/version';
 import { getActiveLocale } from '../i18n';
 import { type ChangelogEntry, type ChangelogEntryText, type ChangelogRelease } from './types';
+import { release as release_1_5_0 } from './1.5.0';
 import { release as release_1_4_0 } from './1.4.0';
 import { release as release_1_3_1 } from './1.3.1';
 import { release as release_1_3_0 } from './1.3.0';
@@ -20,7 +21,7 @@ export { type ChangelogEntry, type ChangelogEntryText, type ChangelogRelease } f
  * locale files forever. Versions are matched against manifest.json's version
  * by exact string, so keep them in sync.
  */
-export const CHANGELOG: ChangelogRelease[] = [release_1_4_0, release_1_3_1, release_1_3_0, release_1_2_1];
+export const CHANGELOG: ChangelogRelease[] = [release_1_5_0, release_1_4_0, release_1_3_1, release_1_3_0, release_1_2_1];
 
 /** Resolves an entry's text for the active UI locale, falling back to English. */
 export function entryText(entry: ChangelogEntry): string {
