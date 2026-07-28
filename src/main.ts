@@ -174,6 +174,22 @@ export default class GitLabFilesPush extends Plugin {
 			})
 		);
 
+		// A saved edit inside the configured vault folder should update that
+		// row's status live rather than leaving it stale until the next manual
+		// refresh. Reuses whatever sync panel views are currently open; no-op
+		// when the panel isn't open or the file isn't in scope.
+		this.registerEvent(
+			this.app.vault.on('modify', (file) => {
+				if (file instanceof TFile && this.filterPathByVaultFolder(file.path)) {
+					for (const leaf of this.app.workspace.getLeavesOfType(SYNC_STATUS_VIEW_TYPE)) {
+						if (leaf.view instanceof SyncStatusView) {
+							void leaf.view.handleFileModified(file);
+						}
+					}
+				}
+			})
+		);
+
 		await this.checkForUpdateNotice();
 	}
 

@@ -1028,6 +1028,40 @@ export class SyncStatusView extends ItemView {
     }
 
     /**
+     * Live-updates one already-tracked file's status after Obsidian reports its
+     * content changed (called from main.ts's vault 'modify' handler, gated to
+     * files inside the configured vault folder). Re-derives 'synced'/'modified'
+     * from a local hash against the remote SHA already known from the last full
+     * refresh -- no network call, so this is cheap enough to run on every edit.
+     *
+     * Only applies to a path already showing 'synced', 'modified', or
+     * 'unsynced' -- the three statuses a direct content comparison drives.
+     * 'moved' is driven by tracked rename metadata, not content, and stays
+     * 'moved' regardless of edits (a rename + edit is still a move, per #66's
+     * edge cases); 'remote-only' has no local file to have changed; 'checking'
+     * means a full refresh is already in flight and will supersede this. A
+     * path the panel isn't currently tracking at all is left alone too --
+     * discovering new files requires the remote tree and belongs to a full
+     * refresh, not a per-edit hook.
+     */
+    async handleFileModified(file: TFile): Promise<void> {
+        const existing = this.fileStatuses.get(file.path);
+        if (!existing || (existing.status !== 'synced' && existing.status !== 'modified' && existing.status !== 'unsynced')) return;
+
+        const localContent = await this.readFileContent(file, this.isBinary(file.path), false);
+
+        if (existing.remoteSha === undefined) {
+            this.fileStatuses.set(file.path, { ...existing, localContent });
+        } else {
+            const localSha = await gitBlobSha(localContent);
+            const status = localSha === existing.remoteSha ? 'synced' : 'modified';
+            this.fileStatuses.set(file.path, { ...existing, status, localContent });
+        }
+
+        this.renderView();
+    }
+
+    /**
      * Classifies a file's sync status. When the remote tree entry carries a git
      * blob SHA (the common case), this is a single local hash + comparison with
      * no network request (Phase 1 of the SHA-based refresh). Falls back to the
