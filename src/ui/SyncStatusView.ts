@@ -1,11 +1,14 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice, Platform, debounce, setIcon, setTooltip } from 'obsidian';
 import GitLabFilesPush from '../main';
-import { getServiceName, getEffectiveSymlinkHandling, type SymlinkHandling } from '../settings';
+import { getServiceName, getEffectiveSymlinkHandling, isSyncMetadataAtPath, type SymlinkHandling } from '../settings';
 import { ConfirmModal } from './ConfirmModal';
+import { SyncPlanModal } from './SyncPlanModal';
 import { logger } from '../utils/logger';
-import { type FileStatus, type FilterValue } from './types';
+import { type FileStatus, type FilterValue, type SyncPlan } from './types';
 import { renderActionBar } from './components/ActionBar';
-import { renderFileItem, statusMeta, type FileItemCallbacks } from './components/FileListItem';
+import { renderFileItem, renderMoveGroupItem, statusMeta, type FileItemCallbacks, type MoveGroupCallbacks } from './components/FileListItem';
+import { renderFolderItem, type FolderTreeItemCallbacks } from './components/FolderTreeItem';
+import { buildStatusTree, type StatusTreeNode } from './components/StatusTree';
 import { ICONS } from './components/icons';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 import { buildRemoteFileUrl } from '../utils/remote-url';
@@ -16,6 +19,7 @@ import { type GitTreeEntry } from '../services/git-service-interface';
 import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
 import { t, type TranslationKey } from '../i18n';
 import { type PushResults } from '../logic/sync-manager';
+import { SyncStatusService } from '../logic/sync-status-service';
 
 export const SYNC_STATUS_VIEW_TYPE = 'sync-status-view';
 
@@ -23,14 +27,26 @@ type RemoteTreeSnapshot = { branch: string; rootPath: string; head: string; entr
 
 export class SyncStatusView extends ItemView {
     plugin: GitLabFilesPush;
-    private readonly fileStatuses: Map<string, FileStatus> = new Map();
     private isRefreshing = false;
     private refreshProgress = { current: 0, total: 0 };
     private statusFilter: FilterValue = 'all';
+    private treeViewEnabled = true;
+    private showSyncedInAll = false;
     private searchQuery = '';
     private readonly selectedFiles: Set<string> = new Set();
+    /** Folders the user collapsed; all other folders start expanded. */
+    private readonly collapsedFolders: Set<string> = new Set();
+    /** Group keys (see groupKey()) currently expanded to show their member rows. */
+    private readonly expandedMoveGroups: Set<string> = new Set();
     private lastSyncTime: number = 0;
     private remoteTreeSnapshot?: RemoteTreeSnapshot;
+    private unsubscribeStatuses?: () => void;
+    private readonly detachedStatusService = new SyncStatusService();
+    private readonly renderStatusChanges = debounce(
+        () => this.renderView(),
+        SyncStatusView.RENDER_THROTTLE_MS,
+        false,
+    );
     // Persistent containers created once in onOpen(). renderView() rebuilds
     // only what's inside them, so the search input (which lives in the header,
     // outside both) is never destroyed mid-typing.
@@ -40,6 +56,11 @@ export class SyncStatusView extends ItemView {
     constructor(leaf: WorkspaceLeaf, plugin: GitLabFilesPush) {
         super(leaf);
         this.plugin = plugin;
+    }
+
+    /** The plugin-wide snapshot; the view owns presentation state, not file state. */
+    private get fileStatuses(): SyncStatusService {
+        return this.plugin.sync?.status ?? this.detachedStatusService;
     }
 
     getViewType(): string { return SYNC_STATUS_VIEW_TYPE; }
@@ -61,6 +82,7 @@ export class SyncStatusView extends ItemView {
         this.infoEl = headerEl.createDiv({ cls: 'ssv-info-slot' });
         this.renderSearchBox(headerEl);
         this.bodyEl = container.createDiv({ cls: 'ssv-body' });
+        this.unsubscribeStatuses = this.fileStatuses.subscribe(() => this.renderStatusChanges());
 
         this.renderView();
         return Promise.resolve();
@@ -180,10 +202,17 @@ export class SyncStatusView extends ItemView {
     }
 
     /** The rows actually on screen: search and status tab applied together. */
-    private visibleStatuses(): FileStatus[] {
-        const searched = this.searchedStatuses();
-        return this.statusFilter === 'all' ? searched : searched.filter(s => s.status === this.statusFilter);
-    }
+	private visibleStatuses(): FileStatus[] {
+		const searched = this.searchedStatuses();
+		if (this.statusFilter !== 'all') return searched.filter(s => s.status === this.statusFilter);
+		if (!this.treeViewEnabled) return this.sortAllStatuses(searched);
+		return this.showSyncedInAll ? searched : searched.filter(s => s.status !== 'synced');
+	}
+
+	/** The legacy flat view keeps completed entries out of the way. */
+	private sortAllStatuses(statuses: FileStatus[]): FileStatus[] {
+		return [...statuses].sort((left, right) => Number(left.status === 'synced') - Number(right.status === 'synced'));
+	}
 
     /**
      * Keeps the invariant that the selection is always a subset of what's on
@@ -238,7 +267,7 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    // ── Filter tabs ─────────────────────────────────────────────────
+    // ── Status filter ────────────────────────────────────────────────
 
     private renderTabs(container: HTMLElement): void {
         // Counted against the search results, not the whole vault: with a
@@ -247,20 +276,31 @@ export class SyncStatusView extends ItemView {
         // hunt through tabs for a file the search has already found.
         const all = this.searchedStatuses();
         const counts: Record<FilterValue, number> = {
-            all: all.length,
+            all: !this.treeViewEnabled || this.showSyncedInAll ? all.length : all.filter(s => s.status !== 'synced').length,
             synced: all.filter(s => s.status === 'synced').length,
             modified: all.filter(s => s.status === 'modified').length,
             unsynced: all.filter(s => s.status === 'unsynced').length,
             'remote-only': all.filter(s => s.status === 'remote-only').length,
+            // Rows, not files: a collapsed 40-file folder move counts as 1, same
+            // as every other tab counting what's actually on screen.
+            moved: this.movedRowCount(all),
         };
 
-        const tabs: Array<{ value: FilterValue; label: string }> = [
-            { value: 'all',         label: t('syncStatus.tab.all') },
-            { value: 'synced',      label: t('syncStatus.tab.synced') },
-            { value: 'modified',    label: t('syncStatus.tab.modified') },
-            { value: 'unsynced',    label: t('syncStatus.tab.unsynced') },
-            { value: 'remote-only', label: t('syncStatus.tab.remote-only') },
-        ];
+		const tabs: Array<{ value: FilterValue; label: string }> = [
+			{ value: 'all',         label: t('syncStatus.tab.all') },
+			{ value: 'modified',    label: t('syncStatus.tab.modified') },
+			{ value: 'unsynced',    label: t('syncStatus.tab.unsynced') },
+			{ value: 'remote-only', label: t('syncStatus.tab.remote-only') },
+            // Shown only when there's at least one moved row — most vaults
+            // never see one, and a permanent empty tab would just be clutter.
+			...(counts.moved > 0 ? [{ value: 'moved' as const, label: t('syncStatus.tab.moved') }] : []),
+			{ value: 'synced',      label: t('syncStatus.tab.synced') },
+		];
+
+        if (Platform.isMobile) {
+            this.renderMobileFilter(container, tabs, counts);
+            return;
+        }
 
         const tabsEl = container.createDiv({ cls: 'ssv-tabs' });
         for (const tab of tabs) {
@@ -277,15 +317,45 @@ export class SyncStatusView extends ItemView {
                 btn.createSpan({ cls: 'ssv-tab-count', text: String(count) });
             }
             setTooltip(btn, tab.label);
-            btn.addEventListener('click', () => {
-                // Was: clear the whole selection on any tab change. Pruning
-                // instead keeps the ticks the new tab still shows, under the
-                // same invariant the search filter follows.
-                this.statusFilter = tab.value;
-                this.pruneSelectionToVisible();
-                this.renderView();
+            btn.addEventListener('click', () => this.applyStatusFilter(tab.value));
+        }
+
+    }
+
+    private renderMobileFilter(
+        container: HTMLElement,
+        tabs: Array<{ value: FilterValue; label: string }>,
+        counts: Record<FilterValue, number>,
+    ): void {
+        const select = container.createEl('select', {
+            cls: 'ssv-filter-select',
+            attr: { 'aria-label': t('syncStatus.filterByStatus') },
+        });
+        for (const tab of tabs) {
+            select.createEl('option', {
+                text: `${tab.label} (${counts[tab.value]})`,
+                value: tab.value,
             });
         }
+        select.value = this.statusFilter;
+        select.addEventListener('change', () => this.applyStatusFilter(select.value as FilterValue));
+    }
+
+    /** Apply a status filter while preserving selections still visible in it. */
+    private applyStatusFilter(filter: FilterValue): void {
+        this.statusFilter = filter;
+        this.pruneSelectionToVisible();
+        this.renderView();
+    }
+
+    /** The 'moved' tab count: rows, not files — a collapsed folder-move group is 1 row. */
+    private movedRowCount(statuses: FileStatus[]): number {
+        const groups = this.collapsibleMoveGroups(statuses);
+        const groupedPaths = new Set<string>();
+        for (const group of groups.values()) for (const m of group.members) groupedPaths.add(m.path);
+
+        const ungroupedMoved = statuses.filter(s => s.status === 'moved' && !groupedPaths.has(s.path)).length;
+        return ungroupedMoved + groups.size;
     }
 
     // ── Action bar ─────────────────────────────────────────────────
@@ -302,9 +372,14 @@ export class SyncStatusView extends ItemView {
             hasFiles:      this.fileStatuses.size > 0,
             allSelected,
             indeterminate: this.selectedFiles.size > 0 && !allSelected,
-            canPush:   selected.filter(s => s.status === 'modified' || s.status === 'unsynced').length,
+            canPush:   selected.filter(s => s.status === 'modified' || s.status === 'unsynced' || s.status === 'moved').length,
+            // Moved rows are excluded here too: a bulk Pull on a moved row
+            // would silently undo the move, so it only has a per-row revert
+            // action with its own confirm — see FileListItem's onRevertMove.
             canPull:   selected.filter(s => s.status === 'modified' || s.status === 'remote-only').length,
-            canDelete: selected.length,
+            canDelete: selected.filter(s => s.status !== 'moved').length,
+            treeViewEnabled: this.treeViewEnabled,
+            showSynced: this.showSyncedInAll,
         }, {
             onRefresh:   () => void this.refreshAllStatuses(),
             onSelectAll: (select) => {
@@ -320,6 +395,16 @@ export class SyncStatusView extends ItemView {
             onPush:   () => void this.pushSelected(),
             onPull:   () => void this.pullSelected(),
             onDelete: () => void this.deleteSelected(),
+            onTreeViewChange: (enabled) => {
+                this.treeViewEnabled = enabled;
+                this.pruneSelectionToVisible();
+                this.renderView();
+            },
+            onShowSyncedChange: (show) => {
+                this.showSyncedInAll = show;
+                this.pruneSelectionToVisible();
+                this.renderView();
+            },
         });
     }
 
@@ -339,7 +424,36 @@ export class SyncStatusView extends ItemView {
             onOpen:   (fs, newLeaf) => this.openFileFromRow(fs, newLeaf),
             canOpen:  (fs) => this.openTargetFor(fs) !== null,
             onOpenDiffPane: (fs) => void this.openDiffPane(fs),
+            onRevertMove: (fs) => void this.revertMove(fs),
         };
+    }
+
+    /**
+     * Undoes a pending move by moving the local file back to where it was
+     * last synced. Reuses the same trackRename mechanism a real vault rename
+     * goes through: moving back to the still-unpushed remote path is exactly
+     * the "rename cancels itself" case, so the pending move disappears.
+     */
+    private async revertMove(fileStatus: FileStatus): Promise<void> {
+        if (!fileStatus.movedFrom) return;
+        const confirmed = await this.showConfirmDialog(
+            t('syncStatus.confirmRevertMove', { from: fileStatus.path, to: fileStatus.movedFrom })
+        );
+        if (!confirmed) return;
+
+        try {
+            const file = fileStatus.file ?? this.app.vault.getFileByPath(fileStatus.path);
+            if (file instanceof TFile) {
+                await this.app.fileManager.renameFile(file, fileStatus.movedFrom);
+            } else {
+                await this.app.vault.adapter.rename(fileStatus.path, fileStatus.movedFrom);
+                await this.plugin.sync.trackRename(fileStatus.movedFrom, fileStatus.path);
+            }
+            new Notice(t('syncStatus.notice.moveReverted', { path: fileStatus.movedFrom }));
+            await this.refreshAllStatuses();
+        } catch (e) {
+            new Notice(t('syncStatus.notice.revertFailed', { message: e instanceof Error ? e.message : String(e) }));
+        }
     }
 
     /**
@@ -415,7 +529,7 @@ export class SyncStatusView extends ItemView {
     private async loadDiffContent(fileStatus: FileStatus): Promise<void> {
         if (fileStatus.remoteContent !== undefined || !fileStatus.remoteSha) return;
         try {
-            const blob = await this.plugin.gitService.getBlob(fileStatus.remoteSha, fileStatus.path);
+            const blob = await this.plugin.gitService.getBlob(fileStatus.remoteSha, fileStatus.movedFrom ?? fileStatus.path);
             fileStatus.remoteContent = blob.content;
         } catch (e) {
             logger.warn(`Failed to load diff content for ${fileStatus.path}`, e);
@@ -437,10 +551,203 @@ export class SyncStatusView extends ItemView {
             return;
         }
 
-        const cb = this.fileItemCallbacks();
-        for (const fs of statuses) {
-            renderFileItem(container, fs, this.selectedFiles.has(fs.path), cb);
+        if (this.treeViewEnabled) this.renderTreeNodes(container, buildStatusTree(statuses).children);
+        else this.renderFlatFileList(container, statuses);
+    }
+
+    private renderFlatFileList(container: HTMLElement, statuses: FileStatus[]): void {
+        const groups = this.collapsibleMoveGroups(statuses);
+        const groupedPaths = new Set<string>();
+        for (const group of groups.values()) for (const member of group.members) groupedPaths.add(member.path);
+
+        const callbacks = this.fileItemCallbacks();
+        const renderedGroups = new Set<string>();
+        for (const status of statuses) {
+            if (groupedPaths.has(status.path)) this.renderGroupedRowOnce(container, status, groups, renderedGroups);
+            else renderFileItem(container, status, this.selectedFiles.has(status.path), callbacks);
         }
+    }
+
+    private renderTreeNodes(container: HTMLElement, nodes: StatusTreeNode[]): void {
+        const fileCallbacks = this.fileItemCallbacks();
+        const folderCallbacks = this.folderItemCallbacks();
+        for (const node of nodes) {
+            if (node.kind === 'file') {
+                renderFileItem(container, node.status, this.selectedFiles.has(node.status.path), fileCallbacks);
+                continue;
+            }
+            const children = renderFolderItem(
+                container, node, this.selectedFiles, !this.collapsedFolders.has(node.path), folderCallbacks,
+            );
+            if (children) this.renderTreeNodes(children, node.children);
+        }
+    }
+
+    private folderItemCallbacks(): FolderTreeItemCallbacks {
+        return {
+            onSelect: (paths, selected) => {
+                for (const path of paths) {
+                    if (selected) this.selectedFiles.add(path);
+                    else this.selectedFiles.delete(path);
+                }
+                this.renderView();
+            },
+            onToggle: (path) => {
+                if (this.collapsedFolders.has(path)) this.collapsedFolders.delete(path);
+                else this.collapsedFolders.add(path);
+                this.renderView();
+            },
+        };
+    }
+
+    /** Renders a collapsed folder-move row the first time one of its members is reached, then skips its later members. */
+    private renderGroupedRowOnce(
+        container: HTMLElement,
+        fs: FileStatus,
+        groups: Map<string, { oldPrefix: string; newPrefix: string; members: FileStatus[] }>,
+        renderedGroups: Set<string>
+    ): void {
+        const key = this.groupKey(fs);
+        if (key === null || renderedGroups.has(key)) return;
+        renderedGroups.add(key);
+
+        const group = groups.get(key);
+        if (!group) return;
+        renderMoveGroupItem(
+            container, key, group.oldPrefix, group.newPrefix, group.members,
+            group.members.every(m => this.selectedFiles.has(m.path)),
+            this.expandedMoveGroups.has(key),
+            this.moveGroupCallbacks()
+        );
+    }
+
+    // ── Folder-move collapsing (#67) ────────────────────────────
+
+    /**
+     * The (oldPrefix, newPrefix) pair a moved file belongs to, derived by
+     * matching path segments from the end: everything that still matches
+     * between the old and new path is the unchanged relative suffix, and
+     * whatever differs before that is the folder that moved. This generalizes
+     * to any nesting depth without needing to know the folder move's actual
+     * boundary up front — a file whose own name also changed (not just its
+     * folder) simply gets a prefix pair unique to itself, so it naturally
+     * never groups with anything else. JSON-encoded so the pair round-trips
+     * exactly through a Map key regardless of what characters the paths
+     * themselves contain.
+     */
+    private groupKey(fs: FileStatus): string | null {
+        const prefixes = this.groupPrefixes(fs);
+        return prefixes && JSON.stringify(prefixes);
+    }
+
+    private groupPrefixes(fs: FileStatus): { oldPrefix: string; newPrefix: string } | null {
+        if (!fs.movedFrom) return null;
+        const oldSegs = fs.movedFrom.split('/');
+        const newSegs = fs.path.split('/');
+        let i = oldSegs.length - 1;
+        let j = newSegs.length - 1;
+        while (i >= 1 && j >= 1 && oldSegs[i] === newSegs[j]) { i--; j--; }
+        return {
+            oldPrefix: oldSegs.slice(0, i + 1).join('/'),
+            newPrefix: newSegs.slice(0, j + 1).join('/'),
+        };
+    }
+
+    /**
+     * True when some currently-tracked file still lives under `oldPrefix`
+     * without having moved — i.e. only part of that folder's contents moved.
+     * Partial moves are exactly where the user needs the per-file detail, so
+     * a group failing this check is left as individual rows instead of being
+     * collapsed.
+     */
+    private isPartialMove(oldPrefix: string): boolean {
+        const prefix = `${oldPrefix}/`;
+        for (const fs of this.fileStatuses.values()) {
+            if (fs.status === 'moved') continue;
+            if (fs.path === oldPrefix || fs.path.startsWith(prefix)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Groups of 'moved' rows worth collapsing into a single folder row: more
+     * than one file sharing a (oldPrefix, newPrefix) pair, with nothing left
+     * behind under the old prefix. A group of one is just a plain moved row —
+     * collapsing it would add an expand affordance for nothing.
+     */
+    private collapsibleMoveGroups(statuses: FileStatus[]): Map<string, { oldPrefix: string; newPrefix: string; members: FileStatus[] }> {
+        const byKey = new Map<string, { oldPrefix: string; newPrefix: string; members: FileStatus[] }>();
+        for (const fs of statuses) {
+            if (fs.status !== 'moved') continue;
+            const prefixes = this.groupPrefixes(fs);
+            if (!prefixes) continue;
+            const key = JSON.stringify(prefixes);
+            const existing = byKey.get(key);
+            if (existing) existing.members.push(fs);
+            else byKey.set(key, { ...prefixes, members: [fs] });
+        }
+
+        const collapsible = new Map<string, { oldPrefix: string; newPrefix: string; members: FileStatus[] }>();
+        for (const [key, group] of byKey) {
+            if (group.members.length < 2) continue;
+            if (this.isPartialMove(group.oldPrefix)) continue;
+            collapsible.set(key, group);
+        }
+        return collapsible;
+    }
+
+    private moveGroupCallbacks(): MoveGroupCallbacks {
+        return {
+            onSelect: (members, selected) => {
+                for (const m of members) {
+                    if (selected) this.selectedFiles.add(m.path);
+                    else this.selectedFiles.delete(m.path);
+                }
+                this.renderView();
+            },
+            onPush: (members) => void this.pushMoveGroup(members),
+            onRevertMove: (members) => void this.revertMoveGroup(members),
+            onToggleExpand: (key) => {
+                if (this.expandedMoveGroups.has(key)) this.expandedMoveGroups.delete(key);
+                else this.expandedMoveGroups.add(key);
+                this.renderView();
+            },
+        };
+    }
+
+    /** Pushes every member of a collapsed folder-move row through the batch flow, so the whole group lands in one commit. */
+    private async pushMoveGroup(members: FileStatus[]): Promise<void> {
+        const files = members.map(m => m.file || m.path);
+        try {
+            const results = await this.plugin.sync.pushAllFiles(files);
+            this.applyOptimisticSyncedStatus(results.syncedPaths);
+            this.renderView();
+        } catch (e) {
+            new Notice(t('syncStatus.notice.opFailed', { verb: t('main.verb.push'), message: e instanceof Error ? e.message : String(e) }));
+        }
+    }
+
+    /** Reverts every member of a collapsed folder-move row — moves each local file back to where it was. */
+    private async revertMoveGroup(members: FileStatus[]): Promise<void> {
+        const confirmed = await this.showConfirmDialog(t('syncStatus.confirmRevertMoveGroup', { count: members.length }));
+        if (!confirmed) return;
+
+        for (const m of members) {
+            if (!m.movedFrom) continue;
+            try {
+                const file = m.file ?? this.app.vault.getFileByPath(m.path);
+                if (file instanceof TFile) {
+                    await this.app.fileManager.renameFile(file, m.movedFrom);
+                } else {
+                    await this.app.vault.adapter.rename(m.path, m.movedFrom);
+                    await this.plugin.sync.trackRename(m.movedFrom, m.path);
+                }
+            } catch (e) {
+                logger.warn(`Failed to revert move for ${m.path}`, e);
+            }
+        }
+        new Notice(t('syncStatus.notice.moveReverted', { path: `${members.length} file(s)` }));
+        await this.refreshAllStatuses();
     }
 
     // ── Single-file operations ──────────────────────────────────────
@@ -472,7 +779,7 @@ export class SyncStatusView extends ItemView {
         const runVerb = op === 'push' ? t('main.verb.pushing') : t('main.verb.pulling');
         const prog = new Notice(t('syncStatus.notice.opStarted', { verb: runVerb, name: fileStatus.path }), 0);
         try {
-            fileStatus.status = 'checking';
+            this.fileStatuses.set({ ...fileStatus, status: 'checking' });
             this.closeDiffPaneFor([fileStatus.path]);
             this.renderView();
 
@@ -526,7 +833,7 @@ export class SyncStatusView extends ItemView {
             for (const hiddenPath of files.hiddenLocalPaths) {
                 this.fileStatuses.set(hiddenPath, { path: hiddenPath, status: 'checking' });
             }
-            const extra = await this.identifyExtraFiles(files.remoteMap, files.localMap, files.allMap);
+            const extra = await this.identifyExtraFiles(files.remoteMap, files.localMap, files.allMap, this.pendingMoveOldPaths());
             this.addExtraToStatuses(extra);
 
             // Re-render info/tabs but keep progress bar (renderView handles this)
@@ -534,6 +841,7 @@ export class SyncStatusView extends ItemView {
 
             const filesToCheck = this.getCheckableFiles(files.local, extra, files.hiddenLocalPaths);
             await this.performStatusCheck(filesToCheck, files.remoteMap);
+            await this.reconcileOutOfBandMoves(files.remoteMap);
 
             this.saveRemoteTreeSnapshot(files.remoteHead, files.remoteEntries);
             this.lastSyncTime = Date.now();
@@ -657,10 +965,20 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    private async identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>) {
+    /** Every path a pending move's `renamedFrom` still points at — the remote's copy at each is represented by the moved row at its new path, not a separate remote-only row. */
+    private pendingMoveOldPaths(): Set<string> {
+        const paths = new Set<string>();
+        for (const meta of Object.values(this.plugin.settings.syncMetadata ?? {})) {
+            if (meta.renamedFrom) paths.add(meta.renamedFrom);
+        }
+        return paths;
+    }
+
+    private async identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, TFile>, pendingMoveOldPaths: Set<string> = new Set()) {
         const extra: Array<TFile | string> = [];
         for (const [vaultPath] of remoteMap.entries()) {
             if (localFilePaths.has(vaultPath)) continue;
+            if (pendingMoveOldPaths.has(vaultPath)) continue;
 
             let localFile = allLocalFileMap.get(vaultPath);
             if (!localFile) {
@@ -677,10 +995,81 @@ export class SyncStatusView extends ItemView {
                 // stale symlink push) now collides with a real local folder of
                 // the same name — either way there's no readable local file to
                 // compare, so it's remote-only.
-                this.fileStatuses.set(vaultPath, { path: vaultPath, status: 'remote-only' });
+                this.fileStatuses.set(vaultPath, {
+                    path: vaultPath,
+                    status: this.fileStatuses.classify({ localExists: false, remoteExists: true }),
+                });
             }
         }
         return extra;
+    }
+
+    /**
+     * Pairs an orphaned remote-only entry with a local-only file sharing its
+     * exact content — for moves that happened while the plugin wasn't
+     * observing the vault's live 'rename' event (Obsidian closed, an
+     * external tool or another device moved it, or the plugin hadn't
+     * finished loading yet). Live tracking in main.ts already covers every
+     * in-app move; this only fills the gap live tracking can't see.
+     *
+     * An orphan only counts if it still carries synced metadata pointing at
+     * that exact path — a brand-new remote file that happens to share
+     * content with an unrelated local draft must never be mistaken for a
+     * move. And a sha match only counts when it's unambiguous on both
+     * sides — a boilerplate/template file legitimately duplicated at
+     * several paths must not get paired at random.
+     */
+    private async reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void> {
+        const orphansBySha = this.orphanedMoveSourcesBySha(remoteMap);
+        if (orphansBySha.size === 0) return;
+
+        const candidatesBySha = await this.unsyncedMoveDestinationsBySha(remoteMap, orphansBySha);
+
+        for (const [sha, orphanPaths] of orphansBySha) {
+            if (orphanPaths.length !== 1) continue; // ambiguous on the remote side
+            const newPaths = candidatesBySha.get(sha);
+            if (!newPaths || newPaths.length !== 1) continue; // ambiguous or unmatched on the local side
+            const oldPath = orphanPaths[0] as string;
+            const newPath = newPaths[0] as string;
+            await this.plugin.sync.trackRename(newPath, oldPath);
+            this.fileStatuses.delete(oldPath);
+            await this.refreshFileStatus(newPath, remoteMap.get(newPath));
+        }
+    }
+
+    /** Every 'remote-only' row that still carries synced metadata at that exact path, grouped by its remote blob sha. */
+    private orphanedMoveSourcesBySha(remoteMap: Map<string, GitTreeEntry>): Map<string, string[]> {
+        const metadata = this.plugin.settings.syncMetadata ?? {};
+        const orphansBySha = new Map<string, string[]>();
+        for (const [path, status] of this.fileStatuses) {
+            if (status.status !== 'remote-only') continue;
+            const meta = metadata[path];
+            if (!isSyncMetadataAtPath(meta, path) || meta.renamedFrom) continue;
+            const entry = remoteMap.get(path);
+            if (!entry || entry.symlink || !entry.sha) continue;
+            const list = orphansBySha.get(entry.sha) ?? [];
+            list.push(path);
+            orphansBySha.set(entry.sha, list);
+        }
+        return orphansBySha;
+    }
+
+    /** Every 'unsynced' row with no remote entry of its own, grouped by its local blob sha — but only shas an orphan actually needs. */
+    private async unsyncedMoveDestinationsBySha(
+        remoteMap: Map<string, GitTreeEntry>,
+        orphansBySha: Map<string, string[]>
+    ): Promise<Map<string, string[]>> {
+        const candidatesBySha = new Map<string, string[]>();
+        for (const [path, status] of this.fileStatuses) {
+            if (status.status !== 'unsynced' || status.localContent === undefined) continue;
+            if (remoteMap.has(path)) continue; // has its own remote entry; not a move destination
+            const sha = await gitBlobSha(status.localContent);
+            if (!orphansBySha.has(sha)) continue;
+            const list = candidatesBySha.get(sha) ?? [];
+            list.push(path);
+            candidatesBySha.set(sha, list);
+        }
+        return candidatesBySha;
     }
 
     private addExtraToStatuses(extra: Array<TFile | string>): void {
@@ -726,7 +1115,7 @@ export class SyncStatusView extends ItemView {
                 const file = filesToCheck[next++];
                 if (file) {
                     const path = typeof file === 'string' ? file : file.path;
-                    await this.refreshFileStatus(file, remoteMap.get(path));
+                    await this.refreshFileStatus(file, remoteMap.get(path), remoteMap);
                 }
                 this.refreshProgress.current++;
                 maybeRender();
@@ -739,6 +1128,91 @@ export class SyncStatusView extends ItemView {
     }
 
     /**
+     * Live-updates one already-tracked file's status after Obsidian reports its
+     * content changed (called from main.ts's vault 'modify' handler, gated to
+     * files inside the configured vault folder). Re-derives 'synced'/'modified'
+     * from a local hash against the remote SHA already known from the last full
+     * refresh -- no network call, so this is cheap enough to run on every edit.
+     *
+     * Applies to rows with a local file. 'moved' stays 'moved' regardless of
+     * edits, but its local content is refreshed so it can be compared with
+     * the remote content at its old path. 'remote-only' has no local file to
+     * have changed; 'checking'
+     * means a full refresh is already in flight and will supersede this. A
+     * path the panel isn't currently tracking at all is left alone too --
+     * discovering new files requires the remote tree and belongs to a full
+     * refresh, not a per-edit hook.
+     */
+    async handleFileModified(file: TFile): Promise<void> {
+        const existing = this.fileStatuses.get(file.path);
+        if (!existing || (existing.status !== 'synced' && existing.status !== 'modified' && existing.status !== 'unsynced' && existing.status !== 'moved')) return;
+
+        const localContent = await this.readFileContent(file, this.isBinary(file.path), false);
+
+        let status: FileStatus['status'] = existing.status;
+        if (existing.status !== 'moved') {
+            status = existing.remoteSha === undefined
+                ? this.fileStatuses.classify({ localExists: true, remoteExists: false })
+                : this.fileStatuses.classify({
+                localExists: true,
+                remoteExists: true,
+                contentsEqual: await gitBlobSha(localContent) === existing.remoteSha,
+            });
+        }
+        this.fileStatuses.set(file.path, { ...existing, status, localContent });
+
+        this.renderView();
+    }
+
+    /**
+     * Live-updates the sync panel after Obsidian reports a rename (called from
+     * main.ts's vault 'rename' handler, once SyncManager.trackRename has
+     * already updated syncMetadata -- so this only ever reads state that's
+     * already settled, no network call). Mirrors what a full refresh would
+     * classify the new path as, from data already known:
+     *
+     * - Not currently tracked at the old path (gitignored, or the panel
+     *   hasn't refreshed since it appeared) -- nothing to do.
+     * - A refresh is mid-flight for the old path ('checking') -- it will
+     *   settle on its own; touching it here would race the refresh.
+     * - The new path fell outside the configured vault folder -- the row
+     *   simply disappears, same as any other out-of-scope file.
+     * - syncMetadata carries a renamedFrom for the new path (the common
+     *   case, set by the trackRename this follows) -- becomes a 'moved' row.
+     * - No renamedFrom (never synced, or renamed back to its last-synced
+     *   path and the pending move cancelled itself) -- carries the previous
+     *   status over at the new path rather than inventing one.
+     */
+    handleFileRenamed(file: TFile, oldPath: string): void {
+        const existing = this.fileStatuses.get(oldPath);
+        if (!existing || existing.status === 'checking') return;
+
+        this.fileStatuses.delete(oldPath);
+
+        if (!this.plugin.filterPathByVaultFolder(file.path)) {
+            this.renderView();
+            return;
+        }
+
+        const renamedFrom = this.plugin.settings.syncMetadata?.[file.path]?.renamedFrom;
+        if (renamedFrom !== undefined) {
+            this.fileStatuses.set(file.path, {
+                file,
+                path: file.path,
+                status: this.fileStatuses.classify({ movedFrom: renamedFrom }),
+                movedFrom: renamedFrom,
+                remoteSha: existing.remoteSha,
+                localContent: existing.localContent,
+                isSymlink: existing.isSymlink,
+            });
+        } else {
+            this.fileStatuses.set(file.path, { ...existing, file, path: file.path });
+        }
+
+        this.renderView();
+    }
+
+    /**
      * Classifies a file's sync status. When the remote tree entry carries a git
      * blob SHA (the common case), this is a single local hash + comparison with
      * no network request (Phase 1 of the SHA-based refresh). Falls back to the
@@ -746,8 +1220,15 @@ export class SyncStatusView extends ItemView {
      * exists but the provider did not supply its SHA. A missing tree entry is
      * already conclusive: it is a new local-only file and needs no 404 probe.
      */
-    private async refreshFileStatus(fileOrPath: TFile | string, remoteEntry: GitTreeEntry | undefined): Promise<void> {
+    private async refreshFileStatus(fileOrPath: TFile | string, remoteEntry: GitTreeEntry | undefined, remoteMap?: Map<string, GitTreeEntry>): Promise<void> {
         try {
+            const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
+            const renamedFrom = this.plugin.settings.syncMetadata?.[path]?.renamedFrom;
+            if (renamedFrom !== undefined) {
+                await this.refreshMovedFileStatus(fileOrPath, renamedFrom, remoteMap?.get(renamedFrom));
+                return;
+            }
+
             if (remoteEntry === undefined) {
                 await this.refreshLocalOnlyStatus(fileOrPath);
             } else if (remoteEntry.sha !== undefined) {
@@ -761,9 +1242,25 @@ export class SyncStatusView extends ItemView {
             this.fileStatuses.set(path, {
                 file: typeof fileOrPath === 'string' ? undefined : fileOrPath,
                 path,
-                status: 'unsynced'
+                status: this.fileStatuses.classify({ localExists: true, remoteExists: false })
             });
         }
+    }
+
+    /** Keeps a pending move distinct while retaining the old remote blob for an on-demand diff. */
+    private async refreshMovedFileStatus(fileOrPath: TFile | string, movedFrom: string, sourceEntry?: GitTreeEntry): Promise<void> {
+        const isStr = typeof fileOrPath === 'string';
+        const path = isStr ? fileOrPath : fileOrPath.path;
+        const localContent = await this.readFileContent(fileOrPath, this.isBinary(path), isStr);
+        this.fileStatuses.set(path, {
+            file: isStr ? undefined : fileOrPath,
+            path,
+            status: this.fileStatuses.classify({ movedFrom }),
+            movedFrom,
+            localContent,
+            remoteSha: sourceEntry?.sha,
+            isSymlink: sourceEntry?.symlink,
+        });
     }
 
     private async refreshLocalOnlyStatus(fileOrPath: TFile | string): Promise<void> {
@@ -773,7 +1270,7 @@ export class SyncStatusView extends ItemView {
         this.fileStatuses.set(path, {
             file: isStr ? undefined : fileOrPath,
             path,
-            status: 'unsynced',
+            status: this.fileStatuses.classify({ localExists: true, remoteExists: false }),
             localContent,
         });
     }
@@ -788,7 +1285,22 @@ export class SyncStatusView extends ItemView {
         const localContent = await this.readLocalContentForSha(fileOrPath, isStr, binary, remoteEntry.symlink, symlinkMode);
         const localSha = await gitBlobSha(localContent);
 
-        const status = localSha === remoteEntry.sha ? 'synced' : 'modified';
+        const status = this.fileStatuses.classify({
+            localExists: true,
+            remoteExists: true,
+            contentsEqual: localSha === remoteEntry.sha,
+        });
+        // A file can reach 'synced' here purely because its content already
+        // matches the remote -- e.g. it was never pushed/pulled through this
+        // plugin (cloned in, or coincidentally identical). Without recording
+        // that in syncMetadata, a later move/rename of this file finds no
+        // metadata at its old path: SyncManager.trackRename and
+        // reconcileOutOfBandMoves both silently no-op on a missing entry, so
+        // the move never gets recognized -- it just shows as a stray
+        // remote-only + unsynced pair instead of 'moved'.
+        if (status === 'synced' && remoteEntry.sha) {
+            await this.plugin.sync.updateMetadata(path, remoteEntry.sha);
+        }
         this.fileStatuses.set(path, {
             file, path, status, localContent,
             remoteSha: remoteEntry.sha,
@@ -827,8 +1339,19 @@ export class SyncStatusView extends ItemView {
         const repoPath = this.plugin.getNormalizedPath(path);
         const remote = await this.plugin.gitService.getFile(repoPath, this.plugin.settings.branch);
 
-        const status = this.determineFileStatus(localContent, remote);
+        const status = remote.sha
+            ? this.fileStatuses.classify({
+                localExists: true,
+                remoteExists: true,
+                contentsEqual: this.contentsEqual(localContent, remote.content),
+            })
+            : this.fileStatuses.classify({ localExists: true, remoteExists: false });
 
+        // Same backfill as refreshFileStatusBySha's synced branch -- see its
+        // comment for why a content-only match must still be recorded.
+        if (status === 'synced' && remote.sha) {
+            await this.plugin.sync.updateMetadata(path, remote.sha);
+        }
         this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha });
     }
 
@@ -871,12 +1394,6 @@ export class SyncStatusView extends ItemView {
         throw new Error('Expected TFile when isStr is false');
     }
 
-    private determineFileStatus(localContent: string | ArrayBuffer, remote: { sha?: string; content?: string | ArrayBuffer }): FileStatus['status'] {
-        if (!remote.sha) return 'unsynced';
-        if (remote.content && this.contentsEqual(localContent, remote.content)) return 'synced';
-        return 'modified';
-    }
-
     private isBinary(path: string): boolean { return isBinaryPath(path); }
 
     private contentsEqual(a: string | ArrayBuffer, b: string | ArrayBuffer): boolean {
@@ -899,7 +1416,7 @@ export class SyncStatusView extends ItemView {
         const targets = Array.from(this.fileStatuses.values()).filter(s => {
             if (filter === 'selected' && !this.selectedFiles.has(s.path)) return false;
             return op === 'push'
-                ? s.status === 'modified' || s.status === 'unsynced'
+                ? s.status === 'modified' || s.status === 'unsynced' || s.status === 'moved'
                 : s.status === 'modified' || s.status === 'remote-only';
         });
 
@@ -928,13 +1445,7 @@ export class SyncStatusView extends ItemView {
      */
     private applyOptimisticSyncedStatus(syncedPaths: Array<{ path: string; sha?: string }>): void {
         for (const { path, sha } of syncedPaths) {
-            const existing = this.fileStatuses.get(path);
-            this.fileStatuses.set(path, {
-                ...existing,
-                path,
-                status: 'synced',
-                remoteSha: sha ?? existing?.remoteSha,
-            });
+            this.fileStatuses.markSynced(path, sha);
         }
     }
 
@@ -996,7 +1507,7 @@ export class SyncStatusView extends ItemView {
 
         const { local, remote } = this.partitionTargets(targets);
         if (local.length === 0 && remote.length === 0) { new Notice(t('syncStatus.notice.nothingToDelete')); return; }
-        if (!await this.confirmDeletion(local.length, remote.length)) return;
+        if (!await this.confirmDeletion(local, remote)) return;
 
         const total = local.length + remote.length;
         const prog = new Notice(t('syncStatus.progress.deleting', { total }), 0);
@@ -1029,26 +1540,33 @@ export class SyncStatusView extends ItemView {
 
     private partitionTargets(targets: FileStatus[]) {
         return {
-            local:  targets.filter(s => s.status !== 'remote-only'),
+            // Moved rows go through neither bucket: bulk delete on a moved row
+            // is ambiguous (delete the new local file? the pending remote
+            // move?) and isn't offered — see canDelete's count above.
+            local:  targets.filter(s => s.status !== 'remote-only' && s.status !== 'moved'),
             remote: targets.filter(s => s.status === 'remote-only')
         };
     }
 
-    private async confirmDeletion(localCount: number, remoteCount: number): Promise<boolean> {
+    private async confirmDeletion(local: FileStatus[], remote: FileStatus[]): Promise<boolean> {
         // Local deletes go through Obsidian's own trash handling, whose actual
         // destination (vault .trash/, OS trash, or permanent) depends on the
         // user's "Deleted files" setting — not something this plugin can read.
         // So local wording defers to that setting rather than promising
-        // recoverability; remote deletes are unconditionally permanent.
-        let msg = '';
-        if (localCount > 0 && remoteCount > 0) {
-            msg = t('syncStatus.confirmDelete.localAndRemote', { local: localCount, remote: remoteCount });
-        } else if (localCount > 0) {
-            msg = t('syncStatus.confirmDelete.localOnly', { local: localCount });
-        } else {
-            msg = t('syncStatus.confirmDelete.remoteOnly', { remote: remoteCount });
+        // recoverability; remote deletes are unconditionally permanent, so
+        // those get the full plan-review modal instead of a plain confirm.
+        if (remote.length === 0) {
+            return this.showConfirmDialog(t('syncStatus.confirmDelete.localOnly', { local: local.length }));
         }
-        return this.showConfirmDialog(msg);
+
+        const plan: SyncPlan = {
+            additions: [], modifications: [], moves: [],
+            deletions: remote.map(s => ({ path: s.path, name: s.file?.name ?? s.path.split('/').pop() ?? s.path }))
+        };
+        const description = local.length > 0 ? t('syncStatus.confirmDelete.alsoLocal', { local: local.length }) : undefined;
+        return new Promise(resolve => {
+            new SyncPlanModal(this.app, plan, 'delete', () => resolve(true), () => resolve(false), description).open();
+        });
     }
 
     private async performLocalDeletion(local: FileStatus[], total: number, prog: Notice, errors: { path: string, message: string }[]): Promise<void> {
@@ -1129,7 +1647,11 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    onClose(): Promise<void> { return Promise.resolve(); }
+    onClose(): Promise<void> {
+        this.unsubscribeStatuses?.();
+        this.unsubscribeStatuses = undefined;
+        return Promise.resolve();
+    }
 
     private showConfirmDialog(message: string): Promise<boolean> {
         return new Promise(resolve => {

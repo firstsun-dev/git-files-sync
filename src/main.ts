@@ -1,4 +1,4 @@
-import { Plugin, TFile, MarkdownView, Notice, Platform, setTooltip, setIcon } from 'obsidian';
+import { Plugin, TFile, TFolder, MarkdownView, Notice, Platform, setTooltip, setIcon } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getServiceName } from "./settings";
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
@@ -28,6 +28,7 @@ export default class GitLabFilesPush extends Plugin {
 	gitService: GitServiceInterface;
 	sync: SyncManager;
 	gitignoreManager: GitignoreManager;
+	private gitignoreConfigKey = '';
 	private pushRibbonEl: HTMLElement;
 	private statusBarEl: HTMLElement;
 	connectionStatus: ConnectionStatus = { state: 'checking' };
@@ -63,8 +64,14 @@ export default class GitLabFilesPush extends Plugin {
 		});
 
 		this.initializeGitService();
-		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath, this.settings.vaultFolder, this.settings.ignorePatterns);
-		this.sync = new SyncManager(this.app, this.gitService, this.settings, this.saveSettings.bind(this));
+		this.updateGitignoreManager();
+		this.sync = new SyncManager(
+			this.app,
+			this.gitService,
+			this.settings,
+			this.saveSettings.bind(this),
+			(path) => this.gitignoreManager.isIgnored(this.getNormalizedPath(path)),
+		);
 
 		this.statusBarEl = this.addStatusBarItem();
 		this.statusBarEl.addClass('gfs-status-bar-connection');
@@ -141,20 +148,93 @@ export default class GitLabFilesPush extends Plugin {
 			})
 		);
 
-		// A file deleted outside the plugin's own delete UI (e.g. from Obsidian's
-		// file explorer) would otherwise leave its syncMetadata entry behind
-		// forever; detectRename's rename-matching scan treats every such orphan
-		// as a rename candidate and does a live remote lookup for it on every
-		// future single-file push, so clear it as soon as Obsidian reports the delete.
+		// Deliberately no vault 'delete' listener clearing syncMetadata here.
+		// An out-of-band move (external tool, cloud sync, mobile) often reaches
+		// Obsidian's watcher as a bare delete of the old path with no correlated
+		// rename event, so eagerly wiping syncMetadata[oldPath] on every delete
+		// would destroy the exact evidence SyncStatusView.reconcileOutOfBandMoves
+		// needs on the next refresh to recognize it as a move rather than a
+		// permanent 'remote-only' ghost -- reintroducing the #66 bug for exactly
+		// the case that reconciler exists to catch. A genuine, intentional local
+		// delete (via the sync panel's own delete action) clears its own
+		// metadata directly; an unrelated stale entry left behind by a real
+		// delete costs nothing further; detectRename's candidate scan reads it
+		// from an already-fetched tree, not a live lookup.
+
+		// Obsidian already knows the exact old path, so record the rename
+		// directly instead of reconstructing it later from content/tree
+		// comparisons. A file with no sync history yet is just a new file at a
+		// new name and needs no tracking.
+		//
+		// Moving a *folder* fires exactly one 'rename' event, with `file` as
+		// the TFolder itself — Obsidian does not also fire one per contained
+		// file. Without handling that case, dragging a whole folder tracked
+		// nothing at all (the `instanceof TFile` check silently skipped the
+		// only event that fired), so no file under it ever showed as moved.
+		//
+		// Once tracked, also update any open sync panel live -- otherwise the
+		// row stays showing its pre-move state (or the old/new path pair as
+		// separate rows) until the next manual refresh.
 		this.registerEvent(
-			this.app.vault.on('delete', (file) => {
+			this.app.vault.on('rename', (file, oldPath) => {
 				if (file instanceof TFile) {
-					void this.sync.clearMetadata(file.path);
+					void this.sync.trackRename(file.path, oldPath).then(() => {
+						this.notifySyncStatusViews(view => view.handleFileRenamed(file, oldPath));
+					});
+				} else if (file instanceof TFolder) {
+					void this.trackFolderRename(file, oldPath);
 				}
 			})
 		);
 
+		// A saved edit inside the configured vault folder should update that
+		// row's status live rather than leaving it stale until the next manual
+		// refresh. Reuses whatever sync panel views are currently open; no-op
+		// when the panel isn't open or the file isn't in scope.
+		this.registerEvent(
+			this.app.vault.on('modify', (file) => {
+				if (file instanceof TFile && this.filterPathByVaultFolder(file.path)) {
+					this.notifySyncStatusViews(view => void view.handleFileModified(file));
+				}
+			})
+		);
+
+		this.app.workspace.onLayoutReady(() => {
+			if (this.settings.autoRefreshOnStartup) void this.refreshSyncStatusOnStartup();
+		});
+
 		await this.checkForUpdateNotice();
+	}
+
+	private async refreshSyncStatusOnStartup(): Promise<void> {
+		await this.activateSyncStatusView();
+		const leaf = this.app.workspace.getLeavesOfType(SYNC_STATUS_VIEW_TYPE)[0];
+		if (leaf?.view instanceof SyncStatusView) await leaf.view.refreshAllStatuses();
+	}
+
+	private notifySyncStatusViews(callback: (view: SyncStatusView) => void): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(SYNC_STATUS_VIEW_TYPE)) {
+			if (leaf.view instanceof SyncStatusView) callback(leaf.view);
+		}
+	}
+
+	/**
+	 * Tracks a folder move as one trackRename call per file now living under
+	 * it, computing each file's old path by swapping the folder's new path
+	 * prefix for its old one. `vault.getFiles()` walks the whole vault
+	 * (including nested subfolders under the moved one), so this covers
+	 * arbitrary nesting depth in one pass, same as SyncStatusView's
+	 * folder-move grouping later reassembles it into a single row.
+	 */
+	private async trackFolderRename(folder: TFolder, oldFolderPath: string): Promise<void> {
+		const newPrefix = folder.path + '/';
+		const oldPrefix = oldFolderPath + '/';
+		const files = this.app.vault.getFiles().filter(f => f.path.startsWith(newPrefix));
+		for (const file of files) {
+			const oldPath = oldPrefix + file.path.slice(newPrefix.length);
+			await this.sync.trackRename(file.path, oldPath);
+			this.notifySyncStatusViews(view => view.handleFileRenamed(file, oldPath));
+		}
 	}
 
 	private async checkForUpdateNotice(): Promise<void> {
@@ -426,6 +506,25 @@ export default class GitLabFilesPush extends Plugin {
 		}
 	}
 
+	private updateGitignoreManager(): void {
+		const configKey = JSON.stringify([
+			this.settings.branch,
+			this.settings.rootPath,
+			this.settings.vaultFolder,
+			this.settings.ignorePatterns,
+		]);
+		if (this.gitignoreConfigKey === configKey) return;
+		this.gitignoreManager = new GitignoreManager(
+			this.app,
+			this.gitService,
+			this.settings.branch,
+			this.settings.rootPath,
+			this.settings.vaultFolder,
+			this.settings.ignorePatterns,
+		);
+		this.gitignoreConfigKey = configKey;
+	}
+
 	private showConfirmDialog(message: string): Promise<boolean> {
 		return new Promise((resolve) => {
 			new ConfirmModal(
@@ -449,6 +548,7 @@ export default class GitLabFilesPush extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.initializeGitService();
+		this.updateGitignoreManager();
 		this.updateRibbonTooltip();
 	}
 }

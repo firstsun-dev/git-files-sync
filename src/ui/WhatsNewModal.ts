@@ -3,6 +3,7 @@ import { type ChangelogRelease, entryText } from '../changelog';
 import { t } from '../i18n';
 
 const CHANGELOG_URL = 'https://github.com/firstsun-dev/git-files-sync/blob/main/CHANGELOG.md';
+const REPOSITORY_URL = 'https://github.com/firstsun-dev/git-files-sync';
 
 export class WhatsNewModal extends Modal {
     private readonly releases: ChangelogRelease[];
@@ -26,6 +27,10 @@ export class WhatsNewModal extends Modal {
         }
 
         const buttonContainer = contentEl.createDiv({ cls: 'ssv-confirm-buttons modal-button-container' });
+
+        new ButtonComponent(buttonContainer)
+            .setButtonText(t('whatsNew.viewOnGitHub'))
+            .onClick(() => window.open(REPOSITORY_URL, '_blank', 'noopener'));
 
         new ButtonComponent(buttonContainer)
             .setButtonText(t('whatsNew.viewChangelog'))

@@ -18,6 +18,21 @@ export interface SyncMetadata {
 	lastSyncedSha: string;
 	lastSyncedAt: number;
 	lastKnownPath?: string;
+	/**
+	 * Set when the vault's 'rename' event moved this entry from another path
+	 * and the move hasn't been pushed yet. Always the path still live on the
+	 * remote — a chain of renames (A→B→C) collapses to this pointing at A, not
+	 * the most recent hop, so pushing deletes the right remote path.
+	 */
+	renamedFrom?: string;
+}
+
+/**
+ * Metadata written before `lastKnownPath` was introduced used its record key
+ * as the path. Keep that format eligible for rename reconciliation.
+ */
+export function isSyncMetadataAtPath(metadata: SyncMetadata | undefined, path: string): metadata is SyncMetadata {
+	return metadata !== undefined && (metadata.lastKnownPath === undefined || metadata.lastKnownPath === path);
 }
 
 export type GitServiceType = 'gitlab' | 'github' | 'gitea';
@@ -54,8 +69,10 @@ export interface GitLabFilesPushSettings {
     lastSeenVersion: string;
     /** Version whose "what's new" banner in the settings tab has been dismissed, if any. */
     bannerDismissedVersion: string;
-    /** UI language. 'system' follows Obsidian's display language, falling back to English if unsupported. */
-    language: LanguageSetting;
+	/** UI language. 'system' follows Obsidian's display language, falling back to English if unsupported. */
+	language: LanguageSetting;
+	/** Refresh the sync status automatically after Obsidian finishes loading. */
+	autoRefreshOnStartup: boolean;
 }
 
 export function getServiceName(settings: GitLabFilesPushSettings): string {
@@ -97,7 +114,8 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
 	ignorePatterns: '',
 	lastSeenVersion: '',
 	bannerDismissedVersion: '',
-	language: 'system'
+	language: 'system',
+	autoRefreshOnStartup: true
 }
 
 const CONNECTION_TEST_DEBOUNCE_MS = 800;
@@ -312,6 +330,16 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 					});
 				FolderSuggest.attach(this.app, text.inputEl);
 			});
+
+		new Setting(containerEl)
+			.setName(t('settings.autoRefreshOnStartup.name'))
+			.setDesc(t('settings.autoRefreshOnStartup.desc'))
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.autoRefreshOnStartup)
+				.onChange((value) => {
+					this.plugin.settings.autoRefreshOnStartup = value;
+					void this.plugin.saveSettings();
+				}));
 
 		new Setting(containerEl)
 			.setName(t('settings.ignorePatterns.name'))
