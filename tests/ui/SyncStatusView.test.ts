@@ -636,17 +636,26 @@ describe('SyncStatusView.handleFileRenamed', () => {
         expect(statuses.get('new.md')).toMatchObject({ status: 'moved', movedFrom: 'old.md' });
     });
 
-    it('carries an unsynced row over at the new path when the file was never synced', () => {
+    it('keeps a never-pushed file local-only after its rename records no metadata', async () => {
         const { plugin, leaf } = makePlugin();
         const view = new SyncStatusView(leaf, plugin);
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         statuses.set('draft-old.md', { path: 'draft-old.md', status: 'unsynced', localContent: 'draft' });
 
+        // main.ts always asks SyncManager to track a vault rename first. A
+        // never-pushed file has no sync metadata, so this must stay a no-op:
+        // treating its rename as a move would later delete an unrelated remote
+        // path if one happened to exist.
+        await plugin.sync.trackRename('draft-new.md', 'draft-old.md');
+        expect(plugin.settings.syncMetadata).toBeUndefined();
+
         const file = Object.assign(new TFile(), { path: 'draft-new.md' });
         view.handleFileRenamed(file, 'draft-old.md');
 
         expect(statuses.has('draft-old.md')).toBe(false);
-        expect(statuses.get('draft-new.md')).toMatchObject({ status: 'unsynced', localContent: 'draft' });
+        const renamed = statuses.get('draft-new.md');
+        expect(renamed).toMatchObject({ status: 'unsynced', localContent: 'draft' });
+        expect(renamed).not.toHaveProperty('movedFrom');
     });
 
     it('drops the row entirely when the rename moves the file out of the configured vault folder', () => {
