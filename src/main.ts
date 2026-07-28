@@ -28,6 +28,7 @@ export default class GitLabFilesPush extends Plugin {
 	gitService: GitServiceInterface;
 	sync: SyncManager;
 	gitignoreManager: GitignoreManager;
+	private gitignoreConfigKey = '';
 	private pushRibbonEl: HTMLElement;
 	private statusBarEl: HTMLElement;
 	connectionStatus: ConnectionStatus = { state: 'checking' };
@@ -63,8 +64,14 @@ export default class GitLabFilesPush extends Plugin {
 		});
 
 		this.initializeGitService();
-		this.gitignoreManager = new GitignoreManager(this.app, this.gitService, this.settings.branch, this.settings.rootPath, this.settings.vaultFolder, this.settings.ignorePatterns);
-		this.sync = new SyncManager(this.app, this.gitService, this.settings, this.saveSettings.bind(this));
+		this.updateGitignoreManager();
+		this.sync = new SyncManager(
+			this.app,
+			this.gitService,
+			this.settings,
+			this.saveSettings.bind(this),
+			(path) => this.gitignoreManager.isIgnored(this.getNormalizedPath(path)),
+		);
 
 		this.statusBarEl = this.addStatusBarItem();
 		this.statusBarEl.addClass('gfs-status-bar-connection');
@@ -489,6 +496,25 @@ export default class GitLabFilesPush extends Plugin {
 		}
 	}
 
+	private updateGitignoreManager(): void {
+		const configKey = JSON.stringify([
+			this.settings.branch,
+			this.settings.rootPath,
+			this.settings.vaultFolder,
+			this.settings.ignorePatterns,
+		]);
+		if (this.gitignoreConfigKey === configKey) return;
+		this.gitignoreManager = new GitignoreManager(
+			this.app,
+			this.gitService,
+			this.settings.branch,
+			this.settings.rootPath,
+			this.settings.vaultFolder,
+			this.settings.ignorePatterns,
+		);
+		this.gitignoreConfigKey = configKey;
+	}
+
 	private showConfirmDialog(message: string): Promise<boolean> {
 		return new Promise((resolve) => {
 			new ConfirmModal(
@@ -512,6 +538,7 @@ export default class GitLabFilesPush extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.initializeGitService();
+		this.updateGitignoreManager();
 		this.updateRibbonTooltip();
 	}
 }
