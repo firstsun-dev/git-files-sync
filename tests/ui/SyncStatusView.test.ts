@@ -66,6 +66,11 @@ function makePlugin(overrides: {
             if (path === vaultFolder) return '';
             return path;
         },
+        filterPathByVaultFolder(path: string): boolean {
+            if (!vaultFolder) return true;
+            const prefix = `${vaultFolder}/`;
+            return path.startsWith(prefix) || path === vaultFolder;
+        },
     } as unknown as GitLabFilesPush;
 
     const leaf = { app } as unknown as WorkspaceLeaf;
@@ -545,6 +550,77 @@ describe('SyncStatusView.handleFileModified', () => {
         expect(adapterRead).not.toHaveBeenCalled();
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         expect(statuses.has('untracked.md')).toBe(false);
+    });
+});
+
+describe('SyncStatusView.handleFileRenamed', () => {
+    beforeAll(() => { setupObsidianDOM(); });
+
+    it('moves a synced row to the new path as \'moved\', reading the renamedFrom trackRename just recorded', () => {
+        const { plugin, leaf } = makePlugin();
+        plugin.settings.syncMetadata = { 'old.md': { lastSyncedSha: 'sha-1', lastSyncedAt: 0, lastKnownPath: 'old.md' } };
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('old.md', { path: 'old.md', status: 'synced', remoteSha: 'sha-1' });
+
+        // Mirrors what main.ts does: SyncManager.trackRename runs first (moving
+        // the metadata entry and setting renamedFrom), then the view is notified.
+        void plugin.sync.trackRename('new.md', 'old.md');
+        const file = Object.assign(new TFile(), { path: 'new.md' });
+        view.handleFileRenamed(file, 'old.md');
+
+        expect(statuses.has('old.md')).toBe(false);
+        expect(statuses.get('new.md')).toMatchObject({ status: 'moved', movedFrom: 'old.md' });
+    });
+
+    it('carries an unsynced row over at the new path when the file was never synced', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('draft-old.md', { path: 'draft-old.md', status: 'unsynced', localContent: 'draft' });
+
+        const file = Object.assign(new TFile(), { path: 'draft-new.md' });
+        view.handleFileRenamed(file, 'draft-old.md');
+
+        expect(statuses.has('draft-old.md')).toBe(false);
+        expect(statuses.get('draft-new.md')).toMatchObject({ status: 'unsynced', localContent: 'draft' });
+    });
+
+    it('drops the row entirely when the rename moves the file out of the configured vault folder', () => {
+        const { plugin, leaf } = makePlugin({ vaultFolder: 'scoped' });
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('scoped/old.md', { path: 'scoped/old.md', status: 'synced', remoteSha: 'sha-1' });
+
+        const file = Object.assign(new TFile(), { path: 'outside/new.md' });
+        view.handleFileRenamed(file, 'scoped/old.md');
+
+        expect(statuses.has('scoped/old.md')).toBe(false);
+        expect(statuses.has('outside/new.md')).toBe(false);
+    });
+
+    it('ignores a rename mid-refresh -- the in-flight refresh will settle it', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statuses.set('old.md', { path: 'old.md', status: 'checking' });
+
+        const file = Object.assign(new TFile(), { path: 'new.md' });
+        view.handleFileRenamed(file, 'old.md');
+
+        expect(statuses.get('old.md')).toMatchObject({ status: 'checking' });
+        expect(statuses.has('new.md')).toBe(false);
+    });
+
+    it('ignores a rename the panel is not currently tracking', () => {
+        const { plugin, leaf } = makePlugin();
+        const view = new SyncStatusView(leaf, plugin);
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+
+        const file = Object.assign(new TFile(), { path: 'new.md' });
+        view.handleFileRenamed(file, 'untracked-old.md');
+
+        expect(statuses.has('new.md')).toBe(false);
     });
 });
 
