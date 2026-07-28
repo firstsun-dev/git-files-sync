@@ -13,4 +13,19 @@ describe('SyncStatusService', () => {
     ])('classifies %s as %s', (_description, facts, expected) => {
         expect(service.classify(facts)).toBe(expected);
     });
+
+    it('owns the status snapshot and publishes each change to subscribers', () => {
+        const observed: Array<string | undefined> = [];
+        const unsubscribe = service.subscribe(statuses => {
+            observed.push(statuses.get('note.md')?.status);
+        });
+
+        service.set({ path: 'note.md', status: 'checking' });
+        service.set({ path: 'note.md', status: 'synced', remoteSha: 'abc' });
+        unsubscribe();
+        service.delete('note.md');
+
+        expect(service.get('note.md')).toBeUndefined();
+        expect(observed).toEqual([undefined, 'checking', 'synced']);
+    });
 });

@@ -91,6 +91,14 @@ describe('SyncManager', () => {
         manager = new SyncManager(mockApp, mockGitLab, mockSettings);
     });
 
+    it('publishes a confirmed synced status whenever it records sync metadata', async () => {
+        manager.status.set({ path: 'note.md', status: 'modified', remoteSha: 'old-sha' });
+
+        await manager.updateMetadata('note.md', 'new-sha');
+
+        expect(manager.status.get('note.md')).toMatchObject({ status: 'synced', remoteSha: 'new-sha' });
+    });
+
     it('should push file content correctly', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
         const readSpy = vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
