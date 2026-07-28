@@ -7,6 +7,8 @@ import { logger } from '../utils/logger';
 import { type FileStatus, type FilterValue, type SyncPlan } from './types';
 import { renderActionBar } from './components/ActionBar';
 import { renderFileItem, renderMoveGroupItem, statusMeta, type FileItemCallbacks, type MoveGroupCallbacks } from './components/FileListItem';
+import { renderFolderItem, type FolderTreeItemCallbacks } from './components/FolderTreeItem';
+import { buildStatusTree, type StatusTreeNode } from './components/StatusTree';
 import { ICONS } from './components/icons';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 import { buildRemoteFileUrl } from '../utils/remote-url';
@@ -28,8 +30,12 @@ export class SyncStatusView extends ItemView {
     private isRefreshing = false;
     private refreshProgress = { current: 0, total: 0 };
     private statusFilter: FilterValue = 'all';
+    private treeViewEnabled = true;
+    private showSyncedInAll = false;
     private searchQuery = '';
     private readonly selectedFiles: Set<string> = new Set();
+    /** Folders the user collapsed; all other folders start expanded. */
+    private readonly collapsedFolders: Set<string> = new Set();
     /** Group keys (see groupKey()) currently expanded to show their member rows. */
     private readonly expandedMoveGroups: Set<string> = new Set();
     private lastSyncTime: number = 0;
@@ -198,11 +204,12 @@ export class SyncStatusView extends ItemView {
     /** The rows actually on screen: search and status tab applied together. */
 	private visibleStatuses(): FileStatus[] {
 		const searched = this.searchedStatuses();
-		const visible = this.statusFilter === 'all' ? searched : searched.filter(s => s.status === this.statusFilter);
-		return this.statusFilter === 'all' ? this.sortAllStatuses(visible) : visible;
+		if (this.statusFilter !== 'all') return searched.filter(s => s.status === this.statusFilter);
+		if (!this.treeViewEnabled) return this.sortAllStatuses(searched);
+		return this.showSyncedInAll ? searched : searched.filter(s => s.status !== 'synced');
 	}
 
-	/** Keep completed work at the bottom of the overview without changing other tab order. */
+	/** The legacy flat view keeps completed entries out of the way. */
 	private sortAllStatuses(statuses: FileStatus[]): FileStatus[] {
 		return [...statuses].sort((left, right) => Number(left.status === 'synced') - Number(right.status === 'synced'));
 	}
@@ -269,7 +276,7 @@ export class SyncStatusView extends ItemView {
         // hunt through tabs for a file the search has already found.
         const all = this.searchedStatuses();
         const counts: Record<FilterValue, number> = {
-            all: all.length,
+            all: !this.treeViewEnabled || this.showSyncedInAll ? all.length : all.filter(s => s.status !== 'synced').length,
             synced: all.filter(s => s.status === 'synced').length,
             modified: all.filter(s => s.status === 'modified').length,
             unsynced: all.filter(s => s.status === 'unsynced').length,
@@ -312,6 +319,7 @@ export class SyncStatusView extends ItemView {
             setTooltip(btn, tab.label);
             btn.addEventListener('click', () => this.applyStatusFilter(tab.value));
         }
+
     }
 
     private renderMobileFilter(
@@ -370,6 +378,8 @@ export class SyncStatusView extends ItemView {
             // action with its own confirm — see FileListItem's onRevertMove.
             canPull:   selected.filter(s => s.status === 'modified' || s.status === 'remote-only').length,
             canDelete: selected.filter(s => s.status !== 'moved').length,
+            treeViewEnabled: this.treeViewEnabled,
+            showSynced: this.showSyncedInAll,
         }, {
             onRefresh:   () => void this.refreshAllStatuses(),
             onSelectAll: (select) => {
@@ -385,6 +395,16 @@ export class SyncStatusView extends ItemView {
             onPush:   () => void this.pushSelected(),
             onPull:   () => void this.pullSelected(),
             onDelete: () => void this.deleteSelected(),
+            onTreeViewChange: (enabled) => {
+                this.treeViewEnabled = enabled;
+                this.pruneSelectionToVisible();
+                this.renderView();
+            },
+            onShowSyncedChange: (show) => {
+                this.showSyncedInAll = show;
+                this.pruneSelectionToVisible();
+                this.renderView();
+            },
         });
     }
 
@@ -531,19 +551,53 @@ export class SyncStatusView extends ItemView {
             return;
         }
 
+        if (this.treeViewEnabled) this.renderTreeNodes(container, buildStatusTree(statuses).children);
+        else this.renderFlatFileList(container, statuses);
+    }
+
+    private renderFlatFileList(container: HTMLElement, statuses: FileStatus[]): void {
         const groups = this.collapsibleMoveGroups(statuses);
         const groupedPaths = new Set<string>();
-        for (const group of groups.values()) for (const m of group.members) groupedPaths.add(m.path);
+        for (const group of groups.values()) for (const member of group.members) groupedPaths.add(member.path);
 
-        const cb = this.fileItemCallbacks();
+        const callbacks = this.fileItemCallbacks();
         const renderedGroups = new Set<string>();
-        for (const fs of statuses) {
-            if (groupedPaths.has(fs.path)) {
-                this.renderGroupedRowOnce(container, fs, groups, renderedGroups);
-            } else {
-                renderFileItem(container, fs, this.selectedFiles.has(fs.path), cb);
-            }
+        for (const status of statuses) {
+            if (groupedPaths.has(status.path)) this.renderGroupedRowOnce(container, status, groups, renderedGroups);
+            else renderFileItem(container, status, this.selectedFiles.has(status.path), callbacks);
         }
+    }
+
+    private renderTreeNodes(container: HTMLElement, nodes: StatusTreeNode[]): void {
+        const fileCallbacks = this.fileItemCallbacks();
+        const folderCallbacks = this.folderItemCallbacks();
+        for (const node of nodes) {
+            if (node.kind === 'file') {
+                renderFileItem(container, node.status, this.selectedFiles.has(node.status.path), fileCallbacks);
+                continue;
+            }
+            const children = renderFolderItem(
+                container, node, this.selectedFiles, !this.collapsedFolders.has(node.path), folderCallbacks,
+            );
+            if (children) this.renderTreeNodes(children, node.children);
+        }
+    }
+
+    private folderItemCallbacks(): FolderTreeItemCallbacks {
+        return {
+            onSelect: (paths, selected) => {
+                for (const path of paths) {
+                    if (selected) this.selectedFiles.add(path);
+                    else this.selectedFiles.delete(path);
+                }
+                this.renderView();
+            },
+            onToggle: (path) => {
+                if (this.collapsedFolders.has(path)) this.collapsedFolders.delete(path);
+                else this.collapsedFolders.add(path);
+                this.renderView();
+            },
+        };
     }
 
     /** Renders a collapsed folder-move row the first time one of its members is reached, then skips its later members. */
