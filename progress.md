@@ -14,6 +14,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] feat-001..023 and the move-detection fixes — see [archive/2026-07.md](./archive/2026-07.md).
 - [x] `refactor(sync-status): centralize status classification` (`c610dde`): introduced a pure `SyncStatusService` and routed full refresh, fallback content comparison, live edits, rename/move, remote-only discovery, and optimistic push completion through its one status policy.
 - [x] `refactor(sync-status): share status state with sync manager` (`9cefb25`): the service owns the shared status map and publishes snapshots; SyncManager records confirmed syncs there, and SyncStatusView subscribes instead of holding its own map.
+- [x] `test(sync): guard never-pushed rename status` (`e586fc2`): verifies `trackRename` leaves missing metadata absent and the view carries the renamed row as Local only, never as moved.
 
 ### What's In Progress
 
