@@ -529,7 +529,7 @@ export class SyncStatusView extends ItemView {
     private async loadDiffContent(fileStatus: FileStatus): Promise<void> {
         if (fileStatus.remoteContent !== undefined || !fileStatus.remoteSha) return;
         try {
-            const blob = await this.plugin.gitService.getBlob(fileStatus.remoteSha, fileStatus.path);
+            const blob = await this.plugin.gitService.getBlob(fileStatus.remoteSha, fileStatus.movedFrom ?? fileStatus.path);
             fileStatus.remoteContent = blob.content;
         } catch (e) {
             logger.warn(`Failed to load diff content for ${fileStatus.path}`, e);
@@ -1115,7 +1115,7 @@ export class SyncStatusView extends ItemView {
                 const file = filesToCheck[next++];
                 if (file) {
                     const path = typeof file === 'string' ? file : file.path;
-                    await this.refreshFileStatus(file, remoteMap.get(path));
+                    await this.refreshFileStatus(file, remoteMap.get(path), remoteMap);
                 }
                 this.refreshProgress.current++;
                 maybeRender();
@@ -1134,11 +1134,10 @@ export class SyncStatusView extends ItemView {
      * from a local hash against the remote SHA already known from the last full
      * refresh -- no network call, so this is cheap enough to run on every edit.
      *
-     * Only applies to a path already showing 'synced', 'modified', or
-     * 'unsynced' -- the three statuses a direct content comparison drives.
-     * 'moved' is driven by tracked rename metadata, not content, and stays
-     * 'moved' regardless of edits (a rename + edit is still a move, per #66's
-     * edge cases); 'remote-only' has no local file to have changed; 'checking'
+     * Applies to rows with a local file. 'moved' stays 'moved' regardless of
+     * edits, but its local content is refreshed so it can be compared with
+     * the remote content at its old path. 'remote-only' has no local file to
+     * have changed; 'checking'
      * means a full refresh is already in flight and will supersede this. A
      * path the panel isn't currently tracking at all is left alone too --
      * discovering new files requires the remote tree and belongs to a full
@@ -1146,17 +1145,20 @@ export class SyncStatusView extends ItemView {
      */
     async handleFileModified(file: TFile): Promise<void> {
         const existing = this.fileStatuses.get(file.path);
-        if (!existing || (existing.status !== 'synced' && existing.status !== 'modified' && existing.status !== 'unsynced')) return;
+        if (!existing || (existing.status !== 'synced' && existing.status !== 'modified' && existing.status !== 'unsynced' && existing.status !== 'moved')) return;
 
         const localContent = await this.readFileContent(file, this.isBinary(file.path), false);
 
-        const status = existing.remoteSha === undefined
-            ? this.fileStatuses.classify({ localExists: true, remoteExists: false })
-            : this.fileStatuses.classify({
+        let status: FileStatus['status'] = existing.status;
+        if (existing.status !== 'moved') {
+            status = existing.remoteSha === undefined
+                ? this.fileStatuses.classify({ localExists: true, remoteExists: false })
+                : this.fileStatuses.classify({
                 localExists: true,
                 remoteExists: true,
                 contentsEqual: await gitBlobSha(localContent) === existing.remoteSha,
             });
+        }
         this.fileStatuses.set(file.path, { ...existing, status, localContent });
 
         this.renderView();
@@ -1199,6 +1201,9 @@ export class SyncStatusView extends ItemView {
                 path: file.path,
                 status: this.fileStatuses.classify({ movedFrom: renamedFrom }),
                 movedFrom: renamedFrom,
+                remoteSha: existing.remoteSha,
+                localContent: existing.localContent,
+                isSymlink: existing.isSymlink,
             });
         } else {
             this.fileStatuses.set(file.path, { ...existing, file, path: file.path });
@@ -1215,20 +1220,12 @@ export class SyncStatusView extends ItemView {
      * exists but the provider did not supply its SHA. A missing tree entry is
      * already conclusive: it is a new local-only file and needs no 404 probe.
      */
-    private async refreshFileStatus(fileOrPath: TFile | string, remoteEntry: GitTreeEntry | undefined): Promise<void> {
+    private async refreshFileStatus(fileOrPath: TFile | string, remoteEntry: GitTreeEntry | undefined, remoteMap?: Map<string, GitTreeEntry>): Promise<void> {
         try {
             const path = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
             const renamedFrom = this.plugin.settings.syncMetadata?.[path]?.renamedFrom;
             if (renamedFrom !== undefined) {
-                // A pending move is known from metadata alone — no tree lookup
-                // or content read needed, same as the perf goal for every other
-                // SHA-based classification here.
-                this.fileStatuses.set(path, {
-                    file: typeof fileOrPath === 'string' ? undefined : fileOrPath,
-                    path,
-                    status: this.fileStatuses.classify({ movedFrom: renamedFrom }),
-                    movedFrom: renamedFrom,
-                });
+                await this.refreshMovedFileStatus(fileOrPath, renamedFrom, remoteMap?.get(renamedFrom));
                 return;
             }
 
@@ -1248,6 +1245,22 @@ export class SyncStatusView extends ItemView {
                 status: this.fileStatuses.classify({ localExists: true, remoteExists: false })
             });
         }
+    }
+
+    /** Keeps a pending move distinct while retaining the old remote blob for an on-demand diff. */
+    private async refreshMovedFileStatus(fileOrPath: TFile | string, movedFrom: string, sourceEntry?: GitTreeEntry): Promise<void> {
+        const isStr = typeof fileOrPath === 'string';
+        const path = isStr ? fileOrPath : fileOrPath.path;
+        const localContent = await this.readFileContent(fileOrPath, this.isBinary(path), isStr);
+        this.fileStatuses.set(path, {
+            file: isStr ? undefined : fileOrPath,
+            path,
+            status: this.fileStatuses.classify({ movedFrom }),
+            movedFrom,
+            localContent,
+            remoteSha: sourceEntry?.sha,
+            isSymlink: sourceEntry?.symlink,
+        });
     }
 
     private async refreshLocalOnlyStatus(fileOrPath: TFile | string): Promise<void> {

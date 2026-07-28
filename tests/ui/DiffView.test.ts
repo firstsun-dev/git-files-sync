@@ -130,6 +130,17 @@ describe('SyncStatusView diff pane', () => {
         expect(existing.getPath()).toBe('b.md');
     });
 
+    it('loads a moved file\'s old remote path for comparison', async () => {
+        const { view } = makeView();
+        const getBlob = vi.fn().mockResolvedValue({ content: 'before move' });
+        view.plugin.gitService.getBlob = getBlob;
+        const moved = { path: 'new.md', status: 'moved' as const, movedFrom: 'old.md', remoteSha: 'old-sha', localContent: 'after move' };
+
+        await internals(view).openDiffPane(moved);
+
+        expect(getBlob).toHaveBeenCalledWith('old-sha', 'old.md');
+    });
+
     it('closes the pane when the file it shows is pushed', async () => {
         const existing = makeDiffView();
         await existing.onOpen();
