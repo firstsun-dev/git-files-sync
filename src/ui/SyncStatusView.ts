@@ -196,10 +196,16 @@ export class SyncStatusView extends ItemView {
     }
 
     /** The rows actually on screen: search and status tab applied together. */
-    private visibleStatuses(): FileStatus[] {
-        const searched = this.searchedStatuses();
-        return this.statusFilter === 'all' ? searched : searched.filter(s => s.status === this.statusFilter);
-    }
+	private visibleStatuses(): FileStatus[] {
+		const searched = this.searchedStatuses();
+		const visible = this.statusFilter === 'all' ? searched : searched.filter(s => s.status === this.statusFilter);
+		return this.statusFilter === 'all' ? this.sortAllStatuses(visible) : visible;
+	}
+
+	/** Keep completed work at the bottom of the overview without changing other tab order. */
+	private sortAllStatuses(statuses: FileStatus[]): FileStatus[] {
+		return [...statuses].sort((left, right) => Number(left.status === 'synced') - Number(right.status === 'synced'));
+	}
 
     /**
      * Keeps the invariant that the selection is always a subset of what's on
@@ -254,7 +260,7 @@ export class SyncStatusView extends ItemView {
         }
     }
 
-    // ── Filter tabs ─────────────────────────────────────────────────
+    // ── Status filter ────────────────────────────────────────────────
 
     private renderTabs(container: HTMLElement): void {
         // Counted against the search results, not the whole vault: with a
@@ -273,16 +279,21 @@ export class SyncStatusView extends ItemView {
             moved: this.movedRowCount(all),
         };
 
-        const tabs: Array<{ value: FilterValue; label: string }> = [
-            { value: 'all',         label: t('syncStatus.tab.all') },
-            { value: 'synced',      label: t('syncStatus.tab.synced') },
-            { value: 'modified',    label: t('syncStatus.tab.modified') },
-            { value: 'unsynced',    label: t('syncStatus.tab.unsynced') },
-            { value: 'remote-only', label: t('syncStatus.tab.remote-only') },
+		const tabs: Array<{ value: FilterValue; label: string }> = [
+			{ value: 'all',         label: t('syncStatus.tab.all') },
+			{ value: 'modified',    label: t('syncStatus.tab.modified') },
+			{ value: 'unsynced',    label: t('syncStatus.tab.unsynced') },
+			{ value: 'remote-only', label: t('syncStatus.tab.remote-only') },
             // Shown only when there's at least one moved row — most vaults
             // never see one, and a permanent empty tab would just be clutter.
-            ...(counts.moved > 0 ? [{ value: 'moved' as const, label: t('syncStatus.tab.moved') }] : []),
-        ];
+			...(counts.moved > 0 ? [{ value: 'moved' as const, label: t('syncStatus.tab.moved') }] : []),
+			{ value: 'synced',      label: t('syncStatus.tab.synced') },
+		];
+
+        if (Platform.isMobile) {
+            this.renderMobileFilter(container, tabs, counts);
+            return;
+        }
 
         const tabsEl = container.createDiv({ cls: 'ssv-tabs' });
         for (const tab of tabs) {
@@ -299,15 +310,34 @@ export class SyncStatusView extends ItemView {
                 btn.createSpan({ cls: 'ssv-tab-count', text: String(count) });
             }
             setTooltip(btn, tab.label);
-            btn.addEventListener('click', () => {
-                // Was: clear the whole selection on any tab change. Pruning
-                // instead keeps the ticks the new tab still shows, under the
-                // same invariant the search filter follows.
-                this.statusFilter = tab.value;
-                this.pruneSelectionToVisible();
-                this.renderView();
+            btn.addEventListener('click', () => this.applyStatusFilter(tab.value));
+        }
+    }
+
+    private renderMobileFilter(
+        container: HTMLElement,
+        tabs: Array<{ value: FilterValue; label: string }>,
+        counts: Record<FilterValue, number>,
+    ): void {
+        const select = container.createEl('select', {
+            cls: 'ssv-filter-select',
+            attr: { 'aria-label': t('syncStatus.filterByStatus') },
+        });
+        for (const tab of tabs) {
+            select.createEl('option', {
+                text: `${tab.label} (${counts[tab.value]})`,
+                value: tab.value,
             });
         }
+        select.value = this.statusFilter;
+        select.addEventListener('change', () => this.applyStatusFilter(select.value as FilterValue));
+    }
+
+    /** Apply a status filter while preserving selections still visible in it. */
+    private applyStatusFilter(filter: FilterValue): void {
+        this.statusFilter = filter;
+        this.pruneSelectionToVisible();
+        this.renderView();
     }
 
     /** The 'moved' tab count: rows, not files — a collapsed folder-move group is 1 row. */

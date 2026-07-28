@@ -29,6 +29,8 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'settings.vaultFolder.name': '库文件夹',
 	'settings.vaultFolder.desc': '选填：仅同步此库文件夹内的文件（例如「sync」则只同步 sync 文件夹内的文件）',
 	'settings.vaultFolder.placeholder': '留空以同步所有文件',
+	'settings.autoRefreshOnStartup.name': '启动时刷新状态',
+	'settings.autoRefreshOnStartup.desc': 'Obsidian 加载完成后，自动刷新同步状态窗口',
 
 	'settings.ignorePatterns.name': '忽略规则',
 	'settings.ignorePatterns.desc': '选填：以 .gitignore 语法（每行一条）排除本机文件，会与远程仓库的 .gitignore 规则一并应用。',
@@ -125,6 +127,7 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'syncStatus.tab.unsynced': '仅本机',
 	'syncStatus.tab.remote-only': '远程',
 	'syncStatus.tab.moved': '已移动',
+	'syncStatus.filterByStatus': '按状态筛选文件',
 	'syncStatus.noFilesForFilter': '没有{filter}的文件',
 	'syncStatus.search.placeholder': '按路径过滤…',
 	'syncStatus.search.clear': '清除过滤',

@@ -185,6 +185,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "npx eslint . -> 0 errors; npm run build -> clean (incl. Obsidian 1.11.0 compat); npx vitest run -> 449/449 passed. Branch claude/sync-plan-preview-63 off prepare-1.5.0."
+    },
+    {
+      "id": "feat-024",
+      "name": "feat(sync): auto-refresh status on startup and order synced entries last",
+      "description": "Automatically refresh the Sync Status View after Obsidian layout is ready, enabled by default with a settings toggle. The Synced tab is last and synced rows are placed at the bottom of All.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 474/474 passed."
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."
