@@ -856,13 +856,12 @@ describe('SyncStatusView folder-move collapsing (#67)', () => {
     it('does not collapse a partial move — a file left behind under the old prefix keeps the group expanded', () => {
         const { plugin, leaf } = makePlugin();
         const view = new SyncStatusView(leaf, plugin);
-        (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses = new Map([
-            ['Archive/Projects/a.md', movedStatus('Archive/Projects/a.md', 'Notes/Projects/a.md')],
-            ['Archive/Projects/b.md', movedStatus('Archive/Projects/b.md', 'Notes/Projects/b.md')],
-            // Left behind: still at the old prefix, never moved.
-            ['Notes/Projects/c.md', { path: 'Notes/Projects/c.md', status: 'synced' }],
-        ]);
-        const statuses = [...(view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses.values()];
+        const statusStore = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        statusStore.set('Archive/Projects/a.md', movedStatus('Archive/Projects/a.md', 'Notes/Projects/a.md'));
+        statusStore.set('Archive/Projects/b.md', movedStatus('Archive/Projects/b.md', 'Notes/Projects/b.md'));
+        // Left behind: still at the old prefix, never moved.
+        statusStore.set('Notes/Projects/c.md', { path: 'Notes/Projects/c.md', status: 'synced' });
+        const statuses = [...statusStore.values()];
 
         const groups = (view as unknown as {
             collapsibleMoveGroups(statuses: FileStatus[]): CollapsibleGroups

@@ -9,6 +9,7 @@ import { logger } from '../utils/logger';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 import { readLocalSymlinkTarget, createLocalSymlink } from '../utils/symlink';
 import { gitBlobSha } from '../utils/git-blob-sha';
+import { SyncStatusService } from './sync-status-service';
 
 /** Result of syncing one file within a batch push/pull. */
 type BatchOutcome = 'done' | 'unchanged' | 'conflict';
@@ -44,12 +45,20 @@ export class SyncManager {
     private gitService: GitServiceInterface;
     private readonly settings: GitLabFilesPushSettings;
     private readonly onSaveSettings?: () => Promise<void>;
+    readonly status: SyncStatusService;
 
-    constructor(app: App, gitService: GitServiceInterface, settings: GitLabFilesPushSettings, onSaveSettings?: () => Promise<void>) {
+    constructor(
+        app: App,
+        gitService: GitServiceInterface,
+        settings: GitLabFilesPushSettings,
+        onSaveSettings?: () => Promise<void>,
+        status: SyncStatusService = new SyncStatusService(),
+    ) {
         this.app = app;
         this.gitService = gitService;
         this.settings = settings;
         this.onSaveSettings = onSaveSettings;
+        this.status = status;
     }
 
     private get serviceName(): string {
@@ -63,6 +72,7 @@ export class SyncManager {
             lastKnownPath: path
         };
         await this.saveSettings();
+        this.status.markSynced(path, sha);
     }
 
     /** Drop sync metadata for a path that's been deleted, so it can't be mistaken for a rename source later. */
