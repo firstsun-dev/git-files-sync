@@ -127,6 +127,7 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'syncStatus.tab.unsynced': '僅本機',
 	'syncStatus.tab.remote-only': '遠端',
 	'syncStatus.tab.moved': '已移動',
+	'syncStatus.showSynced': '顯示已同步',
 	'syncStatus.filterByStatus': '依狀態篩選檔案',
 	'syncStatus.noFilesForFilter': '沒有{filter}的檔案',
 	'syncStatus.search.placeholder': '以路徑過濾…',

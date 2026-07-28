@@ -5,7 +5,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-07-28
-**Active Feature:** `feat-024` — auto-refresh status on startup and status ordering, prepared for PR into `prepare-1.5.0`.
+**Active Feature:** `feat-025` — Sync Status tree view with folder selection and a Show synced toggle.
 
 ## Status
 
@@ -18,19 +18,20 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] `fix(sync): honor ignore patterns for direct push` (`61ca728`): the Ribbon, context-menu, and command single-file Push paths now stop before a vault read or remote call when a user ignore pattern matches. Batch Push filters ignored paths too; saving relevant settings rebuilds the ignore matcher immediately.
 - [x] `fix(sync): reconcile moves from legacy metadata` (`ed04867`): an out-of-band move after restart now treats a missing legacy `lastKnownPath` as the metadata record key, allowing the unique SHA-matched Local only + Remote only pair to become a safe Move.
 - [x] `feat(sync): auto-refresh status on startup`: enabled by default with a settings toggle; Synced tab is last and Synced rows are bottom-most on All.
+- [x] `feat(ui): Sync Status tree view`: paths are grouped into collapsible folders, and folder checkboxes select all visible descendant files with an indeterminate state for partial selection. All now hides Synced by default, with an explicit localized Show synced checkbox.
 
 ### What's In Progress
 
-- None.
+- [ ] Manually verify the tree hierarchy, folder expand/collapse, individual and folder checkboxes, and the Show synced toggle in Obsidian.
 
 ### What's Next
 
-1. Manually verify startup refresh and the setting toggle in Obsidian.
+1. Manually verify `feat-025` in Obsidian.
 2. Issue #57 live-credential smoke test remains relevant before merging push/pull/delete work.
 
 ## Evidence of Completion
 
 - [x] `npx eslint .` — 0 errors
 - [x] `npm run build` — passes, including Obsidian 1.11.0 compatibility typecheck
-- [x] `npx vitest run` — 31 files, 474 tests passed
-- [ ] Manual verification inside Obsidian — outstanding
+- [x] `npx vitest run` — 33 files, 484 tests passed
+- [ ] Manual verification inside Obsidian — feat-025 outstanding
