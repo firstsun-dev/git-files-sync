@@ -1,7 +1,7 @@
 import { TFile, App, Notice } from 'obsidian';
 import { GitServiceInterface, GitTreeEntry, GitFile, BatchMoveItem } from '../services/git-service-interface';
 import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
-import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling } from '../settings';
+import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling, isSyncMetadataAtPath } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
 import { SyncPlanModal, SyncPlanDirection } from '../ui/SyncPlanModal';
 import { SyncPlan, SyncPlanEntry, isSyncPlanEmpty } from '../ui/types';
@@ -291,7 +291,7 @@ export class SyncManager {
     ): Promise<string | null> {
         const candidates = Object.keys(this.settings.syncMetadata).filter(oldPath => {
             const metadata = this.settings.syncMetadata[oldPath];
-            return !!metadata && oldPath !== file.path && metadata.lastKnownPath === oldPath
+            return oldPath !== file.path && isSyncMetadataAtPath(metadata, oldPath)
                 && !this.app.vault.getFileByPath(oldPath);
         });
         if (candidates.length === 0) return null;
@@ -853,7 +853,7 @@ export class SyncManager {
     private hasOrphanedRenameMetadata(): boolean {
         for (const trackedPath of Object.keys(this.settings.syncMetadata)) {
             const metadata = this.settings.syncMetadata[trackedPath];
-            if (!metadata || metadata.lastKnownPath !== trackedPath) continue;
+            if (!isSyncMetadataAtPath(metadata, trackedPath)) continue;
             if (!this.app.vault.getFileByPath(trackedPath)) return true;
         }
         return false;

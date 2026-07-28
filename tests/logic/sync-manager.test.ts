@@ -333,7 +333,7 @@ describe('SyncManager', () => {
     });
 
     describe('Renames and Moves', () => {
-        it('should detect and handle file rename', async () => {
+        it('detects and handles a file rename from legacy metadata without lastKnownPath', async () => {
             const oldPath = 'old.md';
             const newPath = 'new.md';
             const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
@@ -342,7 +342,6 @@ describe('SyncManager', () => {
             mockSettings.syncMetadata[oldPath] = {
                 lastSyncedSha: 'old-sha',
                 lastSyncedAt: Date.now(),
-                lastKnownPath: oldPath
             };
 
             // Mock: old file no longer exists in vault
