@@ -18,6 +18,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] `fix(sync): honor ignore patterns for direct push` (`61ca728`): the Ribbon, context-menu, and command single-file Push paths now stop before a vault read or remote call when a user ignore pattern matches. Batch Push filters ignored paths too; saving relevant settings rebuilds the ignore matcher immediately.
 - [x] `fix(sync): reconcile moves from legacy metadata` (`ed04867`): an out-of-band move after restart now treats a missing legacy `lastKnownPath` as the metadata record key, allowing the unique SHA-matched Local only + Remote only pair to become a safe Move.
 - [x] `feat(sync): auto-refresh status on startup`: enabled by default with a settings toggle; Synced tab is last and Synced rows are bottom-most on All.
+- [x] `fix(ui): show diff for moved-and-edited files`: moved rows retain the source path's remote SHA and current local content, so Diff compares the old remote file to the moved file even after further edits.
 
 ### What's In Progress
 
@@ -32,5 +33,5 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 - [x] `npx eslint .` — 0 errors
 - [x] `npm run build` — passes, including Obsidian 1.11.0 compatibility typecheck
-- [x] `npx vitest run` — 31 files, 474 tests passed
+- [x] `npx vitest run` — 31 files, 478 tests passed
 - [ ] Manual verification inside Obsidian — outstanding

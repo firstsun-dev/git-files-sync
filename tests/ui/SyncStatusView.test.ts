@@ -608,18 +608,18 @@ describe('SyncStatusView.handleFileModified', () => {
         expect(statuses.get('note.md')).toMatchObject({ status: 'modified', localContent: 'edited content' });
     });
 
-    it('leaves a moved row alone -- content edits do not undo a pending move', async () => {
+    it('keeps a moved row while refreshing its local content for a diff', async () => {
         const adapterRead = vi.fn().mockResolvedValue('edited content');
         const { plugin, leaf } = makePlugin({ adapterRead });
         const view = new SyncStatusView(leaf, plugin);
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
-        statuses.set('new.md', { path: 'new.md', status: 'moved', movedFrom: 'old.md' });
+        statuses.set('new.md', { path: 'new.md', status: 'moved', movedFrom: 'old.md', remoteSha: 'sha-1' });
 
         const file = Object.assign(new TFile(), { path: 'new.md' });
         await view.handleFileModified(file);
 
-        expect(adapterRead).not.toHaveBeenCalled();
-        expect(statuses.get('new.md')).toMatchObject({ status: 'moved', movedFrom: 'old.md' });
+        expect(adapterRead).toHaveBeenCalledWith('new.md');
+        expect(statuses.get('new.md')).toMatchObject({ status: 'moved', movedFrom: 'old.md', remoteSha: 'sha-1', localContent: 'edited content' });
     });
 
     it('leaves a remote-only row alone -- there is no local file for it to have changed', async () => {
@@ -667,7 +667,7 @@ describe('SyncStatusView.handleFileRenamed', () => {
         view.handleFileRenamed(file, 'old.md');
 
         expect(statuses.has('old.md')).toBe(false);
-        expect(statuses.get('new.md')).toMatchObject({ status: 'moved', movedFrom: 'old.md' });
+        expect(statuses.get('new.md')).toMatchObject({ status: 'moved', movedFrom: 'old.md', remoteSha: 'sha-1' });
     });
 
     it('keeps a never-pushed file local-only after its rename records no metadata', async () => {
@@ -727,6 +727,30 @@ describe('SyncStatusView.handleFileRenamed', () => {
         view.handleFileRenamed(file, 'untracked-old.md');
 
         expect(statuses.has('new.md')).toBe(false);
+    });
+});
+
+describe('SyncStatusView moved diff data', () => {
+    beforeAll(() => { setupObsidianDOM(); });
+
+    it('retains the old remote blob SHA and current local content after a refresh', async () => {
+        const adapterRead = vi.fn().mockResolvedValue('edited after move');
+        const { plugin, leaf } = makePlugin({ adapterRead });
+        plugin.settings.syncMetadata = {
+            'new.md': { lastSyncedSha: 'old-sha', lastSyncedAt: 0, lastKnownPath: 'new.md', renamedFrom: 'old.md' },
+        };
+        const view = new SyncStatusView(leaf, plugin);
+        const file = Object.assign(new TFile(), { path: 'new.md' });
+        const remoteMap = new Map<string, GitTreeEntry>([['old.md', { path: 'old.md', sha: 'old-sha', symlink: false }]]);
+
+        await (view as unknown as {
+            refreshFileStatus(file: TFile, remoteEntry: GitTreeEntry | undefined, entries: Map<string, GitTreeEntry>): Promise<void>
+        }).refreshFileStatus(file, undefined, remoteMap);
+
+        const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
+        expect(statuses.get('new.md')).toMatchObject({
+            status: 'moved', movedFrom: 'old.md', remoteSha: 'old-sha', localContent: 'edited after move',
+        });
     });
 });
 

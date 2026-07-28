@@ -1,7 +1,7 @@
 # Session Handoff
 
 **Date:** 2026-07-28
-**Branch:** `codex/auto-refresh-status-1-5`, based on `prepare-1.5.0`
+**Branch:** `prepare-1.5.0`
 
 ## Completed
 
@@ -13,15 +13,16 @@
 - `e586fc2`: regression test for an unpushed-file rename. `SyncManager.trackRename()` leaves absent metadata absent; the panel then carries the new path as `unsynced` (Local only), without `movedFrom`.
 - `61ca728`: direct `SyncManager.pushFile()` checks the current `GitignoreManager` predicate before reading the vault or contacting the provider. `pushAllFiles()` filters ignored paths too; relevant setting changes refresh the ignore manager.
 - `ed04867`: restart/out-of-band move reconciliation accepts legacy metadata whose `lastKnownPath` is absent, using the record key as its implied path. The same compatibility rule covers direct Push's fallback rename detection.
+- Moved rows now show a Diff action when the old remote blob is available. Status refresh captures that old blob's SHA and current local content; live renames retain the SHA, and subsequent edits refresh the local side without changing the status away from `moved`. The diff fetch uses `movedFrom` as its source path.
 
 ## Verification
 
 ```
 npx eslint .    -> 0 errors
 npm run build   -> passes (including Obsidian 1.11.0 compatibility)
-npx vitest run  -> 31 files, 472 tests passed
+npx vitest run  -> 31 files, 478 tests passed
 ```
 
 ## Exact Next Step
 
-Push this branch and open a PR targeting `prepare-1.5.0`. Manually verify startup refresh and the settings toggle in Obsidian.
+Manually verify startup refresh/settings toggle in Obsidian, plus a moved-and-edited text file's Diff action.

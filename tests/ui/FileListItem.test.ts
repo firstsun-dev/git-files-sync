@@ -131,6 +131,20 @@ describe('renderFileItem', () => {
         });
     });
 
+    describe('moved file with content changes', () => {
+        it('renders a diff button so the moved file can be compared with its old remote path', () => {
+            const fs = makeFileStatus('moved', {
+                file: mockFile,
+                movedFrom: 'docs/old-name.md',
+                remoteSha: 'old-content-sha',
+            });
+
+            renderFileItem(container, fs, false, callbacks);
+
+            expect(container.querySelector('.ssv-action-btn.diff')).not.toBeNull();
+        });
+    });
+
     // The inline panel is stuck at sidebar width, so desktop sends the diff to
     // its own pane instead and never renders the inline one.
     describe('modified file: desktop diff pane', () => {
