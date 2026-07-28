@@ -204,6 +204,15 @@
     background: rgba(255, 255, 255, 0.22);
 }
 
+.ssv-filter-select { display: none; }
+
+.is-mobile .ssv-filter-select {
+    display: block;
+    width: calc(100% - 20px);
+    min-height: 36px;
+    margin: 10px;
+}
+
 /* ── Action bar ─────────────────────────────────────────────────── */
 .ssv-action-bar {
     display: flex;
