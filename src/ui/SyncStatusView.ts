@@ -1167,6 +1167,17 @@ export class SyncStatusView extends ItemView {
         const localSha = await gitBlobSha(localContent);
 
         const status = localSha === remoteEntry.sha ? 'synced' : 'modified';
+        // A file can reach 'synced' here purely because its content already
+        // matches the remote -- e.g. it was never pushed/pulled through this
+        // plugin (cloned in, or coincidentally identical). Without recording
+        // that in syncMetadata, a later move/rename of this file finds no
+        // metadata at its old path: SyncManager.trackRename and
+        // reconcileOutOfBandMoves both silently no-op on a missing entry, so
+        // the move never gets recognized -- it just shows as a stray
+        // remote-only + unsynced pair instead of 'moved'.
+        if (status === 'synced' && remoteEntry.sha) {
+            await this.plugin.sync.updateMetadata(path, remoteEntry.sha);
+        }
         this.fileStatuses.set(path, {
             file, path, status, localContent,
             remoteSha: remoteEntry.sha,
@@ -1207,6 +1218,11 @@ export class SyncStatusView extends ItemView {
 
         const status = this.determineFileStatus(localContent, remote);
 
+        // Same backfill as refreshFileStatusBySha's synced branch -- see its
+        // comment for why a content-only match must still be recorded.
+        if (status === 'synced' && remote.sha) {
+            await this.plugin.sync.updateMetadata(path, remote.sha);
+        }
         this.fileStatuses.set(path, { file, path, status, localContent, remoteContent: remote.content, remoteSha: remote.sha });
     }
 
