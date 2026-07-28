@@ -110,7 +110,7 @@ function renderFilePath(row: HTMLElement, fileStatus: FileStatus, callbacks: Fil
 function renderFileActions(fileEl: HTMLElement, fileStatus: FileStatus, callbacks: FileItemCallbacks): void {
     const actions = fileEl.createDiv({ cls: 'ssv-file-actions' });
 
-    if (fileStatus.status === 'modified') {
+    if (fileStatus.status === 'modified' || (fileStatus.status === 'moved' && fileStatus.remoteSha !== undefined)) {
         // One entry point per platform, never both: two buttons rendering the
         // same diff differently just invites "what's the difference?".
         if (Platform.isMobile) renderDiffToggleButton(actions, fileEl, fileStatus, callbacks);
