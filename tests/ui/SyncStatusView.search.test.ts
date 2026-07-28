@@ -30,6 +30,7 @@ function makeView(statuses: FileStatus[]): SyncStatusView {
 type Internals = {
     searchQuery: string;
     statusFilter: FilterValue;
+    showSyncedInAll: boolean;
     selectedFiles: Set<string>;
     searchedStatuses(): FileStatus[];
     visibleStatuses(): FileStatus[];
@@ -54,16 +55,21 @@ describe('SyncStatusView search filter', () => {
         expect(internals(view).searchedStatuses()).toHaveLength(SAMPLE.length);
     });
 
-    it('puts synced files at the bottom of the All list', () => {
+    it('hides synced files from All until requested', () => {
         const view = makeView(SAMPLE);
 
         expect(internals(view).visibleStatuses().map(s => s.path)).toEqual([
             'Notes/Projects/alpha.md',
             'Notes/Projects/beta.md',
             'Archive/PROJECT-old.md',
-            'Notes/daily.md',
-            'readme.md',
         ]);
+    });
+
+    it('includes synced files in All when the show-synced checkbox is enabled', () => {
+        const view = makeView(SAMPLE);
+        internals(view).showSyncedInAll = true;
+
+        expect(internals(view).visibleStatuses()).toHaveLength(SAMPLE.length);
     });
 
     it('renders the Synced tab last', () => {
@@ -88,7 +94,7 @@ describe('SyncStatusView search filter', () => {
         expect(select).toBeTruthy();
         expect(filter.querySelector('.ssv-tabs')).toBeNull();
         expect(Array.from(select!.options).map(option => option.text)).toEqual([
-            'All (5)', 'Changed (1)', 'Local only (1)', 'Remote (1)', 'Synced (2)',
+            'All (3)', 'Changed (1)', 'Local only (1)', 'Remote (1)', 'Synced (2)',
         ]);
 
         Platform.isMobile = false;
@@ -135,6 +141,7 @@ describe('SyncStatusView search filter', () => {
     it('narrows visible rows to the search even on the all tab', () => {
         const view = makeView(SAMPLE);
         internals(view).statusFilter = 'all';
+        internals(view).showSyncedInAll = true;
         internals(view).searchQuery = 'readme';
 
         expect(internals(view).visibleStatuses().map(s => s.path)).toEqual(['readme.md']);
@@ -188,10 +195,41 @@ describe('SyncStatusView search box wiring', () => {
             vi.advanceTimersByTime(200);
 
             expect(internals(view).searchQuery).toBe('daily');
-            expect(internals(view).visibleStatuses().map(s => s.path)).toEqual(['Notes/daily.md']);
+            expect(internals(view).visibleStatuses()).toEqual([]);
         } finally {
             vi.useRealTimers();
         }
+    });
+
+    it('shows synced search matches after opting in from All', async () => {
+        const { root, view } = await openWithSearch(SAMPLE);
+        const checkbox = root.querySelector<HTMLInputElement>('.ssv-show-synced input')!;
+
+        expect(checkbox).toBeTruthy();
+        checkbox.checked = true;
+        checkbox.dispatchEvent(new Event('change'));
+
+        expect(internals(view).showSyncedInAll).toBe(true);
+        expect(internals(view).visibleStatuses()).toHaveLength(SAMPLE.length);
+    });
+
+    it('renders paths as a tree and selects the visible files in a folder', async () => {
+        const { root, view } = await openWithSearch(SAMPLE);
+        const folderName = Array.from(root.querySelectorAll('.ssv-tree-folder-name'))
+            .find(element => element.textContent === 'Notes')!;
+        const folder = folderName.closest('.ssv-tree-folder')!;
+        const checkbox = folder.querySelector<HTMLInputElement>('.ssv-folder-checkbox')!;
+
+        expect(folderName).toBeTruthy();
+        expect(root.querySelector('.ssv-tree-children .ssv-tree-folder-name')?.textContent).toBe('Projects');
+
+        checkbox.checked = true;
+        checkbox.dispatchEvent(new Event('change'));
+
+        expect([...internals(view).selectedFiles]).toEqual([
+            'Notes/Projects/alpha.md',
+            'Notes/Projects/beta.md',
+        ]);
     });
 
     // The selection must never hold anything the current filter hides: Push,
