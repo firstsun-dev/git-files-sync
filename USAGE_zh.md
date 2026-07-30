@@ -7,7 +7,9 @@
 
 <video src="https://blog-assets.firstsun.org/obsidian/plugins/git-file-sync/git-file-sync-zh.webm" width="100%" controls autoplay loop muted playsinline></video>
 
-本指南將引導您如何使用 Git File Sync 插件，在行動裝置與桌面電腦之間，透過 GitLab、GitHub 或自架的 Gitea 輕鬆同步您的筆記。
+本指南將引導您如何使用 Git File Sync 外掛，在行動裝置與桌面電腦之間，透過 GitLab、GitHub 或自架的 Gitea 選擇性同步筆記。
+
+**[English](README.md)** · **[简体中文](USAGE_zh-cn.md)** · **[版本紀錄](CHANGELOG.md)**
 
 ---
 
@@ -38,6 +40,7 @@
    - **GitLab**：需要 個人存取權杖 (PAT)、專案 ID、伺服器網址（預設為 `https://gitlab.com`，自架請改為您的網址）。權杖需具備 `api` 權限。
    - **Gitea**：需要 個人存取權杖 (PAT)、伺服器網址（例如 `https://gitea.example.com`）、帳號名稱、儲存庫名稱。權杖在 `使用者設定` > `應用程式` > `存取權杖` 中建立。
 3. **儲存庫路徑**：如果您想將筆記存放在儲存庫的特定資料夾（例如 `notes/`），請在 `Root Path` 中設定。
+4. **語言與自動重新整理**：可選擇跟隨系統、English、繁體中文或简体中文；「Obsidian 啟動時自動重新整理同步狀態」預設開啟，亦可在設定中關閉。
 
 ---
 
@@ -46,11 +49,13 @@
 ### 💡 檢查同步狀態
 每次開始工作或切換裝置時，建議先檢查狀態：
 1. 點擊側邊欄的 **清單圖示** 或使用指令面板 (`Ctrl/Cmd + P`) 輸入 `Open sync status view`。
-2. 點擊 **Refresh status**。
-3. 您會看到檔案清單，標示為：
+2. 同步狀態會在 Obsidian 啟動後自動重新整理；需要時仍可點擊 **Refresh status**。
+3. 使用狀態分頁、路徑搜尋，或選擇性的樹狀檢視來瀏覽檔案。樹狀檢視支援展開資料夾與三態勾選框，可一次選取整個資料夾。
+4. 您會看到檔案清單，標示為：
    - **Synced**：已同步（與雲端一致）。
    - **Modified**：本機已修改（需要 Push）。
    - **Remote only**：雲端有新檔案（需要 Pull）。
+   - **Moved**：檔案或資料夾已重新命名／移動，尚待同步；可 Push 或還原移動。
 
 ![sync-status](imgs/sync-status.png)
 *同步狀態面板讓您可以一目了然地確認哪些檔案已經修改，並進行上傳或下載。*
@@ -64,6 +69,7 @@
   - 或者在檔案列表點擊右鍵，選擇 `Push to GitLab/GitHub/Gitea`。
 - **批量上傳**：
   - 在同步面板勾選多個檔案，點擊下方的 **Push selected**。
+- **確認計畫**：每次 Push 前會先列出新增、修改、移動與刪除項目；確認後點擊 **Apply**。重新命名檔案或移動資料夾會作為真正的移動同步，不會在遠端留下重複檔案。
 
 ---
 
@@ -72,7 +78,8 @@
 1. 打開同步面板，點擊 **Refresh status**。
 2. 找到顯示為 **Remote only** 或 **Modified**（雲端版本較新）的檔案。
 3. 勾選後點擊 **Pull selected**。
-4. **注意**：Pull 會覆蓋掉您本機的內容。如果有衝突，會自動開啟衝突解決視窗。
+4. 先確認即將套用的同步計畫，再點擊 **Apply**。
+5. **注意**：Pull 會覆蓋掉您本機的內容。如果有衝突，會自動開啟衝突解決視窗。
 
 ---
 
@@ -86,6 +93,8 @@
 
 ![conflict](imgs/git-diff.png)
 *內建的差異比對工具 (Diff Viewer) 可讓您在同步前並排比對本機與雲端的修改差異。*
+
+在桌面版，點擊 **Diff** 會在專屬窗格開啟比對；行動版則維持面板內的比對。可點擊檔案路徑開啟本機筆記，或在支援的服務上開啟遠端檔案頁面。
 
 ---
 

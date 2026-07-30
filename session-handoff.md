@@ -1,20 +1,21 @@
 # Session Handoff
 
-**Date:** 2026-07-28
+**Date:** 2026-07-29
 **Branch:** `prepare-1.5.0`
 
 ## Completed
 
-- Added `src/changelog/1.5.0/index.ts` with the approved six What's New highlights in English, Traditional Chinese, and Simplified Chinese. The order is: preview changes, real file moves, tree view, live status, startup refresh, and interface refinements.
-- Added a localized **View on GitHub** button in `WhatsNewModal`, linking to `https://github.com/firstsun-dev/git-files-sync`; the existing full changelog button remains.
-- Added regression coverage ensuring the 1.5.0 release has all six entries in all three languages.
+- Updated `README.md` for the current 1.5.0 feature set: sync-plan review, real file/folder moves, live and startup status refresh, path search, optional tree view with folder selection, desktop Diff pane, and the three supported interface languages.
+- Updated the Traditional Chinese guide, `USAGE_zh.md`, with the same current workflow and feature information.
+- Added `USAGE_zh-cn.md`, a Simplified Chinese guide, and connected all three documentation languages with navigation links.
+- Recommended three new screenshots for a future documentation polish: sync-plan confirmation, tree view with folder selection, and the desktop Diff pane.
 
 ## Verification
 
 ```
-npx eslint .    -> 0 errors
-npm run build   -> passes (including Obsidian 1.11.0 compatibility)
-npx vitest run  -> 33 files, 494 tests passed
+./init.sh        -> npm run lint clean; npm test: 33 files, 494 tests passed; npm run build passes
+git diff --check -> passes
+relative-link check across README.md, USAGE_zh.md, USAGE_zh-cn.md -> no missing local links
 ```
 
 ## Exact Next Step
