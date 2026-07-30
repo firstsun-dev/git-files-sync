@@ -8,7 +8,7 @@
 [![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&query=%24%5B%22git-file-sync%22%5D.downloads&label=downloads&style=for-the-badge&color=007acc)](https://obsidian.md/plugins?id=git-file-sync)
 [![License](https://img.shields.io/github/license/firstsun-dev/git-files-sync?style=for-the-badge)](LICENSE)
 
-**[Releases](https://github.com/firstsun-dev/git-files-sync/releases)** · **[繁體中文使用說明](USAGE_zh.md)** · **[Changelog](CHANGELOG.md)**
+**[Releases](https://github.com/firstsun-dev/git-files-sync/releases)** · **[繁體中文](USAGE_zh.md)** · **[简体中文](USAGE_zh-cn.md)** · **[Changelog](CHANGELOG.md)**
 
 </div>
 
@@ -23,18 +23,24 @@ Push, pull, diff, and resolve conflicts — file by file, not whole-vault. Unlik
 
 ## What's inside
 
-- **File-by-file control** — Sync individual notes or whole folders, not your entire vault. No lock-in to a single sync provider for everything.
+- **File-by-file control** — Sync individual notes or selected files from a folder, not your entire vault. No lock-in to a single sync provider for everything.
 - **Three Git providers** — GitHub, GitLab (including self-hosted), and Gitea, all behind one consistent UI.
-- **Visual diffing** — A built-in diff viewer compares local and remote versions side-by-side before anything is overwritten.
+- **Review before applying** — Every push, pull, and remote deletion shows a plan of additions, changes, moves, and deletions before it writes anything.
+- **Real rename support** — Renamed files and moved folders are committed as moves, without leaving duplicate files behind remotely.
+- **Visual diffing** — A built-in diff viewer compares local and remote versions before anything is overwritten; on desktop it opens in a dedicated pane.
 - **Conflict resolution** — When local and remote both changed, resolve manually with a dedicated conflict tool instead of guessing which version wins.
-- **Works on mobile** — Full support for Obsidian Mobile with a touch-friendly sync dashboard.
+- **Works on mobile** — Full support for Obsidian Mobile with a touch-friendly sync dashboard; the inline diff remains available there.
+- **Three interface languages** — English, Traditional Chinese, and Simplified Chinese. Follow Obsidian's display language or choose one in Settings.
 
 ## Sync Status View
 
 A single dashboard shows the state of every tracked file:
 
-- **Status filtering** — instantly see what's modified, new, or missing.
-- **Visual diffs** — line-by-line comparison of local vs. remote before syncing.
+- **Live status and startup refresh** — tracked files update as you edit or rename them, and the view refreshes automatically after Obsidian starts (configurable in Settings).
+- **Status filtering and search** — instantly narrow the list to modified, new, remote-only, moved, or matching paths.
+- **Tree view and folder selection** — optionally browse files as a collapsible hierarchy, select folders with tri-state checkboxes, and choose whether synced files appear in All.
+- **Safe moves** — renamed files appear as **Moved**; related folder moves collapse into one row and can be pushed or reverted together.
+- **Visual diffs** — line-by-line comparison of local vs. remote before syncing; click a path to open the local note or its remote page when available.
 - **Remote-only detection** — spot files that exist on GitHub/GitLab/Gitea but haven't been pulled into the vault yet.
 
 ![conflict](imgs/git-diff.png)
@@ -65,7 +71,7 @@ A single dashboard shows the state of every tracked file:
 - **GitLab token:** User settings → Access tokens → `api` scope. Base URL defaults to `https://gitlab.com`; change it for self-hosted instances.
 - **Gitea token:** User settings → Applications → Access tokens. Point the base URL at your instance (e.g. `https://gitea.example.com`).
 
-Other settings: **branch** to sync against (default `main`), **root path** prefix inside the repo, **vault folder** to scope which notes are tracked, and **symbolic link handling** (*real* — recreate the link, GitHub only; *follow* — sync the target's content; *skip*). See [Symbolic link handling](docs/symlink-handling.md) for details.
+Other settings: **language** (system default, English, Traditional Chinese, or Simplified Chinese); **auto-refresh Sync Status on startup**; **branch** to sync against (default `main`); **root path** prefix inside the repo; **vault folder** to scope which notes are tracked; and **symbolic link handling** (*real* — recreate the link, GitHub only; *follow* — sync the target's content; *skip*). See [Symbolic link handling](docs/symlink-handling.md) for details.
 
 ## Daily workflow
 
@@ -73,11 +79,13 @@ Other settings: **branch** to sync against (default `main`), **root path** prefi
 - One note — the cloud icon in the ribbon, or the command `Push current file to GitLab/GitHub/Gitea`.
 - Several notes — open the Sync Status View, filter to **Modified**, select files, click **Push selected**.
 - From the file tree — right-click any file and choose `Push to GitLab/GitHub/Gitea`.
+- Review the proposed changes in the plan, then choose **Apply**. Renames and folder moves are included as real moves.
 
 **Pulling:**
 1. Open the Sync Status View and click **Refresh status**.
 2. Files with remote updates show as **Modified** or **Remote only**.
-3. Select them and click **Pull selected**. Pulling overwrites local changes — if both sides changed, the conflict tool opens instead.
+3. Select them and click **Pull selected**.
+4. Review the plan and choose **Apply**. Pulling overwrites local changes — if both sides changed, the conflict tool opens instead.
 
 **Resolving a conflict:**
 1. The Conflict Resolution window opens automatically.
@@ -102,8 +110,9 @@ Other settings: **branch** to sync against (default `main`), **root path** prefi
 
 1. Configure a provider in **Settings > Git File Sync** (see [Configuration](#configuration)).
 2. Open the **Sync Status View** — the list icon in the ribbon, or run `Open sync status view` from the Command Palette.
-3. Click **Refresh status** to compare your vault against the remote repo.
-4. Select files and **Push selected** or **Pull selected** as needed.
+3. The view refreshes automatically after startup; click **Refresh status** whenever you want to check again.
+4. Use the status tabs, path search, or optional tree view to find files; select files or folders and choose **Push selected** or **Pull selected**.
+5. Review the sync plan, then choose **Apply**.
 
 **Commands:**
 
@@ -112,8 +121,8 @@ Other settings: **branch** to sync against (default `main`), **root path** prefi
 | Open sync status view | Open the sync dashboard |
 | Push current file to GitLab/GitHub/Gitea | Push the active note |
 | Pull current file to GitLab/GitHub/Gitea | Pull the active note |
-| Push all files | Push every tracked, changed file |
-| Pull all files | Pull every tracked, changed file |
+| Push all files | Review and push every tracked, changed file |
+| Pull all files | Review and pull every tracked, changed file |
 
 ## Privacy and security
 
