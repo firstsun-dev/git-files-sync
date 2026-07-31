@@ -1,3 +1,15 @@
+## [1.5.1](https://github.com/firstsun-dev/git-files-sync/compare/1.5.0...1.5.1) (2026-07-31)
+
+### Bug Fixes
+
+* **deps:** release patched transitive dev-dep versions ([dc9525b](https://github.com/firstsun-dev/git-files-sync/commit/dc9525b4890764dffb6331bb00aa1888eaa8a590)), closes [#87](https://github.com/firstsun-dev/git-files-sync/issues/87)
+* **release:** correct commit-analyzer releaseRules precedence ([b4b1808](https://github.com/firstsun-dev/git-files-sync/commit/b4b180874d2689b85ef06d4bebd3ac364c3723b0)), closes [#87](https://github.com/firstsun-dev/git-files-sync/issues/87)
+
+### Documentation
+
+* add simplified Chinese guide ([e7d5307](https://github.com/firstsun-dev/git-files-sync/commit/e7d530723816f63cfeb820cd44ca5c34c1d5ba41))
+* archive session state as of 2026-07-31 ([908ebf7](https://github.com/firstsun-dev/git-files-sync/commit/908ebf783c4d836e7e1b01a55b5c116040220a44)), closes [#87](https://github.com/firstsun-dev/git-files-sync/issues/87) [#87](https://github.com/firstsun-dev/git-files-sync/issues/87)
+
 ## [1.5.0](https://github.com/firstsun-dev/git-files-sync/compare/1.4.0...1.5.0) (2026-07-28)
 
 ### Features
