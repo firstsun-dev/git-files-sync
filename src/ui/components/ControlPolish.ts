@@ -235,13 +235,17 @@ const CONTROL_POLISH_CSS = `
     gap: 8px;
 }
 
+.is-mobile .sync-status-view .ssv-action-bar-row > .ssv-btn:only-child {
+    grid-column: 1 / -1;
+}
+
 .is-mobile .sync-status-view .ssv-bar-spacer {
     display: none;
 }
 
 .is-mobile .sync-status-view .ssv-select-row {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
+    justify-content: center;
+    margin-right: 0;
 }
 
 .is-mobile .sync-status-view .ssv-btn {
