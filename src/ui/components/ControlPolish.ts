@@ -1,5 +1,101 @@
 type StyleMap = Partial<CSSStyleDeclaration>;
 
+interface ControlMetrics {
+    inputHeight: string;
+    tabHeight: string;
+    tabPadding: string;
+    toolbarGap: string;
+    toolbarDisplay: string;
+    toolbarColumns: string;
+    buttonHeight: string;
+    buttonWidth: string;
+    buttonMinWidth: string;
+    buttonCssHeight: string;
+    buttonPadding: string;
+    selectHeight: string;
+    selectJustify: string;
+    selectMarginRight: string;
+    treeHeight: string;
+    treeGap: string;
+    treePaddingTop: string;
+    treePaddingBottom: string;
+    fileRowHeight: string;
+    fileActionGap: string;
+    fileActionPaddingLeft: string;
+    fileActionDisplay: string;
+    fileActionColumns: string;
+    fileButtonHeight: string;
+    fileButtonWidth: string;
+    fileButtonPadding: string;
+    fileButtonJustify: string;
+    folderSize: string;
+    folderRowHeight: string;
+}
+
+const DESKTOP_METRICS: ControlMetrics = {
+    inputHeight: '32px',
+    tabHeight: '30px',
+    tabPadding: '5px 10px',
+    toolbarGap: '6px',
+    toolbarDisplay: 'flex',
+    toolbarColumns: '',
+    buttonHeight: '32px',
+    buttonWidth: '',
+    buttonMinWidth: '',
+    buttonCssHeight: '',
+    buttonPadding: '5px 10px',
+    selectHeight: '32px',
+    selectJustify: '',
+    selectMarginRight: '',
+    treeHeight: '28px',
+    treeGap: '16px',
+    treePaddingTop: '',
+    treePaddingBottom: '',
+    fileRowHeight: '32px',
+    fileActionGap: '6px',
+    fileActionPaddingLeft: '',
+    fileActionDisplay: 'flex',
+    fileActionColumns: '',
+    fileButtonHeight: '30px',
+    fileButtonWidth: '',
+    fileButtonPadding: '5px 9px',
+    fileButtonJustify: '',
+    folderSize: '28px',
+    folderRowHeight: '38px',
+};
+
+const MOBILE_METRICS: ControlMetrics = {
+    inputHeight: '44px',
+    tabHeight: '44px',
+    tabPadding: '8px 12px',
+    toolbarGap: '8px',
+    toolbarDisplay: 'grid',
+    toolbarColumns: 'repeat(2, minmax(0, 1fr))',
+    buttonHeight: '44px',
+    buttonWidth: '100%',
+    buttonMinWidth: '0',
+    buttonCssHeight: 'auto',
+    buttonPadding: '9px 12px',
+    selectHeight: '44px',
+    selectJustify: 'center',
+    selectMarginRight: '0',
+    treeHeight: '44px',
+    treeGap: '8px 16px',
+    treePaddingTop: '4px',
+    treePaddingBottom: '4px',
+    fileRowHeight: '44px',
+    fileActionGap: '8px',
+    fileActionPaddingLeft: '0',
+    fileActionDisplay: 'grid',
+    fileActionColumns: 'repeat(2, minmax(0, 1fr))',
+    fileButtonHeight: '44px',
+    fileButtonWidth: '100%',
+    fileButtonPadding: '9px 12px',
+    fileButtonJustify: 'center',
+    folderSize: '44px',
+    folderRowHeight: '44px',
+};
+
 /**
  * Applies the control polish after the current render pass has completed.
  * SyncStatusView rebuilds its body synchronously, so a microtask can style the
@@ -11,21 +107,23 @@ export function scheduleControlPolish(container: HTMLElement): void {
 }
 
 function applyControlPolish(scope: HTMLElement): void {
-    const mobile = scope.closest('.is-mobile') !== null || document.body.classList.contains('is-mobile');
-    polishSearchAndFilters(scope, mobile);
-    polishActionBar(scope, mobile);
-    polishFileActions(scope, mobile);
-    polishFileRows(scope, mobile);
+    const mobile = scope.closest('.is-mobile') !== null || scope.ownerDocument.body.classList.contains('is-mobile');
+    const metrics = mobile ? MOBILE_METRICS : DESKTOP_METRICS;
+    polishSearchAndFilters(scope, metrics);
+    polishActionBar(scope, metrics);
+    polishFileActions(scope, metrics);
+    polishFileRows(scope, metrics);
+    if (mobile) polishMobileLayouts(scope);
 }
 
-function polishSearchAndFilters(scope: HTMLElement, mobile: boolean): void {
+function polishSearchAndFilters(scope: HTMLElement, metrics: ControlMetrics): void {
     for (const search of scope.querySelectorAll<HTMLElement>('.ssv-search')) {
         setStyles(search, { gap: '6px', padding: '8px 10px' });
     }
     for (const input of scope.querySelectorAll<HTMLInputElement>('.ssv-search-input')) {
         setStyles(input, {
-            height: mobile ? '44px' : '32px',
-            minHeight: mobile ? '44px' : '32px',
+            height: metrics.inputHeight,
+            minHeight: metrics.inputHeight,
             paddingLeft: '8px',
             paddingRight: '8px',
             borderRadius: '6px',
@@ -33,9 +131,9 @@ function polishSearchAndFilters(scope: HTMLElement, mobile: boolean): void {
     }
     for (const clear of scope.querySelectorAll<HTMLButtonElement>('.ssv-search-clear')) {
         setStyles(clear, {
-            width: mobile ? '44px' : '32px',
-            height: mobile ? '44px' : '32px',
-            minHeight: mobile ? '44px' : '32px',
+            width: metrics.inputHeight,
+            height: metrics.inputHeight,
+            minHeight: metrics.inputHeight,
             borderRadius: '6px',
         });
     }
@@ -44,39 +142,35 @@ function polishSearchAndFilters(scope: HTMLElement, mobile: boolean): void {
     }
     for (const tab of scope.querySelectorAll<HTMLButtonElement>('.ssv-tab')) {
         setStyles(tab, {
-            minHeight: mobile ? '44px' : '30px',
-            padding: mobile ? '8px 12px' : '5px 10px',
+            minHeight: metrics.tabHeight,
+            padding: metrics.tabPadding,
             gap: '6px',
             borderRadius: '999px',
         });
     }
     for (const select of scope.querySelectorAll<HTMLSelectElement>('.ssv-filter-select')) {
-        setStyles(select, { minHeight: mobile ? '44px' : '32px', borderRadius: '6px' });
+        setStyles(select, { minHeight: metrics.inputHeight, borderRadius: '6px' });
     }
 }
 
-function polishActionBar(scope: HTMLElement, mobile: boolean): void {
+function polishActionBar(scope: HTMLElement, metrics: ControlMetrics): void {
     for (const bar of scope.querySelectorAll<HTMLElement>('.ssv-action-bar')) {
         setStyles(bar, { gap: '8px', padding: '8px 10px' });
     }
     for (const row of scope.querySelectorAll<HTMLElement>('.ssv-action-bar-row')) {
         setStyles(row, {
-            gap: mobile ? '8px' : '6px',
-            display: mobile ? 'grid' : 'flex',
-            gridTemplateColumns: mobile ? 'repeat(2, minmax(0, 1fr))' : '',
+            gap: metrics.toolbarGap,
+            display: metrics.toolbarDisplay,
+            gridTemplateColumns: metrics.toolbarColumns,
         });
-        spanOnlyMobileButton(row, mobile);
-    }
-    for (const spacer of scope.querySelectorAll<HTMLElement>('.ssv-bar-spacer')) {
-        if (mobile) spacer.setCssProps({ display: 'none' });
     }
     for (const button of scope.querySelectorAll<HTMLButtonElement>('.ssv-btn')) {
         setStyles(button, {
-            minHeight: mobile ? '44px' : '32px',
-            width: mobile ? '100%' : '',
-            minWidth: mobile ? '0' : '',
-            height: mobile ? 'auto' : '',
-            padding: mobile ? '9px 12px' : '5px 10px',
+            minHeight: metrics.buttonHeight,
+            width: metrics.buttonWidth,
+            minWidth: metrics.buttonMinWidth,
+            height: metrics.buttonCssHeight,
+            padding: metrics.buttonPadding,
             gap: '6px',
             borderRadius: '6px',
             lineHeight: '1.2',
@@ -86,80 +180,85 @@ function polishActionBar(scope: HTMLElement, mobile: boolean): void {
     }
     for (const selectRow of scope.querySelectorAll<HTMLElement>('.ssv-select-row')) {
         setStyles(selectRow, {
-            minHeight: mobile ? '44px' : '32px',
+            minHeight: metrics.selectHeight,
             paddingLeft: '4px',
             paddingRight: '6px',
             gap: '6px',
-            justifyContent: mobile ? 'center' : '',
-            marginRight: mobile ? '0' : '',
+            justifyContent: metrics.selectJustify,
+            marginRight: metrics.selectMarginRight,
         });
     }
     for (const options of scope.querySelectorAll<HTMLElement>('.ssv-tree-options')) {
         setStyles(options, {
-            minHeight: mobile ? '44px' : '28px',
-            gap: mobile ? '8px 16px' : '16px',
+            minHeight: metrics.treeHeight,
+            gap: metrics.treeGap,
             paddingLeft: '2px',
             flexWrap: 'wrap',
         });
     }
     for (const option of scope.querySelectorAll<HTMLElement>('.ssv-tree-option')) {
         setStyles(option, {
-            minHeight: mobile ? '44px' : '28px',
+            minHeight: metrics.treeHeight,
             gap: '6px',
-            paddingTop: mobile ? '4px' : '',
-            paddingBottom: mobile ? '4px' : '',
+            paddingTop: metrics.treePaddingTop,
+            paddingBottom: metrics.treePaddingBottom,
         });
     }
 }
 
-function spanOnlyMobileButton(row: HTMLElement, mobile: boolean): void {
-    if (!mobile || row.querySelectorAll(':scope > .ssv-btn').length !== 1) return;
-    row.querySelector<HTMLElement>(':scope > .ssv-btn')?.setCssProps({ 'grid-column': '1 / -1' });
+function polishMobileLayouts(scope: HTMLElement): void {
+    for (const spacer of scope.querySelectorAll<HTMLElement>('.ssv-bar-spacer')) {
+        spacer.setCssProps({ display: 'none' });
+    }
+    for (const row of scope.querySelectorAll<HTMLElement>('.ssv-action-bar-row')) {
+        if (row.querySelectorAll(':scope > .ssv-btn').length !== 1) continue;
+        row.querySelector<HTMLElement>(':scope > .ssv-btn')?.setCssProps({ 'grid-column': '1 / -1' });
+    }
 }
 
-function polishFileActions(scope: HTMLElement, mobile: boolean): void {
+function polishFileActions(scope: HTMLElement, metrics: ControlMetrics): void {
     for (const actions of scope.querySelectorAll<HTMLElement>('.ssv-file-actions')) {
         setStyles(actions, {
-            gap: mobile ? '8px' : '6px',
+            gap: metrics.fileActionGap,
             marginTop: '8px',
-            paddingLeft: mobile ? '0' : '',
-            display: mobile ? 'grid' : 'flex',
-            gridTemplateColumns: mobile ? 'repeat(2, minmax(0, 1fr))' : '',
+            paddingLeft: metrics.fileActionPaddingLeft,
+            display: metrics.fileActionDisplay,
+            gridTemplateColumns: metrics.fileActionColumns,
         });
     }
     for (const button of scope.querySelectorAll<HTMLButtonElement>('.ssv-action-btn')) {
         setStyles(button, {
-            minHeight: mobile ? '44px' : '30px',
-            width: mobile ? '100%' : '',
-            padding: mobile ? '9px 12px' : '5px 9px',
+            minHeight: metrics.fileButtonHeight,
+            width: metrics.fileButtonWidth,
+            padding: metrics.fileButtonPadding,
             gap: '6px',
             borderRadius: '6px',
             lineHeight: '1.2',
-            justifyContent: mobile ? 'center' : '',
+            justifyContent: metrics.fileButtonJustify,
         });
         applyFileButtonHierarchy(button);
     }
 }
 
-function polishFileRows(scope: HTMLElement, mobile: boolean): void {
+function polishFileRows(scope: HTMLElement, metrics: ControlMetrics): void {
     for (const file of scope.querySelectorAll<HTMLElement>('.ssv-file')) {
         file.setCssProps({ padding: '10px 12px' });
     }
     for (const fileRow of scope.querySelectorAll<HTMLElement>('.ssv-file-row')) {
-        setStyles(fileRow, { minHeight: mobile ? '44px' : '32px', gap: '8px' });
+        setStyles(fileRow, { minHeight: metrics.fileRowHeight, gap: '8px' });
     }
     for (const toggle of scope.querySelectorAll<HTMLButtonElement>('.ssv-folder-toggle')) {
         setStyles(toggle, {
-            width: mobile ? '44px' : '28px',
-            minWidth: mobile ? '44px' : '28px',
-            height: mobile ? '44px' : '28px',
-            minHeight: mobile ? '44px' : '28px',
+            width: metrics.folderSize,
+            minWidth: metrics.folderSize,
+            height: metrics.folderSize,
+            minHeight: metrics.folderSize,
             borderRadius: '6px',
         });
     }
     for (const folderRow of scope.querySelectorAll<HTMLElement>('.ssv-tree-folder-row')) {
         setStyles(folderRow, {
-            minHeight: mobile ? '44px' : '38px',
+            minHeight: metrics.folderRowHeight,
             gap: '8px',
             padding: '5px 12px 5px 4px',
         });
