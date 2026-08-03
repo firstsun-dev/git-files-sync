@@ -1,6 +1,6 @@
 import { setIcon, setTooltip } from 'obsidian';
 import { ICONS } from './icons';
-import { ensureControlPolishStyles } from './ControlPolish';
+import { scheduleControlPolish } from './ControlPolish';
 import { t } from '../../i18n';
 
 export interface ActionBarProps {
@@ -25,7 +25,7 @@ export interface ActionBarCallbacks {
 }
 
 export function renderActionBar(container: HTMLElement, props: ActionBarProps, callbacks: ActionBarCallbacks): void {
-    ensureControlPolishStyles(container);
+    scheduleControlPolish(container);
 
     const bar = container.createDiv({ cls: 'ssv-action-bar' });
     const actions = bar.createDiv({ cls: 'ssv-action-bar-row' });
