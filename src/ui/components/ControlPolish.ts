@@ -1,287 +1,200 @@
-const STYLE_ATTRIBUTE = 'data-gfs-control-polish';
+type StyleMap = Partial<CSSStyleDeclaration>;
 
 /**
- * Adds a view-scoped style layer for control sizing, spacing, hierarchy, and
- * touch targets. Keeping the element inside the view ties its lifetime to the
- * workspace leaf and avoids leaking overrides after the view is closed.
+ * Applies the control polish after the current render pass has completed.
+ * SyncStatusView rebuilds its body synchronously, so a microtask can style the
+ * action bar and the file rows together without a MutationObserver.
  */
-export function ensureControlPolishStyles(container: HTMLElement): void {
-    const scope = (container.closest('.sync-status-view') as HTMLElement | null) ?? container;
-    if (scope.querySelector(`style[${STYLE_ATTRIBUTE}]`)) return;
-
-    const style = document.createElement('style');
-    style.setAttribute(STYLE_ATTRIBUTE, '');
-    style.textContent = CONTROL_POLISH_CSS;
-    scope.prepend(style);
+export function scheduleControlPolish(container: HTMLElement): void {
+    const scope = container.closest<HTMLElement>('.sync-status-view') ?? container;
+    void Promise.resolve().then(() => applyControlPolish(scope));
 }
 
-const CONTROL_POLISH_CSS = `
-.sync-status-view {
-    --gfs-control-height: 32px;
-    --gfs-control-gap: 6px;
-    --gfs-section-gap: 8px;
-    --gfs-control-radius: 6px;
-    --gfs-touch-target: 44px;
-}
+function applyControlPolish(scope: HTMLElement): void {
+    const mobile = scope.closest('.is-mobile') !== null || document.body.classList.contains('is-mobile');
 
-.sync-status-view .ssv-search {
-    gap: var(--gfs-control-gap);
-    padding: 8px 10px;
-}
-
-.sync-status-view .ssv-search-input {
-    height: var(--gfs-control-height);
-    padding-inline: 8px;
-    border-radius: var(--gfs-control-radius);
-}
-
-.sync-status-view .ssv-search-clear {
-    width: var(--gfs-control-height);
-    height: var(--gfs-control-height);
-    border-radius: var(--gfs-control-radius);
-}
-
-.sync-status-view .ssv-tabs {
-    gap: var(--gfs-control-gap);
-    padding: 8px 10px;
-}
-
-.sync-status-view .ssv-tab {
-    min-height: 30px;
-    padding: 5px 10px;
-    gap: var(--gfs-control-gap);
-    border-radius: 999px;
-}
-
-.sync-status-view .ssv-action-bar {
-    gap: var(--gfs-section-gap);
-    padding: 8px 10px;
-}
-
-.sync-status-view .ssv-action-bar-row {
-    gap: var(--gfs-control-gap);
-}
-
-.sync-status-view .ssv-btn {
-    min-height: var(--gfs-control-height);
-    padding: 5px 10px;
-    gap: var(--gfs-control-gap);
-    border-radius: var(--gfs-control-radius);
-    line-height: 1.2;
-    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
-}
-
-.sync-status-view .ssv-btn:not(:disabled):hover {
-    opacity: 1;
-}
-
-.sync-status-view .ssv-btn-refresh,
-.sync-status-view .ssv-btn-pull {
-    background: var(--background-secondary);
-    border-color: var(--background-modifier-border);
-    color: var(--text-normal);
-}
-
-.sync-status-view .ssv-btn-refresh:not(:disabled):hover,
-.sync-status-view .ssv-btn-pull:not(:disabled):hover {
-    background: var(--background-modifier-hover);
-    border-color: var(--background-modifier-border-hover);
-}
-
-.sync-status-view .ssv-btn-push {
-    background: var(--interactive-accent);
-    border-color: var(--interactive-accent);
-    color: var(--text-on-accent);
-}
-
-.sync-status-view .ssv-btn-delete {
-    background: transparent;
-    border-color: var(--text-error);
-    color: var(--text-error);
-}
-
-.sync-status-view .ssv-btn-delete:not(:disabled):hover {
-    background: var(--background-modifier-hover);
-}
-
-.sync-status-view .ssv-select-row {
-    min-height: var(--gfs-control-height);
-    padding-inline: 4px 6px;
-    gap: var(--gfs-control-gap);
-}
-
-.sync-status-view .ssv-tree-options {
-    min-height: 28px;
-    gap: 16px;
-    padding-left: 2px;
-    flex-wrap: wrap;
-}
-
-.sync-status-view .ssv-tree-option {
-    min-height: 28px;
-    gap: var(--gfs-control-gap);
-}
-
-.sync-status-view .ssv-file {
-    padding: 10px 12px;
-}
-
-.sync-status-view .ssv-file-row {
-    min-height: 32px;
-    gap: 8px;
-}
-
-.sync-status-view .ssv-file-actions {
-    gap: var(--gfs-control-gap);
-    margin-top: 8px;
-}
-
-.sync-status-view .ssv-action-btn {
-    min-height: 30px;
-    padding: 5px 9px;
-    gap: var(--gfs-control-gap);
-    border-radius: var(--gfs-control-radius);
-    line-height: 1.2;
-}
-
-.sync-status-view .ssv-action-btn.push {
-    border-color: var(--interactive-accent);
-    color: var(--interactive-accent);
-}
-
-.sync-status-view .ssv-action-btn.pull,
-.sync-status-view .ssv-action-btn.diff {
-    border-color: var(--background-modifier-border);
-    color: var(--text-normal);
-}
-
-.sync-status-view .ssv-action-btn.danger {
-    border-color: var(--text-error);
-    color: var(--text-error);
-}
-
-.sync-status-view .ssv-folder-toggle {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--gfs-control-radius);
-}
-
-.sync-status-view .ssv-folder-toggle:hover,
-.sync-status-view .ssv-folder-toggle:focus-visible {
-    background: var(--background-modifier-hover);
-}
-
-.sync-status-view .ssv-tree-folder-row {
-    min-height: 38px;
-    gap: 8px;
-    padding: 5px 12px 5px 4px;
-}
-
-@container (max-width: 520px) {
-    .sync-status-view .ssv-action-bar-row {
-        flex-wrap: wrap;
-        gap: var(--gfs-control-gap);
+    for (const search of scope.querySelectorAll<HTMLElement>('.ssv-search')) {
+        setStyles(search, { gap: '6px', padding: '8px 10px' });
+    }
+    for (const input of scope.querySelectorAll<HTMLInputElement>('.ssv-search-input')) {
+        setStyles(input, {
+            height: mobile ? '44px' : '32px',
+            minHeight: mobile ? '44px' : '32px',
+            paddingLeft: '8px',
+            paddingRight: '8px',
+            borderRadius: '6px',
+        });
+    }
+    for (const clear of scope.querySelectorAll<HTMLButtonElement>('.ssv-search-clear')) {
+        setStyles(clear, {
+            width: mobile ? '44px' : '32px',
+            height: mobile ? '44px' : '32px',
+            minHeight: mobile ? '44px' : '32px',
+            borderRadius: '6px',
+        });
     }
 
-    .sync-status-view .ssv-bar-spacer {
-        display: none;
+    for (const tabs of scope.querySelectorAll<HTMLElement>('.ssv-tabs')) {
+        setStyles(tabs, { gap: '6px', padding: '8px 10px' });
+    }
+    for (const tab of scope.querySelectorAll<HTMLButtonElement>('.ssv-tab')) {
+        setStyles(tab, {
+            minHeight: mobile ? '44px' : '30px',
+            padding: mobile ? '8px 12px' : '5px 10px',
+            gap: '6px',
+            borderRadius: '999px',
+        });
+    }
+    for (const select of scope.querySelectorAll<HTMLSelectElement>('.ssv-filter-select')) {
+        setStyles(select, { minHeight: mobile ? '44px' : '32px', borderRadius: '6px' });
     }
 
-    .sync-status-view .ssv-btn {
-        width: 36px;
-        min-width: 36px;
-        height: 36px;
-        padding: 0;
-        justify-content: center;
+    for (const bar of scope.querySelectorAll<HTMLElement>('.ssv-action-bar')) {
+        setStyles(bar, { gap: '8px', padding: '8px 10px' });
+    }
+    for (const row of scope.querySelectorAll<HTMLElement>('.ssv-action-bar-row')) {
+        setStyles(row, {
+            gap: mobile ? '8px' : '6px',
+            display: mobile ? 'grid' : 'flex',
+            gridTemplateColumns: mobile ? 'repeat(2, minmax(0, 1fr))' : '',
+        });
+
+        if (mobile && row.querySelectorAll(':scope > .ssv-btn').length === 1) {
+            const onlyButton = row.querySelector<HTMLElement>(':scope > .ssv-btn');
+            if (onlyButton) onlyButton.style.gridColumn = '1 / -1';
+        }
+    }
+    for (const spacer of scope.querySelectorAll<HTMLElement>('.ssv-bar-spacer')) {
+        if (mobile) spacer.style.display = 'none';
+    }
+    for (const button of scope.querySelectorAll<HTMLButtonElement>('.ssv-btn')) {
+        setStyles(button, {
+            minHeight: mobile ? '44px' : '32px',
+            width: mobile ? '100%' : '',
+            minWidth: mobile ? '0' : '',
+            height: mobile ? 'auto' : '',
+            padding: mobile ? '9px 12px' : '5px 10px',
+            gap: '6px',
+            borderRadius: '6px',
+            lineHeight: '1.2',
+            transition: 'background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease',
+        });
+        applyToolbarButtonHierarchy(button);
+    }
+    for (const selectRow of scope.querySelectorAll<HTMLElement>('.ssv-select-row')) {
+        setStyles(selectRow, {
+            minHeight: mobile ? '44px' : '32px',
+            paddingLeft: '4px',
+            paddingRight: '6px',
+            gap: '6px',
+            justifyContent: mobile ? 'center' : '',
+            marginRight: mobile ? '0' : '',
+        });
+    }
+    for (const options of scope.querySelectorAll<HTMLElement>('.ssv-tree-options')) {
+        setStyles(options, {
+            minHeight: mobile ? '44px' : '28px',
+            gap: mobile ? '8px 16px' : '16px',
+            paddingLeft: '2px',
+            flexWrap: 'wrap',
+        });
+    }
+    for (const option of scope.querySelectorAll<HTMLElement>('.ssv-tree-option')) {
+        setStyles(option, {
+            minHeight: mobile ? '44px' : '28px',
+            gap: '6px',
+            paddingTop: mobile ? '4px' : '',
+            paddingBottom: mobile ? '4px' : '',
+        });
     }
 
-    .sync-status-view .ssv-btn-label,
-    .sync-status-view .ssv-select-label {
-        display: none;
+    for (const file of scope.querySelectorAll<HTMLElement>('.ssv-file')) {
+        file.style.padding = '10px 12px';
+    }
+    for (const fileRow of scope.querySelectorAll<HTMLElement>('.ssv-file-row')) {
+        setStyles(fileRow, { minHeight: mobile ? '44px' : '32px', gap: '8px' });
+    }
+    for (const actions of scope.querySelectorAll<HTMLElement>('.ssv-file-actions')) {
+        setStyles(actions, {
+            gap: mobile ? '8px' : '6px',
+            marginTop: '8px',
+            paddingLeft: mobile ? '0' : '',
+            display: mobile ? 'grid' : 'flex',
+            gridTemplateColumns: mobile ? 'repeat(2, minmax(0, 1fr))' : '',
+        });
+    }
+    for (const button of scope.querySelectorAll<HTMLButtonElement>('.ssv-action-btn')) {
+        setStyles(button, {
+            minHeight: mobile ? '44px' : '30px',
+            width: mobile ? '100%' : '',
+            padding: mobile ? '9px 12px' : '5px 9px',
+            gap: '6px',
+            borderRadius: '6px',
+            lineHeight: '1.2',
+            justifyContent: mobile ? 'center' : '',
+        });
+        applyFileButtonHierarchy(button);
     }
 
-    .sync-status-view .ssv-select-row {
-        margin-right: auto;
+    for (const toggle of scope.querySelectorAll<HTMLButtonElement>('.ssv-folder-toggle')) {
+        setStyles(toggle, {
+            width: mobile ? '44px' : '28px',
+            minWidth: mobile ? '44px' : '28px',
+            height: mobile ? '44px' : '28px',
+            minHeight: mobile ? '44px' : '28px',
+            borderRadius: '6px',
+        });
     }
-
-    .sync-status-view .ssv-tree-options {
-        gap: 12px;
-    }
-
-    .sync-status-view .ssv-file-actions {
-        padding-left: 0;
+    for (const folderRow of scope.querySelectorAll<HTMLElement>('.ssv-tree-folder-row')) {
+        setStyles(folderRow, {
+            minHeight: mobile ? '44px' : '38px',
+            gap: '8px',
+            padding: '5px 12px 5px 4px',
+        });
     }
 }
 
-.is-mobile .sync-status-view .ssv-search-input,
-.is-mobile .sync-status-view .ssv-search-clear,
-.is-mobile .sync-status-view .ssv-filter-select,
-.is-mobile .sync-status-view .ssv-btn,
-.is-mobile .sync-status-view .ssv-select-row,
-.is-mobile .sync-status-view .ssv-tree-option,
-.is-mobile .sync-status-view .ssv-action-btn,
-.is-mobile .sync-status-view .ssv-folder-toggle {
-    min-height: var(--gfs-touch-target);
+function applyToolbarButtonHierarchy(button: HTMLButtonElement): void {
+    if (button.classList.contains('ssv-btn-push')) {
+        setStyles(button, {
+            background: 'var(--interactive-accent)',
+            borderColor: 'var(--interactive-accent)',
+            color: 'var(--text-on-accent)',
+        });
+        return;
+    }
+
+    if (button.classList.contains('ssv-btn-delete')) {
+        setStyles(button, {
+            background: 'transparent',
+            borderColor: 'var(--text-error)',
+            color: 'var(--text-error)',
+        });
+        return;
+    }
+
+    if (button.classList.contains('ssv-btn-pull') || button.classList.contains('ssv-btn-refresh')) {
+        setStyles(button, {
+            background: 'var(--background-secondary)',
+            borderColor: 'var(--background-modifier-border)',
+            color: 'var(--text-normal)',
+        });
+    }
 }
 
-.is-mobile .sync-status-view .ssv-action-bar {
-    gap: var(--gfs-section-gap);
-    padding: 8px 10px;
+function applyFileButtonHierarchy(button: HTMLButtonElement): void {
+    if (button.classList.contains('push')) {
+        button.style.borderColor = 'var(--interactive-accent)';
+        button.style.color = 'var(--interactive-accent)';
+    } else if (button.classList.contains('danger')) {
+        button.style.borderColor = 'var(--text-error)';
+        button.style.color = 'var(--text-error)';
+    } else if (button.classList.contains('pull') || button.classList.contains('diff')) {
+        button.style.borderColor = 'var(--background-modifier-border)';
+        button.style.color = 'var(--text-normal)';
+    }
 }
 
-.is-mobile .sync-status-view .ssv-action-bar-row {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+function setStyles(element: HTMLElement, styles: StyleMap): void {
+    Object.assign(element.style, styles);
 }
-
-.is-mobile .sync-status-view .ssv-action-bar-row > .ssv-btn:only-child {
-    grid-column: 1 / -1;
-}
-
-.is-mobile .sync-status-view .ssv-bar-spacer {
-    display: none;
-}
-
-.is-mobile .sync-status-view .ssv-select-row {
-    justify-content: center;
-    margin-right: 0;
-}
-
-.is-mobile .sync-status-view .ssv-btn {
-    width: 100%;
-    min-width: 0;
-    height: auto;
-    padding: 9px 12px;
-}
-
-.is-mobile .sync-status-view .ssv-btn-label,
-.is-mobile .sync-status-view .ssv-select-label {
-    display: inline;
-}
-
-.is-mobile .sync-status-view .ssv-tree-options {
-    gap: 8px 16px;
-}
-
-.is-mobile .sync-status-view .ssv-tree-option {
-    padding-block: 4px;
-}
-
-.is-mobile .sync-status-view .ssv-file-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-}
-
-.is-mobile .sync-status-view .ssv-action-btn {
-    width: 100%;
-    justify-content: center;
-    padding: 9px 12px;
-}
-
-.is-mobile .sync-status-view .ssv-folder-toggle {
-    width: var(--gfs-touch-target);
-    height: var(--gfs-touch-target);
-}
-`;
