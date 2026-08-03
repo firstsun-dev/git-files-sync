@@ -12,7 +12,13 @@ export function scheduleControlPolish(container: HTMLElement): void {
 
 function applyControlPolish(scope: HTMLElement): void {
     const mobile = scope.closest('.is-mobile') !== null || document.body.classList.contains('is-mobile');
+    polishSearchAndFilters(scope, mobile);
+    polishActionBar(scope, mobile);
+    polishFileActions(scope, mobile);
+    polishFileRows(scope, mobile);
+}
 
+function polishSearchAndFilters(scope: HTMLElement, mobile: boolean): void {
     for (const search of scope.querySelectorAll<HTMLElement>('.ssv-search')) {
         setStyles(search, { gap: '6px', padding: '8px 10px' });
     }
@@ -33,7 +39,6 @@ function applyControlPolish(scope: HTMLElement): void {
             borderRadius: '6px',
         });
     }
-
     for (const tabs of scope.querySelectorAll<HTMLElement>('.ssv-tabs')) {
         setStyles(tabs, { gap: '6px', padding: '8px 10px' });
     }
@@ -48,7 +53,9 @@ function applyControlPolish(scope: HTMLElement): void {
     for (const select of scope.querySelectorAll<HTMLSelectElement>('.ssv-filter-select')) {
         setStyles(select, { minHeight: mobile ? '44px' : '32px', borderRadius: '6px' });
     }
+}
 
+function polishActionBar(scope: HTMLElement, mobile: boolean): void {
     for (const bar of scope.querySelectorAll<HTMLElement>('.ssv-action-bar')) {
         setStyles(bar, { gap: '8px', padding: '8px 10px' });
     }
@@ -58,14 +65,10 @@ function applyControlPolish(scope: HTMLElement): void {
             display: mobile ? 'grid' : 'flex',
             gridTemplateColumns: mobile ? 'repeat(2, minmax(0, 1fr))' : '',
         });
-
-        if (mobile && row.querySelectorAll(':scope > .ssv-btn').length === 1) {
-            const onlyButton = row.querySelector<HTMLElement>(':scope > .ssv-btn');
-            if (onlyButton) onlyButton.style.gridColumn = '1 / -1';
-        }
+        spanOnlyMobileButton(row, mobile);
     }
     for (const spacer of scope.querySelectorAll<HTMLElement>('.ssv-bar-spacer')) {
-        if (mobile) spacer.style.display = 'none';
+        if (mobile) spacer.setCssProps({ display: 'none' });
     }
     for (const button of scope.querySelectorAll<HTMLButtonElement>('.ssv-btn')) {
         setStyles(button, {
@@ -107,13 +110,14 @@ function applyControlPolish(scope: HTMLElement): void {
             paddingBottom: mobile ? '4px' : '',
         });
     }
+}
 
-    for (const file of scope.querySelectorAll<HTMLElement>('.ssv-file')) {
-        file.style.padding = '10px 12px';
-    }
-    for (const fileRow of scope.querySelectorAll<HTMLElement>('.ssv-file-row')) {
-        setStyles(fileRow, { minHeight: mobile ? '44px' : '32px', gap: '8px' });
-    }
+function spanOnlyMobileButton(row: HTMLElement, mobile: boolean): void {
+    if (!mobile || row.querySelectorAll(':scope > .ssv-btn').length !== 1) return;
+    row.querySelector<HTMLElement>(':scope > .ssv-btn')?.setCssProps({ 'grid-column': '1 / -1' });
+}
+
+function polishFileActions(scope: HTMLElement, mobile: boolean): void {
     for (const actions of scope.querySelectorAll<HTMLElement>('.ssv-file-actions')) {
         setStyles(actions, {
             gap: mobile ? '8px' : '6px',
@@ -135,7 +139,15 @@ function applyControlPolish(scope: HTMLElement): void {
         });
         applyFileButtonHierarchy(button);
     }
+}
 
+function polishFileRows(scope: HTMLElement, mobile: boolean): void {
+    for (const file of scope.querySelectorAll<HTMLElement>('.ssv-file')) {
+        file.setCssProps({ padding: '10px 12px' });
+    }
+    for (const fileRow of scope.querySelectorAll<HTMLElement>('.ssv-file-row')) {
+        setStyles(fileRow, { minHeight: mobile ? '44px' : '32px', gap: '8px' });
+    }
     for (const toggle of scope.querySelectorAll<HTMLButtonElement>('.ssv-folder-toggle')) {
         setStyles(toggle, {
             width: mobile ? '44px' : '28px',
@@ -163,7 +175,6 @@ function applyToolbarButtonHierarchy(button: HTMLButtonElement): void {
         });
         return;
     }
-
     if (button.classList.contains('ssv-btn-delete')) {
         setStyles(button, {
             background: 'transparent',
@@ -172,7 +183,6 @@ function applyToolbarButtonHierarchy(button: HTMLButtonElement): void {
         });
         return;
     }
-
     if (button.classList.contains('ssv-btn-pull') || button.classList.contains('ssv-btn-refresh')) {
         setStyles(button, {
             background: 'var(--background-secondary)',
@@ -184,17 +194,23 @@ function applyToolbarButtonHierarchy(button: HTMLButtonElement): void {
 
 function applyFileButtonHierarchy(button: HTMLButtonElement): void {
     if (button.classList.contains('push')) {
-        button.style.borderColor = 'var(--interactive-accent)';
-        button.style.color = 'var(--interactive-accent)';
+        button.setCssProps({
+            'border-color': 'var(--interactive-accent)',
+            color: 'var(--interactive-accent)',
+        });
     } else if (button.classList.contains('danger')) {
-        button.style.borderColor = 'var(--text-error)';
-        button.style.color = 'var(--text-error)';
+        button.setCssProps({
+            'border-color': 'var(--text-error)',
+            color: 'var(--text-error)',
+        });
     } else if (button.classList.contains('pull') || button.classList.contains('diff')) {
-        button.style.borderColor = 'var(--background-modifier-border)';
-        button.style.color = 'var(--text-normal)';
+        button.setCssProps({
+            'border-color': 'var(--background-modifier-border)',
+            color: 'var(--text-normal)',
+        });
     }
 }
 
 function setStyles(element: HTMLElement, styles: StyleMap): void {
-    Object.assign(element.style, styles);
+    element.setCssStyles(styles);
 }
