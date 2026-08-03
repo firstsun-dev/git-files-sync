@@ -70,6 +70,13 @@ export function setupObsidianDOM(): void {
             if (value === null || value === false) el.removeAttribute(name);
             else el.setAttribute(name, String(value));
         },
+        setCssStyles(styles: Partial<CSSStyleDeclaration>): void {
+            Object.assign((this as HTMLElement).style, styles);
+        },
+        setCssProps(props: Record<string, string>): void {
+            const style = (this as HTMLElement).style;
+            for (const [property, value] of Object.entries(props)) style.setProperty(property, value);
+        },
         empty(): void {
             (this as HTMLElement).replaceChildren();
         },
