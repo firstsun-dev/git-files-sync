@@ -1,14 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabSyncSettingTab } from '../../src/settings';
-import GitLabFilesPush from '../../src/main';
+import GitLabFilesPush, { type ConnectionStatus } from '../../src/main';
 import { createContainer, setupObsidianDOM } from './setup-dom';
 
 vi.mock('../../src/main', () => ({
   default: class {},
 }));
 
-setupObsidianDOM();
+beforeAll(() => { setupObsidianDOM(); });
 
 function createPluginStub(): GitLabFilesPush {
   return {
@@ -16,7 +16,7 @@ function createPluginStub(): GitLabFilesPush {
     manifest: { version: '0.0.0-test' },
     saveSettings: vi.fn().mockResolvedValue(undefined),
     initializeGitService: vi.fn(),
-    onConnectionStatusChange: vi.fn((listener) => {
+    onConnectionStatusChange: vi.fn((listener: (status: ConnectionStatus) => void) => {
       listener({ state: 'checking' });
       return vi.fn();
     }),
@@ -31,10 +31,7 @@ function createPluginStub(): GitLabFilesPush {
  * definition that emptied the SettingGroup container while it was rendering.
  */
 function renderAsObsidian113(tab: GitLabSyncSettingTab): void {
-  const maybeDeclarative = tab as unknown as {
-    getSettingDefinitions?: () => unknown[];
-  };
-  const definitions = maybeDeclarative.getSettingDefinitions?.() ?? [];
+  const definitions = tab.getSettingDefinitions();
 
   if (definitions.length === 0) {
     tab.display();
@@ -42,13 +39,10 @@ function renderAsObsidian113(tab: GitLabSyncSettingTab): void {
 }
 
 describe('GitLabSyncSettingTab on Obsidian 1.13+', () => {
-  it('does not opt into declarative settings until the tab is fully migrated', () => {
-    expect(
-      Object.prototype.hasOwnProperty.call(
-        GitLabSyncSettingTab.prototype,
-        'getSettingDefinitions',
-      ),
-    ).toBe(false);
+  it('returns no declarative definitions until the tab is fully migrated', () => {
+    const tab = new GitLabSyncSettingTab(new App(), createPluginStub());
+
+    expect(tab.getSettingDefinitions()).toEqual([]);
   });
 
   it('falls back to display() and renders settings instead of a blank page', () => {
