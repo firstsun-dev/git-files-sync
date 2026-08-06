@@ -49,13 +49,18 @@ describe('GitLabSyncSettingTab on Obsidian 1.13+', () => {
     vi.useFakeTimers();
     const tab = new GitLabSyncSettingTab(new App(), createPluginStub());
     tab.containerEl = createContainer();
+    const displaySpy = vi.spyOn(tab, 'display');
 
-    renderAsObsidian113(tab);
+    try {
+      renderAsObsidian113(tab);
 
-    expect(tab.containerEl.querySelectorAll('.setting-item').length).toBeGreaterThan(0);
-    expect(tab.containerEl.textContent).not.toBe('');
-
-    vi.clearAllTimers();
-    vi.useRealTimers();
+      expect(displaySpy).toHaveBeenCalledOnce();
+      expect(tab.containerEl.childElementCount).toBeGreaterThan(0);
+      expect(tab.containerEl.querySelector('input')).not.toBeNull();
+      expect(tab.containerEl.querySelector('button')).not.toBeNull();
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 });
