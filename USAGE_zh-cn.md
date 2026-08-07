@@ -34,9 +34,14 @@ Git File Sync 不会同步整个 vault；您可以只选择要分享、发布或
 
 1. **选择服务**：在 `设置` > `Git File Sync` 中选择 GitLab、GitHub 或 Gitea。
 2. **填写凭据**：
-   - **GitHub**：需要个人访问令牌 (PAT)、用户名或组织名、仓库名。令牌需要 `repo` 权限。
-   - **GitLab**：需要个人访问令牌 (PAT)、项目 ID、服务器网址（默认为 `https://gitlab.com`；自建实例请改为对应网址）。令牌需要 `api` 权限。
-   - **Gitea**：需要个人访问令牌 (PAT)、服务器网址（例如 `https://gitea.example.com`）、用户名或组织名、仓库名。可在 `用户设置` > `应用程序` > `访问令牌` 中创建令牌。
+
+   > **安全提示：** 请把每个令牌的权限范围缩到最小：只允许需要同步的仓库、只授予必要权限，并设置较短的有效期。令牌只应保存在本插件的设置中，不要粘贴到会被同步的笔记里。如果令牌可能泄露，请立即撤销并重新创建；不再使用的令牌也应直接撤销。
+
+   - **GitHub**：建议创建 [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)，而不是 classic token。在 **Repository access** 中选择 *Only select repositories*，只指定要同步的仓库；设置 **Expiration**（建议不超过 90 天），并只授予 **Contents: Read and write**。如果必须使用 classic token，则使用 `repo` scope，并为该用途设置到期时间。
+   - **GitLab**：建议优先使用 [project access token](https://docs.gitlab.com/user/project/settings/project_access_tokens/)（`Project` > `Settings` > `Access tokens`），而不是个人访问令牌，使权限限制在单个项目内，也可以独立撤销。插件只会调用 repository tree、blob、commit 和 branch 相关 API，因此只需要 `read_repository` 和 `write_repository`，**不需要** `api`。如需推送到非 protected branch，最低角色为 **Developer**。请设置到期时间；服务器网址默认为 `https://gitlab.com`，自建环境请改为您的实例网址。
+   - **Gitea**：在 `用户设置` > `应用程序` > `访问令牌` 中创建令牌。插件只会操作仓库内容、分支和 Git data；Gitea 1.19+ 支持 scoped token，请只选择 **`write:repository`**（已包含读取权限），不要选择全部权限。较旧版本（最低支持到 1.12）没有 scoped token，令牌默认是账号级别；这种情况下建议使用只拥有目标仓库权限的专用 bot / service account，而不是个人账号。若实例支持到期时间也请设置，并将服务器网址指向您的 Gitea 实例（例如 `https://gitea.example.com`）。
+
+   三种服务都可以从各自的设置页面立即撤销令牌。如果令牌可能泄露，请先撤销，再签发新的令牌。
 3. **仓库路径**：如需把笔记存放在仓库中的特定目录（例如 `notes/`），请设置 `Root Path`。
 4. **语言和自动刷新**：可以选择跟随系统、English、繁體中文或简体中文。“Obsidian 启动时自动刷新同步状态”默认开启，也可在设置中关闭。
 
@@ -104,5 +109,5 @@ Git File Sync 不会同步整个 vault；您可以只选择要分享、发布或
 
 ## 🔒 隐私与安全
 
-- 个人访问令牌只保存在本地 vault 的插件数据目录中，只会发送给您配置的 Git 服务。
+- 个人访问令牌只保存在本地 vault 的插件数据目录中，只会发送到您配置的 Git 服务。
 - 插件不收集使用数据或分析信息。
