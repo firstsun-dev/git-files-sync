@@ -1,18 +1,19 @@
 # Session Handoff
 
-**Date:** 2026-07-31
-**Branch:** main (1.5.0 released, e7d5307)
+**Date:** 2026-08-07
+**Branch:** main (1.5.2 released)
 
 ## Completed This Session
 
-- Investigated 4x Dependabot security vulnerabilities (brace-expansion, fast-uri, postcss, tar).
-- **PR #87** opened on `claude/fix-dependabot-security-alerts`: patches all CVEs using npm overrides pattern.
-  - Fixes apply to transitive dev/build dependencies only — zero runtime impact.
-  - All automated checks pass: lint/build/test green.
+- **Issue #94** fixed: revert-move "folder does not exist" error.
+  - Extracted `ensureParentDirs()` helper to `src/utils/vault-path.ts`
+  - Updated `revertMove()` and `revertMoveGroup()` to ensure parent directories exist before rename
+  - Added 6 focused tests for the helper function
+  - All automated checks pass: lint/build/test green (502 tests pass)
 
 ## Current Feature State
 
-**feat-025** (Sync Status tree view) is **code-complete** but requires manual Obsidian verification:
+**feat-025** (Sync Status tree view) remains **code-complete** but requires manual Obsidian verification:
 - ✓ Tree hierarchy with collapsible folders
 - ✓ Tri-state folder checkboxes (indeterminate for partial selection)
 - ✓ Show synced toggle beneath Refresh button
@@ -28,19 +29,15 @@
 - Toggle "Show synced" and verify Synced rows appear/disappear
 - Once verified: mark feat-025 as done in feature_list.json
 
-**Priority 2:** PR #87 (Dependabot security patches) ready for review/merge
-
-**Priority 3:** Issue #57 live-credential smoke test before push/pull/delete batch work
+**Priority 2:** Pick next issue from GitHub Project #6 backlog
 
 ## Verification Baseline
 
 ```
-./init.sh        -> npm run lint clean; npm test: 33 files, 494 tests passed; npm run build passes
-npm audit        -> 4 vulnerabilities (PR #87 fixes them; awaiting merge)
+./init.sh        -> npm run lint clean; npm test: 35 files, 502 tests passed; npm run build passes
 git diff --check -> clean
 ```
 
 ## Active Branches
 
-- **PR #87**: `claude/fix-dependabot-security-alerts` — security patches via npm overrides (open, ready to merge)
-- **feat-025** on main — tree view code complete, manual verification pending
+- **main** — 1.5.2 released, issue #94 fix committed (e25d755)

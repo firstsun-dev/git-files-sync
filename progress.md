@@ -16,8 +16,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Latest Evidence
 
-- [x] `npx eslint .` — 0 errors
-- [x] `npm run build` — passes, including Obsidian 1.11.0 compatibility typecheck
-- [x] `npx vitest run` — 490 tests passed
+- [x] `fix(sync): ensure parent dirs exist when reverting file moves` (issue #94): extracted `ensureParentDirs()` to `src/utils/vault-path.ts` and called it before rename in both `revertMove` and `revertMoveGroup`, fixing "folder does not exist" error when reverting moves to deleted parent folders. `npx eslint .` — 0 errors; `npm run build` — clean; `npx vitest run` — 502 tests passed.
+- [x] `fix(gitlab): fix sha/revision semantics for optimistic locking` (issue #101, PR #113, merged): `GitFile.sha` now consistently represents blob identity across providers; added `GitFile.revision` for provider-specific write control.
 
 Full history of completed features (feat-001 through feat-024) archived to [archive/2026-07.md](./archive/2026-07.md). August work archived to [archive/2026-08.md](./archive/2026-08.md).
