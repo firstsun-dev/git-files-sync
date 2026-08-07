@@ -73,7 +73,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
 
         // The Commits API response doesn't include each file's new blob sha, so
-        // read it back via a single follow-up tree fetch (one extra call for the
+        // read it back via a single follow-up tree request (one extra call for the
         // whole batch, not per file) rather than per-file getFile calls.
         const freshTree = await this.listFilesDetailed(branch, false);
         const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
