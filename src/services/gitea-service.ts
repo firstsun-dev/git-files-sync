@@ -1,5 +1,17 @@
 import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchMoveItem } from './git-service-interface';
-import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE, BLOB_CREATE_CONCURRENCY } from './git-service-base';
+import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
+
+/** One entry in a Gitea "change multiple files" request. */
+interface GiteaChangeFileOperation {
+    operation: 'create' | 'update' | 'delete';
+    path: string;
+    content?: string;
+    from_path?: string;
+}
+
+interface GiteaFilesResponse {
+    files: Array<{ path: string; sha: string } | null>;
+}
 
 export class GiteaService extends BaseGitService implements GitServiceInterface {
     private baseUrl: string = '';
@@ -24,23 +36,19 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         return `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/contents/${encodedPath}`;
     }
 
-    protected getGitDataApiBase(): string {
-        return `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}`;
-    }
-
-    // Gitea's git/commits/{sha} endpoint needs a resolved commit sha, not a
-    // branch ref name, and older Gitea versions don't expose GitHub's
-    // git/ref/heads/{branch} endpoint at all — resolve via /branches/{branch}
-    // instead, same as listFilesDetailed already does.
-    private async resolveBaseTree(branch: string): Promise<{ latestCommitSha: string; baseTreeSha: string }> {
-        const branchUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/branches/${branch}`;
-        const branchResp = await this.safeRequest(branchUrl, 'GET');
-        const latestCommitSha = this.parseJson<{ commit: { id: string } }>(branchResp).commit.id;
-
-        const commitResp = await this.safeRequest(`${this.getGitDataApiBase()}/git/commits/${latestCommitSha}`, 'GET');
-        const baseTreeSha = this.parseJson<{ tree: { sha: string } }>(commitResp).tree.sha;
-
-        return { latestCommitSha, baseTreeSha };
+    /**
+     * Commits several file changes at once via Gitea's "change multiple
+     * files" contents API. Gitea's Git Data API (git/blobs, git/trees,
+     * git/commits POST, git/refs PATCH) — the GitHub-shaped flow GitHub's
+     * commitGitHubStyleTree uses — is read-only in Gitea; there is no write
+     * endpoint for it (confirmed against a real instance via its swagger
+     * spec, not just the mocks the unit tests used). This is Gitea's actual
+     * equivalent of a single atomic multi-file commit.
+     */
+    private async changeFiles(files: GiteaChangeFileOperation[], branch: string, message: string): Promise<GiteaFilesResponse> {
+        const url = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/contents`;
+        const response = await this.safeRequest(url, 'POST', { branch, message, files });
+        return this.parseJson<GiteaFilesResponse>(response);
     }
 
     async getFile(path: string, branch: string): Promise<GitFile> {
@@ -76,66 +84,47 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
 
     async pushBatch(items: BatchPushItem[], branch: string, message: string): Promise<BatchPushResult[]> {
         if (items.length === 0) return [];
-        const base = this.getGitDataApiBase();
-        const { latestCommitSha, baseTreeSha } = await this.resolveBaseTree(branch);
 
-        const blobShas = await this.mapWithConcurrency(items, BLOB_CREATE_CONCURRENCY, async item => {
-            const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', {
-                content: this.encodeContent(item.content),
-                encoding: 'base64',
-            });
-            return this.parseJson<{ sha: string }>(blobResp).sha;
-        });
-
-        const treeItems = items.map((item, i) => ({
+        // Gitea's 'create' operation 422s if the path already exists, and
+        // 'update' 500s if it doesn't — unlike the old tree-based commit,
+        // this contents API distinguishes them, so existedRemotely (already
+        // needed by GitLab) now matters for Gitea too.
+        const files: GiteaChangeFileOperation[] = items.map(item => ({
+            operation: item.existedRemotely ? 'update' : 'create',
             path: this.getFullPath(item.path),
-            mode: '100644',
-            type: 'blob' as const,
-            sha: blobShas[i] as string,
+            content: this.encodeContent(item.content),
         }));
 
-        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
-
-        return items.map((item, i) => ({ path: item.path, sha: blobShas[i] }));
+        const result = await this.changeFiles(files, branch, message);
+        return items.map((item, i) => ({ path: item.path, sha: result.files[i]?.sha }));
     }
 
     /**
-     * A real `git mv`: additions get a new blob entry, moves get both a new
-     * blob entry at the new path and a `sha: null` entry removing the old
-     * one, all in the same tree/commit — same building block deleteBatch uses
-     * for its null-sha removals.
+     * A real `git mv`: additions are created at their new path, moves are
+     * expressed as an 'update' of the new path with `from_path` set to the
+     * old one — both a content write and a rename in the same commit.
      */
     async commitBatch(additions: BatchPushItem[], moves: BatchMoveItem[], branch: string, message: string): Promise<BatchPushResult[]> {
         if (additions.length === 0 && moves.length === 0) return [];
-        const base = this.getGitDataApiBase();
-        const { latestCommitSha, baseTreeSha } = await this.resolveBaseTree(branch);
 
-        const additionBlobShas = await this.mapWithConcurrency(additions, BLOB_CREATE_CONCURRENCY, async item => {
-            const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', {
+        const files: GiteaChangeFileOperation[] = [
+            ...additions.map((item): GiteaChangeFileOperation => ({
+                operation: 'create',
+                path: this.getFullPath(item.path),
                 content: this.encodeContent(item.content),
-                encoding: 'base64',
-            });
-            return this.parseJson<{ sha: string }>(blobResp).sha;
-        });
-        const moveBlobShas = await this.mapWithConcurrency(moves, BLOB_CREATE_CONCURRENCY, async item => {
-            const blobResp = await this.safeRequest(`${base}/git/blobs`, 'POST', {
+            })),
+            ...moves.map((item): GiteaChangeFileOperation => ({
+                operation: 'update',
+                path: this.getFullPath(item.newPath),
+                from_path: this.getFullPath(item.oldPath),
                 content: this.encodeContent(item.content),
-                encoding: 'base64',
-            });
-            return this.parseJson<{ sha: string }>(blobResp).sha;
-        });
-
-        const treeItems = [
-            ...additions.map((item, i) => ({ path: this.getFullPath(item.path), mode: '100644', type: 'blob' as const, sha: additionBlobShas[i] as string })),
-            ...moves.map((item, i) => ({ path: this.getFullPath(item.newPath), mode: '100644', type: 'blob' as const, sha: moveBlobShas[i] as string })),
-            ...moves.map(item => ({ path: this.getFullPath(item.oldPath), mode: '100644', type: 'blob' as const, sha: null })),
+            })),
         ];
 
-        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
-
+        const result = await this.changeFiles(files, branch, message);
         return [
-            ...additions.map((item, i) => ({ path: item.path, sha: additionBlobShas[i] })),
-            ...moves.map((item, i) => ({ path: item.newPath, sha: moveBlobShas[i] })),
+            ...additions.map((item, i) => ({ path: item.path, sha: result.files[i]?.sha })),
+            ...moves.map((item, i) => ({ path: item.newPath, sha: result.files[additions.length + i]?.sha })),
         ];
     }
 
@@ -191,17 +180,11 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
 
     async deleteBatch(paths: string[], branch: string, message: string): Promise<void> {
         if (paths.length === 0) return;
-        const base = this.getGitDataApiBase();
-        const { latestCommitSha, baseTreeSha } = await this.resolveBaseTree(branch);
-
-        const treeItems = paths.map(path => ({
+        const files: GiteaChangeFileOperation[] = paths.map(path => ({
+            operation: 'delete',
             path: this.getFullPath(path),
-            mode: '100644',
-            type: 'blob' as const,
-            sha: null,
         }));
-
-        await this.commitGitHubStyleTree(base, branch, baseTreeSha, latestCommitSha, treeItems, message);
+        await this.changeFiles(files, branch, message);
     }
 
     async testConnection(branch: string): Promise<ConnectionTestResult> {

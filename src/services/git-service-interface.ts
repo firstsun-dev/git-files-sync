@@ -32,8 +32,9 @@ export interface BatchPushItem {
     content: string | ArrayBuffer;
     /**
      * Whether this path already existed on the remote before this push, per the
-     * caller's pre-fetched tree. Only GitLab's Commits API needs this (to choose
-     * action 'create' vs 'update'); GitHub/Gitea's tree-based commit ignores it.
+     * caller's pre-fetched tree. GitLab's Commits API and Gitea's contents API
+     * both need this to choose action 'create' vs 'update'; GitHub's tree-based
+     * commit ignores it (a tree entry upserts regardless).
      */
     existedRemotely?: boolean;
     /** Revision read during batch planning, used by GitLab's optimistic lock. */
