@@ -15,4 +15,7 @@ export interface RemoteVerifier {
 
     /** True if `path` does not exist at `ref` (used to verify deletes/renames-away). */
     fileMissing(path: string, ref: string): Promise<boolean>;
+
+    /** Commit shas on `ref`, newest first — used to assert a batch/rename/push landed as exactly N new commits, without trusting the service under test's own commit count. */
+    listCommitShas(ref: string, perPage?: number): Promise<string[]>;
 }

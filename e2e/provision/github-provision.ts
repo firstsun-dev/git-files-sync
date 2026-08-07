@@ -82,6 +82,10 @@ export async function provisionGitHub(): Promise<GitHubEnvironment> {
 
 /** Best-effort cleanup — safe to call even if provisioning only partially completed. */
 export async function teardownGitHub(env: GitHubEnvironment): Promise<void> {
+    if (process.env.E2E_KEEP_BRANCH === '1' || process.env.E2E_KEEP_BRANCH === 'true') {
+        logInfo(`E2E_KEEP_BRANCH set — leaving run branch ${env.branch} in place for debugging`);
+        return;
+    }
     logInfo(`Removing run branch ${env.branch}`);
     try {
         await fetch(`${API_BASE}/repos/${env.owner}/${env.repo}/git/refs/heads/${encodeURIComponent(env.branch)}`, {

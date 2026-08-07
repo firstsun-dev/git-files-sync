@@ -53,6 +53,14 @@ export class GitLabVerifier implements RemoteVerifier {
         return (await this.getFile(path, ref)) === null;
     }
 
+    async listCommitShas(ref: string, perPage = 30): Promise<string[]> {
+        const url = `${this.baseUrl}/api/v4/projects/${this.encodedProjectId}/repository/commits?ref_name=${encodeURIComponent(ref)}&per_page=${perPage}`;
+        const res = await fetch(url, { headers: this.headers() });
+        if (!res.ok) throw new Error(`GitLabVerifier.listCommitShas failed: ${res.status} ${await res.text()}`);
+        const data = await res.json() as Array<{ id: string }>;
+        return data.map(item => item.id);
+    }
+
     /**
      * Fetches the file's `last_commit_id` (GitLab's optimistic-locking
      * revision) directly, independent of GitLabService.getFile. Used by the

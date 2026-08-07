@@ -128,6 +128,10 @@ async function createSandboxRepo(baseUrl: string, token: string): Promise<void> 
 
 /** Best-effort cleanup — safe to call even if provisioning only partially completed. */
 export async function teardownGitea(env: Pick<GiteaEnvironment, 'containerName' | 'networkName'>): Promise<void> {
+    if (process.env.E2E_KEEP_BRANCH === '1' || process.env.E2E_KEEP_BRANCH === 'true') {
+        logInfo(`E2E_KEEP_BRANCH set — leaving container ${env.containerName} running for debugging`);
+        return;
+    }
     logInfo(`Removing container ${env.containerName}`);
     await removeContainer(env.containerName);
     logInfo(`Removing network ${env.networkName}`);
