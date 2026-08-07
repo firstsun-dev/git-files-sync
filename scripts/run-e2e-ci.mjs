@@ -10,8 +10,10 @@
  * 2. Fail loudly, not silently, when credentials are missing.
  *
  * Whether this provider is *supposed* to run at all for the current event
- * (e.g. a fork PR only getting Gitea) is decided by the job-level `if:` in
- * ci.yml -- by the time this script runs, the workflow has already decided
+ * (e.g. a fork PR only getting Gitea) is decided by the "Determine whether
+ * this provider leg should run" step in ci.yml (job-level `if:` can't see
+ * the `matrix` context, so that gate has to be a step, not the job's own
+ * `if:`) -- by the time this script runs, that gate has already decided
  * this cell should execute, so missing credentials here always means
  * something is actually broken (an unset repo secret/variable), never "this
  * event legitimately has no credentials". A missing required secret must be

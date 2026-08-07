@@ -61,27 +61,18 @@ jobs:
     runs-on: [self-hosted, linux, x64, 32gb-ram]
     # Runs when sync/provider-relevant paths changed, or unconditionally on
     # workflow_dispatch/schedule/a push to main (main always gets the full
-    # tier regardless of path, per the issue's CI wiring). Within that:
-    # internal PRs / pushes to main / manual dispatch / schedule get every
-    # provider. A fork PR (head repo != base repo) only gets Gitea, which
-    # needs no repository secrets and can safely run against an untrusted
-    # fork's code -- GitHub/GitLab need real sandbox credentials that must
-    # never be exposed to a fork PR's workflow run.
+    # tier regardless of path, per the issue's CI wiring). The per-provider
+    # part of the gating (internal PRs/main/dispatch/schedule get every
+    # provider; a fork PR only gets Gitea) can't live here: job-level `if:`
+    # has no access to the `matrix` context (GitHub Actions error
+    # "Unrecognized named-value: 'matrix'" if you try) -- only step-level
+    # `if:` can see it. That part is done by the "Determine whether this
+    # provider leg should run" step below instead, gating every later step.
     if: >-
-      (
-        needs.changes.outputs.e2e-relevant == 'true' ||
-        github.event_name == 'workflow_dispatch' ||
-        github.event_name == 'schedule' ||
-        github.ref == 'refs/heads/main'
-      ) && (
-        github.event_name != 'pull_request' ||
-        matrix.provider == 'gitea' ||
-        github.event.pull_request.head.repo.full_name == github.repository
-      ) && (
-        github.event_name != 'workflow_dispatch' ||
-        github.event.inputs.provider == 'all' ||
-        github.event.inputs.provider == matrix.provider
-      )
+      needs.changes.outputs.e2e-relevant == 'true' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
       max-parallel: 3
@@ -99,23 +90,51 @@ jobs:
       E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
       E2E_KEEP_BRANCH: ${{ github.event.inputs.keep_branch }}
     steps:
+      # Per-provider gate (needs `matrix`, so it runs as a step, not the job-level
+      # `if:` above -- see the comment on that `if:` for why). A fork PR (head repo
+      # != base repo) only gets Gitea, which needs no repository secrets and can
+      # safely run against an untrusted fork's code; GitHub/GitLab need real sandbox
+      # credentials that must never be exposed to a fork PR's workflow run. All
+      # other events/providers run.
+      - name: Determine whether this provider leg should run
+        id: gate
+        run: |
+          run=true
+          if [ "${{ github.event_name }}" = "pull_request" ] \
+            && [ "${{ matrix.provider }}" != "gitea" ] \
+            && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            run=false
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+            && [ "${{ github.event.inputs.provider }}" != "all" ] \
+            && [ "${{ github.event.inputs.provider }}" != "${{ matrix.provider }}" ]; then
+            run=false
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
+        if: steps.gate.outputs.run == 'true'
 
       - uses: actions/setup-node@v6
+        if: steps.gate.outputs.run == 'true'
         with:
           node-version: '22'
           cache: npm
 
       - run: npm ci
+        if: steps.gate.outputs.run == 'true'
 
       - name: Run provider E2E
+        if: steps.gate.outputs.run == 'true'
         run: node scripts/run-e2e-ci.mjs --provider=${{ matrix.provider }}
 
   # Aggregates the matrix into a single required status so branch protection
   # only has to reference one check name (see docs/testing/real-provider-e2e.md
   # for the "Gitea required, GitHub/GitLab not required at branch-protection
   # level" split -- required-vs-optional per *provider* still comes from the
-  # matrix `if:` above; this gate only asks "did whatever ran, pass?").
+  # "Determine whether this provider leg should run" step above; this gate
+  # only asks "did whatever ran, pass?"). A gated-off leg's steps are all
+  # skipped without failing the job, so it still reports "success" here.
   # `if: always()` so a real provider-e2e failure/cancellation is caught
   # here and blocks CI/release, instead of GitHub Actions silently treating
   # an upstream failure as "this job never needed to run".

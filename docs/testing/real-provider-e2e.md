@@ -63,8 +63,9 @@ via `gh secret list` / `gh variable list` while wiring this workflow):
 | `E2E_GITLAB_PROJECT_ID` | secret (not a variable — it's treated as sensitive here) |
 | `E2E_GITLAB_TOKEN` | secret |
 
-**Fork PRs** only run the Gitea cell (`provider-e2e`'s job `if:` checks
-`github.event.pull_request.head.repo.full_name == github.repository`) — GitHub/GitLab need
+**Fork PRs** only run the Gitea cell (checked in the `Determine whether this provider leg should
+run` step — GitHub Actions job-level `if:` can't reference the `matrix` context, so this can't
+live on the job itself; it gates every later step instead) — GitHub/GitLab need
 real credentials that must never be exposed to an untrusted fork's workflow run. Gitea needs no
 repo secrets at all, so it's safe to run unconditionally.
 
