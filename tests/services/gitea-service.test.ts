@@ -124,30 +124,29 @@ describe('GiteaService', () => {
             expect(requestUrl).not.toHaveBeenCalled();
         });
 
-        it('resolves branch via /branches/{branch}, then commits N files in one commit', async () => {
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({ status: 200, json: { commit: { id: 'commit1' } } } as unknown as RequestUrlResponse) // resolve branch
-                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)    // get commit
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-a' } } as unknown as RequestUrlResponse)             // blob a
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)              // create tree
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)            // create commit
-                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                           // update ref
+        it('commits N files in one request to the contents batch endpoint', async () => {
+            mockRequest({ status: 201, json: { files: [{ path: 'a.md', sha: 'blob-a' }] } });
 
             const result = await service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'Push 1 file(s) from Obsidian');
 
             expect(result).toEqual([{ path: 'a.md', sha: 'blob-a' }]);
 
-            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
-            expect(calls).toHaveLength(6);
-            expect(calls[0]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/branches/main`);
-            expect(calls[1]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/commits/commit1`);
+            const call = getLastRequestCall();
+            expect(call.method).toBe('POST');
+            expect(call.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/contents`);
+            const body = JSON.parse(call.body as string) as { branch: string; message: string; files: Array<{ operation: string; path: string; content: string }> };
+            expect(body.branch).toBe('main');
+            expect(body.files).toEqual([{ operation: 'create', path: 'a.md', content: btoa('hello') }]);
+        });
 
-            const blobBody = JSON.parse(calls[2]?.body as string) as { content: string; encoding: string };
-            expect(blobBody.encoding).toBe('base64');
-            expect(atob(blobBody.content)).toBe('hello');
+        it('uses operation "update" for items that already existed remotely', async () => {
+            mockRequest({ status: 201, json: { files: [{ path: 'a.md', sha: 'blob-a2' }] } });
 
-            expect(calls[5]?.method).toBe('PATCH');
-            expect(calls[5]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/refs/heads/main`);
+            await service.pushBatch([{ path: 'a.md', content: 'hello', existedRemotely: true }], 'main', 'Update 1 file(s) from Obsidian');
+
+            const call = getLastRequestCall();
+            const body = JSON.parse(call.body as string) as { files: Array<{ operation: string }> };
+            expect(body.files[0]?.operation).toBe('update');
         });
     });
 
@@ -306,26 +305,16 @@ describe('GiteaService', () => {
             expect(requestUrl).not.toHaveBeenCalled();
         });
 
-        it('resolves branch via /branches/{branch}, then deletes N files in one commit', async () => {
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({ status: 200, json: { commit: { id: 'commit1' } } } as unknown as RequestUrlResponse) // resolve branch
-                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)    // get commit
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)              // create tree
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)            // create commit
-                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                           // update ref
+        it('deletes N files in one request to the contents batch endpoint', async () => {
+            mockRequest({ status: 201, json: { files: [null] } });
 
             await service.deleteBatch(['a.md'], 'main', 'Delete 1 file(s) from Obsidian');
 
-            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
-            expect(calls).toHaveLength(5);
-            expect(calls[0]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/branches/main`);
-            expect(calls[1]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/commits/commit1`);
-
-            const treeBody = JSON.parse(calls[2]?.body as string) as { tree: Array<{ path: string; sha: string | null }> };
-            expect(treeBody.tree).toEqual([{ path: 'a.md', mode: '100644', type: 'blob', sha: null }]);
-
-            expect(calls[4]?.method).toBe('PATCH');
-            expect(calls[4]?.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/git/refs/heads/main`);
+            const call = getLastRequestCall();
+            expect(call.method).toBe('POST');
+            expect(call.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/contents`);
+            const body = JSON.parse(call.body as string) as { files: Array<{ operation: string; path: string }> };
+            expect(body.files).toEqual([{ operation: 'delete', path: 'a.md' }]);
         });
     });
 
@@ -336,15 +325,11 @@ describe('GiteaService', () => {
             expect(requestUrl).not.toHaveBeenCalled();
         });
 
-        it('adds a new blob for the moved path and a null-sha entry for the old one, in the same tree/commit', async () => {
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({ status: 200, json: { commit: { id: 'commit1' } } } as unknown as RequestUrlResponse) // resolve branch
-                .mockResolvedValueOnce({ status: 200, json: { tree: { sha: 'tree1' } } } as unknown as RequestUrlResponse)    // get commit
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-a' } } as unknown as RequestUrlResponse)             // blob for addition
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'blob-move' } } as unknown as RequestUrlResponse)          // blob for move's new content
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'tree2' } } as unknown as RequestUrlResponse)              // create tree
-                .mockResolvedValueOnce({ status: 201, json: { sha: 'commit2' } } as unknown as RequestUrlResponse)            // create commit
-                .mockResolvedValueOnce({ status: 200, json: {} } as unknown as RequestUrlResponse);                           // update ref
+        it('creates additions and moves (with from_path) in one request to the contents batch endpoint', async () => {
+            mockRequest({
+                status: 201,
+                json: { files: [{ path: 'a.md', sha: 'blob-a' }, { path: 'new.md', sha: 'blob-move' }] },
+            });
 
             const result = await service.commitBatch(
                 [{ path: 'a.md', content: 'hello' }],
@@ -358,13 +343,13 @@ describe('GiteaService', () => {
                 { path: 'new.md', sha: 'blob-move' },
             ]);
 
-            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
-            expect(calls).toHaveLength(7);
-            const treeBody = JSON.parse(calls[4]?.body as string) as { tree: Array<{ path: string; sha: string | null }> };
-            expect(treeBody.tree).toEqual([
-                { path: 'a.md', mode: '100644', type: 'blob', sha: 'blob-a' },
-                { path: 'new.md', mode: '100644', type: 'blob', sha: 'blob-move' },
-                { path: 'old.md', mode: '100644', type: 'blob', sha: null },
+            const call = getLastRequestCall();
+            expect(call.method).toBe('POST');
+            expect(call.url).toBe(`${baseUrl}/api/v1/repos/${owner}/${repo}/contents`);
+            const body = JSON.parse(call.body as string) as { files: Array<{ operation: string; path: string; from_path?: string }> };
+            expect(body.files).toEqual([
+                { operation: 'create', path: 'a.md', content: btoa('hello') },
+                { operation: 'update', path: 'new.md', from_path: 'old.md', content: btoa('moved content') },
             ]);
         });
     });
