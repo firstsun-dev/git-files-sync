@@ -1,3 +1,13 @@
+## [1.5.5](https://github.com/firstsun-dev/git-files-sync/compare/1.5.4...1.5.5) (2026-08-07)
+
+### Bug Fixes
+
+* **provider:** preserve sync correctness ([ce61588](https://github.com/firstsun-dev/git-files-sync/commit/ce61588e7db9085dc6c8fdbda6b964734e33fa5a))
+
+### Documentation
+
+* tighten token permission guidance to least-privilege scopes ([#116](https://github.com/firstsun-dev/git-files-sync/issues/116)) ([45dc39d](https://github.com/firstsun-dev/git-files-sync/commit/45dc39d28de5fbb80a1b89b43a35fbff2b98f198))
+
 ## [1.5.4](https://github.com/firstsun-dev/git-files-sync/compare/1.5.3...1.5.4) (2026-08-07)
 
 ### Bug Fixes
