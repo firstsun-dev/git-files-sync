@@ -36,9 +36,14 @@
 
 1. **選擇服務**：在 `設定` > `Git File Sync` 中選擇 GitLab、GitHub 或 Gitea。
 2. **填寫憑證**：
-   - **GitHub**：需要 個人存取權杖 (PAT)、帳號名稱、儲存庫名稱。權杖需具備 `repo` 權限。
-   - **GitLab**：需要 個人存取權杖 (PAT)、專案 ID、伺服器網址（預設為 `https://gitlab.com`，自架請改為您的網址）。權杖需具備 `api` 權限。
-   - **Gitea**：需要 個人存取權杖 (PAT)、伺服器網址（例如 `https://gitea.example.com`）、帳號名稱、儲存庫名稱。權杖在 `使用者設定` > `應用程式` > `存取權杖` 中建立。
+
+   > **安全性提示：** 請將每個權杖的範圍縮到最小：只允許需要同步的儲存庫、只授予必要權限，並設定較短的有效期限。權杖只應儲存在此外掛的設定中，不要貼到會被同步的筆記。如果權杖可能外洩，請立即撤銷並重新建立；不再使用的權杖也應直接撤銷。
+
+   - **GitHub**：建議建立 [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)，而不是 classic token。在 **Repository access** 選擇 *Only select repositories*，只指定要同步的儲存庫；設定 **Expiration**（建議 90 天以內），並只授予 **Contents: Read and write**。若必須使用 classic token，則使用 `repo` scope，並為此用途設定到期日。
+   - **GitLab**：建議優先使用 [project access token](https://docs.gitlab.com/user/project/settings/project_access_tokens/)（`Project` > `Settings` > `Access tokens`），而不是個人存取權杖，讓權限限制在單一專案，也能獨立撤銷。外掛只會呼叫 repository tree、blob、commit 與 branch 相關 API，因此只需要 `read_repository` 與 `write_repository`，**不需要** `api`。若要推送到非 protected branch，最低角色需為 **Developer**。請設定到期日；伺服器網址預設為 `https://gitlab.com`，自架環境請改成您的實例網址。
+   - **Gitea**：在 `使用者設定` > `應用程式` > `存取權杖` 建立權杖。外掛只會操作儲存庫內容、分支與 Git data；Gitea 1.19+ 支援 scoped token，請只選 **`write:repository`**（已包含讀取權限），不要選擇全部權限。較舊版本（最低支援至 1.12）沒有 scoped token，權杖預設為帳號層級；這種情況建議使用只具備目標儲存庫權限的專用 bot / service account，而不是個人帳號。若實例支援到期日也請設定，並將伺服器網址指向您的 Gitea 實例（例如 `https://gitea.example.com`）。
+
+   三種服務都可以從各自的設定頁立即撤銷權杖。如果權杖可能外洩，請先撤銷，再簽發新的權杖。
 3. **儲存庫路徑**：如果您想將筆記存放在儲存庫的特定資料夾（例如 `notes/`），請在 `Root Path` 中設定。
 4. **語言與自動重新整理**：可選擇跟隨系統、English、繁體中文或简体中文；「Obsidian 啟動時自動重新整理同步狀態」預設開啟，亦可在設定中關閉。
 
@@ -108,5 +113,5 @@
 
 ## 🔒 隱私與安全
 
-- 您的存取權杖 (Token) 僅會儲存在您本機的 Obsidian 資料夾內，不會傳送至任何第三方伺服器。
-- 本插件不會收集任何個人數據或使用紀錄。
+- 您的存取權杖 (Token) 僅會儲存在本機 vault 的外掛資料目錄中，只會傳送到您設定的 Git 服務。
+- 本外掛不會收集任何個人資料或使用紀錄。
