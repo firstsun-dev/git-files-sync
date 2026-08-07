@@ -12,9 +12,130 @@ on:
     branches: [main, master, '**']
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'Provider(s) to run (github, gitlab, gitea, or all)'
+        default: 'all'
+      keep_branch:
+        description: 'Keep the E2E branch/container after the run for debugging'
+        type: boolean
+        default: false
+  schedule:
+    # Weekly API-drift check: same real-provider suites, no code change required to trigger them.
+    - cron: '0 6 * * 1'
 
 jobs:
+  # `on.push.paths`/`on.pull_request.paths` would gate this *whole* workflow
+  # file by path -- including the release-critical `CI` job below, which must
+  # keep running for every push/PR regardless of path. This job instead
+  # computes a per-job boolean so only `provider-e2e` skips on irrelevant
+  # changes, while `CI`/`build-artifact` are unaffected.
+  changes:
+    name: Detect sync/provider-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      e2e-relevant: ${{ steps.filter.outputs.e2e-relevant }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            e2e-relevant:
+              - 'src/services/**'
+              - 'src/logic/sync-manager.ts'
+              - 'src/utils/git-blob-sha.ts'
+              - 'src/utils/path.ts'
+              - 'src/utils/symlink.ts'
+              - 'e2e/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/ci.yml'
+
+  # Real-provider E2E: one matrix job covering GitHub, GitLab, and Gitea (see
+  # docs/testing/real-provider-e2e.md).
+  provider-e2e:
+    name: E2E / ${{ matrix.provider }}
+    needs: changes
+    runs-on: [self-hosted, linux, x64, 32gb-ram]
+    # Runs when sync/provider-relevant paths changed, or unconditionally on
+    # workflow_dispatch/schedule/a push to main (main always gets the full
+    # tier regardless of path, per the issue's CI wiring). Within that:
+    # internal PRs / pushes to main / manual dispatch / schedule get every
+    # provider. A fork PR (head repo != base repo) only gets Gitea, which
+    # needs no repository secrets and can safely run against an untrusted
+    # fork's code -- GitHub/GitLab need real sandbox credentials that must
+    # never be exposed to a fork PR's workflow run.
+    if: >-
+      (
+        needs.changes.outputs.e2e-relevant == 'true' ||
+        github.event_name == 'workflow_dispatch' ||
+        github.event_name == 'schedule' ||
+        github.ref == 'refs/heads/main'
+      ) && (
+        github.event_name != 'pull_request' ||
+        matrix.provider == 'gitea' ||
+        github.event.pull_request.head.repo.full_name == github.repository
+      ) && (
+        github.event_name != 'workflow_dispatch' ||
+        github.event.inputs.provider == 'all' ||
+        github.event.inputs.provider == matrix.provider
+      )
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        provider: [github, gitlab, gitea]
+    env:
+      E2E_GITHUB_OWNER: ${{ vars.E2E_GITHUB_OWNER }}
+      E2E_GITHUB_REPO: ${{ vars.E2E_GITHUB_REPO }}
+      E2E_GITHUB_TOKEN: ${{ secrets.E2E_GITHUB_TOKEN }}
+      # E2E_GITLAB_PROJECT_ID is configured as a repo *secret*, not a
+      # variable, on firstsun-dev/git-files-sync (confirmed via `gh secret
+      # list` while wiring this workflow) -- unlike E2E_GITHUB_OWNER/REPO,
+      # which are plain (non-sensitive) vars.
+      E2E_GITLAB_PROJECT_ID: ${{ secrets.E2E_GITLAB_PROJECT_ID }}
+      E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
+      E2E_KEEP_BRANCH: ${{ github.event.inputs.keep_branch }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run provider E2E
+        run: node scripts/run-e2e-ci.mjs --provider=${{ matrix.provider }}
+
+  # Aggregates the matrix into a single required status so branch protection
+  # only has to reference one check name (see docs/testing/real-provider-e2e.md
+  # for the "Gitea required, GitHub/GitLab not required at branch-protection
+  # level" split -- required-vs-optional per *provider* still comes from the
+  # matrix `if:` above; this gate only asks "did whatever ran, pass?").
+  # `if: always()` so a real provider-e2e failure/cancellation is caught
+  # here and blocks CI/release, instead of GitHub Actions silently treating
+  # an upstream failure as "this job never needed to run".
+  e2e-gate:
+    name: E2E gate
+    needs: provider-e2e
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check provider-e2e result
+        run: |
+          result="${{ needs.provider-e2e.result }}"
+          echo "provider-e2e result: $result"
+          if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+            echo "::error::provider-e2e failed or was cancelled ($result) -- blocking CI/release."
+            exit 1
+          fi
+
   CI:
+    needs: e2e-gate
     uses: firstsun-dev/.github/.github/workflows/obsidian-plugin-ci.yml@v1
     with:
       plugin-id: "git-file-sync"
