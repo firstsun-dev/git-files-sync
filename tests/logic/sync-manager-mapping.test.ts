@@ -99,7 +99,8 @@ describe('SyncManager Mapping', () => {
             'content',
             'main',
             'Update test.md from Obsidian',
-            ''
+            '',
+            undefined
         );
     });
 

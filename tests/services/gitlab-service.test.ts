@@ -17,10 +17,11 @@ describe('GitLabService', () => {
 
     describe('getFile', () => {
         it('should fetch and decode file content correctly', async () => {
-            mockRequest({ status: 200, json: { content: btoa('hello world'), last_commit_id: 'test-commit-id' } });
+            mockRequest({ status: 200, json: { content: btoa('hello world'), blob_id: 'blob-sha-123', last_commit_id: 'test-commit-id' } });
             const result = await service.getFile('test.md', 'main');
             expect(result.content).toBe('hello world');
-            expect(result.sha).toBe('test-commit-id');
+            expect(result.sha).toBe('blob-sha-123');
+            expect(result.revision).toBe('test-commit-id');
             const call = getLastRequestCall();
             expect(call.method).toBe('GET');
             expect(call.headers).toMatchObject({ 'PRIVATE-TOKEN': token });
@@ -33,10 +34,11 @@ describe('GitLabService', () => {
             expect(result.sha).toBe('');
         });
 
-        it('should return last_commit_id as sha', async () => {
-            mockRequest({ status: 200, json: { content: btoa('test content'), last_commit_id: 'test-last-commit-id' } });
+        it('should return blob_id as sha and last_commit_id as revision', async () => {
+            mockRequest({ status: 200, json: { content: btoa('test content'), blob_id: 'blob-sha-456', last_commit_id: 'test-last-commit-id' } });
             const result = await service.getFile('test.md', 'main');
-            expect(result.sha).toBe('test-last-commit-id');
+            expect(result.sha).toBe('blob-sha-456');
+            expect(result.revision).toBe('test-last-commit-id');
         });
     });
 

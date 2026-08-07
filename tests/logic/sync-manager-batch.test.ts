@@ -452,7 +452,7 @@ describe('SyncManager Batch Operations', () => {
 
             expect(results.success).toBe(1);
             expect(results.conflicts).toBe(0);
-            expect(mockGitService.pushFile).toHaveBeenCalledWith(path, 'local content', 'main', expect.any(String), 'some-sha');
+            expect(mockGitService.pushFile).toHaveBeenCalledWith(path, 'local content', 'main', expect.any(String), 'some-sha', undefined);
         });
     });
 
@@ -473,7 +473,7 @@ describe('SyncManager Batch Operations', () => {
             await manager.pushAllFiles([mockFile]);
 
             expect(mockGitService.getFile).not.toHaveBeenCalled();
-            expect(mockGitService.pushFile).toHaveBeenCalledWith(newPath, 'new content', 'main', expect.any(String), undefined);
+            expect(mockGitService.pushFile).toHaveBeenCalledWith(newPath, 'new content', 'main', expect.any(String), undefined, undefined);
         });
     });
 
@@ -599,7 +599,7 @@ describe('SyncManager Batch Operations', () => {
 
             expect(results.success).toBe(1);
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
-                pushedPath, 'unrelated content', 'main', `Update ${mockFile.name} from Obsidian`, 'remote-sha'
+                pushedPath, 'unrelated content', 'main', `Update ${mockFile.name} from Obsidian`, 'remote-sha', undefined
             );
             expect(mockSettings.syncMetadata[orphanedPath]).toBeDefined();
             // The tree doesn't list the orphaned path, so it can't be a rename
