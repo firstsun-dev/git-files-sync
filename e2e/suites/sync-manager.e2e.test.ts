@@ -92,7 +92,10 @@ describe('SyncManager E2E', () => {
     }, timeouts.containerReadyMs + 30_000);
 
     afterAll(async () => {
-        await adapter.teardown(ctx);
+        // Guard against beforeAll failing before ctx is assigned (e.g. Docker/
+        // container-readiness failure, missing credentials) — teardown must not
+        // throw in that case either.
+        if (ctx) await adapter.teardown(ctx);
     });
 
     function newManager(vault: FakeVault, settings: GitLabFilesPushSettings): SyncManager {
@@ -200,7 +203,15 @@ describe('SyncManager E2E', () => {
 
         vault.renameLocal(oldPath, newPath);
         await manager.trackRename(newPath, oldPath);
-        const shasBefore = await ctx.verifier.listCommitShas(ctx.branch);
+        // Just the current HEAD, not a full list: the sandbox repo's base branch
+        // already carries pre-existing history (e.g. 47 commits on this GitHub
+        // sandbox's `main` at the time of writing), so asserting on
+        // listCommitShas(...).length would silently start failing forever once
+        // that history exceeds the API's default page size (30) -- the "before"
+        // and "after" calls both cap at the same page size and stop reflecting
+        // real growth. Comparing HEAD-before against the two newest commits
+        // after is exact regardless of total history depth.
+        const [headBefore] = await ctx.verifier.listCommitShas(ctx.branch, 1);
 
         // Rename detection only runs off a real TFile (sync-manager.ts checks
         // `!isString && fileOrPath instanceof TFile` before consulting
@@ -212,8 +223,9 @@ describe('SyncManager E2E', () => {
         expect(await ctx.verifier.fileMissing(oldPath, ctx.branch)).toBe(true);
         const remote = await ctx.verifier.getFile(newPath, ctx.branch);
         expect(remote?.content).toBe('move me');
-        const shasAfter = await ctx.verifier.listCommitShas(ctx.branch);
-        expect(shasAfter.length).toBe(shasBefore.length + 1);
+        const [headAfter, headAfterParent] = await ctx.verifier.listCommitShas(ctx.branch, 2);
+        expect(headAfter).not.toBe(headBefore);
+        expect(headAfterParent).toBe(headBefore);
     });
 
     it('deletes a file via the real service, verified independently', async () => {
@@ -240,7 +252,9 @@ describe('SyncManager E2E', () => {
         for (const p of paths) vault.writeLocal(p, `content for ${p}`);
         const settings = makeSettings(ctx.branch);
         const manager = newManager(vault, settings);
-        const shasBefore = await ctx.verifier.listCommitShas(ctx.branch);
+        // See the rename test above for why this compares HEAD-before against
+        // the two newest commits after, rather than list length.
+        const [headBefore] = await ctx.verifier.listCommitShas(ctx.branch, 1);
 
         const results = await manager.pushAllFiles(paths);
 
@@ -250,7 +264,8 @@ describe('SyncManager E2E', () => {
             const remote = await ctx.verifier.getFile(p, ctx.branch);
             expect(remote?.content).toBe(`content for ${p}`);
         }
-        const shasAfter = await ctx.verifier.listCommitShas(ctx.branch);
-        expect(shasAfter.length).toBe(shasBefore.length + 1);
+        const [headAfter, headAfterParent] = await ctx.verifier.listCommitShas(ctx.branch, 2);
+        expect(headAfter).not.toBe(headBefore);
+        expect(headAfterParent).toBe(headBefore);
     });
 });

@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { runNamespace } from '../namespace';
 import { globalSecrets, logInfo } from '../redact';
 import { giteaImage, timeouts } from '../config/env';
-import { createNetwork, removeNetwork, removeContainer, hostPortFor, waitUntilReady, docker } from './docker';
+import { createNetwork, removeNetwork, removeContainer, hostPortFor, waitUntilReady, docker, containerLogsAllowFailure } from './docker';
 
 const execFileAsync = promisify(execFile);
 
@@ -86,9 +86,15 @@ export async function provisionGitea(): Promise<GiteaEnvironment> {
 
         return { baseUrl, owner: ADMIN_USERNAME, repo: SANDBOX_REPO, token, containerName, networkName };
     } catch (e) {
-        // Provisioning failed partway through — clean up what we started before rethrowing.
+        // Provisioning failed partway through. A readiness timeout in particular
+        // gives no clue *why* Gitea never came up (self-hosted runner Docker/
+        // network hiccup vs. a real startup failure) without runner shell access
+        // -- attach the container's own logs to the error before it's torn down,
+        // so a future CI failure is diagnosable straight from the job output.
+        const logs = await containerLogsAllowFailure(containerName);
         await teardownGitea({ containerName, networkName } as GiteaEnvironment);
-        throw e;
+        const message = e instanceof Error ? e.message : String(e);
+        throw new Error(`${message}\n\n-- gitea container logs (tail) --\n${logs}`);
     }
 }
 

@@ -31,6 +31,20 @@ export async function removeContainer(name: string): Promise<void> {
     await dockerAllowFailure(['rm', '-f', name]);
 }
 
+/** Best-effort: the container's own stdout/stderr, for diagnosing a readiness
+ * timeout (e.g. a slow/failed startup) directly from CI output instead of
+ * needing shell access to the runner. Never throws. `docker logs` writes the
+ * container's stdout/stderr to its own stdout/stderr respectively, so both
+ * are captured and combined, not just stdout. */
+export async function containerLogsAllowFailure(name: string, tailLines = 200): Promise<string> {
+    try {
+        const { stdout, stderr } = await execFileAsync('docker', ['logs', '--tail', String(tailLines), name]);
+        return [stdout, stderr].filter(Boolean).join('\n').trim();
+    } catch (e) {
+        return `(failed to fetch container logs: ${e instanceof Error ? e.message : String(e)})`;
+    }
+}
+
 /** Reads back the dynamic host port Docker assigned for a `-p 0:<containerPort>` mapping. */
 export async function hostPortFor(containerName: string, containerPort: number): Promise<number> {
     const output = await docker(['port', containerName, String(containerPort)]);
