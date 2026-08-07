@@ -9,6 +9,7 @@ import { logger } from '../utils/logger';
 import { isBinaryPath, contentsEqual } from '../utils/path';
 import { readLocalSymlinkTarget, createLocalSymlink } from '../utils/symlink';
 import { gitBlobSha } from '../utils/git-blob-sha';
+import { ensureParentDirs } from '../utils/vault-path';
 import { SyncStatusService } from './sync-status-service';
 
 /** Result of syncing one file within a batch push/pull. */
@@ -511,7 +512,7 @@ export class SyncManager {
     }
 
     private async performPull(file: TFile | {path: string, name: string}, remoteContent: string | ArrayBuffer, remoteSha: string, silent = false, symlinkTarget?: string) {
-        await this.ensureParentDirs(file.path);
+        await ensureParentDirs(this.app.vault.adapter, file.path);
 
         if (symlinkTarget !== undefined) {
             // Remote blob is a symbolic link. Recreate a real OS link when the
@@ -541,19 +542,6 @@ export class SyncManager {
             await this.app.vault.modify(file, remoteContent);
         } else {
             await this.app.vault.adapter.write(file.path, remoteContent);
-        }
-    }
-
-    private async ensureParentDirs(filePath: string): Promise<void> {
-        const parts = filePath.split('/');
-        let cur = '';
-        for (let i = 0; i < parts.length - 1; i++) {
-            cur += (i > 0 ? '/' : '') + parts[i];
-            try {
-                await this.app.vault.adapter.mkdir(cur);
-            } catch {
-                // already exists or failed
-            }
         }
     }
 
