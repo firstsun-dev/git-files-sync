@@ -5,7 +5,7 @@
  * scripts/run-e2e.mjs for how E2E_PROVIDER gets set).
  */
 
-export const SUPPORTED_PROVIDERS = ['gitea'] as const;
+export const SUPPORTED_PROVIDERS = ['gitea', 'gitlab'] as const;
 export type E2EProvider = typeof SUPPORTED_PROVIDERS[number];
 
 export function isSupportedProvider(value: string): value is E2EProvider {
@@ -38,3 +38,47 @@ export const timeouts = {
 };
 
 export const giteaImage = process.env.E2E_GITEA_IMAGE ?? 'gitea/gitea:1.22';
+
+/**
+ * GitLab has no lightweight self-hostable image the way Gitea does (the
+ * official `gitlab-ce` image takes minutes to become healthy and is far too
+ * heavy to spin up per test run), so unlike Gitea's provisioner, GitLab E2E
+ * targets a pre-existing sandbox project rather than a freshly provisioned
+ * container. See e2e/provision/gitlab-provision.ts for what it does instead
+ * (a run-specific branch inside that project).
+ */
+export interface GitLabSandboxConfig {
+    baseUrl: string;
+    projectId: string;
+    token: string;
+}
+
+/**
+ * Reads the dedicated GitLab E2E sandbox project's credentials from env.
+ * Requires a token with `api` scope (a Project Access Token on the sandbox
+ * project, or a dedicated E2E user's Personal Access Token if Project Access
+ * Tokens aren't available on the target GitLab plan) — `write_repository`
+ * alone is not sufficient because the verifier and branch provisioning use
+ * read/write REST endpoints outside the write_repository scope's coverage.
+ */
+export function gitlabSandboxConfig(): GitLabSandboxConfig {
+    const baseUrl = process.env.E2E_GITLAB_BASE_URL ?? 'https://gitlab.com';
+    const projectId = process.env.E2E_GITLAB_PROJECT_ID;
+    const token = process.env.E2E_GITLAB_TOKEN;
+
+    const missing: string[] = [];
+    if (!projectId) missing.push('E2E_GITLAB_PROJECT_ID');
+    if (!token) missing.push('E2E_GITLAB_TOKEN');
+    if (missing.length > 0) {
+        throw new Error(
+            `Missing required env var(s) for GitLab E2E: ${missing.join(', ')}. ` +
+            'Point these at a dedicated GitLab sandbox project (not an ordinary project) and a token ' +
+            'with `api` scope — a Project Access Token on the sandbox project, or a dedicated E2E ' +
+            'user\'s Personal Access Token if Project Access Tokens are unavailable on the plan. ' +
+            '`write_repository` scope alone is not sufficient. Optionally set E2E_GITLAB_BASE_URL ' +
+            '(defaults to https://gitlab.com).'
+        );
+    }
+
+    return { baseUrl, projectId: projectId as string, token: token as string };
+}
