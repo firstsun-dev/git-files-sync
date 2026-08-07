@@ -31,12 +31,18 @@ describe('GitLabService E2E', () => {
 
     it('creates a file, verified independently of the service', async () => {
         const filePath = path('created.md');
+        // Unlike Gitea/GitHub's contents API, GitLab's create/update file
+        // endpoint response body is just `{ file_path, branch }` — no blob
+        // sha (confirmed directly against a real GitLab.com project, not
+        // just inferred from the type). pushFile's `sha` return is therefore
+        // undefined by design for GitLab; SyncManager.performPush already
+        // accounts for this with a `result.sha ?? gitBlobSha(content)`
+        // fallback (src/logic/sync-manager.ts), so this is not asserted here.
         const result = await ctx.service.pushFile(filePath, '# hello e2e', ctx.branch, 'e2e: create file');
+        expect(result.path).toBe(filePath);
 
-        expect(result.sha).toBeTruthy();
         const remote = await ctx.verifier.getFile(filePath, ctx.branch);
         expect(remote?.content).toBe('# hello e2e');
-        expect(remote?.sha).toBe(result.sha);
     });
 
     it('reads a file whose content was independently established', async () => {
@@ -54,19 +60,22 @@ describe('GitLabService E2E', () => {
     it('updates a file, verified independently of the service', async () => {
         const filePath = path('to-update.md');
         await ctx.service.pushFile(filePath, 'v1', ctx.branch, 'e2e: create file for update test');
-        const beforeUpdate = await ctx.service.getFile(filePath, ctx.branch);
-        expect(beforeUpdate.sha).toBeTruthy();
+        const beforeUpdate = await ctx.verifier.getFile(filePath, ctx.branch);
+        expect(beforeUpdate?.sha).toBeTruthy();
 
         // Matches SyncManager.performPush: existingSha decides create-vs-update
         // (PUT vs POST), existingRevision (last_commit_id) is GitLab's
         // optimistic-locking token — see the #101 regression suite below for
-        // why these must never be conflated.
-        const result = await ctx.service.pushFile(filePath, 'v2', ctx.branch, 'e2e: update file', beforeUpdate.sha, beforeUpdate.revision);
+        // why these must never be conflated. GitLab's write response carries
+        // no blob sha (see the "creates a file" test above), so the new sha
+        // is read back through the independent verifier, not from the
+        // pushFile return value.
+        const pulled = await ctx.service.getFile(filePath, ctx.branch);
+        await ctx.service.pushFile(filePath, 'v2', ctx.branch, 'e2e: update file', pulled.sha, pulled.revision);
 
         const afterUpdate = await ctx.verifier.getFile(filePath, ctx.branch);
         expect(afterUpdate?.content).toBe('v2');
-        expect(afterUpdate?.sha).toBe(result.sha);
-        expect(afterUpdate?.sha).not.toBe(beforeUpdate.sha);
+        expect(afterUpdate?.sha).not.toBe(beforeUpdate?.sha);
     });
 
     it('deletes a file, verified independently of the service', async () => {
@@ -117,18 +126,24 @@ describe('GitLabService E2E', () => {
     //                                   commit that touches the file, even
     //                                   an unrelated one elsewhere in the
     //                                   repo can bump it.
-    // Before the fix, pushFile sent `sha` (blob_id) as GitLab's
-    // `last_commit_id` lock token. blob_id and last_commit_id live in
-    // different ID spaces and essentially never match, so every push a
-    // real GitLab server received a stale/incorrect lock token and could be
-    // rejected as a false conflict — even though nothing on the server had
-    // actually changed since the last pull. These tests must fail again if
-    // that conflation is ever reintroduced.
+    //
+    // Verified directly against a real GitLab.com project (outside this
+    // production code, via raw curl) what actually happens when the two are
+    // conflated: a genuinely stale-but-valid last_commit_id (a real, older
+    // commit id) IS correctly rejected with 400 "you are attempting to
+    // update a file that has changed since you started editing it" — but a
+    // syntactically-valid-yet-nonexistent value, such as a blob_id, is
+    // silently ACCEPTED. GitLab's optimistic-lock check appears to resolve
+    // last_commit_id to an actual commit first and no-ops the check entirely
+    // if that resolution fails, rather than rejecting on a literal mismatch.
+    // So the pre-#101-fix bug (sending blob_id as last_commit_id) did not
+    // manifest as spurious false conflicts — it silently disabled conflict
+    // detection altogether, letting concurrent edits overwrite each other
+    // with no warning. That is the behavior these tests protect against.
     describe('P0 regression (#101): blob sha vs revision separation', () => {
         it('single pull -> obtain sha + revision -> edit -> push succeeds without a false conflict', async () => {
             const filePath = path('regression-101.md');
-            const created = await ctx.service.pushFile(filePath, 'v1', ctx.branch, 'e2e: create for #101 regression');
-            expect(created.sha).toBeTruthy();
+            await ctx.service.pushFile(filePath, 'v1', ctx.branch, 'e2e: create for #101 regression');
 
             // Simulates a single pull: SyncManager stores both identities from getFile().
             const pulled = await ctx.service.getFile(filePath, ctx.branch);
@@ -139,35 +154,56 @@ describe('GitLabService E2E', () => {
 
             // Edit locally, then push exactly as SyncManager.performPush does:
             // existingSha=remote.sha (create/update decision), existingRevision=remote.revision (lock token).
-            const pushed = await ctx.service.pushFile(
+            await ctx.service.pushFile(
                 filePath, 'v2 edited locally', ctx.branch, 'e2e: edit for #101 regression', pulled.sha, pulled.revision
             );
 
             const remote = await ctx.verifier.getFile(filePath, ctx.branch);
             expect(remote?.content).toBe('v2 edited locally');
 
-            // The new blob sha must not be polluted by (or coincide with) the revision values.
-            expect(pushed.sha).not.toBe(pulled.sha);
-            expect(pushed.sha).not.toBe(pulled.revision);
-
             const remoteRevisionAfter = await ctx.verifier.getRevision(filePath, ctx.branch);
+            // The write must have advanced the revision — proves the push actually
+            // went through as an update, not a false-conflict rejection.
             expect(remoteRevisionAfter).not.toBe(pulled.revision);
         });
 
-        it('reproduces the original bug: sending blob sha as the lock token is rejected by GitLab', async () => {
+        it('the fix works: a genuinely stale revision (real concurrent edit) is correctly rejected', async () => {
+            const filePath = path('regression-101-real-conflict.md');
+            await ctx.service.pushFile(filePath, 'v1', ctx.branch, 'e2e: create for #101 real-conflict test');
+            const pulled = await ctx.service.getFile(filePath, ctx.branch);
+
+            // Someone else pushes a concurrent edit before we push ours.
+            await ctx.service.pushFile(filePath, 'concurrent edit by someone else', ctx.branch, 'e2e: concurrent edit', pulled.sha, pulled.revision);
+
+            // Our push still carries the pre-concurrent-edit revision — this is a
+            // genuine conflict and must be rejected using the real last_commit_id lock.
+            await expect(
+                ctx.service.pushFile(filePath, 'stale local edit', ctx.branch, 'e2e: stale push should conflict', pulled.sha, pulled.revision)
+            ).rejects.toThrow();
+
+            const remote = await ctx.verifier.getFile(filePath, ctx.branch);
+            expect(remote?.content).toBe('concurrent edit by someone else');
+        });
+
+        it('reproduces the original #101 bug: blob sha as the lock token silently bypasses conflict detection', async () => {
             const filePath = path('regression-101-bug-repro.md');
             await ctx.service.pushFile(filePath, 'v1', ctx.branch, 'e2e: create for #101 bug repro');
             const pulled = await ctx.service.getFile(filePath, ctx.branch);
-            expect(pulled.sha).toBeTruthy();
 
-            // The pre-fix behavior: pass blob sha where GitLab expects last_commit_id.
+            // Someone else pushes a concurrent edit before we push ours — same
+            // genuine-conflict setup as the previous test.
+            await ctx.service.pushFile(filePath, 'concurrent edit by someone else', ctx.branch, 'e2e: concurrent edit', pulled.sha, pulled.revision);
+
+            // The pre-#101-fix behavior: pass blob sha where GitLab expects
+            // last_commit_id. This must be a documented characterization, not a
+            // desired outcome — it succeeds and silently clobbers the concurrent
+            // edit above, which is exactly the data-loss risk the #101 fix closes.
             await expect(
-                ctx.service.pushFile(filePath, 'should not land', ctx.branch, 'e2e: regression bug reproduction', pulled.sha, pulled.sha)
-            ).rejects.toThrow();
+                ctx.service.pushFile(filePath, 'stale local edit using sha as lock token', ctx.branch, 'e2e: regression bug reproduction', pulled.sha, pulled.sha)
+            ).resolves.not.toThrow();
 
-            // The rejected push must not have changed the remote content.
             const remote = await ctx.verifier.getFile(filePath, ctx.branch);
-            expect(remote?.content).toBe('v1');
+            expect(remote?.content).toBe('stale local edit using sha as lock token');
         });
 
         it('batch push after a pull + local edit does not falsely conflict', async () => {
