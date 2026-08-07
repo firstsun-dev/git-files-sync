@@ -251,7 +251,10 @@ describe('GitLabService', () => {
         });
 
         it('posts a Commits API actions array with action: delete, no content/encoding', async () => {
-            mockRequest({ status: 201, json: { id: 'commit-sha' } });
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { content: btoa('a'), blob_id: 'a-blob', last_commit_id: 'revision-a' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { content: btoa('b'), blob_id: 'b-blob', last_commit_id: 'revision-b' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse);
 
             await service.deleteBatch(['a.md', 'b.md'], 'main', 'Delete 2 file(s) from Obsidian');
 
@@ -262,8 +265,8 @@ describe('GitLabService', () => {
             expect(body.branch).toBe('main');
             expect(body.commit_message).toBe('Delete 2 file(s) from Obsidian');
             expect(body.actions).toEqual([
-                { action: 'delete', file_path: 'a.md' },
-                { action: 'delete', file_path: 'b.md' },
+                { action: 'delete', file_path: 'a.md', last_commit_id: 'revision-a' },
+                { action: 'delete', file_path: 'b.md', last_commit_id: 'revision-b' },
             ]);
         });
     });
@@ -273,6 +276,27 @@ describe('GitLabService', () => {
             const result = await service.commitBatch([], [], 'main', 'nothing');
             expect(result).toEqual([]);
             expect(requestUrl).not.toHaveBeenCalled();
+        });
+
+        it('sends last_commit_id for existing updates and moves', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: [
+                    { path: 'existing.md', type: 'blob', id: 'updated-blob' },
+                    { path: 'new.md', type: 'blob', id: 'moved-blob' },
+                ] } as unknown as RequestUrlResponse);
+
+            await service.commitBatch(
+                [{ path: 'existing.md', content: 'new', existedRemotely: true, revision: 'update-revision' }],
+                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved', oldRevision: 'move-revision' }],
+                'main', 'locked batch'
+            );
+
+            const body = JSON.parse((vi.mocked(requestUrl).mock.calls[0]?.[0] as { body: string }).body) as { actions: Array<{ action: string; last_commit_id?: string }> };
+            expect(body.actions).toEqual([
+                expect.objectContaining({ action: 'update', last_commit_id: 'update-revision' }),
+                expect.objectContaining({ action: 'move', last_commit_id: 'move-revision' }),
+            ]);
         });
 
         it('uses the Commits API native action: move for renames, alongside create/update for plain additions', async () => {

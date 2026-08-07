@@ -343,16 +343,24 @@ describe('GitHubService', () => {
     describe('pushFile', () => {
         it('commits one regular file through GraphQL instead of the Contents API', async () => {
             vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'note.md', type: 'blob', mode: '100644' }] } } as unknown as RequestUrlResponse)
                 .mockResolvedValueOnce(headOidResponse('commit1'))
                 .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
 
             await expect(service.pushFile('note.md', 'new content', 'main', 'update', 'old-sha')).resolves.toEqual({ path: 'note.md' });
 
             const calls = vi.mocked(requestUrl).mock.calls.map(call => call[0] as RequestUrlParam);
-            expect(calls).toHaveLength(2);
-            expect(calls[1]?.url).toBe('https://api.github.com/graphql');
-            const body = JSON.parse(calls[1]?.body as string) as { variables: { input: { fileChanges: { additions: Array<{ path: string; contents: string }> } } } };
+            expect(calls).toHaveLength(3);
+            expect(calls[2]?.url).toBe('https://api.github.com/graphql');
+            const body = JSON.parse(calls[2]?.body as string) as { variables: { input: { fileChanges: { additions: Array<{ path: string; contents: string }> } } } };
             expect(body.variables.input.fileChanges.additions).toEqual([{ path: 'note.md', contents: btoa('new content') }]);
+        });
+
+        it('refuses to turn an in-repository symlink into a regular file', async () => {
+            mockRequest({ status: 200, json: { tree: [{ path: 'link.md', type: 'blob', mode: '120000' }] } });
+
+            await expect(service.pushFile('link.md', 'replacement', 'main', 'update')).rejects.toThrow(/Cannot overwrite symlink/);
+            expect(requestUrl).toHaveBeenCalledTimes(1);
         });
     });
 
@@ -397,15 +405,12 @@ describe('GitHubService', () => {
             expect(await service.listFiles('main')).toEqual(['src/content/index.md']);
         });
 
-        it('should return files and log warning when result is truncated', async () => {
+        it('fails closed when the tree result is truncated', async () => {
             mockRequest({ status: 200, json: { truncated: true, tree: [
                 { path: 'file1.md', type: 'blob' },
                 { path: 'file2.md', type: 'blob' },
             ] } });
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            const result = await service.listFiles('main');
-            expect(result).toEqual(['file1.md', 'file2.md']);
-            warnSpy.mockRestore();
+            await expect(service.listFiles('main')).rejects.toThrow(/truncated; sync stopped/);
         });
 
         it('should throw a message naming the branch when the branch is not found', async () => {

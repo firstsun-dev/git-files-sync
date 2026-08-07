@@ -22,7 +22,7 @@ type PlanClassification = { kind: 'addition' | 'modification' | 'move' | 'unchan
 type ToPushEntry = { path: string; name: string; repoPath: string; content: string | ArrayBuffer; existingSha?: string; existingRevision?: string };
 
 /** A renamed file classified as a safe move, queued for the grouped batch-commit call. */
-type ToMoveEntry = { path: string; name: string; repoPath: string; oldPath: string; oldRepoPath: string; content: string | ArrayBuffer };
+type ToMoveEntry = { path: string; name: string; repoPath: string; oldPath: string; oldRepoPath: string; content: string | ArrayBuffer; oldRevision?: string };
 
 /**
  * Result of a batch push. `syncedPaths` lists every path that's now confirmed
@@ -682,6 +682,7 @@ export class SyncManager {
         }
 
         const treeEntry = treeByFullPath.get(this.getFullPathForTree(repoPath));
+        await this.migrateGitLabLegacyBaseline(path, repoPath, treeEntry);
         const outcome = await this.classifyAgainstTreeEntry(path, content, treeEntry, true);
         if (outcome === 'queued') return { kind: treeEntry ? 'modification' : 'addition' };
         // classifyAgainstTreeEntry's dry-run path only ever resolves to
@@ -714,7 +715,7 @@ export class SyncManager {
         if (!renamedFrom) return undefined;
 
         const scratch: ToMoveEntry[] = [];
-        const outcome = this.queueMove(path, name, renamedFrom, content, treeByFullPath, scratch);
+        const outcome = await this.queueMove(path, name, renamedFrom, content, treeByFullPath, scratch);
         return outcome === 'queued' ? { kind: 'move', movedFrom: renamedFrom } : { kind: 'conflict' };
     }
 
@@ -742,6 +743,7 @@ export class SyncManager {
 
         const localSha = await gitBlobSha(await this.getFileContent(fileOrPath));
         if (localSha === entry.sha) return 'unchanged';
+        await this.migrateGitLabLegacyBaseline(path, repoPath, entry);
         const lastSynced = this.settings.syncMetadata[path];
         if (lastSynced && entry.sha !== lastSynced.lastSyncedSha) return 'conflict';
         return 'modification';
@@ -891,15 +893,18 @@ export class SyncManager {
             const trackedOldPath = this.settings.syncMetadata[path]?.renamedFrom;
             const renamedFrom = trackedOldPath ?? (hasOrphans ? await this.detectRename(fileOrPath, content, treeByFullPath) : null);
             if (renamedFrom) {
-                return this.queueMove(path, name, renamedFrom, content, treeByFullPath, toMove);
+                return await this.queueMove(path, name, renamedFrom, content, treeByFullPath, toMove);
             }
         }
 
-        const treeEntry = treeByFullPath.get(this.getFullPathForTree(repoPath));
+        let treeEntry = treeByFullPath.get(this.getFullPathForTree(repoPath));
+        await this.migrateGitLabLegacyBaseline(path, repoPath, treeEntry);
+        const revision = await this.refreshGitLabBatchRevision(repoPath, treeEntry);
+        if (revision) treeEntry = { ...treeEntry!, sha: revision.sha };
         const outcome = await this.classifyAgainstTreeEntry(path, content, treeEntry);
         if (outcome !== 'queued') return outcome;
 
-        toPush.push({ path, name, repoPath, content, existingSha: treeEntry?.sha });
+        toPush.push({ path, name, repoPath, content, existingSha: treeEntry?.sha, existingRevision: revision?.revision });
         return 'queued';
     }
 
@@ -912,26 +917,48 @@ export class SyncManager {
      * silently deleted. Both surface as 'conflict' so the batch can't quietly
      * clobber either side the way a plain content push already refuses to.
      */
-    private queueMove(
+    private async queueMove(
         path: string,
         name: string,
         oldPath: string,
         content: string | ArrayBuffer,
         treeByFullPath: Map<string, GitTreeEntry>,
         toMove: ToMoveEntry[]
-    ): BatchOutcome | 'queued' {
+    ): Promise<BatchOutcome | 'queued'> {
         const repoPath = this.getNormalizedPath(path);
         const oldRepoPath = this.getNormalizedPath(oldPath);
 
         if (treeByFullPath.get(this.getFullPathForTree(repoPath))) return 'conflict';
 
-        const oldEntry = treeByFullPath.get(this.getFullPathForTree(oldRepoPath));
+        let oldEntry = treeByFullPath.get(this.getFullPathForTree(oldRepoPath));
+        await this.migrateGitLabLegacyBaseline(oldPath, oldRepoPath, oldEntry);
+        const oldRevision = await this.refreshGitLabBatchRevision(oldRepoPath, oldEntry);
+        if (oldRevision) oldEntry = { ...oldEntry!, sha: oldRevision.sha };
         const metadata = this.settings.syncMetadata[path] ?? this.settings.syncMetadata[oldPath];
         const safeToDeleteOld = !oldEntry?.sha || !metadata?.lastSyncedSha || oldEntry.sha === metadata.lastSyncedSha;
         if (oldEntry?.sha && !safeToDeleteOld) return 'conflict';
 
-        toMove.push({ path, name, repoPath, oldPath, oldRepoPath, content });
+        toMove.push({ path, name, repoPath, oldPath, oldRepoPath, content, oldRevision: oldRevision?.revision });
         return 'queued';
+    }
+
+    /** GitLab tree rows expose blob identity but not the commit revision needed
+     * for optimistic locking. Read it during planning and compare the fresh blob
+     * again before accepting the action; the stored revision then protects the
+     * interval between planning and the atomic commit. */
+    private async refreshGitLabBatchRevision(repoPath: string, entry: GitTreeEntry | undefined): Promise<{ sha: string; revision?: string } | undefined> {
+        if (this.settings.serviceType !== 'gitlab' || !entry?.sha) return undefined;
+        const remote = await this.gitService.getFile(repoPath, this.settings.branch);
+        return remote.sha ? { sha: remote.sha, revision: remote.revision } : undefined;
+    }
+
+    /** Migrates a legacy GitLab last_commit_id baseline only when the current
+     * file endpoint proves it still describes this tree blob. */
+    private async migrateGitLabLegacyBaseline(path: string, repoPath: string, entry: GitTreeEntry | undefined): Promise<void> {
+        const metadata = this.settings.syncMetadata[path];
+        if (this.settings.serviceType !== 'gitlab' || !metadata?.lastSyncedSha || !entry?.sha || entry.sha === metadata.lastSyncedSha) return;
+        const remote = await this.gitService.getFile(repoPath, this.settings.branch);
+        if (remote.sha === entry.sha && remote.revision === metadata.lastSyncedSha) await this.updateMetadata(path, remote.sha);
     }
 
     /**
@@ -1060,7 +1087,7 @@ export class SyncManager {
         try {
             const commitMessage = `Push ${chunk.length} file(s) from Obsidian`;
             const batchResults = await this.gitService.pushBatch!(
-                chunk.map(f => ({ path: f.repoPath, content: f.content, existedRemotely: !!f.existingSha })),
+                chunk.map(f => ({ path: f.repoPath, content: f.content, existedRemotely: !!f.existingSha, revision: f.existingRevision })),
                 this.settings.branch,
                 commitMessage
             );
@@ -1106,8 +1133,8 @@ export class SyncManager {
             const commitMessage = this.combinedChunkCommitMessage(pushEntries.length, moveEntries.length);
 
             const batchResults = await this.gitService.commitBatch!(
-                pushEntries.map(f => ({ path: f.repoPath, content: f.content, existedRemotely: !!f.existingSha })),
-                moveEntries.map(f => ({ oldPath: f.oldRepoPath, newPath: f.repoPath, content: f.content })),
+                pushEntries.map(f => ({ path: f.repoPath, content: f.content, existedRemotely: !!f.existingSha, revision: f.existingRevision })),
+                moveEntries.map(f => ({ oldPath: f.oldRepoPath, newPath: f.repoPath, content: f.content, oldRevision: f.oldRevision })),
                 this.settings.branch,
                 commitMessage
             );
@@ -1248,6 +1275,8 @@ export class SyncManager {
             await this.updateMetadata(path, entry.sha);
             return 'unchanged';
         }
+
+        await this.migrateGitLabLegacyBaseline(path, this.getNormalizedPath(path), entry);
 
         // Same conflict check as the content path below: local differs and the
         // remote has moved since we last synced, so pulling would discard one of

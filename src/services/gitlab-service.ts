@@ -1,5 +1,6 @@
 import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchMoveItem } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
+import { isBinaryPath } from '../utils/path';
 
 export class GitLabService extends BaseGitService implements GitServiceInterface {
     private baseUrl: string = 'https://gitlab.com';
@@ -61,12 +62,13 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         const encodedProjectId = encodeURIComponent(this.projectId);
         const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/commits`;
 
-        const actions = items.map(item => ({
+        const actions = await Promise.all(items.map(async item => ({
             action: item.existedRemotely ? 'update' : 'create',
             file_path: this.getFullPath(item.path),
             content: this.encodeContent(item.content),
             encoding: 'base64',
-        }));
+            ...(item.existedRemotely && item.revision ? { last_commit_id: item.revision } : {}),
+        })));
 
         await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
 
@@ -89,19 +91,21 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/commits`;
 
         const actions = [
-            ...additions.map(item => ({
+            ...await Promise.all(additions.map(async item => ({
                 action: item.existedRemotely ? 'update' : 'create',
                 file_path: this.getFullPath(item.path),
                 content: this.encodeContent(item.content),
                 encoding: 'base64',
-            })),
-            ...moves.map(item => ({
+                ...(item.existedRemotely && item.revision ? { last_commit_id: item.revision } : {}),
+            }))),
+            ...await Promise.all(moves.map(async item => ({
                 action: 'move',
                 file_path: this.getFullPath(item.newPath),
                 previous_path: this.getFullPath(item.oldPath),
                 content: this.encodeContent(item.content),
                 encoding: 'base64',
-            })),
+                ...(item.oldRevision ? { last_commit_id: item.oldRevision } : {}),
+            }))),
         ];
 
         await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
@@ -160,7 +164,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         const encodedProjectId = encodeURIComponent(this.projectId);
         const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/blobs/${sha}/raw`;
         const response = await this.safeRequest(url, 'GET');
-        const content = this.isBinary(path) ? response.arrayBuffer : response.text;
+        const content = isBinaryPath(path) ? response.arrayBuffer : response.text;
         return { content, sha };
     }
 
@@ -179,7 +183,11 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         const encodedProjectId = encodeURIComponent(this.projectId);
         const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/commits`;
 
-        const actions = paths.map(path => ({ action: 'delete', file_path: this.getFullPath(path) }));
+        const actions = await Promise.all(paths.map(async path => ({
+            action: 'delete',
+            file_path: this.getFullPath(path),
+            last_commit_id: (await this.getFile(path, branch)).revision,
+        })));
 
         await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
     }
