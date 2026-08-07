@@ -15,6 +15,7 @@ import { buildRemoteFileUrl } from '../utils/remote-url';
 import { DiffView, SYNC_DIFF_VIEW_TYPE } from './DiffView';
 import { readLocalSymlinkTarget } from '../utils/symlink';
 import { gitBlobSha } from '../utils/git-blob-sha';
+import { ensureParentDirs } from '../utils/vault-path';
 import { type GitTreeEntry } from '../services/git-service-interface';
 import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
 import { t, type TranslationKey } from '../i18n';
@@ -442,6 +443,7 @@ export class SyncStatusView extends ItemView {
         if (!confirmed) return;
 
         try {
+            await ensureParentDirs(this.app.vault.adapter, fileStatus.movedFrom);
             const file = fileStatus.file ?? this.app.vault.getFileByPath(fileStatus.path);
             if (file instanceof TFile) {
                 await this.app.fileManager.renameFile(file, fileStatus.movedFrom);
@@ -735,6 +737,7 @@ export class SyncStatusView extends ItemView {
         for (const m of members) {
             if (!m.movedFrom) continue;
             try {
+                await ensureParentDirs(this.app.vault.adapter, m.movedFrom);
                 const file = m.file ?? this.app.vault.getFileByPath(m.path);
                 if (file instanceof TFile) {
                     await this.app.fileManager.renameFile(file, m.movedFrom);
