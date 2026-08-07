@@ -1,3 +1,9 @@
+## [1.5.3](https://github.com/firstsun-dev/git-files-sync/compare/1.5.2...1.5.3) (2026-08-07)
+
+### Bug Fixes
+
+* **gitlab:** fix sha/revision semantics for optimistic locking ([#113](https://github.com/firstsun-dev/git-files-sync/issues/113)) ([ad15238](https://github.com/firstsun-dev/git-files-sync/commit/ad15238d84d82a6b9ae6ec52dc6a2544c7ab6458)), closes [#101](https://github.com/firstsun-dev/git-files-sync/issues/101)
+
 ## [1.5.1](https://github.com/firstsun-dev/git-files-sync/compare/1.5.0...1.5.1) (2026-07-31)
 
 ### Bug Fixes
