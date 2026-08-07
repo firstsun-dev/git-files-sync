@@ -284,6 +284,32 @@ describe('GitHubService', () => {
             }
         });
 
+        it('retries on a real concurrent-write race ("Ref ... is at <oid> but expected <oid>")', async () => {
+            // Regression test: confirmed against a live GitHub sandbox (issue #57
+            // E2E coverage) that a genuine race between two concurrent commits to
+            // the same branch reports this wording, not any of the previously
+            // handled phrasings — so it fell through to an immediate failure with
+            // zero retries until this pattern was added.
+            vi.useFakeTimers();
+            try {
+                vi.mocked(requestUrl)
+                    .mockResolvedValueOnce(headOidResponse('770c05b')) // branch head query (already superseded)
+                    .mockResolvedValueOnce({ status: 200, json: { errors: [{ message: 'Ref refs/heads/main is at 770c05b907dd37741a47a9189c6b7578772067c5 but expected 15b14038967ad236c1a3c2460b5b1e6e60ca3f28' }] } } as unknown as RequestUrlResponse) // mutation fails
+                    .mockResolvedValueOnce(headOidResponse('fresh-commit')) // branch head query (fresh, retry)
+                    .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse); // mutation succeeds
+
+                const resultPromise = service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'Push 1 file(s) from Obsidian');
+                await vi.runAllTimersAsync();
+
+                expect(await resultPromise).toEqual([{ path: 'a.md' }]);
+                const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+                const retryMutation = JSON.parse(calls[3]?.body as string) as { variables: { input: { expectedHeadOid: string } } };
+                expect(retryMutation.variables.input.expectedHeadOid).toBe('fresh-commit');
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
         it('reads expectedHeadOid over GraphQL, not the cacheable REST ref endpoint', async () => {
             // GitHub serves REST reads as `private, max-age=60`, so a cached
             // git/ref response would keep feeding the retry the same stale oid.
@@ -588,6 +614,38 @@ describe('GitHubService', () => {
             );
 
             expect(result).toEqual([{ path: 'new.md' }]);
+        });
+
+        it('retries a rename\'s deletion-side stale read ("does not exist as of commit oid")', async () => {
+            // Regression test: confirmed against a live GitHub sandbox (issue #57
+            // E2E coverage) that renaming a file immediately after creating it can
+            // read a HEAD whose tree hasn't caught up to the create yet, and
+            // GitHub reports the old path as missing with this exact wording — a
+            // different phrasing than "does not exist in tree" that the retry
+            // regex already handled, so this variant fell through unretried.
+            vi.useFakeTimers();
+            try {
+                vi.mocked(requestUrl)
+                    .mockResolvedValueOnce(headOidResponse('stale-commit'))
+                    .mockResolvedValueOnce({ status: 200, json: { errors: [{ message: 'A path was requested for deletion which does not exist as of commit oid `stale-commit`' }] } } as unknown as RequestUrlResponse)
+                    .mockResolvedValueOnce(headOidResponse('fresh-commit'))
+                    .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
+
+                const resultPromise = service.commitBatch(
+                    [],
+                    [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                    'main',
+                    'Move 1 file(s) from Obsidian'
+                );
+                await vi.runAllTimersAsync();
+
+                expect(await resultPromise).toEqual([{ path: 'new.md' }]);
+                const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+                const retryMutation = JSON.parse(calls[3]?.body as string) as { variables: { input: { expectedHeadOid: string } } };
+                expect(retryMutation.variables.input.expectedHeadOid).toBe('fresh-commit');
+            } finally {
+                vi.useRealTimers();
+            }
         });
     });
 

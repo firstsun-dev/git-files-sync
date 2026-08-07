@@ -34,10 +34,15 @@ const BRANCH_HEAD_QUERY = `
  * Messages GitHub uses for a createCommitOnBranch call whose `expectedHeadOid`
  * no longer matches the branch head. The wording differs by cause: a moved
  * branch reports "Expected branch to point to \"<oid>\" but it did not. Pull and
- * try again.", while a HEAD read that lags a just-completed write surfaces as
- * "path does not exist in tree <oid>" instead.
+ * try again.", a HEAD read that lags a just-completed write surfaces as "path
+ * does not exist in tree <oid>" or "A path was requested for deletion which
+ * does not exist as of commit oid <oid>" (the latter confirmed live in a
+ * commitBatch rename immediately after the file's own create — same lag, a
+ * deletion-specific phrasing), and a real concurrent write to the same
+ * branch (also confirmed against a live sandbox, issue #57's E2E coverage)
+ * reports "Ref refs/heads/<branch> is at <oid> but expected <oid>" instead.
  */
-const STALE_HEAD_ERROR = /expected branch to point to|pull and try again|does not exist in tree|head sha was modified|does not match|expectedHeadOid/i;
+const STALE_HEAD_ERROR = /expected branch to point to|pull and try again|does not exist in tree|does not exist as of commit|head sha was modified|does not match|expectedHeadOid|is at .+ but expected/i;
 
 export class GitHubService extends BaseGitService implements GitServiceInterface {
     private owner: string = '';

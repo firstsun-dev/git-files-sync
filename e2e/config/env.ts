@@ -5,7 +5,7 @@
  * scripts/run-e2e.mjs for how E2E_PROVIDER gets set).
  */
 
-export const SUPPORTED_PROVIDERS = ['gitea', 'gitlab'] as const;
+export const SUPPORTED_PROVIDERS = ['gitea', 'gitlab', 'github'] as const;
 export type E2EProvider = typeof SUPPORTED_PROVIDERS[number];
 
 export function isSupportedProvider(value: string): value is E2EProvider {

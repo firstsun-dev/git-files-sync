@@ -13,6 +13,10 @@ export default defineConfig({
     alias: {
       'obsidian': './e2e/shim/obsidian-request-url.ts',
     },
+    // Minimal `window` alias so production code written for Obsidian's
+    // Electron renderer (e.g. window.setTimeout) runs as-is under Node — see
+    // e2e/shim/window-timers.ts for why this was needed.
+    setupFiles: ['./e2e/shim/window-timers.ts'],
     include: ['e2e/suites/**/*.e2e.test.ts'],
     exclude: ['**/node_modules/**', '**/.claude/**'],
     testTimeout: 120_000,
