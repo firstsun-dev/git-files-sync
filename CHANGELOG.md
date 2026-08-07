@@ -1,3 +1,13 @@
+## [1.5.6](https://github.com/firstsun-dev/git-files-sync/compare/1.5.5...1.5.6) (2026-08-07)
+
+### Bug Fixes
+
+* **e2e:** correct gitlab suite against real GitLab.com behavior ([77a3355](https://github.com/firstsun-dev/git-files-sync/commit/77a33552dc74f6a82c46862a37986db5ae89c93a)), closes [#101](https://github.com/firstsun-dev/git-files-sync/issues/101) [#101](https://github.com/firstsun-dev/git-files-sync/issues/101)
+
+### Documentation
+
+* **e2e:** write GitHub E2E test plan ([3cef03e](https://github.com/firstsun-dev/git-files-sync/commit/3cef03e962fb5d073a9a24aafee1cdefcd620b07))
+
 ## [1.5.5](https://github.com/firstsun-dev/git-files-sync/compare/1.5.4...1.5.5) (2026-08-07)
 
 ### Bug Fixes
