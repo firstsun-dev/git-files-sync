@@ -28,11 +28,8 @@ export default tseslint.config(
 		...sonarjs.configs.recommended,
 	},
 	{
-		// e2e/ and scripts/ are Node-side tooling, not plugin code that ships
-		// into Obsidian: they run in CI/local Node, need real fetch/Buffer/process,
-		// and are the one place `fetch` is correct (the obsidian-request-url shim
-		// IS the requestUrl implementation the obsidianmd rule wants everyone to use).
-		files: ["e2e/**/*.ts", "scripts/**/*.mjs"],
+		// Retained scripts are local Node build/release tooling, not plugin code.
+		files: ["scripts/**/*.mjs"],
 		languageOptions: {
 			globals: {
 				...globals.node,

@@ -17,7 +17,6 @@
 		"lint": "eslint .",
 		"test": "vitest run",
 		"test:ui": "vitest --ui",
-		"test:e2e": "node scripts/run-e2e.mjs",
 		"prepare": "husky",
 		"semantic-release": "semantic-release"
 	},
