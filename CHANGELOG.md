@@ -1,3 +1,9 @@
+## [1.5.4](https://github.com/firstsun-dev/git-files-sync/compare/1.5.3...1.5.4) (2026-08-07)
+
+### Bug Fixes
+
+* **sync:** ensure parent dirs exist when reverting file moves ([#114](https://github.com/firstsun-dev/git-files-sync/issues/114)) ([cda7137](https://github.com/firstsun-dev/git-files-sync/commit/cda7137ba5d3a30ddbc7ff2553f95b7bf3b6a36b)), closes [#94](https://github.com/firstsun-dev/git-files-sync/issues/94) [#6](https://github.com/firstsun-dev/git-files-sync/issues/6)
+
 ## [1.5.3](https://github.com/firstsun-dev/git-files-sync/compare/1.5.2...1.5.3) (2026-08-07)
 
 ### Bug Fixes
