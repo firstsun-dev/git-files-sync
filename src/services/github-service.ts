@@ -103,7 +103,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         }
     }
 
-    async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, _existingSha?: string): Promise<{ path: string, sha?: string }> {
+    async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, _existingSha?: string, _revision?: string): Promise<{ path: string, sha?: string }> {
         const [result] = await this.pushBatch([{ path, content }], branch, message);
         return result ?? { path };
     }

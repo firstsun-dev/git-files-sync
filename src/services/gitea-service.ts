@@ -59,7 +59,7 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         }
     }
 
-    async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
+    async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string, _revision?: string): Promise<{ path: string, sha?: string }> {
         const url = this.getApiUrl(path);
         const body: { message: string; content: string; branch: string; sha?: string } = {
             message,

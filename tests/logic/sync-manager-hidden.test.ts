@@ -80,7 +80,7 @@ describe('SyncManager – hidden file support', () => {
             await manager.pushFile('.claude/CLAUDE.md');
 
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
-                '.claude/CLAUDE.md', '# Memory\n\nsome content', 'main', expect.any(String), ''
+                '.claude/CLAUDE.md', '# Memory\n\nsome content', 'main', expect.any(String), '', undefined
             );
         });
 
