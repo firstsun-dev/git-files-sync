@@ -4,9 +4,9 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-07-31
-**Active Feature:** `feat-025` — Sync Status tree view with folder selection and a Show synced toggle (code complete, manual Obsidian verification pending).
-**Parallel Work:** PR #87 — 4x Dependabot security alerts being fixed via npm overrides.
+**Last Updated:** 2026-08-07
+**Active Work:** Issue #94 — fix revert-move "folder does not exist" error (code complete, all tests pass).
+**Parallel Work:** `feat-025` manual Obsidian verification pending.
 
 ## Status
 
@@ -22,22 +22,19 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 - [x] `feat(ui): Sync Status tree view` (feat-025): paths are grouped into collapsible folders, and folder checkboxes select all visible descendant files with an indeterminate state for partial selection. The option row below Refresh toggles tree view and, when enabled, Show synced. Folder disclosure uses unboxed `+` / `−` signs. **Code complete; all automated checks pass.**
 - [x] `fix(ui): show diff for moved-and-edited files`: moved rows retain the source path's remote SHA and current local content, so Diff compares the old remote file to the moved file even after further edits.
 - [x] `feat(changelog): add 1.5.0 What's New copy`: added the six approved highlights in English, Traditional Chinese, and Simplified Chinese, plus a link to the GitHub repository from the What's New modal.
+- [x] `fix(sync): ensure parent dirs exist when reverting file moves` (issue #94): extracted `ensureParentDirs()` to `src/utils/vault-path.ts` and called it before rename in both `revertMove` and `revertMoveGroup`, fixing "folder does not exist" error when reverting moves to deleted parent folders. Commit `e25d755` — lint/build clean, 502 tests pass.
 
 ### What's In Progress
 
-- [ ] **feat-025**: Manual verification in Obsidian — tree hierarchy, folder expand/collapse, individual and folder checkboxes, and Show synced toggle.
+- None currently. Issue #94 is complete.
 
 ### What's Next
 
 1. Manual Obsidian verification of feat-025 (tree view).
-2. PR #87 merging (4x Dependabot security patches via npm overrides).
-3. Issue #57 live-credential smoke test remains relevant before merging push/pull/delete work.
+2. More issues from GitHub Project #6 backlog.
 
 ## Evidence of Completion
 
 - [x] `npx eslint .` — 0 errors
 - [x] `npm run build` — passes, including Obsidian 1.11.0 compatibility typecheck
-- [x] `npx vitest run` — 33 files, 490 tests passed
-- [x] `npx vitest run` — 31 files, 478 tests passed
-- [x] `npx vitest run` — 33 files, 494 tests passed
-- [ ] Manual verification inside Obsidian — outstanding
+- [x] `npx vitest run` — 35 files, 502 tests passed (issue #94 fix)
