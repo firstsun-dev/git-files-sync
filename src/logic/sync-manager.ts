@@ -18,7 +18,7 @@ type BatchOutcome = 'done' | 'unchanged' | 'conflict';
 type PlanClassification = { kind: 'addition' | 'modification' | 'move' | 'unchanged' | 'conflict' | 'skip'; movedFrom?: string };
 
 /** A file classified as needing a push, queued for the grouped batch-commit call. */
-type ToPushEntry = { path: string; name: string; repoPath: string; content: string | ArrayBuffer; existingSha?: string };
+type ToPushEntry = { path: string; name: string; repoPath: string; content: string | ArrayBuffer; existingSha?: string; existingRevision?: string };
 
 /** A renamed file classified as a safe move, queued for the grouped batch-commit call. */
 type ToMoveEntry = { path: string; name: string; repoPath: string; oldPath: string; oldRepoPath: string; content: string | ArrayBuffer };
@@ -195,7 +195,7 @@ export class SyncManager {
 
             const lastSynced = this.settings.syncMetadata[path];
 
-            if (remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
+            if (remote.sha && lastSynced && !this.isSameBaseline(lastSynced.lastSyncedSha, remote)) {
                 this.openPushConflictModal(fileOrPath, { path, name }, content, remote);
                 return undefined;
             }
@@ -203,7 +203,7 @@ export class SyncManager {
             const confirmed = await this.confirmPlan(this.singleEntryPlan(remote.sha ? 'modification' : 'addition', path, name), 'push');
             if (!confirmed) return undefined;
 
-            const sha = await this.performPush({ path, name }, content, remote.sha);
+            const sha = await this.performPush({ path, name }, content, remote.sha, remote.revision);
             return { sha };
         } catch (e) {
             this.handleError(`Failed to push ${name} to ${this.serviceName}`, e);
@@ -259,7 +259,7 @@ export class SyncManager {
                 try {
                     const fileRep = typeof fileOrPath === 'string' ? file : fileOrPath;
                     if (choice === 'local') {
-                        await this.performPush(file, content, remote.sha);
+                        await this.performPush(file, content, remote.sha, remote.revision);
                     } else {
                         await this.performPull(fileRep, remote.content, remote.sha, false, this.symlinkPullTarget(remote));
                     }
@@ -367,7 +367,7 @@ export class SyncManager {
             }
 
             const remoteAtOldPath = await this.gitService.getFile(oldRepoPath, this.settings.branch);
-            const safeToDeleteOld = !remoteAtOldPath.sha || !metadata?.lastSyncedSha || remoteAtOldPath.sha === metadata.lastSyncedSha;
+            const safeToDeleteOld = !remoteAtOldPath.sha || !metadata?.lastSyncedSha || this.isSameBaseline(metadata.lastSyncedSha, remoteAtOldPath);
 
             const newSha = await this.commitMove(repoPath, oldRepoPath, content, safeToDeleteOld && !!remoteAtOldPath.sha);
 
@@ -405,14 +405,15 @@ export class SyncManager {
         return newSha;
     }
 
-    private async performPush(file: {path: string, name: string}, content: string | ArrayBuffer, existingSha?: string, silent = false): Promise<string | undefined> {
+    private async performPush(file: {path: string, name: string}, content: string | ArrayBuffer, existingSha?: string, existingRevision?: string, silent = false): Promise<string | undefined> {
         const repoPath = this.getNormalizedPath(file.path);
         const result = await this.gitService.pushFile(
             repoPath,
             content,
             this.settings.branch,
             `Update ${file.name} from Obsidian`,
-            existingSha
+            existingSha,
+            existingRevision
         );
 
         // Update metadata
@@ -474,13 +475,13 @@ export class SyncManager {
             }
 
             // Conflict detection for pull (only if local exists)
-            if (exists && remote.sha && lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
+            if (exists && remote.sha && lastSynced && !this.isSameBaseline(lastSynced.lastSyncedSha, remote)) {
                 new SyncConflictModal(this.app, name, (localContent as string) || '', remote.content as string, (choice) => {
                     void (async () => {
                         try {
                             const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
                             if (choice === 'local') {
-                                await this.performPush(fileRep, localContent || '', remote.sha);
+                                await this.performPush(fileRep, localContent || '', remote.sha, remote.revision);
                             } else {
                                 await this.performPull(fileRep, remote.content, remote.sha, false, this.symlinkPullTarget(remote));
                             }
@@ -504,6 +505,11 @@ export class SyncManager {
 
     private contentsEqual(a: string | ArrayBuffer, b: string | ArrayBuffer): boolean {
         return contentsEqual(a, b);
+    }
+
+    /** Check if remote baseline matches metadata, supporting lazy migration of old metadata. */
+    private isSameBaseline(lastSyncedSha: string, remoteFile: GitFile): boolean {
+        return lastSyncedSha === remoteFile.sha || lastSyncedSha === remoteFile.revision;
     }
 
     private isBinary(path: string): boolean {
@@ -1034,7 +1040,7 @@ export class SyncManager {
     private async pushSequentialFallback(toPush: ToPushEntry[], results: PushResults): Promise<void> {
         for (const f of toPush) {
             try {
-                const sha = await this.performPush({ path: f.path, name: f.name }, f.content, f.existingSha, true);
+                const sha = await this.performPush({ path: f.path, name: f.name }, f.content, f.existingSha, f.existingRevision, true);
                 results.success++;
                 results.syncedPaths.push({ path: f.path, sha });
             } catch (e) {
@@ -1220,7 +1226,7 @@ export class SyncManager {
 
             // Same conflict check as the single-file flow (see processSingleBatchPush).
             const lastSynced = this.settings.syncMetadata[path];
-            if (lastSynced && remote.sha !== lastSynced.lastSyncedSha) {
+            if (lastSynced && !this.isSameBaseline(lastSynced.lastSyncedSha, remote)) {
                 return 'conflict';
             }
         }

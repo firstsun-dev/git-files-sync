@@ -5,6 +5,7 @@ import { GitTreeEntry } from './git-service-interface';
 export interface GitFile {
     content: string | ArrayBuffer;
     sha: string;
+    revision?: string;
     isSymlink?: boolean;
     symlinkTarget?: string;
 }
@@ -376,7 +377,7 @@ export abstract class BaseGitService {
     }
 
     abstract getFile(path: string, branch: string): Promise<GitFile>;
-    abstract pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }>;
+    abstract pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string, revision?: string): Promise<{ path: string, sha?: string }>;
     abstract listFilesDetailed(branch: string, useFilter?: boolean): Promise<GitTreeEntry[]>;
     abstract deleteFile(path: string, branch: string, message: string): Promise<void>;
     abstract testConnection(branch: string): Promise<ConnectionTestResult>;

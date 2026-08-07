@@ -36,7 +36,7 @@ describe('SyncManager – binary file handling', () => {
             expect(mockAdapter.readBinary).toHaveBeenCalledWith('photo.png');
             expect(mockAdapter.read).not.toHaveBeenCalled();
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
-                'photo.png', buf, 'main', expect.any(String), ''
+                'photo.png', buf, 'main', expect.any(String), '', undefined
             );
         });
 

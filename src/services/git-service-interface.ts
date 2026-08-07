@@ -2,7 +2,10 @@ import { ConnectionTestResult } from './git-service-base';
 
 export interface GitFile {
     content: string | ArrayBuffer;
+    /** The blob's git SHA — permanent blob identity, used to compare content across syncs. */
     sha: string;
+    /** Provider-specific revision for write/concurrency control (e.g., GitLab's last_commit_id). */
+    revision?: string;
     /** True when the remote blob is a symbolic link (mode 120000). */
     isSymlink?: boolean;
     /** The link target path, when isSymlink is true and it could be determined. */
@@ -54,7 +57,7 @@ export interface BatchMoveItem {
 export interface GitServiceInterface {
     updateConfig(...args: unknown[]): void;
     getFile(path: string, branch: string): Promise<GitFile>;
-    pushFile(path: string, content: string | ArrayBuffer, branch: string, commitMessage: string, existingSha?: string): Promise<{ path: string, sha?: string }>;
+    pushFile(path: string, content: string | ArrayBuffer, branch: string, commitMessage: string, existingSha?: string, existingRevision?: string): Promise<{ path: string, sha?: string }>;
     /** Returns the branch's current commit SHA when the provider can expose it cheaply. */
     getBranchHead?(branch: string): Promise<string>;
     /** Checks the repository is reachable and the given branch exists. */

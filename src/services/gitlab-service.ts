@@ -28,17 +28,18 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
             const url = `${this.getApiUrl(path)}?ref=${branch}`;
             const response = await this.safeRequest(url, 'GET');
             const data = this.parseJson<GitLabFileResponse>(response);
-            
+
             return {
                 content: this.decodeContent(data.content, path),
-                sha: data.last_commit_id
+                sha: data.blob_id,
+                revision: data.last_commit_id
             };
         } catch (e) {
             return this.handleFileNotFound(e);
         }
     }
 
-    async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string): Promise<{ path: string, sha?: string }> {
+    async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, sha?: string, revision?: string): Promise<{ path: string, sha?: string }> {
         const url = this.getApiUrl(path);
         const body: { branch: string; content: string; encoding: string; commit_message: string; last_commit_id?: string } = {
             branch,
@@ -46,8 +47,8 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
             encoding: 'base64',
             commit_message: message,
         };
-        // A blank sha means the file is new: create it (POST) without last_commit_id.
-        if (sha) body.last_commit_id = sha;
+        // A blank sha means the file is new: create it (POST). Use revision for GitLab's optimistic locking.
+        if (revision) body.last_commit_id = revision;
 
         const method = sha ? 'PUT' : 'POST';
         const response = await this.safeRequest(url, method, body);

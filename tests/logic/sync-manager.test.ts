@@ -135,7 +135,8 @@ describe('SyncManager', () => {
             'local content',
             'main',
             'Update test.md from Obsidian',
-            'old-sha'
+            'old-sha',
+            undefined
         );
     });
 
@@ -155,7 +156,8 @@ describe('SyncManager', () => {
             'linked content',
             'main',
             'Update link.md from Obsidian',
-            'old-sha'
+            'old-sha',
+            undefined
         );
     });
 
@@ -221,7 +223,7 @@ describe('SyncManager', () => {
         await new Promise(resolve => setTimeout(resolve, 50));
 
         const pushSpy = vi.spyOn(mockGitLab, 'pushFile');
-        expect(pushSpy).toHaveBeenCalledWith('test.md', 'local content', 'main', 'Update test.md from Obsidian', 'remote-sha');
+        expect(pushSpy).toHaveBeenCalledWith('test.md', 'local content', 'main', 'Update test.md from Obsidian', 'remote-sha', undefined);
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('new-sha');
     });
 
@@ -328,7 +330,8 @@ describe('SyncManager', () => {
             'new local content',
             'main',
             'Update new.md from Obsidian',
-            ''
+            '',
+            undefined
         );
         expect(mockSettings.syncMetadata['new.md']?.lastSyncedSha).toBe('new-sha');
     });
@@ -456,7 +459,8 @@ describe('SyncManager', () => {
                 'unrelated content',
                 'main',
                 `Update ${mockFile.name} from Obsidian`,
-                'remote-sha'
+                'remote-sha',
+                undefined
             );
             // The orphaned entry must be left alone -- it wasn't the source of this push.
             expect(mockSettings.syncMetadata[orphanedPath]).toBeDefined();
