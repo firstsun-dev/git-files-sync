@@ -1,31 +1,7 @@
 {
   "_note": "GitHub Issues (firstsun-dev/git-files-sync, Project #6) is the source of truth for the full backlog and priority/estimate fields. This file mirrors only the active feature and the next few candidates so an agent session has a local, offline checkpoint — sync it against `gh issue list --repo firstsun-dev/git-files-sync --state open` at the start of a session rather than treating it as authoritative.",
-  "_prPolicy": "User explicitly requested fewer PRs (2026-07-13): all issue work is consolidated onto branch claude/fix-directory-symlink-pull-260713 -> PR #51, not one PR per issue. Commit new work directly onto that branch unless told otherwise.",
+  "_lastSync": "2026-08-07: Archived feat-001 through feat-025 (complete). Backlog candidates below.",
   "features": [
-    {
-      "id": "feat-001",
-      "name": "Project Setup",
-      "description": "Confirm the project can install dependencies, run verification, and start from a clean checkout",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "Commit 28f4f8e - npm install/lint/build/test all pass from a clean checkout"
-    },
-    {
-      "id": "feat-002",
-      "name": "Settings UX bundle (issues #40, #41, #42)",
-      "description": "Local ignore-pattern sync setting (#40), persistent connection status badge in settings (#41), and resized/tabbed conflict resolution modal (#42)",
-      "dependencies": ["feat-001"],
-      "status": "done",
-      "evidence": "Consolidated onto PR #51 (branch claude/fix-directory-symlink-pull-260713); 302 tests pass"
-    },
-    {
-      "id": "feat-003",
-      "name": "fix: symbolic link pull fails (issue #33)",
-      "description": "Directory symlinks were walked as real trees by local scanning code, causing bogus remote .gitignore 404s and a permanently-stuck 'remote only' status; also fixed a missing Windows symlinkSync type hint",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "Commit 4c8896b, consolidated onto PR #51"
-    },
     {
       "id": "feat-004",
       "name": "fix: resolve sonarqube issues (issue #45)",
@@ -35,172 +11,12 @@
       "evidence": ""
     },
     {
-      "id": "feat-005",
-      "name": "feat(settings): folder picker for root path / vault folder (issue #48)",
-      "description": "Searchable folder suggester for the Root path and Vault folder settings fields, replacing free-text entry",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "Commit c107979, consolidated onto PR #51"
-    },
-    {
-      "id": "feat-006",
-      "name": "perf(refresh): use tree blob SHAs to avoid per-file content fetches (issue #36)",
-      "description": "Status refresh compares a locally-computed git blob SHA against each remote tree entry's SHA instead of one getFile per file; diff content fetched on demand via new getBlob(sha,path); symlink-aware hashing per real/follow/skip modes",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "Commit 2ed5a43, consolidated onto PR #51; 302 tests pass"
-    },
-    {
-      "id": "feat-007",
-      "name": "fix: clear error when requestUrl() rejects with HTML (issue #31)",
-      "description": "Some Obsidian versions eagerly JSON-parse inside requestUrl() itself, so a login/proxy HTML page rejected the whole call with a raw SyntaxError bypassing the existing parseJson() HTML-detection wrapper; added the same detection to safeRequest's outer catch",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "Commit a867217, consolidated onto PR #51"
-    },
-    {
-      "id": "feat-008",
-      "name": "feat: show new feature tips after update (issue #39)",
-      "description": "Hand-curated src/changelog.ts (separate from auto-generated CHANGELOG.md) with a notable flag per entry, numeric compareVersions(), WhatsNewModal shown once per version bump via a new lastSeenVersion setting",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "Commit 4eebebc, consolidated onto PR #51"
-    },
-    {
-      "id": "feat-009",
-      "name": "feat: add i18n (multi-language) support (issue #38)",
-      "description": "Extract hardcoded UI strings (settings tab, ribbon/command labels, Notice messages, sync status view/modals) into an i18n key system with locale detection and English fallback",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "Commit 144eb28, merged into claude/fix-directory-symlink-pull-260713 - 159 i18n keys (en+zh-tw), ~130 strings replaced; lint/build clean, 308 tests pass; consolidated onto PR #51"
-    },
-    {
       "id": "feat-010",
       "name": "feat: add bitbucket support (issue #37)",
       "description": "Add Bitbucket as a fourth GitServiceInterface provider; Bitbucket's API has no native blob SHA concept and is PR-based rather than direct-commit, so GitFile.sha semantics may need adjusting",
-      "dependencies": ["feat-009"],
+      "dependencies": [],
       "status": "not-started",
       "evidence": ""
-    },
-    {
-      "id": "feat-011",
-      "name": "perf(push): batch-commit push-all + SHA-based diffing",
-      "description": "Push-all was up to 3N sequential HTTP calls and N separate commits for N files, plus two redundant full-tree fetches per run. Added optional GitServiceInterface.pushBatch (GitHub/Gitea via blob->tree->commit->ref, generalizing pushSymlink's pattern; GitLab via the native multi-action Commits API + a follow-up tree read for blob shas); sync-manager now classifies each file via a locally-computed git blob sha against one pre-fetched remote tree (no getFile per file) and commits all queued files in one grouped call (chunked at MAX_BATCH_PUSH_SIZE=200), falling back to the old per-file path when a provider has no pushBatch; main.ts/GitignoreManager now share one tree fetch instead of two",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 330/330 passed; consolidated onto PR #51"
-    },
-    {
-      "id": "feat-012",
-      "name": "perf(delete): batch-commit remote-only file deletion",
-      "description": "Follow-up to feat-011: batch-deleting remote-only files via the sync status panel's checkbox multi-select was still N separate commits (SyncStatusView.performRemoteDeletion looped gitService.deleteFile per file). Added optional GitServiceInterface.deleteBatch, mirroring pushBatch: GitHub/Gitea via the git blob->tree->commit->ref Data API (a tree entry with sha:null removes that path); GitLab via the same Commits API actions array used for pushBatch, with action:'delete'. SyncStatusView.performRemoteDeletion now calls deleteBatch once (chunked at MAX_BATCH_PUSH_SIZE) when the provider supports it, falling back to the original sequential per-file performRemoteDeletionSequential otherwise",
-      "dependencies": ["feat-011"],
-      "status": "done",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 339/339 passed; consolidated onto PR #51"
-    },
-    {
-      "id": "feat-013",
-      "name": "perf(push): parallelize blob creation within a batch commit",
-      "description": "User reported push-all was still slow on GitHub after feat-011's one-commit-per-run batching landed. Root cause: GitHubService/GiteaService.pushBatch still created each file's blob with a sequential `for` loop (N sequential POST .../git/blobs round trips before the single tree/commit/ref sequence), so wall-clock time was still O(N) latency-bound. Added a shared BaseGitService.mapWithConcurrency helper (order-preserving, bounded concurrency) and a BLOB_CREATE_CONCURRENCY=8 cap in git-service-base.ts; both services' pushBatch now creates blobs concurrently instead of one at a time. GitLab unaffected (its Commits API already sends the whole batch in one request, no per-file blob step)",
-      "dependencies": ["feat-011"],
-      "status": "done",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 340/340 passed; consolidated onto PR #51"
-    },
-    {
-      "id": "feat-014",
-      "name": "perf(push): GitHub batch push/delete via GraphQL createCommitOnBranch",
-      "description": "User reported batch push was still slow on GitHub after feat-013's blob-concurrency fix. Root cause: GitHubService.pushBatch/deleteBatch still needed N/8 rounds of sequential REST blob-creation calls before the tree/commit/ref sequence. Replaced GitHub's pushBatch/deleteBatch with a single GraphQL createCommitOnBranch mutation carrying file content directly (additions/deletions), cutting an N-file batch to 2-3 HTTP calls total (ref lookup + mutation, plus one follow-up tree fetch for pushBatch's per-file shas, which the mutation doesn't return). Extracted BaseGitService.getLatestCommitSha out of resolveGitHubStyleBaseTree (still used by pushSymlink and Gitea's REST-only batch path, which has no GraphQL equivalent). Added explicit handling for GraphQL's 200-status-with-errors-array failure mode, which REST's status-code check can't catch.",
-      "dependencies": ["feat-013"],
-      "status": "done",
-      "evidence": "Commit 114a575. npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 341/341 passed; live smoke test against a real GitHub repo confirmed pushBatch/deleteBatch each produce one commit."
-    },
-    {
-      "id": "feat-015",
-      "name": "fix(push): avoid stale remote-tree read right after a batch push",
-      "description": "User reported: batch-pushing two empty files, then refreshing immediately, showed them as 'modified' even though the diff was identical; refreshing again a bit later showed them synced. Root cause (confirmed via live GitHub API test, not a content bug - the pushed blob was byte-for-byte correct): SyncStatusView re-fetched the remote tree via refreshAllStatuses() right after push, and GitHub's tree-by-branch-name read can lag a just-completed write by a moment. Fix: SyncManager.pushAllFiles now also returns syncedPaths (path + new sha) from data already known at each write site (batch chunk result, sequential fallback, immediate symlink/rename push); SyncStatusView marks those paths 'synced' directly instead of re-fetching the tree, avoiding the race entirely. Pull unaffected.",
-      "dependencies": ["feat-014"],
-      "status": "done",
-      "evidence": "Commit 7676325. npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 344/344 passed."
-    },
-    {
-      "id": "feat-016",
-      "name": "perf(push): eliminate redundant GitHub requests + avoid stale rename lookup requests",
-      "description": "Two further push-speed perf commits landed on codex/perf-github-push-260723 before this session (pre-existing work, not authored in this session): 0445b17 eliminate redundant GitHub requests, f8a0a26 avoid stale rename lookup requests. perf(push) is patch-level under .releaserc.json's commit-analyzer, so these will bump 1.3.0 -> 1.3.1 on the next automated release.",
-      "dependencies": ["feat-015"],
-      "status": "done",
-      "evidence": "Commits 0445b17, f8a0a26 (pre-session)."
-    },
-    {
-      "id": "feat-017",
-      "name": "feat(i18n): localize update notifications (issue #64)",
-      "description": "The what's-new modal title/buttons were already i18n'd, but each release's entry text (src/changelog.ts) was hard-coded English. Restructured into src/changelog/ with one folder per version (1.2.1, 1.3.0, 1.3.1), each entry carrying inline {en, zh-tw, zh-cn} text resolved at render time by entryText() against the active locale (falls back to en). WhatsNewModal and the settings what's-new banner both switched from reading entry.text to entryText(entry). First pass put the text as new keys in the shared src/i18n/locales/*.ts catalog; user rejected that since it would make those files grow unbounded every release, so it was redesigned into the per-version-folder shape. Also added a 1.3.1 entry summarizing feat-016's push-speed work.",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 351/351 passed."
-    },
-    {
-      "id": "feat-018",
-      "name": "feat(ui): add a path search filter to the sync panel (issue #70)",
-      "description": "Text input above the tabs filtering rows by case-insensitive substring of the full path (so a folder prefix acts as a folder filter), debounced 150ms. Search ANDs with the status tab and tab counts recompute against the search results, so a match in another tab is visible rather than lost. Any change to the search or the status tab prunes selectedFiles down to the visible rows, keeping the invariant that the selection never holds anything the filter hides (Push/Pull/Delete all act on it and are irreversible). Originally shipped as a full clear on any query change, corrected after user feedback: that discarded ticks the new query still matched. Structural prerequisite: renderView() called container.empty() on the whole tree, so an input created inside it was destroyed on every keystroke and lost focus after one character - onOpen() now builds a persistent headerEl (info slot + search box) and bodyEl, and renderView() rebuilds only those two inner containers.",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 395/395 passed. Not yet committed."
-    },
-    {
-      "id": "feat-019",
-      "name": "feat(ui): open the file from its path in the sync panel (issue #68)",
-      "description": "The row path was a plain span with no handler. It is now a link whose target follows where the file actually lives: local statuses open in Obsidian via workspace.getLeaf(newLeaf).openFile, remote-only opens the provider's web page via a new src/utils/remote-url.ts builder (GitHub/Gitea always; GitLab only when projectId is a namespace path, since a numeric id has no per-file web URL). Paths with no resolvable target - hidden files outside Obsidian's index, or provider settings that yield no URL - render as plain text rather than a dead link. Cmd/Ctrl+click opens in a new leaf via Keymap.isModEvent.",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 395/395 passed. Not yet committed."
-    },
-    {
-      "id": "feat-020",
-      "name": "feat(ui): show diff in a dedicated pane on desktop (issue #69)",
-      "description": "New DiffView (sync-diff-view) registered in main.ts; on desktop the row's Diff button opens/reuses that pane instead of expanding inline, mobile keeps the inline panel. Cheap because renderDiffPanel was already a container-agnostic pure function and the split/unified switch is a container query - the pane carries its own container-type, so side-by-side appears with no CSS changes. Leaf reuse (getLeavesOfType then getLeaf('tab') only when absent) keeps the pane where the user drags it. Stale-pane guard: closeDiffPaneFor() detaches the pane when the file it shows is pushed or pulled, since it would otherwise keep rendering the pre-push diff while looking current.",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 395/395 passed. Not yet committed."
-    },
-    {
-      "id": "feat-021",
-      "name": "feat(sync): commit renames as a real move with a dedicated moved status (issue #66)",
-      "description": "Renaming a file previously pushed a copy to the new path and left the old file on the remote forever. main.ts now tracks vault 'rename' events live via new SyncManager.trackRename, moving syncMetadata to the new path and recording renamedFrom (a chain of renames collapses to one pending move; renaming back to the still-synced path cancels it). handleRename performs a real move - new path added, old path removed, one commit - via new optional GitServiceInterface.commitBatch (GitHub: createCommitOnBranch additions+deletions; GitLab: Commits API action:'move'; Gitea: tree with a fresh blob + null-sha removal), falling back to sequential push-then-delete otherwise. Two safety checks: a target that already exists on the remote is never silently overwritten, and an old path whose remote content moved on since the last sync is never silently deleted. Moves fold into the push-all batch flow (toMove alongside toPush) for one commit per run. UI: new FileStatus 'moved' + movedFrom, classified from syncMetadata alone (no network call), rendered as one row (struck-through old path, Push + Revert actions, excluded from bulk Pull/Delete), with a conditional 'moved' filter tab.",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "Commit aeb1ad0 - npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 425/425 passed."
-    },
-    {
-      "id": "feat-022",
-      "name": "feat(ui): collapse folder moves into a single row (issue #67)",
-      "description": "Depends on feat-021. Moving a folder previously produced one 'moved' row per file. SyncStatusView now groups 'moved' rows by an (oldPrefix, newPrefix) pair found by matching path segments from the end (the topmost divergence point is the folder that moved), collapsing to one row only when every tracked file under the old prefix actually moved (isPartialMove) and the group has more than one member. New renderMoveGroupItem (FileListItem.ts) shows the new/old prefix, a Push button that routes every member through the existing pushAllFiles batch flow (one commit for the whole group), an expand toggle listing members as read-only sub-rows, and a Revert action. The 'moved' tab count is rows, not files.",
-      "dependencies": ["feat-021"],
-      "status": "done",
-      "evidence": "Commit 1ba1293 - npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 430/430 passed."
-    },
-    {
-      "id": "feat-023",
-      "name": "feat: add sync plan preview before applying changes (issue #63)",
-      "description": "Terraform-style plan/review/apply for every push, pull, and remote deletion -- single-file or batch. New SyncPlan type (additions/modifications/deletions/moves) and SyncPlanModal render the counts and paths for review, with deletions in their own visually distinct/warned section; Apply/Cancel resolve a promise gating the real write. SyncManager gained read-only plan classifiers (classifyPushForPlan reuses queueMove and a dryRun-guarded classifyAgainstTreeEntry; classifyPullForPlan reads only the pre-fetched tree's blob sha, never a network fetch, to avoid doubling pull-all's remote reads) feeding planPushBatch/planPullBatch; pushFile/pullFile show a single-entry plan inline before performPush/performPull. SyncStatusView.confirmDeletion uses SyncPlanModal for any remote deletion (falls back to the existing plain ConfirmModal when the batch is local-only). Conflict resolution (SyncConflictModal) and the rename/move push path are unchanged -- both already carry their own review/safety gates, so this doesn't stack a second modal on top.",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean (incl. Obsidian 1.11.0 compat); npx vitest run -> 449/449 passed. Branch claude/sync-plan-preview-63 off prepare-1.5.0."
-    },
-    {
-      "id": "feat-024",
-      "name": "feat(sync): auto-refresh status on startup and order synced entries last",
-      "description": "Automatically refresh the Sync Status View after Obsidian layout is ready, enabled by default with a settings toggle. The Synced tab is last and synced rows are placed at the bottom of All.",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 474/474 passed."
-    },
-    {
-      "id": "feat-025",
-      "name": "feat(ui): tree view and synced toggle in Sync Status",
-      "description": "Render Sync Status paths as a collapsible hierarchy with tri-state folder selection. The controls below Refresh toggle tree view on/off and, while tree view is enabled, whether All shows Synced rows; the Synced tab remains available.",
-      "dependencies": ["feat-024"],
-      "status": "in-progress",
-      "evidence": "npx eslint . -> 0 errors; npm run build -> clean; npx vitest run -> 490/490 passed; manual Obsidian verification outstanding."
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."
