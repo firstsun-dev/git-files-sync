@@ -1,6 +1,5 @@
 import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchMoveItem } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE, BLOB_CREATE_CONCURRENCY } from './git-service-base';
-import { logger } from '../utils/logger';
 import { PushTimingCollector, PushTimingHandler, PushTimingRecord } from './push-timing';
 
 /**
@@ -109,6 +108,10 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
     }
 
     async pushFile(path: string, content: string | ArrayBuffer, branch: string, message: string, _existingSha?: string, _revision?: string): Promise<{ path: string, sha?: string }> {
+        const entry = (await this.listFilesDetailed(branch, false)).find(item => item.path === this.getFullPath(path));
+        if (entry?.symlink) {
+            throw new Error(`Cannot overwrite symlink "${path}" with a regular file.`);
+        }
         const [result] = await this.pushBatch([{ path, content }], branch, message);
         return result ?? { path };
     }
@@ -314,9 +317,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
             throw this.branchNotFoundError(e, branch);
         }
 
-        if (data.truncated) {
-            logger.warn('GitHub tree result is truncated. Some files might not be shown.');
-        }
+        if (data.truncated) throw new Error(`GitHub tree for branch "${branch}" is truncated; sync stopped to avoid treating an incomplete remote tree as a snapshot.`);
 
         const entries = data.tree
             .filter(item => item.type === 'blob')

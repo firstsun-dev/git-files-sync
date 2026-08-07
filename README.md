@@ -63,13 +63,17 @@ A single dashboard shows the state of every tracked file:
 
 | | Provider | Required info | Token scope |
 |:---:|---|---|---|
-| <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub"> | **GitHub** | Personal access token, owner, repo name | `repo` |
-| <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab"> | **GitLab** | Personal access token, project ID, base URL | `api` |
-| <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea"> | **Gitea** | Personal access token, base URL, owner, repo name | (all) |
+| <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub"> | **GitHub** | Personal access token, owner, repo name | `Contents: Read and write` (fine-grained); `repo` (classic) |
+| <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab"> | **GitLab** | Personal access token, project ID, base URL | `read_repository`, `write_repository` |
+| <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea"> | **Gitea** | Personal access token, base URL, owner, repo name | `write:repository` (1.19+); account-wide on older versions |
 
-- **GitHub token:** Settings → Developer settings → Personal access tokens → `repo` scope.
-- **GitLab token:** User settings → Access tokens → `api` scope. Base URL defaults to `https://gitlab.com`; change it for self-hosted instances.
-- **Gitea token:** User settings → Applications → Access tokens. Point the base URL at your instance (e.g. `https://gitea.example.com`).
+> **Security tip:** scope every token as narrowly as possible — one repo, the minimum permissions, and a short expiration — and store it only in this plugin's settings. Never paste it into a note that gets synced. Rotate it immediately if it's ever exposed, and revoke tokens you're no longer using.
+
+- **GitHub token:** create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) (Settings → Developer settings → Personal access tokens → Fine-grained tokens) rather than a classic one. Set **Repository access** to *Only select repositories* and pick just the repo you're syncing, set an **Expiration** (90 days or less), and grant only **Contents: Read and write**. If you must use a classic token, limit the `repo` scope to that one use and set an expiration.
+- **GitLab token:** prefer a [project access token](https://docs.gitlab.com/user/project/settings/project_access_tokens/) (Project → Settings → Access tokens) over a personal one — it's scoped to a single project and can be revoked without affecting your account. The plugin only calls the repository tree/blobs/commits/branches endpoints, so grant just `read_repository` and `write_repository` (**not** `api`, which also grants issues, merge requests, CI, and account-wide access). Role **Developer** is the minimum that can push to a non-protected branch. Set an expiration date, and base URL defaults to `https://gitlab.com`; change it for self-hosted instances.
+- **Gitea token:** User settings → Applications → Access tokens. The plugin only touches repository content, branches, and git data, so on Gitea 1.19+ (which supports per-scope tokens) select just **`write:repository`** — that implies read access too — instead of "Select all". Older Gitea versions (down to the 1.12 minimum) don't support scoped tokens, so the token is account-wide by default; in that case, use a dedicated bot/service account with access to only the target repo rather than your personal account's token. Set an expiration if your instance offers one, and point the base URL at your instance (e.g. `https://gitea.example.com`).
+
+All three providers let you revoke a token instantly from its settings page — do that first if a token may have leaked, then issue a new one.
 
 Other settings: **language** (system default, English, Traditional Chinese, or Simplified Chinese); **auto-refresh Sync Status on startup**; **branch** to sync against (default `main`); **root path** prefix inside the repo; **vault folder** to scope which notes are tracked; and **symbolic link handling** (*real* — recreate the link, GitHub only; *follow* — sync the target's content; *skip*). See [Symbolic link handling](docs/symlink-handling.md) for details.
 

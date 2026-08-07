@@ -177,6 +177,8 @@ describe('BaseGitService', () => {
         it('should correctly encode and decode UTF-8 content', async () => {
             const original = 'Hello, 世界! 🌍';
             vi.mocked(requestUrl)
+                // Tree mode check prevents a regular-file push from replacing a symlink.
+                .mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'test.md', type: 'blob', mode: '100644' }] } } as unknown as RequestUrlResponse)
                 // Branch head for expectedHeadOid, read over GraphQL.
                 .mockResolvedValueOnce({ status: 200, json: { data: { repository: { ref: { target: { oid: 'commit1' } } } } } } as unknown as RequestUrlResponse)
                 .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
@@ -185,7 +187,7 @@ describe('BaseGitService', () => {
             await service.pushFile('test.md', original, 'main', 'test');
 
             const calls = vi.mocked(requestUrl).mock.calls;
-            const body = JSON.parse((calls[1]?.[0] as { body: string }).body) as { variables: { input: { fileChanges: { additions: Array<{ contents: string }> } } } };
+            const body = JSON.parse((calls[2]?.[0] as { body: string }).body) as { variables: { input: { fileChanges: { additions: Array<{ contents: string }> } } } };
             const decoded = atob(body.variables.input.fileChanges.additions[0]?.contents.replace(/\s/g, '') ?? '');
             const bytes = new Uint8Array(decoded.length);
             for (let i = 0; i < decoded.length; i++) {

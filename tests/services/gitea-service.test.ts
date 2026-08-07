@@ -205,12 +205,9 @@ describe('GiteaService', () => {
             expect(await service.listFiles('main', false)).toEqual(['vault/file1.md', 'other/file2.md']);
         });
 
-        it('should log warning and return files when result is truncated', async () => {
+        it('fails closed when the tree result is truncated', async () => {
             mockListFiles([{ path: 'file1.md', type: 'blob' }], true);
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            const result = await service.listFiles('main');
-            expect(result).toEqual(['file1.md']);
-            warnSpy.mockRestore();
+            await expect(service.listFiles('main')).rejects.toThrow(/truncated; sync stopped/);
         });
 
         it('should throw a message naming the branch when the branch is not found', async () => {

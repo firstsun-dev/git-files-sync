@@ -1,6 +1,7 @@
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { logger } from '../utils/logger';
 import { GitTreeEntry } from './git-service-interface';
+import { isBinaryPath } from '../utils/path';
 
 export interface GitFile {
     content: string | ArrayBuffer;
@@ -195,18 +196,6 @@ export abstract class BaseGitService {
         return cleanRoot + path;
     }
 
-    protected isBinary(path: string): boolean {
-        const ext = path.split('.').pop()?.toLowerCase();
-        if (!ext) return false;
-        const BINARY_EXTENSIONS = new Set([
-            'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'pdf', 'zip', 'gz', '7z', 'rar',
-            'mp3', 'mp4', 'wav', 'ogg', 'webm', 'mov', 'avi', 'wmv', 'webp',
-            'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'epub', 'exe', 'dll', 'so',
-            'ttf', 'woff', 'woff2', 'eot', 'wasm', 'dmg', 'iso'
-        ]);
-        return BINARY_EXTENSIONS.has(ext);
-    }
-
     protected encodeContent(content: string | ArrayBuffer): string {
         if (typeof content === 'string') {
             const bytes = new TextEncoder().encode(content);
@@ -235,7 +224,7 @@ export abstract class BaseGitService {
             bytes[i] = cp !== undefined ? cp : 0;
         }
 
-        return this.isBinary(path) ? bytes.buffer : new TextDecoder().decode(bytes);
+        return isBinaryPath(path) ? bytes.buffer : new TextDecoder().decode(bytes);
     }
 
     /**
