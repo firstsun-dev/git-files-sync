@@ -148,6 +148,27 @@ describe('SyncManager Batch Operations', () => {
             ]);
         });
 
+        it('reads and forwards GitLab revision for an existing batch update', async () => {
+            const path = 'locked.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            mockSettings.serviceType = 'gitlab';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'remote-blob', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('local edit');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path, symlink: false, sha: 'remote-blob' }]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote original', sha: 'remote-blob', revision: 'remote-commit' });
+            mockGitService.pushBatch = vi.fn().mockResolvedValue([{ path, sha: 'new-blob' }]);
+
+            const results = await manager.pushAllFiles([path]);
+
+            expect(results.success).toBe(1);
+            expect(mockGitService.pushBatch).toHaveBeenCalledWith([
+                { path, content: 'local edit', existedRemotely: true, revision: 'remote-commit' },
+            ], 'main', expect.any(String));
+        });
+
         it('reports syncedPaths via the sequential fallback when the provider has no pushBatch', async () => {
             const files = ['a.md', 'b.md'];
             const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
@@ -317,6 +338,25 @@ describe('SyncManager Batch Operations', () => {
             expect(results.conflicts).toBe(1);
             expect(mockGitService.getFile).not.toHaveBeenCalled();
             expect(adapter.write).not.toHaveBeenCalled();
+        });
+
+        it('migrates a legacy GitLab last_commit_id baseline instead of creating a false pull conflict', async () => {
+            const path = 'legacy.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            mockSettings.serviceType = 'gitlab';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'legacy-last-commit', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('local old copy');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path, symlink: false, sha: 'remote-blob' }]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote current copy', sha: 'remote-blob', revision: 'legacy-last-commit' });
+
+            const results = await manager.pullAllFiles([path]);
+
+            expect(results.conflicts).toBe(0);
+            expect(results.success).toBe(1);
+            expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe('remote-blob');
         });
 
         it('still downloads when the local file differs and the remote has not moved', async () => {

@@ -1,6 +1,5 @@
 import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchMoveItem } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE, BLOB_CREATE_CONCURRENCY } from './git-service-base';
-import { logger } from '../utils/logger';
 
 export class GiteaService extends BaseGitService implements GitServiceInterface {
     private baseUrl: string = '';
@@ -156,9 +155,7 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
         const treeResponse = await this.safeRequest(treeUrl, 'GET');
         const treeData = this.parseJson<GitHubTreeResponse>(treeResponse);
 
-        if (treeData.truncated) {
-            logger.warn('Gitea tree result is truncated. Some files might not be shown.');
-        }
+        if (treeData.truncated) throw new Error(`Gitea tree for branch "${branch}" is truncated; sync stopped to avoid treating an incomplete remote tree as a snapshot.`);
 
         const entries = treeData.tree
             .filter(item => item.type === 'blob')

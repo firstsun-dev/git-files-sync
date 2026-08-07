@@ -36,6 +36,8 @@ export interface BatchPushItem {
      * action 'create' vs 'update'); GitHub/Gitea's tree-based commit ignores it.
      */
     existedRemotely?: boolean;
+    /** Revision read during batch planning, used by GitLab's optimistic lock. */
+    revision?: string;
 }
 
 /** Result for one file after a batch push completes. */
@@ -52,6 +54,8 @@ export interface BatchMoveItem {
     /** Path relative to rootPath, where the file now lives. */
     newPath: string;
     content: string | ArrayBuffer;
+    /** Revision of oldPath read during batch planning, used by GitLab's optimistic lock. */
+    oldRevision?: string;
 }
 
 export interface GitServiceInterface {
