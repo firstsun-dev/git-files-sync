@@ -349,6 +349,31 @@ describe('GiteaService', () => {
                 { operation: 'update', path: 'new.md', from_path: 'old.md', content: btoa('moved content') },
             ]);
         });
+
+        it('uses "update" (not "create") for an addition that already existed remotely, mixed with a move', async () => {
+            // A batch-resolved "keep local" conflict lands here as an addition
+            // with existedRemotely: true -- commitBatch must respect that flag
+            // exactly like pushBatch does, or Gitea 422s trying to "create" a
+            // path that's already there.
+            mockRequest({
+                status: 201,
+                json: { files: [{ path: 'existing.md', sha: 'blob-existing' }, { path: 'new.md', sha: 'blob-move' }] },
+            });
+
+            await service.commitBatch(
+                [{ path: 'existing.md', content: 'resolved content', existedRemotely: true }],
+                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                'main',
+                'Push 1 file(s) and move 1 file(s) from Obsidian'
+            );
+
+            const call = getLastRequestCall();
+            const body = JSON.parse(call.body as string) as { files: Array<{ operation: string; path: string; from_path?: string }> };
+            expect(body.files).toEqual([
+                { operation: 'update', path: 'existing.md', content: btoa('resolved content') },
+                { operation: 'update', path: 'new.md', from_path: 'old.md', content: btoa('moved content') },
+            ]);
+        });
     });
 
     describe('testConnection', () => {
