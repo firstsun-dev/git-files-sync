@@ -1,29 +1,48 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi, beforeEach, Mocked } from 'vitest';
-import { SyncManager } from '../../src/logic/sync-manager';
+import { SyncManager, BatchPushConflict, ConflictResolution } from '../../src/logic/sync-manager';
 import { App, DataAdapter, TFile } from 'obsidian';
 import { GitLabFilesPushSettings } from '../../src/settings';
 import { GitServiceInterface } from '../../src/services/git-service-interface';
 import { gitBlobSha } from '../../src/utils/git-blob-sha';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
+import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
 
 vi.mock('obsidian');
 // Every push/pull-all now shows a plan for review before applying;
 // auto-confirm it here since these tests exercise batch mechanics, not the modal.
 vi.mock('../../src/ui/SyncPlanModal');
+vi.mock('../../src/ui/BatchConflictResolutionModal');
 
 describe('SyncManager Batch Operations', () => {
     let manager: SyncManager;
     let mockApp: Mocked<App>;
     let mockGitService: Mocked<GitServiceInterface>;
     let mockSettings: GitLabFilesPushSettings;
+    /** How the mocked BatchConflictResolutionModal resolves each conflict by default; override per-test. Defaults to 'skip', matching the old silent-skip behavior for tests that don't care about conflict resolution specifics. */
+    let conflictResolver: (conflict: BatchPushConflict) => ConflictResolution;
 
     beforeEach(() => {
         vi.clearAllMocks();
+        conflictResolver = () => 'skip';
         vi.mocked(SyncPlanModal).mockImplementation(function (
             this: SyncPlanModal, _app: unknown, _plan: unknown, _direction: SyncPlanDirection, onConfirm: () => void
         ) {
             onConfirm();
+            return this;
+        } as never);
+        vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
+            this: BatchConflictResolutionModal,
+            _app: unknown,
+            _gitService: unknown,
+            conflicts: BatchPushConflict[],
+            _totalFiles: number,
+            _safeCount: number,
+            onResolve: () => void,
+            _onCancel: () => void,
+        ) {
+            for (const conflict of conflicts) conflict.resolution = conflictResolver(conflict);
+            onResolve();
             return this;
         } as never);
 
@@ -51,6 +70,7 @@ describe('SyncManager Batch Operations', () => {
         mockGitService = {
             pushFile: vi.fn(),
             getFile: vi.fn(),
+            getBlob: vi.fn(),
             testConnection: vi.fn(),
             listFiles: vi.fn(),
             listFilesDetailed: vi.fn().mockResolvedValue([]),
@@ -496,6 +516,291 @@ describe('SyncManager Batch Operations', () => {
         });
     });
 
+    describe('batch conflict resolution', () => {
+        it('merges a "keep local" conflict into the single atomic commit, and applies "keep remote" locally only after it succeeds, leaving a skipped conflict untouched', async () => {
+            const safePath = 'safe.md';
+            const localPath = 'local-wins.md';
+            const remotePath = 'remote-wins.md';
+            const skipPath = 'left-alone.md';
+
+            mockSettings.syncMetadata = {
+                [localPath]: { lastSyncedSha: 'base-local', lastSyncedAt: 0, lastKnownPath: localPath },
+                [remotePath]: { lastSyncedSha: 'base-remote', lastSyncedAt: 0, lastKnownPath: remotePath },
+                [skipPath]: { lastSyncedSha: 'base-skip', lastSyncedAt: 0, lastKnownPath: skipPath },
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockImplementation(async (p) => {
+                if (p === safePath) return 'new safe content';
+                if (p === localPath) return 'local edit';
+                if (p === remotePath) return 'local stale edit';
+                return 'local skip edit';
+            });
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: localPath, symlink: false, sha: 'remote-moved-local' },
+                { path: remotePath, symlink: false, sha: 'remote-moved-remote' },
+                { path: skipPath, symlink: false, sha: 'remote-moved-skip' },
+            ]);
+            // The pre-commit snapshot re-check reads this for the "keep local" path.
+            vi.mocked(mockGitService.getFile).mockImplementation(async (repoPath) => (
+                repoPath === localPath ? { content: '', sha: 'remote-moved-local' } : { content: '', sha: '' }
+            ));
+            vi.mocked(mockGitService.getBlob).mockResolvedValue({ content: 'remote reviewed content', sha: 'remote-moved-remote' });
+            mockGitService.pushBatch = vi.fn().mockResolvedValue([
+                { path: safePath, sha: 'sha-safe' },
+                { path: localPath, sha: 'sha-local' },
+            ]);
+
+            conflictResolver = (c) => {
+                if (c.path === localPath) return 'keep-local';
+                if (c.path === remotePath) return 'keep-remote';
+                return 'skip';
+            };
+
+            const results = await manager.pushAllFiles([safePath, localPath, remotePath, skipPath]);
+
+            // Exactly one atomic remote commit, containing the safe file and the
+            // "keep local" resolution -- never a separate commit for conflicts.
+            expect(mockGitService.pushBatch).toHaveBeenCalledTimes(1);
+            const [items] = vi.mocked(mockGitService.pushBatch).mock.calls[0]!;
+            expect(items).toHaveLength(2);
+            expect(items).toEqual(expect.arrayContaining([
+                { path: safePath, content: 'new safe content', existedRemotely: false },
+                { path: localPath, content: 'local edit', existedRemotely: true, revision: undefined },
+            ]));
+
+            // "Keep remote" is written locally only after that commit succeeded.
+            expect(mockApp.vault.adapter.write).toHaveBeenCalledWith(remotePath, 'remote reviewed content');
+            expect(mockSettings.syncMetadata[remotePath]?.lastSyncedSha).toBe('remote-moved-remote');
+
+            // The skipped conflict is left exactly as it was.
+            expect(mockSettings.syncMetadata[skipPath]?.lastSyncedSha).toBe('base-skip');
+
+            expect(results.success).toBe(2);
+            expect(results.resolvedConflicts).toBe(2);
+            expect(results.skippedConflicts).toBe(1);
+            expect(results.failed).toBe(0);
+            expect(results.cancelled).toBeUndefined();
+        });
+
+        it('"Keep Local for All" turns every conflict into an ordinary batch update -- one commit, zero single-file pushes', async () => {
+            const paths = ['a.md', 'b.md', 'c.md'];
+            mockSettings.syncMetadata = Object.fromEntries(
+                paths.map(p => [p, { lastSyncedSha: `base-${p}`, lastSyncedAt: 0, lastKnownPath: p }])
+            );
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockImplementation(async (p) => `local-${p}`);
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue(
+                paths.map(p => ({ path: p, symlink: false, sha: `remote-${p}` }))
+            );
+            vi.mocked(mockGitService.getFile).mockImplementation(async (repoPath) => ({ content: '', sha: `remote-${repoPath}` }));
+            mockGitService.pushBatch = vi.fn().mockResolvedValue(paths.map(p => ({ path: p, sha: `new-${p}` })));
+
+            conflictResolver = () => 'keep-local';
+
+            const results = await manager.pushAllFiles(paths);
+
+            expect(mockGitService.pushBatch).toHaveBeenCalledTimes(1);
+            expect(mockGitService.pushFile).not.toHaveBeenCalled();
+            expect(results.success).toBe(3);
+            expect(results.resolvedConflicts).toBe(3);
+            expect(results.skippedConflicts).toBe(0);
+        });
+
+        it('"Keep Remote for All" never adds the conflicts as remote modifications, applies their reviewed content locally, and advances metadata to the reviewed sha', async () => {
+            const paths = ['a.md', 'b.md'];
+            mockSettings.syncMetadata = Object.fromEntries(
+                paths.map(p => [p, { lastSyncedSha: `base-${p}`, lastSyncedAt: 0, lastKnownPath: p }])
+            );
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockImplementation(async (p) => `local-${p}`);
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue(
+                paths.map(p => ({ path: p, symlink: false, sha: `remote-${p}` }))
+            );
+            vi.mocked(mockGitService.getBlob).mockImplementation(async (sha) => ({ content: `content-for-${sha}`, sha }));
+
+            conflictResolver = () => 'keep-remote';
+
+            const results = await manager.pushAllFiles(paths);
+
+            // Nothing to push remotely -- no pushBatch/pushFile call at all.
+            expect(mockGitService.pushBatch).toBeUndefined();
+            expect(mockGitService.pushFile).not.toHaveBeenCalled();
+            for (const p of paths) {
+                expect(mockApp.vault.adapter.write).toHaveBeenCalledWith(p, `content-for-remote-${p}`);
+                expect(mockSettings.syncMetadata[p]?.lastSyncedSha).toBe(`remote-${p}`);
+            }
+            expect(results.resolvedConflicts).toBe(2);
+            expect(results.success).toBe(0);
+        });
+
+        it('"Skip All" leaves every conflict untouched on both sides while still committing normal changes once', async () => {
+            const safePath = 'safe.md';
+            const paths = ['a.md', 'b.md'];
+            mockSettings.syncMetadata = Object.fromEntries(
+                paths.map(p => [p, { lastSyncedSha: `base-${p}`, lastSyncedAt: 0, lastKnownPath: p }])
+            );
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockImplementation(async (p) => (p === safePath ? 'new safe content' : `local-${p}`));
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue(
+                paths.map(p => ({ path: p, symlink: false, sha: `remote-${p}` }))
+            );
+            mockGitService.pushBatch = vi.fn().mockResolvedValue([{ path: safePath, sha: 'sha-safe' }]);
+
+            conflictResolver = () => 'skip';
+
+            const results = await manager.pushAllFiles([safePath, ...paths]);
+
+            expect(mockGitService.pushBatch).toHaveBeenCalledTimes(1);
+            const [items] = vi.mocked(mockGitService.pushBatch).mock.calls[0]!;
+            expect(items).toEqual([{ path: safePath, content: 'new safe content', existedRemotely: false }]);
+            for (const p of paths) {
+                expect(mockSettings.syncMetadata[p]?.lastSyncedSha).toBe(`base-${p}`);
+            }
+            expect(mockApp.vault.adapter.write).not.toHaveBeenCalled();
+            expect(results.skippedConflicts).toBe(2);
+            expect(results.success).toBe(1);
+        });
+
+        it('cancelling the conflict resolution modal makes zero writes anywhere', async () => {
+            const path = 'conflicted.md';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'base', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('local edit');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'remote-moved' }
+            ]);
+            mockGitService.pushBatch = vi.fn();
+
+            vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
+                this: BatchConflictResolutionModal,
+                _app: unknown, _git: unknown, _conflicts: unknown, _total: unknown, _safe: unknown,
+                _onResolve: () => void, onCancel: () => void
+            ) {
+                onCancel();
+                return this;
+            } as never);
+
+            const results = await manager.pushAllFiles([path]);
+
+            expect(mockGitService.pushBatch).not.toHaveBeenCalled();
+            expect(mockGitService.pushFile).not.toHaveBeenCalled();
+            expect(mockApp.vault.adapter.write).not.toHaveBeenCalled();
+            expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe('base');
+            expect(results.cancelled).toBe(true);
+            expect(SyncPlanModal).not.toHaveBeenCalled();
+        });
+
+        it('cancelling the final resolved-plan review makes zero writes anywhere', async () => {
+            const path = 'conflicted.md';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'base', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('local edit');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'remote-moved' }
+            ]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: 'remote-moved' });
+            mockGitService.pushBatch = vi.fn();
+
+            conflictResolver = () => 'keep-local';
+            vi.mocked(SyncPlanModal).mockImplementation(function (
+                this: SyncPlanModal, _app: unknown, _plan: unknown, _direction: SyncPlanDirection, _onConfirm: () => void, onCancel?: () => void
+            ) {
+                onCancel?.();
+                return this;
+            } as never);
+
+            const results = await manager.pushAllFiles([path]);
+
+            expect(mockGitService.pushBatch).not.toHaveBeenCalled();
+            expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe('base');
+            expect(results.cancelled).toBe(true);
+        });
+
+        it('a failed atomic commit leaves the accompanying "keep remote" conflict unapplied and metadata unchanged', async () => {
+            const failingPath = 'fails.md';
+            const remotePath = 'kept-remote.md';
+            mockSettings.syncMetadata = {
+                [failingPath]: { lastSyncedSha: 'base-fail', lastSyncedAt: 0, lastKnownPath: failingPath },
+                [remotePath]: { lastSyncedSha: 'base-remote', lastSyncedAt: 0, lastKnownPath: remotePath },
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockImplementation(async (p) => (p === failingPath ? 'new content' : 'stale local'));
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: remotePath, symlink: false, sha: 'remote-current' }
+            ]);
+            vi.mocked(mockGitService.getBlob).mockResolvedValue({ content: 'reviewed remote content', sha: 'remote-current' });
+            mockGitService.pushBatch = vi.fn().mockRejectedValue(new Error('commit failed'));
+
+            conflictResolver = (c) => (c.path === remotePath ? 'keep-remote' : 'skip');
+
+            const results = await manager.pushAllFiles([failingPath, remotePath]);
+
+            expect(mockApp.vault.adapter.write).not.toHaveBeenCalled();
+            expect(mockSettings.syncMetadata[remotePath]?.lastSyncedSha).toBe('base-remote');
+            expect(results.failed).toBeGreaterThan(0);
+        });
+
+        it('resolves a binary conflict without assuming text content', async () => {
+            const path = 'image.png';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'base', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            const localBuffer = new Uint8Array([1, 2, 3]).buffer;
+            vi.mocked(adapter.readBinary).mockResolvedValue(localBuffer);
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'remote-moved' }
+            ]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: 'remote-moved' });
+            mockGitService.pushBatch = vi.fn().mockResolvedValue([{ path, sha: 'new-sha' }]);
+
+            conflictResolver = () => 'keep-local';
+
+            const results = await manager.pushAllFiles([path]);
+
+            expect(mockGitService.pushBatch).toHaveBeenCalledTimes(1);
+            const [items] = vi.mocked(mockGitService.pushBatch).mock.calls[0]!;
+            expect(items[0]!.content).toBe(localBuffer);
+            expect(results.resolvedConflicts).toBe(1);
+        });
+
+        it('aborts safely, without committing, when the remote moved again after the conflict was reviewed', async () => {
+            const path = 'reviewed.md';
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: 'base', lastSyncedAt: 0, lastKnownPath: path }
+            };
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('local edit');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'remote-at-plan-time' }
+            ]);
+            // Between planning and commit, the remote moved on again.
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: 'remote-moved-again' });
+            mockGitService.pushBatch = vi.fn();
+
+            conflictResolver = () => 'keep-local';
+
+            const results = await manager.pushAllFiles([path]);
+
+            expect(mockGitService.pushBatch).not.toHaveBeenCalled();
+            expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe('base');
+            expect(results.failed).toBeGreaterThan(0);
+        });
+    });
+
     describe('batch push avoids remote 404 probes', () => {
         it('skips stale rename metadata when the prefetched tree has no matching old path', async () => {
             const oldPath = 'src/content/blog/.agents/skills/blog-master/SKILL.md';
@@ -668,6 +973,8 @@ describe('SyncManager Batch Operations', () => {
                     modifications: [{ path: 'existing.md', name: 'existing.md' }],
                     deletions: [],
                     moves: [],
+                    acceptedRemote: [],
+                    skippedConflicts: [],
                 },
                 'push',
                 expect.any(Function),
