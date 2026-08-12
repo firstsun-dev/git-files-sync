@@ -500,6 +500,84 @@ describe('SyncManager', () => {
             // tree (listFilesDetailed), not 5 separate live getFile lookups.
             expect(mockGitLab.getFile).toHaveBeenCalledTimes(1);
         });
+
+        it('regression: an Individual Push resolved as a path string (no live TFile) must still classify a tracked rename as a move, not an addition', async () => {
+            // Regression test for the reported bug: SyncStatusView's per-row push
+            // button calls `pushFiles([fileStatus.file || fileStatus.path])` -- a raw
+            // path string whenever no live TFile is attached to that row's status
+            // entry yet (e.g. right after a rename, before the panel's next refresh
+            // re-resolves it). "Selected x1 Push" resolves the exact same `pushFiles`
+            // pipeline, normally with a live TFile -- there is now only one function,
+            // so "Individual Push" and "Selected x1 Push" can no longer structurally
+            // diverge. A string input must still classify a tracked rename as a move.
+            const oldPath = 'old.md';
+            const newPath = 'new.md';
+
+            mockSettings.syncMetadata[oldPath] = {
+                lastSyncedSha: 'old-sha',
+                lastSyncedAt: Date.now(),
+                lastKnownPath: oldPath,
+            };
+            await manager.trackRename(newPath, oldPath);
+
+            vi.spyOn(mockApp.vault.adapter, 'exists').mockResolvedValue(true);
+            vi.spyOn(mockApp.vault.adapter, 'read').mockResolvedValue('content');
+            vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
+                if (path === oldPath) return { content: 'content', sha: 'old-sha' };
+                return { content: '', sha: '' };
+            });
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([]);
+
+            await manager.pushFiles([newPath]);
+
+            // Must be a move, never an addition.
+            expect(mockGitLab.pushFile).toHaveBeenCalledWith(
+                newPath, 'content', 'main', `Move ${oldPath} to ${newPath}`
+            );
+            expect(mockGitLab.deleteFile).toHaveBeenCalledWith(
+                oldPath, 'main', `Remove ${oldPath} (moved to ${newPath})`
+            );
+        });
+
+        it('classifies the same tracked rename as a move identically whether pushFiles is called with one file or as part of a larger batch (Individual Push === Selected x1 Push)', async () => {
+            const oldPath = 'old.md';
+            const newPath = 'new.md';
+            const otherPath = 'unrelated.md';
+            const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
+
+            mockSettings.syncMetadata[oldPath] = { lastSyncedSha: 'old-sha', lastSyncedAt: Date.now(), lastKnownPath: oldPath };
+            await manager.trackRename(newPath, oldPath);
+
+            vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation((path) => (path === newPath ? mockFile : null));
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
+            vi.spyOn(mockApp.vault.adapter, 'exists').mockResolvedValue(true);
+            vi.spyOn(mockApp.vault.adapter, 'read').mockResolvedValue('other content');
+            vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([]);
+
+            // "Selected x1": one file, as a TFile, in an array of one.
+            await manager.pushFiles([mockFile]);
+            expect(mockGitLab.pushFile).toHaveBeenCalledWith(newPath, 'content', 'main', `Move ${oldPath} to ${newPath}`);
+            expect(mockGitLab.deleteFile).toHaveBeenCalledWith(oldPath, 'main', `Remove ${oldPath} (moved to ${newPath})`);
+
+            vi.clearAllMocks();
+            mockSettings.syncMetadata[oldPath] = { lastSyncedSha: 'old-sha', lastSyncedAt: Date.now(), lastKnownPath: oldPath };
+            await manager.trackRename(newPath, oldPath);
+            vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation((path) => (path === newPath ? mockFile : null));
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
+            vi.spyOn(mockApp.vault.adapter, 'exists').mockResolvedValue(true);
+            vi.spyOn(mockApp.vault.adapter, 'read').mockResolvedValue('other content');
+            vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([]);
+
+            // Same file, same expectation, but as one of several files in the batch.
+            await manager.pushFiles([mockFile, otherPath]);
+            expect(mockGitLab.pushFile).toHaveBeenCalledWith(newPath, 'content', 'main', `Move ${oldPath} to ${newPath}`);
+            expect(mockGitLab.deleteFile).toHaveBeenCalledWith(oldPath, 'main', `Remove ${oldPath} (moved to ${newPath})`);
+        });
     });
 
     describe('trackRename', () => {

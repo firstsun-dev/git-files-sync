@@ -602,16 +602,19 @@ export class SyncManager {
     }
 
     /**
-     * Batch push as one transaction: classify every candidate first (nothing
-     * written yet), let the user resolve any conflicts and review the final
-     * plan, then commit everything that's ready to push/move in one grouped
-     * call — a "keep local" conflict resolution rides along in that same
-     * commit as an ordinary update, and a "keep remote" resolution is only
-     * applied to the vault after that commit succeeds. Cancelling either the
-     * conflict-resolution or the final-review step aborts the whole batch:
-     * no commit, no local overwrite, no metadata change.
+     * The one push pipeline for every entry point (ribbon, command palette,
+     * context menu, sync-status row, "selected", "all modified") — a single
+     * file is just a one-element array, never a special case. Classifies
+     * every candidate first (nothing written yet), lets the user resolve any
+     * conflicts and review the final plan, then commits everything that's
+     * ready to push/move in one grouped call — a "keep local" conflict
+     * resolution rides along in that same commit as an ordinary update, and a
+     * "keep remote" resolution is only applied to the vault after that commit
+     * succeeds. Cancelling either the conflict-resolution or the final-review
+     * step aborts the whole batch: no commit, no local overwrite, no metadata
+     * change.
      */
-    async pushAllFiles(
+    async pushFiles(
         files: (TFile | string)[],
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
@@ -1041,6 +1044,16 @@ export class SyncManager {
      * block, not a case of "two versions of the same content" — there's
      * nothing to arbitrate with keep-local/keep-remote, so it's always left
      * alone rather than offered in the interactive resolution modal.
+     *
+     * The tracked fast path (`syncMetadata[path]?.renamedFrom`, set live by
+     * the vault 'rename' handler) is keyed purely by path, not by object
+     * identity, so it works whether the caller hands in a live `TFile` or
+     * just its path string — every push entry point must classify a rename
+     * identically regardless of which one it happens to have on hand (e.g. a
+     * sync-status row with no cached `TFile` yet falls back to its path).
+     * Only the content-based fallback scan (`detectRename`, for renames the
+     * plugin missed tracking live) needs an actual `TFile`, so a string input
+     * resolves one from the vault first.
      */
     private async classifyAsMoveCandidate(
         fileOrPath: TFile | string,
@@ -1053,10 +1066,12 @@ export class SyncManager {
         hasOrphans: boolean,
         autoSkipped: SyncPlanEntry[]
     ): Promise<BatchOutcome | 'queued' | undefined> {
-        if (isString || !(fileOrPath instanceof TFile)) return undefined;
-
         const trackedOldPath = this.settings.syncMetadata[path]?.renamedFrom;
-        const renamedFrom = trackedOldPath ?? (hasOrphans ? await this.detectRename(fileOrPath, content, treeByFullPath) : null);
+        let renamedFrom = trackedOldPath ?? null;
+        if (!renamedFrom && hasOrphans) {
+            const file = !isString && fileOrPath instanceof TFile ? fileOrPath : this.app.vault.getFileByPath(path);
+            if (file) renamedFrom = await this.detectRename(file, content, treeByFullPath);
+        }
         if (!renamedFrom) return undefined;
 
         const outcome = await this.queueMove(path, name, renamedFrom, content, treeByFullPath, toMove);

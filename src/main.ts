@@ -83,7 +83,7 @@ export default class GitLabFilesPush extends Plugin {
 		this.pushRibbonEl = this.addRibbonIcon('upload-cloud', this.pushRibbonLabel(), async () => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView && activeView.file instanceof TFile) {
-				await this.sync.pushFile(activeView.file);
+				await this.sync.pushFiles([activeView.file]);
 			} else {
 				new Notice(t('main.notice.noActiveNote'));
 			}
@@ -99,7 +99,7 @@ export default class GitLabFilesPush extends Plugin {
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
-					await this.sync.pushFile(activeView.file);
+					await this.sync.pushFiles([activeView.file]);
 				}
 			}
 		});
@@ -137,7 +137,7 @@ export default class GitLabFilesPush extends Plugin {
 					menu.addItem((item) => {
 						item.setTitle(t('main.contextMenu.pushTo', { service: this.serviceName }))
 							.setIcon('upload-cloud')
-							.onClick(async () => { await this.sync.pushFile(file); });
+							.onClick(async () => { await this.sync.pushFiles([file]); });
 					});
 					menu.addItem((item) => {
 						item.setTitle(t('main.contextMenu.pullFrom', { service: this.serviceName }))
@@ -419,7 +419,7 @@ export default class GitLabFilesPush extends Plugin {
 
 		try {
 			const results = op === 'push'
-				? await this.sync.pushAllFiles(files, (current, total, fileName) => {
+				? await this.sync.pushFiles(files, (current, total, fileName) => {
 					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pushing'), current, total, fileName }));
 				}, tree)
 				: await this.sync.pullAllFiles(files, (current, total, fileName) => {

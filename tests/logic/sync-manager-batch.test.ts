@@ -93,7 +93,7 @@ describe('SyncManager Batch Operations', () => {
         manager.saveSettings = vi.fn().mockResolvedValue(undefined);
     });
 
-    describe('pushAllFiles', () => {
+    describe('pushFiles', () => {
         it('should push multiple files correctly (strings and TFiles)', async () => {
             const mockFile = Object.assign(new TFile(), { path: 'file2.md', name: 'file2.md' });
             const files = ['file1.md', mockFile];
@@ -107,7 +107,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'diff', sha: 'old-sha' });
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: 'path', sha: 'new-sha' });
 
-            const results = await manager.pushAllFiles(files);
+            const results = await manager.pushFiles(files);
 
             expect(results.success).toBe(2);
             expect(vi.mocked(mockGitService.pushFile)).toHaveBeenCalledTimes(2);
@@ -126,7 +126,7 @@ describe('SyncManager Batch Operations', () => {
                 .mockResolvedValueOnce({ path: 'path', sha: 'new-sha' })
                 .mockRejectedValueOnce(new Error('Push failed'));
 
-            const results = await manager.pushAllFiles(files);
+            const results = await manager.pushFiles(files);
 
             expect(results.success).toBe(1);
             expect(results.failed).toBe(1);
@@ -148,7 +148,7 @@ describe('SyncManager Batch Operations', () => {
                 { path: 'b.md', sha: 'sha-b' },
             ]);
 
-            const results = await manager.pushAllFiles(files);
+            const results = await manager.pushFiles(files);
 
             expect(results.success).toBe(2);
             expect(results.failed).toBe(0);
@@ -181,7 +181,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote original', sha: 'remote-blob', revision: 'remote-commit' });
             mockGitService.pushBatch = vi.fn().mockResolvedValue([{ path, sha: 'new-blob' }]);
 
-            const results = await manager.pushAllFiles([path]);
+            const results = await manager.pushFiles([path]);
 
             expect(results.success).toBe(1);
             expect(mockGitService.pushBatch).toHaveBeenCalledWith([
@@ -199,7 +199,7 @@ describe('SyncManager Batch Operations', () => {
             mockGitService.pushBatch = undefined;
             vi.mocked(mockGitService.pushFile).mockImplementation(async (path) => ({ path, sha: `sha-${path}` }));
 
-            const results = await manager.pushAllFiles(files);
+            const results = await manager.pushFiles(files);
 
             expect(results.success).toBe(2);
             expect(mockGitService.pushFile).toHaveBeenCalledTimes(2);
@@ -222,7 +222,7 @@ describe('SyncManager Batch Operations', () => {
                 { path: 'image.png', sha: 'sha-image' },
             ]);
 
-            const results = await manager.pushAllFiles(files);
+            const results = await manager.pushFiles(files);
 
             expect(results.success).toBe(2);
             expect(mockGitService.pushBatch).toHaveBeenCalledTimes(1);
@@ -237,7 +237,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([]);
             mockGitService.pushBatch = vi.fn().mockRejectedValue(new Error('commit failed'));
 
-            const results = await manager.pushAllFiles(files);
+            const results = await manager.pushFiles(files);
 
             expect(results.success).toBe(0);
             expect(results.failed).toBe(2);
@@ -261,7 +261,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path, symlink: false, sha }]);
             mockGitService.pushBatch = vi.fn();
 
-            const results = await manager.pushAllFiles([path]);
+            const results = await manager.pushFiles([path]);
 
             expect(results.success).toBe(0);
             expect(results.conflicts).toBe(0);
@@ -292,7 +292,7 @@ describe('SyncManager Batch Operations', () => {
             ]);
             mockGitService.pushBatch = vi.fn().mockResolvedValue([{ path }]);
 
-            const results = await manager.pushAllFiles([path]);
+            const results = await manager.pushFiles([path]);
 
             expect(results.success).toBe(1);
             expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe(await gitBlobSha('edited content'));
@@ -444,7 +444,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: 'path', sha: 'new' });
 
             const onProgress = vi.fn();
-            await manager.pushAllFiles(files, onProgress);
+            await manager.pushFiles(files, onProgress);
 
             expect(onProgress).toHaveBeenCalledTimes(3);
             expect(onProgress).toHaveBeenCalledWith(1, 3, 'file1.md');
@@ -468,7 +468,7 @@ describe('SyncManager Batch Operations', () => {
                 { path, symlink: false, sha: 'sha-changed-on-remote' }
             ]);
 
-            const results = await manager.pushAllFiles([path]);
+            const results = await manager.pushFiles([path]);
 
             expect(results.success).toBe(0);
             expect(results.conflicts).toBe(1);
@@ -508,7 +508,7 @@ describe('SyncManager Batch Operations', () => {
             ]);
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path, sha: 'new-sha' });
 
-            const results = await manager.pushAllFiles([path]);
+            const results = await manager.pushFiles([path]);
 
             expect(results.success).toBe(1);
             expect(results.conflicts).toBe(0);
@@ -557,7 +557,7 @@ describe('SyncManager Batch Operations', () => {
                 return 'skip';
             };
 
-            const results = await manager.pushAllFiles([safePath, localPath, remotePath, skipPath]);
+            const results = await manager.pushFiles([safePath, localPath, remotePath, skipPath]);
 
             // Exactly one atomic remote commit, containing the safe file and the
             // "keep local" resolution -- never a separate commit for conflicts.
@@ -599,7 +599,7 @@ describe('SyncManager Batch Operations', () => {
 
             conflictResolver = () => 'keep-local';
 
-            const results = await manager.pushAllFiles(paths);
+            const results = await manager.pushFiles(paths);
 
             expect(mockGitService.pushBatch).toHaveBeenCalledTimes(1);
             expect(mockGitService.pushFile).not.toHaveBeenCalled();
@@ -623,7 +623,7 @@ describe('SyncManager Batch Operations', () => {
 
             conflictResolver = () => 'keep-remote';
 
-            const results = await manager.pushAllFiles(paths);
+            const results = await manager.pushFiles(paths);
 
             // Nothing to push remotely -- no pushBatch/pushFile call at all.
             expect(mockGitService.pushBatch).toBeUndefined();
@@ -652,7 +652,7 @@ describe('SyncManager Batch Operations', () => {
 
             conflictResolver = () => 'skip';
 
-            const results = await manager.pushAllFiles([safePath, ...paths]);
+            const results = await manager.pushFiles([safePath, ...paths]);
 
             expect(mockGitService.pushBatch).toHaveBeenCalledTimes(1);
             const [items] = vi.mocked(mockGitService.pushBatch).mock.calls[0]!;
@@ -687,7 +687,7 @@ describe('SyncManager Batch Operations', () => {
                 return this;
             } as never);
 
-            const results = await manager.pushAllFiles([path]);
+            const results = await manager.pushFiles([path]);
 
             expect(mockGitService.pushBatch).not.toHaveBeenCalled();
             expect(mockGitService.pushFile).not.toHaveBeenCalled();
@@ -719,7 +719,7 @@ describe('SyncManager Batch Operations', () => {
                 return this;
             } as never);
 
-            const results = await manager.pushAllFiles([path]);
+            const results = await manager.pushFiles([path]);
 
             expect(mockGitService.pushBatch).not.toHaveBeenCalled();
             expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe('base');
@@ -744,7 +744,7 @@ describe('SyncManager Batch Operations', () => {
 
             conflictResolver = (c) => (c.path === remotePath ? 'keep-remote' : 'skip');
 
-            const results = await manager.pushAllFiles([failingPath, remotePath]);
+            const results = await manager.pushFiles([failingPath, remotePath]);
 
             expect(mockApp.vault.adapter.write).not.toHaveBeenCalled();
             expect(mockSettings.syncMetadata[remotePath]?.lastSyncedSha).toBe('base-remote');
@@ -768,7 +768,7 @@ describe('SyncManager Batch Operations', () => {
 
             conflictResolver = () => 'keep-local';
 
-            const results = await manager.pushAllFiles([path]);
+            const results = await manager.pushFiles([path]);
 
             expect(mockGitService.pushBatch).toHaveBeenCalledTimes(1);
             const [items] = vi.mocked(mockGitService.pushBatch).mock.calls[0]!;
@@ -793,7 +793,7 @@ describe('SyncManager Batch Operations', () => {
 
             conflictResolver = () => 'keep-local';
 
-            const results = await manager.pushAllFiles([path]);
+            const results = await manager.pushFiles([path]);
 
             expect(mockGitService.pushBatch).not.toHaveBeenCalled();
             expect(mockSettings.syncMetadata[path]?.lastSyncedSha).toBe('base');
@@ -815,7 +815,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: newPath, sha: 'new-sha' });
             vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([]);
 
-            await manager.pushAllFiles([mockFile]);
+            await manager.pushFiles([mockFile]);
 
             expect(mockGitService.getFile).not.toHaveBeenCalled();
             expect(mockGitService.pushFile).toHaveBeenCalledWith(newPath, 'new content', 'main', expect.any(String), undefined, undefined);
@@ -847,7 +847,7 @@ describe('SyncManager Batch Operations', () => {
             // rename is confirmed by the content probe above.
             vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path: oldPath, symlink: false }]);
 
-            const results = await manager.pushAllFiles([mockFile]);
+            const results = await manager.pushFiles([mockFile]);
 
             // A real move (mockGitService has no commitBatch, so this is the
             // sequential push-then-delete fallback): the new path is pushed
@@ -880,7 +880,7 @@ describe('SyncManager Batch Operations', () => {
                 { path: newPath, symlink: false, sha: 'remote-existing-sha' },
             ]);
 
-            const results = await manager.pushAllFiles([mockFile]);
+            const results = await manager.pushFiles([mockFile]);
 
             expect(results.conflicts).toBe(1);
             expect(results.success).toBe(0);
@@ -910,7 +910,7 @@ describe('SyncManager Batch Operations', () => {
                 { path: oldPath, symlink: false, sha: contentSha }
             ]);
 
-            const results = await manager.pushAllFiles([mockFile]);
+            const results = await manager.pushFiles([mockFile]);
 
             expect(results.success).toBe(1);
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
@@ -940,7 +940,7 @@ describe('SyncManager Batch Operations', () => {
                 { path: pushedPath, symlink: false, sha: 'remote-sha' }
             ]);
 
-            const results = await manager.pushAllFiles([mockFile]);
+            const results = await manager.pushFiles([mockFile]);
 
             expect(results.success).toBe(1);
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
@@ -964,7 +964,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockGitService.getFile).mockResolvedValue({ content: '', sha: '' });
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: 'path', sha: 'new-sha' });
 
-            const results = await manager.pushAllFiles(['new.md', 'existing.md']);
+            const results = await manager.pushFiles(['new.md', 'existing.md']);
 
             expect(SyncPlanModal).toHaveBeenCalledWith(
                 mockApp,
@@ -997,7 +997,7 @@ describe('SyncManager Batch Operations', () => {
             vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([]);
             const pushFileSpy = vi.mocked(mockGitService.pushFile);
 
-            const results = await manager.pushAllFiles(['new.md']);
+            const results = await manager.pushFiles(['new.md']);
 
             expect(results.success).toBe(0);
             expect(pushFileSpy).not.toHaveBeenCalled();
@@ -1012,7 +1012,7 @@ describe('SyncManager Batch Operations', () => {
                 { path: 'same.md', symlink: false, sha: await gitBlobSha(content) }
             ]);
 
-            const results = await manager.pushAllFiles(['same.md']);
+            const results = await manager.pushFiles(['same.md']);
 
             expect(SyncPlanModal).not.toHaveBeenCalled();
             expect(results.success).toBe(0);
