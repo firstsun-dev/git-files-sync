@@ -913,14 +913,18 @@
 }
 
 /* ── Conflict Modal ─────────────────────────────────────────────── */
-.sync-conflict-modal.modal {
-    width: min(1100px, 92vw);
-    height: min(85vh, 800px);
+.sync-conflict-modal.modal,
+.batch-conflict-modal.modal {
+    width: min(1600px, 96vw);
+    max-width: 96vw;
+    height: min(1000px, 92vh);
+    max-height: 92vh;
     display: flex;
     flex-direction: column;
 }
 
-.sync-conflict-modal .modal-content {
+.sync-conflict-modal .modal-content,
+.batch-conflict-modal .modal-content {
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -965,12 +969,18 @@
 
 .conflict-diff-container {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 14px;
     margin-bottom: 18px;
 }
 
-@media (max-width: 600px) {
+.conflict-panel {
+    min-width: 0;
+}
+
+/* Below this width two side-by-side panes are too narrow to read a real
+   Markdown file comfortably, so fall back to the tab/single-pane view. */
+@media (max-width: 900px) {
     .conflict-diff-container { grid-template-columns: 1fr; }
 
     .conflict-tabs { display: flex; }
@@ -988,15 +998,21 @@
 
 .conflict-content,
 .conflict-diff {
-    overflow-y: auto;
+    overflow: auto;
     padding: 10px;
     background: var(--background-secondary);
     border-radius: 5px;
     margin: 0;
     font-family: var(--font-monospace);
     font-size: 0.82em;
-    white-space: pre-wrap;
-    word-wrap: break-word;
+    white-space: pre;
+}
+
+.conflict-binary-notice {
+    color: var(--text-muted);
+    padding: 16px;
+    background: var(--background-secondary);
+    border-radius: 5px;
 }
 
 .conflict-diff-section { margin-bottom: 18px; }
@@ -1025,6 +1041,97 @@
 .conflict-buttons .setting-item-control {
     display: flex;
     gap: 10px;
+}
+
+/* ── Batch Conflict Resolution Modal ────────────────────────────── */
+.batch-conflict-bulk-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    flex-shrink: 0;
+}
+
+.batch-conflict-row-list {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.batch-conflict-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    background: var(--background-secondary);
+    border-radius: 6px;
+}
+
+.batch-conflict-row-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+}
+
+.batch-conflict-row-path {
+    font-family: var(--font-monospace);
+    font-size: 0.9em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.batch-conflict-row-badge,
+.batch-conflict-row-binary-badge {
+    font-size: 0.78em;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.batch-conflict-view-diff {
+    font-size: 0.85em;
+    padding: 4px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    cursor: pointer;
+}
+
+.batch-conflict-row-radios {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.batch-conflict-radio-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.85em;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.batch-conflict-buttons {
+    margin-top: 12px;
+}
+
+@media (max-width: 700px) {
+    .batch-conflict-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .batch-conflict-row-radios {
+        justify-content: space-between;
+    }
 }
 
 /* ── Sync Plan Modal ────────────────────────────────────────────── */
