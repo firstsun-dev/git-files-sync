@@ -150,7 +150,7 @@ See [Real-provider E2E](testing/real-provider-e2e.md) for the architecture, setu
 
 ### Complex patterns
 | Case |
-|---|---|
+|---|
 | Negative patterns (`!important.log`) |
 | Directory-only patterns (`build/`) |
 | Deep wildcards (`**/temp/*`) |
