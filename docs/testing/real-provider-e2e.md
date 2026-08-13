@@ -110,13 +110,22 @@ killed run's branch is simply never touched by the next one.
 
 ### Concurrency and cancellation
 
-`.github/workflows/ci.yml`'s `provider-e2e` job carries a per-source/per-provider concurrency
-group (`e2e-pr-<number>-<provider>` or `e2e-branch-<source-branch>-<provider>`) with
-`cancel-in-progress: true`, so a superseding push/rerun cancels its own predecessor instead of the
-two competing for runner/provider capacity. **Cancellation is not a cleanup mechanism.** A
-cancelled run's `cleanup` step may never execute, or may be mid-delete when the runner is
-terminated; the next run is still safe because it always allocates a brand-new
-`run-<run-id>-<run-attempt>` branch rather than deleting and reusing the old one.
+`.github/workflows/ci.yml`'s `provider-e2e` job carries a per-source-branch/per-provider
+concurrency group (`e2e-<branch>-<provider>`, using `github.head_ref || github.ref_name` — the
+same expression as `E2E_SOURCE_BRANCH`) with `cancel-in-progress: true`, so a superseding
+push/rerun cancels its own predecessor instead of the two competing for runner/provider capacity.
+The group is keyed by branch name alone, deliberately *not* split by trigger event: a `push` to a
+branch with an open PR fires both a `push` and a `pull_request` run for the same commit, and an
+earlier version of this group keyed PR runs by number instead of branch name, putting those two
+runs in different groups — so they ran fully concurrently against the same shared provider
+sandbox and starved each other (observed as real GitLab API timeouts under that double load).
+Keying by branch name alone means the later of the two cancels the earlier instead. The two
+cleanup workflows below share this same group naming for the same branch, with
+`cancel-in-progress: false`, so cleanup queues behind rather than races an active run.
+**Cancellation is not a cleanup mechanism.** A cancelled run's `cleanup` step may never execute, or
+may be mid-delete when the runner is terminated; the next run is still safe because it always
+allocates a brand-new `run-<run-id>-<run-attempt>` branch rather than deleting and reusing the old
+one.
 
 ### Cleanup hierarchy
 

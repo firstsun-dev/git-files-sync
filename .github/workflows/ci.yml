@@ -82,18 +82,25 @@ jobs:
       max-parallel: 3
       matrix:
         provider: [github, gitlab, gitea]
-    # One group per source (PR number, else branch)/provider, so a repeated
-    # push or a workflow rerun cancels its own predecessor instead of piling
-    # up runner/provider load -- but this is NOT a cleanup mechanism (see
-    # scripts/e2e-harness.sh's per-run branch naming): a cancelled run's
-    # branch can still be mid-delete when the next one starts, which is
-    # exactly why every run gets its own unique branch regardless of
-    # cancellation. `concurrency:` at job level *does* support the `matrix`
-    # context (unlike job-level `if:`, see the comment below), so each
-    # matrix leg gets its own group.
+    # One group per source branch/provider -- keyed by branch name alone
+    # (github.head_ref || github.ref_name, same expression E2E_SOURCE_BRANCH
+    # below uses), deliberately NOT split by event type. A `push` to a branch
+    # with an open PR fires both a `push` and a `pull_request` run for the
+    # same commit; keying by event type (PR number vs branch name, as an
+    # earlier version of this did) put those two runs in different groups,
+    # so they ran fully concurrently against the same shared provider
+    # sandbox and starved each other (observed as real GitLab API timeouts
+    # under that double load -- see docs/testing/real-provider-e2e.md).
+    # Keying by branch name alone means the later of the two cancels the
+    # earlier instead, same as a repeated push or a workflow rerun. This is
+    # NOT a cleanup mechanism (see scripts/e2e-harness.sh's per-run branch
+    # naming): a cancelled run's branch can still be mid-delete when the
+    # next one starts, which is exactly why every run gets its own unique
+    # branch regardless of cancellation. `concurrency:` at job level *does*
+    # support the `matrix` context (unlike job-level `if:`, see the comment
+    # below), so each matrix leg still gets its own group.
     concurrency:
-      group: >-
-        e2e-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('branch-{0}', github.ref_name) }}-${{ matrix.provider }}
+      group: e2e-${{ github.head_ref || github.ref_name }}-${{ matrix.provider }}
       cancel-in-progress: true
     env:
       E2E_GITHUB_OWNER: ${{ vars.E2E_GITHUB_OWNER }}
