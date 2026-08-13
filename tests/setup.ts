@@ -138,6 +138,12 @@ export const ButtonComponent = class {
     return this;
   }
 
+  setDisabled(disabled: boolean) {
+    this.buttonEl.disabled = disabled;
+    this.buttonEl.classList.toggle('is-disabled', disabled);
+    return this;
+  }
+
   setIcon(icon: string) {
     this.buttonEl.dataset.icon = icon;
     return this;

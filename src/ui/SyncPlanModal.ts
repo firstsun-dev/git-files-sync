@@ -9,6 +9,8 @@ const SECTION_ORDER: Array<{ key: keyof SyncPlan; icon: string; titleKey: Transl
     { key: 'additions', icon: ICONS.addition, titleKey: 'syncPlanModal.section.additions', destructive: false },
     { key: 'modifications', icon: ICONS.modified, titleKey: 'syncPlanModal.section.modifications', destructive: false },
     { key: 'moves', icon: ICONS.moved, titleKey: 'syncPlanModal.section.moves', destructive: false },
+    { key: 'acceptedRemote', icon: ICONS.pull, titleKey: 'syncPlanModal.section.acceptedRemote', destructive: false },
+    { key: 'skippedConflicts', icon: ICONS.clear, titleKey: 'syncPlanModal.section.skippedConflicts', destructive: false },
     { key: 'deletions', icon: ICONS.delete, titleKey: 'syncPlanModal.section.deletions', destructive: true },
 ];
 
@@ -45,7 +47,7 @@ export class SyncPlanModal extends Modal {
 
         const listEl = contentEl.createDiv({ cls: 'sync-plan-sections' });
         for (const section of SECTION_ORDER) {
-            const entries = this.plan[section.key];
+            const entries = this.plan[section.key] ?? [];
             if (entries.length === 0) continue;
             this.renderSection(listEl, section.titleKey, section.icon, entries, section.destructive);
         }

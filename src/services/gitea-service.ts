@@ -109,7 +109,12 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
 
         const files: GiteaChangeFileOperation[] = [
             ...additions.map((item): GiteaChangeFileOperation => ({
-                operation: 'create',
+                // A "keep local" conflict resolution lands here as an addition
+                // that already exists remotely (e.g. from planPushBatch merging
+                // a resolved conflict into the ordinary push list); Gitea 422s
+                // on 'create' for a path that already exists, so this must
+                // respect existedRemotely exactly like pushBatch does above.
+                operation: item.existedRemotely ? 'update' : 'create',
                 path: this.getFullPath(item.path),
                 content: this.encodeContent(item.content),
             })),

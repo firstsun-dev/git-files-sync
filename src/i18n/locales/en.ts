@@ -219,6 +219,7 @@ const en = {
 	'syncConflictModal.keepRemote': 'Keep remote',
 	'syncConflictModal.keepRemote.tooltip': 'Overwrite local with remote content',
 	'syncConflictModal.cancel': 'Cancel',
+	'syncConflictModal.binaryChanged': 'Both the local and remote versions of this binary file have changed. A line-by-line diff isn\'t available.',
 
 	'syncPlanModal.title.push': 'Review push plan',
 	'syncPlanModal.title.pull': 'Review pull plan',
@@ -226,11 +227,28 @@ const en = {
 	'syncPlanModal.section.additions': 'Additions',
 	'syncPlanModal.section.modifications': 'Modifications',
 	'syncPlanModal.section.moves': 'Moves',
+	'syncPlanModal.section.acceptedRemote': 'Accept remote locally',
+	'syncPlanModal.section.skippedConflicts': 'Skipped conflicts',
 	'syncPlanModal.section.deletions': 'Deletions',
 	'syncPlanModal.deletionWarning': 'This permanently deletes {count} file(s) on the remote. This cannot be undone.',
 	'syncPlanModal.movedFrom': 'moved from {path}',
 	'syncPlanModal.confirm': 'Apply',
 	'syncPlanModal.cancel': 'Cancel',
+
+	'batchConflictModal.title': 'Resolve {count} conflict(s) before pushing {total} file(s)',
+	'batchConflictModal.description': '{safeCount} file(s) are ready. {conflictCount} file(s) changed both locally and remotely. Resolve them before continuing.',
+	'batchConflictModal.keepLocalAll': 'Keep Local for All',
+	'batchConflictModal.keepRemoteAll': 'Keep Remote for All',
+	'batchConflictModal.skipAll': 'Skip All',
+	'batchConflictModal.row.badge': 'Local changed · Remote changed',
+	'batchConflictModal.row.binary': 'Binary',
+	'batchConflictModal.row.viewDiff': 'View Diff',
+	'batchConflictModal.row.keepLocal': 'Keep Local',
+	'batchConflictModal.row.keepRemote': 'Keep Remote',
+	'batchConflictModal.row.skip': 'Skip',
+	'batchConflictModal.continue': 'Continue',
+	'batchConflictModal.cancel': 'Cancel',
+	'batchConflictModal.unresolvedWarning': 'Choose a resolution for every conflict before continuing.',
 };
 
 export default en;

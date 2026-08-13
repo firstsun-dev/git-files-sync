@@ -721,7 +721,7 @@ export class SyncStatusView extends ItemView {
     private async pushMoveGroup(members: FileStatus[]): Promise<void> {
         const files = members.map(m => m.file || m.path);
         try {
-            const results = await this.plugin.sync.pushAllFiles(files);
+            const results = await this.plugin.sync.pushFiles(files);
             this.applyOptimisticSyncedStatus(results.syncedPaths);
             this.renderView();
         } catch (e) {
@@ -787,19 +787,24 @@ export class SyncStatusView extends ItemView {
             this.renderView();
 
             if (op === 'push') {
-                const result = await this.plugin.sync.pushFile(fileStatus.file || fileStatus.path);
+                // Individual push is just a one-element pushFiles() batch -- the same
+                // pipeline "Selected x1" uses -- so a tracked rename is classified
+                // identically regardless of which button the user clicked.
+                const results = await this.plugin.sync.pushFiles([fileStatus.file || fileStatus.path]);
                 prog.hide();
-                if (result) {
+                const synced = results.syncedPaths.find(p => p.path === fileStatus.path);
+                if (synced) {
                     // Same approach as executeBatchOperation's applyOptimisticSyncedStatus:
                     // trust what was just written instead of re-fetching the remote tree,
                     // which can lag a successful write by a few seconds. Passing `undefined`
                     // as refreshFileStatus's remoteEntry (the old code path) claims the file
                     // isn't on the remote at all, which forces 'unsynced' right after a
                     // successful push -- the bug being fixed here.
-                    this.applyOptimisticSyncedStatus([{ path: fileStatus.path, sha: result.sha }]);
+                    this.applyOptimisticSyncedStatus([synced]);
                 } else {
-                    // Not a confirmed sync (file deleted, remote symlink left untouched, or a
-                    // conflict deferred to its modal) -- fall back to an accurate live check.
+                    // Not a confirmed sync (cancelled, conflict left unresolved, file
+                    // deleted, or remote symlink left untouched) -- fall back to an
+                    // accurate live check.
                     await this.refreshFileStatusByContent(fileStatus.file || fileStatus.path);
                 }
             } else {
@@ -1478,7 +1483,7 @@ export class SyncStatusView extends ItemView {
         try {
             const remoteTree = await this.getReusableRemoteTree();
             const results = op === 'push'
-                ? await this.plugin.sync.pushAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pushing', { current: cur, total, name })), remoteTree)
+                ? await this.plugin.sync.pushFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pushing', { current: cur, total, name })), remoteTree)
                 : await this.plugin.sync.pullAllFiles(files, (cur, total, name) => prog.setMessage(t('syncStatus.progress.pulling', { current: cur, total, name })), remoteTree);
 
             prog.hide();

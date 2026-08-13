@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SyncManager } from '../../src/logic/sync-manager';
+import { SyncManager, BatchPushConflict, ConflictResolution } from '../../src/logic/sync-manager';
 
 // Mock dependencies
 import { App, TFile } from 'obsidian';
-import { SyncConflictModal } from '../../src/ui/SyncConflictModal';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
+import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
 import { gitBlobSha } from '../../src/utils/git-blob-sha';
 
 vi.mock('../../src/ui/SyncConflictModal');
@@ -13,6 +13,7 @@ vi.mock('../../src/ui/SyncConflictModal');
 // exercise push/pull mechanics assuming the user confirms, so the plan modal
 // is auto-confirmed by default; conflict-specific tests never reach it.
 vi.mock('../../src/ui/SyncPlanModal');
+vi.mock('../../src/ui/BatchConflictResolutionModal');
 import { GitLabService } from '../../src/services/gitlab-service';
 import { GitLabFilesPushSettings } from '../../src/settings';
 
@@ -47,6 +48,7 @@ const mockApp = {
 const mockGitLab = {
     pushFile: vi.fn(),
     getFile: vi.fn(),
+    getBlob: vi.fn(),
     listFilesDetailed: vi.fn().mockResolvedValue([]),
     deleteFile: vi.fn(),
 } as unknown as GitLabService;
@@ -77,13 +79,30 @@ const mockSettings: GitLabFilesPushSettings = {
 
 describe('SyncManager', () => {
     let manager: SyncManager;
+    /** How the mocked BatchConflictResolutionModal resolves each conflict by default; override per-test. */
+    let conflictResolver: (conflict: BatchPushConflict) => ConflictResolution;
 
     beforeEach(() => {
         vi.clearAllMocks();
+        conflictResolver = () => 'skip';
         vi.mocked(SyncPlanModal).mockImplementation(function (
             this: SyncPlanModal, _app: unknown, _plan: unknown, _direction: SyncPlanDirection, onConfirm: () => void
         ) {
             onConfirm();
+            return this;
+        } as never);
+        vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
+            this: BatchConflictResolutionModal,
+            _app: unknown,
+            _gitService: unknown,
+            conflicts: BatchPushConflict[],
+            _totalFiles: number,
+            _safeCount: number,
+            onResolve: () => void,
+            _onCancel: () => void,
+        ) {
+            for (const conflict of conflicts) conflict.resolution = conflictResolver(conflict);
+            onResolve();
             return this;
         } as never);
         mockSettings.syncMetadata = {};
@@ -112,7 +131,7 @@ describe('SyncManager', () => {
         const readSpy = vi.spyOn(mockApp.vault, 'read').mockResolvedValue('secret');
         const remoteSpy = vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
 
-        await ignoredManager.pushFile(file);
+        await ignoredManager.pushFiles([file]);
 
         expect(readSpy).not.toHaveBeenCalled();
         expect(remoteSpy).not.toHaveBeenCalled();
@@ -122,14 +141,14 @@ describe('SyncManager', () => {
     it('should push file content correctly', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
         const readSpy = vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
-        // Mock getFile to return different content to trigger a push
-        const getSpy = vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'different content', sha: 'old-sha' });
+        vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'test.md', sha: 'old-sha', symlink: false }]);
+        // GitLab-only: classification re-reads the tree entry's revision via getFile.
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'different content', sha: 'old-sha' });
         const pushSpy = vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'test.md', sha: 'new-sha' });
 
-        await manager.pushFile(mockFile);
+        await manager.pushFiles([mockFile]);
 
         expect(readSpy).toHaveBeenCalledWith(mockFile);
-        expect(getSpy).toHaveBeenCalled();
         expect(pushSpy).toHaveBeenCalledWith(
             'test.md',
             'local content',
@@ -144,10 +163,11 @@ describe('SyncManager', () => {
         const mockFile = Object.assign(new TFile(), { path: 'link.md', name: 'link.md' });
         const readSpy = vi.spyOn(mockApp.vault, 'read').mockRejectedValue(new Error('EINVAL: symlink'));
         const adapterReadSpy = vi.spyOn(mockApp.vault.adapter, 'read').mockResolvedValue('linked content');
+        vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'link.md', sha: 'old-sha', symlink: false }]);
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'different content', sha: 'old-sha' });
         const pushSpy = vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'link.md', sha: 'new-sha' });
 
-        await manager.pushFile(mockFile);
+        await manager.pushFiles([mockFile]);
 
         expect(readSpy).toHaveBeenCalledWith(mockFile);
         expect(adapterReadSpy).toHaveBeenCalledWith('link.md');
@@ -164,10 +184,11 @@ describe('SyncManager', () => {
     it('does not overwrite a remote symlink on push (follow mode safety)', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'link.md', name: 'link.md' });
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
+        vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'link.md', sha: 'link-sha', symlink: true }]);
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: 'link-sha', isSymlink: true, symlinkTarget: '../x.md' });
         const pushSpy = vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'link.md', sha: 'new' });
 
-        await manager.pushFile(mockFile);
+        await manager.pushFiles([mockFile]);
 
         // The remote symlink must be left untouched.
         expect(pushSpy).not.toHaveBeenCalled();
@@ -185,10 +206,11 @@ describe('SyncManager', () => {
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
         // Mock GitLab returning a different remote SHA and different content
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'remote content', sha: 'new-remote-sha' });
+        vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'test.md', sha: 'new-remote-sha', symlink: false }]);
 
-        const modalMock = vi.mocked(SyncConflictModal);
+        const modalMock = vi.mocked(BatchConflictResolutionModal);
 
-        await manager.pushFile(mockFile);
+        await manager.pushFiles([mockFile]);
 
         expect(modalMock).toHaveBeenCalled();
     });
@@ -198,29 +220,12 @@ describe('SyncManager', () => {
         mockSettings.syncMetadata['test.md'] = { lastSyncedSha: 'old', lastSyncedAt: 0 };
 
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
-        vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: 'remote content', sha: 'remote-sha' });
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+        vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'test.md', sha: 'remote-sha', symlink: false }]);
         vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'test.md', sha: 'new-sha' });
-        // No second getFile call needed if pushFile returns sha
+        conflictResolver = () => 'keep-local';
 
-        const modalMock = vi.mocked(SyncConflictModal);
-
-        // Capture the callback passed to the modal
-        let callback: (choice: 'local' | 'remote') => void = () => { };
-        modalMock.mockImplementation(function (this: SyncConflictModal, app: App, fileName: string, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
-            callback = onChoose;
-            (this as unknown as Record<string, unknown>).open = vi.fn();
-            (this as unknown as Record<string, unknown>).close = vi.fn();
-            (this as unknown as Record<string, unknown>).app = app;
-            (this as unknown as Record<string, unknown>).setTitle = vi.fn().mockReturnThis();
-        });
-
-        await manager.pushFile(mockFile);
-
-        // Simulate user choosing 'local'
-        callback('local');
-
-        // Wait for async operations in callback
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await manager.pushFiles([mockFile]);
 
         const pushSpy = vi.spyOn(mockGitLab, 'pushFile');
         expect(pushSpy).toHaveBeenCalledWith('test.md', 'local content', 'main', 'Update test.md from Obsidian', 'remote-sha', undefined);
@@ -233,28 +238,16 @@ describe('SyncManager', () => {
 
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
-        const modifySpy = vi.spyOn(mockApp.vault, 'modify').mockResolvedValue();
+        vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'test.md', sha: 'remote-sha', symlink: false }]);
+        vi.spyOn(mockGitLab, 'getBlob').mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+        // The batch conflict pipeline applies "keep remote" by path (via the
+        // adapter), not through the original TFile reference.
+        const writeSpy = vi.spyOn(mockApp.vault.adapter, 'write').mockResolvedValue(undefined);
+        conflictResolver = () => 'keep-remote';
 
-        const modalMock = vi.mocked(SyncConflictModal);
+        await manager.pushFiles([mockFile]);
 
-        let callback: (choice: 'local' | 'remote') => void = () => { };
-        modalMock.mockImplementation(function (this: SyncConflictModal, app: App, fileName: string, local: string, remote: string, onChoose: (choice: 'local' | 'remote') => void) {
-            callback = onChoose;
-            (this as unknown as Record<string, unknown>).open = vi.fn();
-            (this as unknown as Record<string, unknown>).close = vi.fn();
-            (this as unknown as Record<string, unknown>).app = app;
-            (this as unknown as Record<string, unknown>).setTitle = vi.fn().mockReturnThis();
-        });
-
-        await manager.pushFile(mockFile);
-
-        // Simulate user choosing 'remote'
-        callback('remote');
-
-        // Wait for async operations in callback
-        await new Promise(resolve => setTimeout(resolve, 50));
-
-        expect(modifySpy).toHaveBeenCalledWith(mockFile, 'remote content');
+        expect(writeSpy).toHaveBeenCalledWith('test.md', 'remote content');
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('remote-sha');
     });
 
@@ -263,12 +256,15 @@ describe('SyncManager', () => {
         mockSettings.syncMetadata = {};
 
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('same content');
-        vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: 'same content', sha: 'remote-sha' });
+        const contentSha = await gitBlobSha('same content');
+        vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'test.md', sha: contentSha, symlink: false }]);
+        // GitLab-only: classification re-reads the tree entry's revision via getFile.
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'same content', sha: contentSha });
 
-        await manager.pushFile(mockFile);
+        await manager.pushFiles([mockFile]);
 
         expect(mockGitLab.pushFile).not.toHaveBeenCalled();
-        expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('remote-sha');
+        expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe(contentSha);
     });
 
     it('should update metadata after successful push', async () => {
@@ -280,7 +276,7 @@ describe('SyncManager', () => {
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: 'diff', sha: 'old' });
         vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'test.md', sha: 'new-sha' });
 
-        await manager.pushFile(mockFile);
+        await manager.pushFiles([mockFile]);
 
         expect(mockSettings.syncMetadata['test.md']).toBeDefined();
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('new-sha');
@@ -305,7 +301,7 @@ describe('SyncManager', () => {
         const mockFile = Object.assign(new TFile(), { path: 'non-existent.md', name: 'non-existent.md' });
         vi.spyOn(mockApp.vault, 'getFileByPath').mockReturnValue(null);
 
-        await manager.pushFile(mockFile);
+        await manager.pushFiles([mockFile]);
 
         const getFileSpy = vi.spyOn(mockGitLab, 'getFile');
         const pushFileSpy = vi.spyOn(mockGitLab, 'pushFile');
@@ -318,11 +314,11 @@ describe('SyncManager', () => {
         mockSettings.syncMetadata = {};
 
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('new local content');
-        // Remote returns 404/empty
-        vi.spyOn(mockGitLab, 'getFile').mockResolvedValueOnce({ content: '', sha: '' });
+        // Remote tree has no entry for this path: it's new.
+        vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([]);
         vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'new.md', sha: 'new-sha' });
 
-        await manager.pushFile(mockFile);
+        await manager.pushFiles([mockFile]);
 
         const pushFileSpy = vi.spyOn(mockGitLab, 'pushFile');
         expect(pushFileSpy).toHaveBeenCalledWith(
@@ -330,7 +326,7 @@ describe('SyncManager', () => {
             'new local content',
             'main',
             'Update new.md from Obsidian',
-            '',
+            undefined,
             undefined
         );
         expect(mockSettings.syncMetadata['new.md']?.lastSyncedSha).toBe('new-sha');
@@ -366,7 +362,7 @@ describe('SyncManager', () => {
             });
             vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
 
-            await manager.pushFile(mockFile);
+            await manager.pushFiles([mockFile]);
 
             // A real move: the new path is added and the old path is removed
             // (mockGitLab has no commitBatch, so this is the sequential
@@ -403,7 +399,11 @@ describe('SyncManager', () => {
 
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
             const contentSha = await gitBlobSha('content');
-            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: oldPath, sha: contentSha, symlink: false }]);
+            // A different file already exists on the remote at the new path.
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([
+                { path: oldPath, sha: contentSha, symlink: false },
+                { path: newPath, sha: 'remote-existing-sha', symlink: false },
+            ]);
             vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
                 // Remote still has the old path with matching content: confirms a real rename.
                 if (path === oldPath) return { content: 'content', sha: 'old-sha' };
@@ -411,7 +411,7 @@ describe('SyncManager', () => {
                 return { content: 'old remote content', sha: 'remote-existing-sha' };
             });
 
-            await manager.pushFile(mockFile);
+            await manager.pushFiles([mockFile]);
 
             // Never a silent overwrite: nothing is pushed or deleted, and the
             // pending move is left in place so the user can resolve it.
@@ -443,6 +443,10 @@ describe('SyncManager', () => {
             });
 
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('unrelated content');
+            // Normal push target: already exists remotely with older content. The
+            // orphaned path is deliberately absent from the tree -- it's not the
+            // source of this push.
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: pushedPath, sha: 'remote-sha', symlink: false }]);
             vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
                 // The orphaned path's remote content is unrelated to what's being pushed now.
                 if (path === orphanedPath) return { content: 'totally different content', sha: 'orphaned-sha' };
@@ -451,7 +455,7 @@ describe('SyncManager', () => {
             });
             vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: pushedPath, sha: 'new-sha' });
 
-            await manager.pushFile(mockFile);
+            await manager.pushFiles([mockFile]);
 
             // Must be treated as a normal update, not a rename from the orphaned path.
             expect(mockGitLab.pushFile).toHaveBeenCalledWith(
@@ -490,15 +494,94 @@ describe('SyncManager', () => {
                 return null; // every orphaned path is gone from the vault
             });
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('new content');
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: pushedPath, sha: 'remote-sha', symlink: false }]);
             vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'old content', sha: 'remote-sha' });
             vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: pushedPath, sha: 'new-sha' });
 
-            await manager.pushFile(mockFile);
+            await manager.pushFiles([mockFile]);
 
-            // Exactly one getFile call: the conflict check for the file actually being
-            // pushed. The 5 orphaned candidates must be resolved via a single prefetched
-            // tree (listFilesDetailed), not 5 separate live getFile lookups.
+            // Exactly one getFile call: GitLab's revision refresh for the file actually
+            // being pushed. The 5 orphaned candidates must be resolved via a single
+            // prefetched tree (listFilesDetailed), not 5 separate live getFile lookups.
             expect(mockGitLab.getFile).toHaveBeenCalledTimes(1);
+        });
+
+        it('regression: an Individual Push resolved as a path string (no live TFile) must still classify a tracked rename as a move, not an addition', async () => {
+            // Regression test for the reported bug: SyncStatusView's per-row push
+            // button calls `pushFiles([fileStatus.file || fileStatus.path])` -- a raw
+            // path string whenever no live TFile is attached to that row's status
+            // entry yet (e.g. right after a rename, before the panel's next refresh
+            // re-resolves it). "Selected x1 Push" resolves the exact same `pushFiles`
+            // pipeline, normally with a live TFile -- there is now only one function,
+            // so "Individual Push" and "Selected x1 Push" can no longer structurally
+            // diverge. A string input must still classify a tracked rename as a move.
+            const oldPath = 'old.md';
+            const newPath = 'new.md';
+
+            mockSettings.syncMetadata[oldPath] = {
+                lastSyncedSha: 'old-sha',
+                lastSyncedAt: Date.now(),
+                lastKnownPath: oldPath,
+            };
+            await manager.trackRename(newPath, oldPath);
+
+            vi.spyOn(mockApp.vault.adapter, 'exists').mockResolvedValue(true);
+            vi.spyOn(mockApp.vault.adapter, 'read').mockResolvedValue('content');
+            vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
+                if (path === oldPath) return { content: 'content', sha: 'old-sha' };
+                return { content: '', sha: '' };
+            });
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([]);
+
+            await manager.pushFiles([newPath]);
+
+            // Must be a move, never an addition.
+            expect(mockGitLab.pushFile).toHaveBeenCalledWith(
+                newPath, 'content', 'main', `Move ${oldPath} to ${newPath}`
+            );
+            expect(mockGitLab.deleteFile).toHaveBeenCalledWith(
+                oldPath, 'main', `Remove ${oldPath} (moved to ${newPath})`
+            );
+        });
+
+        it('classifies the same tracked rename as a move identically whether pushFiles is called with one file or as part of a larger batch (Individual Push === Selected x1 Push)', async () => {
+            const oldPath = 'old.md';
+            const newPath = 'new.md';
+            const otherPath = 'unrelated.md';
+            const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
+
+            mockSettings.syncMetadata[oldPath] = { lastSyncedSha: 'old-sha', lastSyncedAt: Date.now(), lastKnownPath: oldPath };
+            await manager.trackRename(newPath, oldPath);
+
+            vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation((path) => (path === newPath ? mockFile : null));
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
+            vi.spyOn(mockApp.vault.adapter, 'exists').mockResolvedValue(true);
+            vi.spyOn(mockApp.vault.adapter, 'read').mockResolvedValue('other content');
+            vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([]);
+
+            // "Selected x1": one file, as a TFile, in an array of one.
+            await manager.pushFiles([mockFile]);
+            expect(mockGitLab.pushFile).toHaveBeenCalledWith(newPath, 'content', 'main', `Move ${oldPath} to ${newPath}`);
+            expect(mockGitLab.deleteFile).toHaveBeenCalledWith(oldPath, 'main', `Remove ${oldPath} (moved to ${newPath})`);
+
+            vi.clearAllMocks();
+            mockSettings.syncMetadata[oldPath] = { lastSyncedSha: 'old-sha', lastSyncedAt: Date.now(), lastKnownPath: oldPath };
+            await manager.trackRename(newPath, oldPath);
+            vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation((path) => (path === newPath ? mockFile : null));
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
+            vi.spyOn(mockApp.vault.adapter, 'exists').mockResolvedValue(true);
+            vi.spyOn(mockApp.vault.adapter, 'read').mockResolvedValue('other content');
+            vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
+            vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: newPath, sha: 'new-sha' });
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([]);
+
+            // Same file, same expectation, but as one of several files in the batch.
+            await manager.pushFiles([mockFile, otherPath]);
+            expect(mockGitLab.pushFile).toHaveBeenCalledWith(newPath, 'content', 'main', `Move ${oldPath} to ${newPath}`);
+            expect(mockGitLab.deleteFile).toHaveBeenCalledWith(oldPath, 'main', `Remove ${oldPath} (moved to ${newPath})`);
         });
     });
 
@@ -553,12 +636,12 @@ describe('SyncManager', () => {
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('content');
             vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
             vi.spyOn(mockGitLab, 'pushFile').mockRejectedValue(new Error('Network error'));
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([]);
 
-            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-            
-            await manager.pushFile(mockFile);
+            const results = await manager.pushFiles([mockFile]);
 
-            expect(consoleSpy).toHaveBeenCalled();
+            expect(results.failed).toBe(1);
+            expect(results.errors).toEqual([{ file: 'fail.md', error: 'Network error' }]);
         });
 
         it('should handle rename errors gracefully', async () => {
@@ -566,7 +649,7 @@ describe('SyncManager', () => {
             const newPath = 'new.md';
             const mockFile = Object.assign(new TFile(), { path: newPath, name: 'new.md' });
             mockSettings.syncMetadata[oldPath] = { lastSyncedSha: 's', lastSyncedAt: 0, lastKnownPath: oldPath };
-            
+
             vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation(p => p === oldPath ? null : mockFile);
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('c');
             vi.spyOn(mockGitLab, 'getFile').mockImplementation(async (path) => {
@@ -575,10 +658,11 @@ describe('SyncManager', () => {
                 return { content: '', sha: '' };
             });
             vi.spyOn(mockGitLab, 'pushFile').mockRejectedValue(new Error('Rename failed'));
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([]);
 
-            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-            await manager.pushFile(mockFile);
-            expect(consoleSpy).toHaveBeenCalled();
+            const results = await manager.pushFiles([mockFile]);
+            expect(results.failed).toBe(1);
+            expect(results.errors).toEqual([{ file: newPath, error: 'Rename failed' }]);
             // Verify metadata wasn't updated
             expect(mockSettings.syncMetadata[oldPath]).toBeDefined();
             expect(mockSettings.syncMetadata[newPath]).toBeUndefined();
@@ -625,14 +709,15 @@ describe('SyncManager', () => {
         it('shows a plan before a single-file push and applies it when confirmed', async () => {
             const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
+            vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'test.md', sha: 'old-sha', symlink: false }]);
             vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'different content', sha: 'old-sha' });
             const pushSpy = vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'test.md', sha: 'new-sha' });
 
-            await manager.pushFile(mockFile);
+            await manager.pushFiles([mockFile]);
 
             expect(SyncPlanModal).toHaveBeenCalledWith(
                 mockApp,
-                { additions: [], modifications: [{ path: 'test.md', name: 'test.md' }], deletions: [], moves: [] },
+                { additions: [], modifications: [{ path: 'test.md', name: 'test.md' }], deletions: [], moves: [], acceptedRemote: [], skippedConflicts: [] },
                 'push',
                 expect.any(Function),
                 expect.any(Function)
@@ -653,9 +738,9 @@ describe('SyncManager', () => {
             vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'different content', sha: 'old-sha' });
             const pushSpy = vi.spyOn(mockGitLab, 'pushFile');
 
-            const result = await manager.pushFile(mockFile);
+            const results = await manager.pushFiles([mockFile]);
 
-            expect(result).toBeUndefined();
+            expect(results.cancelled).toBe(true);
             expect(pushSpy).not.toHaveBeenCalled();
         });
 
@@ -685,11 +770,11 @@ describe('SyncManager', () => {
             vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: '', sha: '' });
             vi.spyOn(mockGitLab, 'pushFile').mockResolvedValue({ path: 'new.md', sha: 'sha' });
 
-            await manager.pushFile(mockFile);
+            await manager.pushFiles([mockFile]);
 
             expect(SyncPlanModal).toHaveBeenCalledWith(
                 mockApp,
-                { additions: [{ path: 'new.md', name: 'new.md' }], modifications: [], deletions: [], moves: [] },
+                { additions: [{ path: 'new.md', name: 'new.md' }], modifications: [], deletions: [], moves: [], acceptedRemote: [], skippedConflicts: [] },
                 'push',
                 expect.any(Function),
                 expect.any(Function)

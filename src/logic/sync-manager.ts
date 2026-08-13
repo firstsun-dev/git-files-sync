@@ -1,9 +1,10 @@
 import { TFile, App, Notice } from 'obsidian';
-import { GitServiceInterface, GitTreeEntry, GitFile, BatchMoveItem } from '../services/git-service-interface';
+import { GitServiceInterface, GitTreeEntry, GitFile } from '../services/git-service-interface';
 import { MAX_BATCH_PUSH_SIZE } from '../services/git-service-base';
 import { GitLabFilesPushSettings, getServiceName, getEffectiveSymlinkHandling, isSyncMetadataAtPath } from '../settings';
 import { SyncConflictModal } from '../ui/SyncConflictModal';
 import { SyncPlanModal, SyncPlanDirection } from '../ui/SyncPlanModal';
+import { BatchConflictResolutionModal } from '../ui/BatchConflictResolutionModal';
 import { SyncPlan, SyncPlanEntry, isSyncPlanEmpty } from '../ui/types';
 import { logger } from '../utils/logger';
 import { isBinaryPath, contentsEqual } from '../utils/path';
@@ -15,14 +16,43 @@ import { SyncStatusService } from './sync-status-service';
 /** Result of syncing one file within a batch push/pull. */
 type BatchOutcome = 'done' | 'unchanged' | 'conflict';
 
-/** Result of classifying one file for a plan preview -- like BatchOutcome, but read-only and distinguishing additions/modifications/moves for display. */
-type PlanClassification = { kind: 'addition' | 'modification' | 'move' | 'unchanged' | 'conflict' | 'skip'; movedFrom?: string };
-
 /** A file classified as needing a push, queued for the grouped batch-commit call. */
 type ToPushEntry = { path: string; name: string; repoPath: string; content: string | ArrayBuffer; existingSha?: string; existingRevision?: string };
 
 /** A renamed file classified as a safe move, queued for the grouped batch-commit call. */
 type ToMoveEntry = { path: string; name: string; repoPath: string; oldPath: string; oldRepoPath: string; content: string | ArrayBuffer; oldRevision?: string };
+
+/** How the user chose to resolve one batch-push conflict in `BatchConflictResolutionModal`. */
+export type ConflictResolution = 'keep-local' | 'keep-remote' | 'skip';
+
+/**
+ * A file whose local and remote content have both changed since the last
+ * sync, detected while planning a batch push. Carries everything needed to
+ * resolve it against the exact remote snapshot the plan was built from —
+ * `remoteSha` (and `remoteRevision` for GitLab's optimistic lock) — without
+ * re-fetching the remote tree. Remote content itself is fetched lazily (via
+ * `getBlob(remoteSha, repoPath)`) only when the user asks to view the diff or
+ * once "keep remote" is actually applied, so resolving a large batch of
+ * conflicts via a bulk action never has to download content nobody looks at.
+ */
+export type BatchPushConflict = {
+    path: string;
+    name: string;
+    repoPath: string;
+    localContent: string | ArrayBuffer;
+    remoteSha: string;
+    remoteRevision?: string;
+    resolution?: ConflictResolution;
+};
+
+/** The result of classifying a whole batch push before anything is written: what's ready to commit, and what needs a conflict decision first. */
+type BatchPushPlan = {
+    pushes: ToPushEntry[];
+    moves: ToMoveEntry[];
+    conflicts: BatchPushConflict[];
+    /** Rename-safety conflicts (target already exists, or the old path moved on) — always left alone, never offered for interactive resolution. */
+    autoSkipped: SyncPlanEntry[];
+};
 
 /**
  * Result of a batch push. `syncedPaths` lists every path that's now confirmed
@@ -36,9 +66,17 @@ type ToMoveEntry = { path: string; name: string; repoPath: string; oldPath: stri
 export type PushResults = {
     success: number;
     failed: number;
+    /** Total conflicts detected (both interactively resolved and rename-safety auto-skips). */
     conflicts: number;
+    /** Conflicts resolved as "keep local" or "keep remote" and applied. */
+    resolvedConflicts: number;
+    /** Conflicts left untouched — by explicit "skip", or a rename-safety auto-skip. */
+    skippedConflicts: number;
+    /** True when the user cancelled conflict resolution or the final plan review — nothing was written for the batch commit. */
+    cancelled?: boolean;
     errors: Array<{ file: string; error: string }>;
     syncedPaths: Array<{ path: string; sha?: string }>;
+    conflictedPaths?: string[];
 };
 
 export class SyncManager {
@@ -151,127 +189,6 @@ export class SyncManager {
     }
 
     /**
-     * Returns a confirmed-synced result (with the new blob sha, when known) so
-     * an interactive single-file push can mark the file's UI status directly —
-     * the same "trust what we just wrote" approach batch push already uses via
-     * `syncedPaths` — instead of re-fetching the remote tree right after a
-     * write, which GitHub's tree-by-branch-name read can lag by a few seconds.
-     * Returns `undefined` when the outcome isn't a confirmed sync (file gone,
-     * remote symlink left untouched, or a conflict deferred to the modal).
-     */
-    async pushFile(fileOrPath: TFile | string): Promise<{ sha?: string } | undefined> {
-        const { path, name, isString } = this.getFileInfo(fileOrPath);
-        const repoPath = this.getNormalizedPath(path);
-
-        if (this.isPathIgnored(path)) {
-            new Notice(`Skipped ${name}: it matches an ignore pattern.`);
-            return undefined;
-        }
-
-        if (!await this.checkFileExists(path, isString)) {
-            new Notice(`File ${name} no longer exists in vault.`);
-            return undefined;
-        }
-
-        try {
-            const shortCircuit = await this.tryPushAsSymlinkOrRename(fileOrPath, path, name, isString);
-            if (shortCircuit.handled) return shortCircuit.result;
-            const content = shortCircuit.content;
-
-            // Conflict detection & equality check
-            const remote = await this.gitService.getFile(repoPath, this.settings.branch);
-
-            // "follow" must not silently convert a remote symlink into a regular
-            // file. If the remote is a symlink, leave it untouched.
-            if (remote.isSymlink) {
-                new Notice(`${name} is a symlink on the remote; not overwriting (use "real" symlink mode to manage links).`);
-                return undefined;
-            }
-
-            if (remote.sha && this.contentsEqual(content, remote.content)) {
-                await this.updateMetadata(path, remote.sha);
-                new Notice(`${name} is already up to date.`);
-                return { sha: remote.sha };
-            }
-
-            const lastSynced = this.settings.syncMetadata[path];
-
-            if (remote.sha && lastSynced && !this.isSameBaseline(lastSynced.lastSyncedSha, remote)) {
-                this.openPushConflictModal(fileOrPath, { path, name }, content, remote);
-                return undefined;
-            }
-
-            const confirmed = await this.confirmPlan(this.singleEntryPlan(remote.sha ? 'modification' : 'addition', path, name), 'push');
-            if (!confirmed) return undefined;
-
-            const sha = await this.performPush({ path, name }, content, remote.sha, remote.revision);
-            return { sha };
-        } catch (e) {
-            this.handleError(`Failed to push ${name} to ${this.serviceName}`, e);
-            return undefined;
-        }
-    }
-
-    /**
-     * The first two branches of a push -- "is this a symlink?" and "is this a
-     * rename of a tracked path?" -- each short-circuit the whole operation with
-     * their own result. Split out of `pushFile` purely to keep that function's
-     * branching flat; on no short circuit, returns the local content it read
-     * (needed either way) so the caller doesn't read it twice.
-     */
-    private async tryPushAsSymlinkOrRename(
-        fileOrPath: TFile | string, path: string, name: string, isString: boolean
-    ): Promise<{ handled: true; result: { sha?: string } | undefined } | { handled: false; content: string | ArrayBuffer }> {
-        // Symbolic link handling: real → push as a symlink (GitHub), skip → ignore.
-        const symlinkTarget = readLocalSymlinkTarget(this.app, path);
-        if (symlinkTarget !== null) {
-            const symlinkOutcome = await this.handleSymlinkPush({ path, name }, symlinkTarget);
-            if (symlinkOutcome.handled) {
-                return { handled: true, result: symlinkOutcome.synced ? { sha: symlinkOutcome.sha } : undefined };
-            }
-        }
-
-        const content = await this.getFileContent(fileOrPath);
-
-        // A path already carrying renamedFrom was tracked live by the vault
-        // 'rename' handler, so it's known for free; only fall back to the
-        // content-based scan for renames the plugin missed (e.g. it was
-        // disabled at the time).
-        if (!isString && fileOrPath instanceof TFile) {
-            const renamedFrom = this.settings.syncMetadata[path]?.renamedFrom ?? await this.detectRename(fileOrPath, content);
-            if (renamedFrom) {
-                const sha = await this.handleRename(fileOrPath, renamedFrom, content);
-                return { handled: true, result: sha !== undefined ? { sha } : undefined };
-            }
-        }
-
-        return { handled: false, content };
-    }
-
-    /** Opens the local-vs-remote conflict modal for a push and applies whichever side the user picks. The choice resolves asynchronously, after `pushFile` has already returned. */
-    private openPushConflictModal(
-        fileOrPath: TFile | string,
-        file: { path: string; name: string },
-        content: string | ArrayBuffer,
-        remote: GitFile
-    ): void {
-        new SyncConflictModal(this.app, file.name, content as string, remote.content as string, (choice) => {
-            void (async () => {
-                try {
-                    const fileRep = typeof fileOrPath === 'string' ? file : fileOrPath;
-                    if (choice === 'local') {
-                        await this.performPush(file, content, remote.sha, remote.revision);
-                    } else {
-                        await this.performPull(fileRep, remote.content, remote.sha, false, this.symlinkPullTarget(remote));
-                    }
-                } catch (e) {
-                    this.handleError(`Failed to resolve conflict for ${file.name}`, e);
-                }
-            })();
-        }).open();
-    }
-
-    /**
      * A missing local file at a tracked path is only weak evidence of a rename —
      * any orphaned metadata entry (e.g. from a local delete) matches it too. Only
      * report a rename once the remote content at the old path still matches the
@@ -335,75 +252,6 @@ export class SyncManager {
         const entry = treeByFullPath.get(this.getFullPathForTree(oldRepoPath));
         if (!entry || entry.symlink) return false;
         return entry.sha ? entry.sha === localSha : undefined;
-    }
-
-    /**
-     * Commits a rename as a real move: the new path is added and the old path
-     * is removed in one commit (via commitBatch where the provider supports
-     * it, otherwise a sequential push-then-delete). Two safety checks guard
-     * against destroying data:
-     *
-     * - The target path must not already exist on the remote — that would be
-     *   a silent overwrite of someone else's file, so this bails out entirely
-     *   (returning undefined, nothing pushed) and leaves the pending move in
-     *   place for the user to resolve.
-     * - The old path's remote content must still match what was last synced
-     *   there. If it doesn't, someone changed the remote since — deleting it
-     *   would discard a change we've never seen, so the new content is still
-     *   pushed (nothing local is lost) but the old path is left alone.
-     *
-     * Returns the new path's blob sha on a confirmed push, so pushFile can
-     * mark the file synced directly instead of re-fetching the remote tree.
-     */
-    private async handleRename(file: TFile, oldPath: string, content: string | ArrayBuffer): Promise<string | undefined> {
-        try {
-            const repoPath = this.getNormalizedPath(file.path);
-            const oldRepoPath = this.getNormalizedPath(oldPath);
-            const metadata = this.settings.syncMetadata[file.path] ?? this.settings.syncMetadata[oldPath];
-
-            const existingAtNewPath = await this.gitService.getFile(repoPath, this.settings.branch);
-            if (existingAtNewPath.sha) {
-                new Notice(`Can't move ${file.name}: "${repoPath}" already exists on ${this.serviceName}. Resolve manually, then push again.`);
-                return undefined;
-            }
-
-            const remoteAtOldPath = await this.gitService.getFile(oldRepoPath, this.settings.branch);
-            const safeToDeleteOld = !remoteAtOldPath.sha || !metadata?.lastSyncedSha || this.isSameBaseline(metadata.lastSyncedSha, remoteAtOldPath);
-
-            const newSha = await this.commitMove(repoPath, oldRepoPath, content, safeToDeleteOld && !!remoteAtOldPath.sha);
-
-            await this.updateMetadata(file.path, newSha);
-            delete this.settings.syncMetadata[oldPath];
-            await this.saveSettings();
-
-            if (safeToDeleteOld) {
-                new Notice(`Moved ${file.name} on ${this.serviceName}`);
-            } else {
-                new Notice(`Pushed ${file.name} to ${this.serviceName}, but "${oldPath}" changed on ${this.serviceName} since the last sync and was left in place. Resolve manually.`);
-            }
-            return newSha;
-        } catch (e) {
-            this.handleError('Failed to handle rename', e);
-            throw e; // Rethrow for batch processing
-        }
-    }
-
-    /** Commits one move (single-file flow only; the batch flow groups many moves into one commit via commitBatch directly). */
-    private async commitMove(repoPath: string, oldRepoPath: string, content: string | ArrayBuffer, deleteOld: boolean): Promise<string> {
-        if (this.gitService.commitBatch) {
-            const message = deleteOld ? `Move ${oldRepoPath} to ${repoPath}` : `Add ${repoPath}`;
-            const moves: BatchMoveItem[] = deleteOld ? [{ oldPath: oldRepoPath, newPath: repoPath, content }] : [];
-            const additions = deleteOld ? [] : [{ path: repoPath, content }];
-            const [result] = await this.gitService.commitBatch(additions, moves, this.settings.branch, message);
-            return result?.sha ?? await gitBlobSha(content);
-        }
-
-        const pushResult = await this.gitService.pushFile(repoPath, content, this.settings.branch, `Move ${oldRepoPath} to ${repoPath}`);
-        const newSha = pushResult.sha ?? await gitBlobSha(content);
-        if (deleteOld) {
-            await this.gitService.deleteFile(oldRepoPath, this.settings.branch, `Remove ${oldRepoPath} (moved to ${repoPath})`);
-        }
-        return newSha;
     }
 
     private async performPush(file: {path: string, name: string}, content: string | ArrayBuffer, existingSha?: string, existingRevision?: string, silent = false): Promise<string | undefined> {
@@ -477,7 +325,7 @@ export class SyncManager {
 
             // Conflict detection for pull (only if local exists)
             if (exists && remote.sha && lastSynced && !this.isSameBaseline(lastSynced.lastSyncedSha, remote)) {
-                new SyncConflictModal(this.app, name, (localContent as string) || '', remote.content as string, (choice) => {
+                new SyncConflictModal(this.app, name, localContent ?? '', remote.content, (choice) => {
                     void (async () => {
                         try {
                             const fileRep = typeof fileOrPath === 'string' ? { path, name } : fileOrPath;
@@ -563,21 +411,192 @@ export class SyncManager {
         new Notice(`${message}: ${detail}`);
     }
 
-    async pushAllFiles(
+    /**
+     * The one push pipeline for every entry point (ribbon, command palette,
+     * context menu, sync-status row, "selected", "all modified") — a single
+     * file is just a one-element array, never a special case. Classifies
+     * every candidate first (nothing written yet), lets the user resolve any
+     * conflicts and review the final plan, then commits everything that's
+     * ready to push/move in one grouped call — a "keep local" conflict
+     * resolution rides along in that same commit as an ordinary update, and a
+     * "keep remote" resolution is only applied to the vault after that commit
+     * succeeds. Cancelling either the conflict-resolution or the final-review
+     * step aborts the whole batch: no commit, no local overwrite, no metadata
+     * change.
+     */
+    async pushFiles(
         files: (TFile | string)[],
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
     ): Promise<PushResults> {
+        const emptyResults = (): PushResults => (
+            { success: 0, failed: 0, conflicts: 0, resolvedConflicts: 0, skippedConflicts: 0, errors: [], syncedPaths: [] }
+        );
+
         const syncableFiles = files.filter(file => file && !this.isPathIgnored(this.getFileInfo(file).path));
-        if (syncableFiles.length === 0) {
-            return { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
-        }
+        if (syncableFiles.length === 0) return emptyResults();
+
         const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
-        const plan = await this.planPushBatch(syncableFiles, tree);
-        if (!isSyncPlanEmpty(plan) && !await this.confirmPlan(plan, 'push')) {
-            return { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
+        const { plan, immediate } = await this.buildBatchPushPlan(syncableFiles, onProgress, tree);
+
+        const results: PushResults = {
+            ...emptyResults(),
+            success: immediate.success,
+            failed: immediate.failed,
+            conflicts: plan.conflicts.length + plan.autoSkipped.length,
+            errors: immediate.errors,
+            syncedPaths: immediate.syncedPaths,
+        };
+
+        const skipped: BatchPushConflict[] = [];
+        const keepRemote: BatchPushConflict[] = [];
+        const keepLocal: BatchPushConflict[] = [];
+
+        if (plan.conflicts.length > 0) {
+            const resolved = await this.resolveBatchConflicts(plan.conflicts, syncableFiles.length, plan.pushes.length + plan.moves.length);
+            if (!resolved) {
+                results.cancelled = true;
+                results.conflictedPaths = [...plan.conflicts.map(c => c.path), ...plan.autoSkipped.map(e => e.path)];
+                await this.saveSettings();
+                return results;
+            }
+            for (const conflict of plan.conflicts) {
+                if (conflict.resolution === 'keep-local') {
+                    keepLocal.push(conflict);
+                    plan.pushes.push({
+                        path: conflict.path,
+                        name: conflict.name,
+                        repoPath: conflict.repoPath,
+                        content: conflict.localContent,
+                        existingSha: conflict.remoteSha,
+                        existingRevision: conflict.remoteRevision,
+                    });
+                } else if (conflict.resolution === 'keep-remote') {
+                    keepRemote.push(conflict);
+                } else {
+                    skipped.push(conflict);
+                }
+            }
         }
-        return this.processPushBatch(syncableFiles, onProgress, tree);
+
+        const reviewPlan: SyncPlan = {
+            additions: plan.pushes.filter(p => !p.existingSha).map(p => ({ path: p.path, name: p.name })),
+            modifications: plan.pushes.filter(p => p.existingSha).map(p => ({ path: p.path, name: p.name })),
+            moves: plan.moves.map(m => ({ path: m.path, name: m.name, movedFrom: m.oldPath })),
+            deletions: [],
+            acceptedRemote: keepRemote.map(c => ({ path: c.path, name: c.name })),
+            skippedConflicts: [
+                ...skipped.map(c => ({ path: c.path, name: c.name })),
+                ...plan.autoSkipped.map(e => ({ path: e.path, name: e.name })),
+            ],
+        };
+
+        if (!isSyncPlanEmpty(reviewPlan) && !await this.confirmPlan(reviewPlan, 'push')) {
+            results.cancelled = true;
+            results.skippedConflicts = skipped.length + plan.autoSkipped.length;
+            results.conflictedPaths = [...plan.conflicts.map(c => c.path), ...plan.autoSkipped.map(e => e.path)];
+            await this.saveSettings();
+            return results;
+        }
+
+        await this.commitResolvedBatch(plan.pushes, plan.moves, keepRemote, keepLocal, results);
+        results.skippedConflicts = skipped.length + plan.autoSkipped.length;
+
+        await this.saveSettings();
+        this.notifyPushBatchResult(results);
+        return results;
+    }
+
+    /**
+     * Opens the batch conflict resolution modal and resolves once the user
+     * clicks Continue (every conflict object in `conflicts` now carries a
+     * `resolution`) or cancels (`false` — the conflicts are left untouched).
+     */
+    private resolveBatchConflicts(conflicts: BatchPushConflict[], totalFiles: number, safeCount: number): Promise<boolean> {
+        return new Promise(resolve => {
+            new BatchConflictResolutionModal(
+                this.app,
+                this.gitService,
+                conflicts,
+                totalFiles,
+                safeCount,
+                () => resolve(true),
+                () => resolve(false),
+            ).open();
+        });
+    }
+
+    /**
+     * Commits the resolved batch as one transaction. A "keep local" decision
+     * was made against a specific remote snapshot (`remoteSha`); if the
+     * remote has moved on for any of those paths since the user reviewed
+     * them, the whole commit is aborted rather than silently applying a
+     * stale decision — the user reviewed one version of the remote file, not
+     * whatever is there now. Only once the commit (if any was needed)
+     * actually succeeds are "keep remote" conflicts written to the vault —
+     * a failed or aborted commit leaves both sides exactly as they were.
+     */
+    private async commitResolvedBatch(
+        toPush: ToPushEntry[],
+        toMove: ToMoveEntry[],
+        keepRemote: BatchPushConflict[],
+        keepLocal: BatchPushConflict[],
+        results: PushResults
+    ): Promise<void> {
+        if (keepLocal.length > 0) {
+            const stale = await this.staleResolvedConflicts(keepLocal);
+            if (stale.length > 0) {
+                const message = `Remote content changed since you reviewed this conflict (${stale.map(c => c.path).join(', ')}). Nothing was pushed — resolve the conflict again.`;
+                for (const f of toPush) {
+                    results.failed++;
+                    results.errors.push({ file: f.path, error: message });
+                }
+                for (const f of toMove) {
+                    results.failed++;
+                    results.errors.push({ file: f.path, error: message });
+                }
+                return;
+            }
+        }
+
+        const hadWork = toPush.length > 0 || toMove.length > 0;
+        const failedBefore = results.failed;
+        if (hadWork) {
+            await this.commitPushBatch(toPush, toMove, results);
+        }
+
+        const committedOk = !hadWork || results.failed === failedBefore;
+        if (!committedOk) return;
+
+        const keepLocalPaths = new Set(keepLocal.map(c => c.path));
+        results.resolvedConflicts += results.syncedPaths.filter(p => keepLocalPaths.has(p.path)).length;
+
+        await this.applyKeepRemote(keepRemote, results);
+    }
+
+    /** Re-checks each "keep local" conflict's remote blob against the sha recorded when the plan was built, so a resolution reviewed against one remote snapshot is never silently applied to a different, newer one. */
+    private async staleResolvedConflicts(keepLocal: BatchPushConflict[]): Promise<BatchPushConflict[]> {
+        const stale: BatchPushConflict[] = [];
+        for (const conflict of keepLocal) {
+            const current = await this.gitService.getFile(conflict.repoPath, this.settings.branch);
+            if (current.sha !== conflict.remoteSha) stale.push(conflict);
+        }
+        return stale;
+    }
+
+    /** Writes each "keep remote" conflict's reviewed content to the vault. Fetched by the exact blob sha recorded at plan time (via getBlob), not a fresh getFile, so what's applied is exactly what the user reviewed. */
+    private async applyKeepRemote(keepRemote: BatchPushConflict[], results: PushResults): Promise<void> {
+        for (const conflict of keepRemote) {
+            try {
+                const blob = await this.gitService.getBlob(conflict.remoteSha, conflict.repoPath);
+                await this.performPull({ path: conflict.path, name: conflict.name }, blob.content, blob.sha, true, this.symlinkPullTarget(blob));
+                results.resolvedConflicts++;
+                results.syncedPaths.push({ path: conflict.path, sha: blob.sha });
+            } catch (e) {
+                results.failed++;
+                results.errors.push({ file: conflict.path, error: e instanceof Error ? e.message : String(e) });
+            }
+        }
     }
 
     async pullAllFiles(
@@ -598,26 +617,6 @@ export class SyncManager {
             return { success: 0, failed: 0, conflicts: 0, errors: [] };
         }
         return this.processPullBatch(files, onProgress, tree);
-    }
-
-    /** Computes what a push-all would do, without writing anything, for the plan-review modal. */
-    async planPushBatch(files: (TFile | string)[], remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
-        const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
-        const treeByFullPath = new Map<string, GitTreeEntry>(tree.map(e => [e.path, e]));
-        const hasOrphans = this.hasOrphanedRenameMetadata();
-
-        const plan: SyncPlan = { additions: [], modifications: [], deletions: [], moves: [] };
-        for (const fileOrPath of files) {
-            if (!fileOrPath) continue;
-            const { path, name, isString } = this.getFileInfo(fileOrPath);
-            try {
-                const result = await this.classifyPushForPlan(fileOrPath, path, name, isString, treeByFullPath, hasOrphans);
-                this.addPlanEntry(plan, result.kind, path, name, result.movedFrom);
-            } catch (e) {
-                logger.warn(`Skipping ${path} from push plan preview`, e);
-            }
-        }
-        return plan;
     }
 
     /** Computes what a pull-all would do, without writing anything, for the plan-review modal. */
@@ -647,76 +646,6 @@ export class SyncManager {
         else if (kind === 'modification') plan.modifications.push(entry);
         else if (kind === 'move') plan.moves.push(entry);
         // 'unchanged' / 'conflict' / 'skip' aren't part of what would be applied.
-    }
-
-    /**
-     * Read-only mirror of classifyPushCandidate's decision, for the plan
-     * preview: reuses queueMove (already pure — its only side effect is
-     * pushing into the scratch array passed in) and classifyAgainstTreeEntry
-     * in dry-run mode, so the two safety checks that guard a real move can't
-     * silently drift out of sync with what the plan shows.
-     */
-    private async classifyPushForPlan(
-        fileOrPath: TFile | string,
-        path: string,
-        name: string,
-        isString: boolean,
-        treeByFullPath: Map<string, GitTreeEntry>,
-        hasOrphans: boolean
-    ): Promise<PlanClassification> {
-        if (!await this.checkFileExists(path, isString)) return { kind: 'skip' };
-
-        const symlinkTarget = readLocalSymlinkTarget(this.app, path);
-        if (symlinkTarget !== null) {
-            const symlinkResult = this.classifySymlinkForPushPlan(path, treeByFullPath);
-            if (symlinkResult) return symlinkResult;
-            // 'follow' (or 'real' without provider support): falls through to a normal content push.
-        }
-
-        const content = await this.getFileContent(fileOrPath);
-        const repoPath = this.getNormalizedPath(path);
-
-        if (!isString && fileOrPath instanceof TFile) {
-            const moveResult = await this.classifyMoveForPushPlan(fileOrPath, path, name, content, treeByFullPath, hasOrphans);
-            if (moveResult) return moveResult;
-        }
-
-        const treeEntry = treeByFullPath.get(this.getFullPathForTree(repoPath));
-        await this.migrateGitLabLegacyBaseline(path, repoPath, treeEntry);
-        const outcome = await this.classifyAgainstTreeEntry(path, content, treeEntry, true);
-        if (outcome === 'queued') return { kind: treeEntry ? 'modification' : 'addition' };
-        // classifyAgainstTreeEntry's dry-run path only ever resolves to
-        // 'unchanged' or 'conflict' -- 'done' belongs to the symlink branch,
-        // already handled above.
-        return { kind: outcome === 'conflict' ? 'conflict' : 'unchanged' };
-    }
-
-    private classifySymlinkForPushPlan(path: string, treeByFullPath: Map<string, GitTreeEntry>): PlanClassification | undefined {
-        const mode = getEffectiveSymlinkHandling(this.settings);
-        if (mode === 'skip') return { kind: 'unchanged' };
-        if (mode !== 'real' || !this.gitService.pushSymlink) return undefined;
-
-        const repoPath = this.getNormalizedPath(path);
-        const treeEntry = treeByFullPath.get(this.getFullPathForTree(repoPath));
-        return { kind: treeEntry ? 'modification' : 'addition' };
-    }
-
-    /** Undefined means "not a tracked rename" -- the caller falls through to a normal content classification. */
-    private async classifyMoveForPushPlan(
-        file: TFile,
-        path: string,
-        name: string,
-        content: string | ArrayBuffer,
-        treeByFullPath: Map<string, GitTreeEntry>,
-        hasOrphans: boolean
-    ): Promise<PlanClassification | undefined> {
-        const trackedOldPath = this.settings.syncMetadata[path]?.renamedFrom;
-        const renamedFrom = trackedOldPath ?? (hasOrphans ? await this.detectRename(file, content, treeByFullPath) : null);
-        if (!renamedFrom) return undefined;
-
-        const scratch: ToMoveEntry[] = [];
-        const outcome = await this.queueMove(path, name, renamedFrom, content, treeByFullPath, scratch);
-        return outcome === 'queued' ? { kind: 'move', movedFrom: renamedFrom } : { kind: 'conflict' };
     }
 
     /**
@@ -790,17 +719,28 @@ export class SyncManager {
         return results;
     }
 
-    private async processPushBatch(
+    /**
+     * Classifies every candidate for a batch push without writing anything
+     * (except the pre-existing exception: a "real"-mode symlink push, which
+     * has never gone through conflict detection and is committed immediately
+     * exactly as before). Returns a `BatchPushPlan` of what's ready to push,
+     * what needs a move, and what conflicts still need a resolution — plus
+     * `immediate`, the outcome of anything already written during
+     * classification.
+     */
+    private async buildBatchPushPlan(
         files: (TFile | string)[],
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
-    ): Promise<PushResults> {
-        const results: PushResults = { success: 0, failed: 0, conflicts: 0, errors: [], syncedPaths: [] };
+    ): Promise<{
+        plan: BatchPushPlan;
+        immediate: { success: number; failed: number; errors: Array<{ file: string; error: string }>; syncedPaths: Array<{ path: string; sha?: string }> };
+    }> {
+        const plan: BatchPushPlan = { pushes: [], moves: [], conflicts: [], autoSkipped: [] };
+        const immediate = { success: 0, failed: 0, errors: [] as Array<{ file: string; error: string }>, syncedPaths: [] as Array<{ path: string; sha?: string }> };
 
         const tree = remoteTree ?? await this.gitService.listFilesDetailed(this.settings.branch, false);
         const treeByFullPath = new Map<string, GitTreeEntry>(tree.map(e => [e.path, e]));
-        const toPush: ToPushEntry[] = [];
-        const toMove: ToMoveEntry[] = [];
         // Computed once per batch rather than per file: the fallback rename
         // scan is only worth running at all when some metadata entry has no
         // matching local file. Most files carry a tracked renamedFrom (set live
@@ -816,33 +756,28 @@ export class SyncManager {
             onProgress?.(i + 1, files.length, name);
 
             try {
-                const outcome = await this.classifyPushCandidate(fileOrPath, path, name, isString, treeByFullPath, toPush, toMove, hasOrphans);
+                const outcome = await this.classifyPushCandidate(
+                    fileOrPath, path, name, isString, treeByFullPath, plan.pushes, plan.moves, hasOrphans, plan.conflicts, plan.autoSkipped
+                );
                 if (outcome === 'done') {
-                    results.success++;
+                    immediate.success++;
                     // Symlink pushes are committed immediately outside the
                     // toPush queue, so the new sha isn't known here — the caller
                     // still gets to mark the path synced, just without a sha update.
-                    results.syncedPaths.push({ path });
+                    immediate.syncedPaths.push({ path });
                 }
-                else if (outcome === 'conflict') results.conflicts++;
-                // 'unchanged' and 'queued'/'queued-move' don't move any of the
-                // counters directly: 'unchanged' never did, and the queued
-                // outcomes are resolved by commitPushBatch below.
+                // 'unchanged'/'conflict'/'queued' don't move any of these
+                // counters directly: conflicts are recorded into plan.conflicts
+                // / plan.autoSkipped by classifyPushCandidate itself, and the
+                // queued outcomes are resolved once the plan is committed.
             } catch (e) {
                 logger.error(`Failed to push ${path}:`, e);
-                results.failed++;
-                results.errors.push({ file: path, error: e instanceof Error ? e.message : String(e) });
+                immediate.failed++;
+                immediate.errors.push({ file: path, error: e instanceof Error ? e.message : String(e) });
             }
         }
 
-        if (toPush.length > 0 || toMove.length > 0) {
-            await this.commitPushBatch(toPush, toMove, results);
-        }
-
-        await this.saveSettings();
-        this.notifyBatchResult('push', results.success, results.failed, results.conflicts);
-
-        return results;
+        return { plan, immediate };
     }
 
     /** Whether any syncMetadata entry no longer has a matching local file — the only case detectRename's fallback scan can find anything. */
@@ -871,7 +806,9 @@ export class SyncManager {
         treeByFullPath: Map<string, GitTreeEntry>,
         toPush: ToPushEntry[],
         toMove: ToMoveEntry[],
-        hasOrphans: boolean
+        hasOrphans: boolean,
+        conflicts: BatchPushConflict[],
+        autoSkipped: SyncPlanEntry[]
     ): Promise<BatchOutcome | 'queued'> {
         if (!await this.checkFileExists(path, isString)) throw new Error('File no longer exists');
 
@@ -885,27 +822,71 @@ export class SyncManager {
         const content = await this.getFileContent(fileOrPath);
         const repoPath = this.getNormalizedPath(path);
 
-        // Rename detection: a tracked renamedFrom is free (set live by the
-        // vault 'rename' handler); the content-based scan is only a fallback
-        // for renames the plugin missed, and only worth running when an
-        // orphaned metadata entry actually exists.
-        if (!isString && fileOrPath instanceof TFile) {
-            const trackedOldPath = this.settings.syncMetadata[path]?.renamedFrom;
-            const renamedFrom = trackedOldPath ?? (hasOrphans ? await this.detectRename(fileOrPath, content, treeByFullPath) : null);
-            if (renamedFrom) {
-                return await this.queueMove(path, name, renamedFrom, content, treeByFullPath, toMove);
-            }
-        }
+        const moveOutcome = await this.classifyAsMoveCandidate(fileOrPath, path, name, isString, content, treeByFullPath, toMove, hasOrphans, autoSkipped);
+        if (moveOutcome) return moveOutcome;
 
         let treeEntry = treeByFullPath.get(this.getFullPathForTree(repoPath));
         await this.migrateGitLabLegacyBaseline(path, repoPath, treeEntry);
         const revision = await this.refreshGitLabBatchRevision(repoPath, treeEntry);
         if (revision) treeEntry = { ...treeEntry!, sha: revision.sha };
         const outcome = await this.classifyAgainstTreeEntry(path, content, treeEntry);
+        if (outcome === 'conflict') {
+            conflicts.push({
+                path,
+                name,
+                repoPath,
+                localContent: content,
+                remoteSha: treeEntry!.sha!,
+                remoteRevision: revision?.revision,
+            });
+            return 'conflict';
+        }
         if (outcome !== 'queued') return outcome;
 
         toPush.push({ path, name, repoPath, content, existingSha: treeEntry?.sha, existingRevision: revision?.revision });
         return 'queued';
+    }
+
+    /**
+     * `undefined` means "not a tracked rename" — the caller falls through to
+     * a normal content classification. A rename-safety conflict (target
+     * already exists, or the old path changed remotely) is a structural
+     * block, not a case of "two versions of the same content" — there's
+     * nothing to arbitrate with keep-local/keep-remote, so it's always left
+     * alone rather than offered in the interactive resolution modal.
+     *
+     * The tracked fast path (`syncMetadata[path]?.renamedFrom`, set live by
+     * the vault 'rename' handler) is keyed purely by path, not by object
+     * identity, so it works whether the caller hands in a live `TFile` or
+     * just its path string — every push entry point must classify a rename
+     * identically regardless of which one it happens to have on hand (e.g. a
+     * sync-status row with no cached `TFile` yet falls back to its path).
+     * Only the content-based fallback scan (`detectRename`, for renames the
+     * plugin missed tracking live) needs an actual `TFile`, so a string input
+     * resolves one from the vault first.
+     */
+    private async classifyAsMoveCandidate(
+        fileOrPath: TFile | string,
+        path: string,
+        name: string,
+        isString: boolean,
+        content: string | ArrayBuffer,
+        treeByFullPath: Map<string, GitTreeEntry>,
+        toMove: ToMoveEntry[],
+        hasOrphans: boolean,
+        autoSkipped: SyncPlanEntry[]
+    ): Promise<BatchOutcome | 'queued' | undefined> {
+        const trackedOldPath = this.settings.syncMetadata[path]?.renamedFrom;
+        let renamedFrom = trackedOldPath ?? null;
+        if (!renamedFrom && hasOrphans) {
+            const file = !isString && fileOrPath instanceof TFile ? fileOrPath : this.app.vault.getFileByPath(path);
+            if (file) renamedFrom = await this.detectRename(file, content, treeByFullPath);
+        }
+        if (!renamedFrom) return undefined;
+
+        const outcome = await this.queueMove(path, name, renamedFrom, content, treeByFullPath, toMove);
+        if (outcome === 'conflict') autoSkipped.push({ path, name });
+        return outcome;
     }
 
     /**
@@ -1172,6 +1153,29 @@ export class SyncManager {
         }
         if (failed > 0) {
             new Notice(`Failed to ${op} ${failed} file(s). Check console for details.`);
+        }
+    }
+
+    /**
+     * One summary notification for a resolved batch push, distinguishing a
+     * plain push from one that also resolved conflicts along the way — e.g.
+     * "Pushed 19 files in one commit. 1 conflict kept remote. 1 conflict
+     * skipped." Never more than one Notice per outcome kind, so resolving a
+     * batch of many conflicts doesn't spam a notification per file.
+     */
+    private notifyPushBatchResult(results: PushResults): void {
+        if (results.success > 0) {
+            const commitNote = results.resolvedConflicts > 0 ? ' in one commit' : '';
+            new Notice(`Pushed ${results.success} file(s) to ${this.serviceName}${commitNote}.`);
+        }
+        if (results.resolvedConflicts > 0) {
+            new Notice(`Resolved ${results.resolvedConflicts} conflict(s).`);
+        }
+        if (results.skippedConflicts > 0) {
+            new Notice(`Skipped ${results.skippedConflicts} conflict(s).`, 8000);
+        }
+        if (results.failed > 0) {
+            new Notice(`Failed to push ${results.failed} file(s). Check console for details.`);
         }
     }
 
