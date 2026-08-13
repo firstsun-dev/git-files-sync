@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSyncManagerMocks, SyncManagerMocks } from './sync-manager-test-helpers';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
+import { gitBlobSha } from '../../src/utils/git-blob-sha';
 
 vi.mock('obsidian');
 // Every push/pull now shows a plan for review before applying; auto-confirm
@@ -69,29 +70,29 @@ describe('SyncManager – hidden file support', () => {
         });
     });
 
-    describe('pushFile with hidden paths', () => {
+    describe('pushFiles with hidden paths', () => {
         it('pushes hidden file content via string path', async () => {
             const { manager, mockAdapter, mockGitService } = mocks;
             vi.mocked(mockAdapter.exists).mockResolvedValue(true);
             vi.mocked(mockAdapter.read).mockResolvedValue('# Memory\n\nsome content');
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ sha: '', content: '' });
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: '.claude/CLAUDE.md', sha: 'new-sha' });
 
-            await manager.pushFile('.claude/CLAUDE.md');
+            await manager.pushFiles(['.claude/CLAUDE.md']);
 
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
-                '.claude/CLAUDE.md', '# Memory\n\nsome content', 'main', expect.any(String), '', undefined
+                '.claude/CLAUDE.md', '# Memory\n\nsome content', 'main', expect.any(String), undefined, undefined
             );
         });
 
         it('skips push when hidden file is already in sync', async () => {
             const { manager, mockAdapter, mockGitService } = mocks;
             const content = 'same content';
+            const contentSha = await gitBlobSha(content);
             vi.mocked(mockAdapter.exists).mockResolvedValue(true);
             vi.mocked(mockAdapter.read).mockResolvedValue(content);
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ sha: 'existing-sha', content });
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path: '.claude/settings.json', sha: contentSha, symlink: false }]);
 
-            await manager.pushFile('.claude/settings.json');
+            await manager.pushFiles(['.claude/settings.json']);
 
             expect(mockGitService.pushFile).not.toHaveBeenCalled();
         });
@@ -100,7 +101,7 @@ describe('SyncManager – hidden file support', () => {
             const { manager, mockAdapter, mockGitService } = mocks;
             vi.mocked(mockAdapter.exists).mockResolvedValue(false);
 
-            await manager.pushFile('.claude/missing.json');
+            await manager.pushFiles(['.claude/missing.json']);
 
             expect(mockGitService.pushFile).not.toHaveBeenCalled();
         });

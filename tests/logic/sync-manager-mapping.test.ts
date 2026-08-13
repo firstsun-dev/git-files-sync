@@ -35,9 +35,11 @@ const mockApp = {
 
 const mockGetFile = vi.fn();
 const mockPushFile = vi.fn();
+const mockListFilesDetailed = vi.fn().mockResolvedValue([]);
 const mockGitService = {
     getFile: mockGetFile,
     pushFile: mockPushFile,
+    listFilesDetailed: mockListFilesDetailed,
 } as unknown as GitServiceInterface;
 
 const mockSettings: GitLabFilesPushSettings = {
@@ -88,18 +90,19 @@ describe('SyncManager Mapping', () => {
         getFileByPathSpy.mockReturnValue(mockFile);
         readSpy.mockResolvedValue('content');
 
-        vi.mocked(mockGetFile).mockResolvedValue({ content: '', sha: '' });
         vi.mocked(mockPushFile).mockResolvedValue({ path: 'notes/test.md' });
 
-        await manager.pushFile(mockFile);
+        await manager.pushFiles([mockFile]);
 
-        expect(mockGetFile).toHaveBeenCalledWith('test.md', 'main');
+        // No tree entry for this repo-relative path: it's a new file, and the
+        // batch pipeline classifies it locally from the pre-fetched tree
+        // rather than a live getFile() lookup per push.
         expect(mockPushFile).toHaveBeenCalledWith(
             'test.md',
             'content',
             'main',
             'Update test.md from Obsidian',
-            '',
+            undefined,
             undefined
         );
     });
@@ -129,11 +132,10 @@ describe('SyncManager Mapping', () => {
         const readSpy = vi.spyOn(mockApp.vault, 'read');
         getFileByPathSpy.mockReturnValue(mockFile);
         readSpy.mockResolvedValue('content');
+        vi.mocked(mockPushFile).mockResolvedValue({ path: 'notes/root.md' });
 
-        vi.mocked(mockGetFile).mockResolvedValue({ content: '', sha: '' });
+        await manager.pushFiles([mockFile]);
 
-        await manager.pushFile(mockFile);
-
-        expect(mockGetFile).toHaveBeenCalledWith('root.md', 'main');
+        expect(mockPushFile).toHaveBeenCalledWith('root.md', 'content', 'main', expect.any(String), undefined, undefined);
     });
 });
