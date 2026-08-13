@@ -96,7 +96,7 @@ normalize_env() {
                 # URL on its own; this is the one place GitLab genuinely needs
                 # a REST call rather than git protocol (see task section 3).
                 local project_json
-                project_json=$(curl -sS -H "PRIVATE-TOKEN: ${E2E_GITLAB_TOKEN}" \
+                project_json=$(curl -sS --max-time 15 -H "PRIVATE-TOKEN: ${E2E_GITLAB_TOKEN}" \
                     "${E2E_GITLAB_BASE_URL}/api/v4/projects/${E2E_GITLAB_PROJECT_ID}")
                 export E2E_TEST_REPO_URL
                 E2E_TEST_REPO_URL=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).http_url_to_repo)' <<<"$project_json")
@@ -379,18 +379,32 @@ provision_gitea_container() {
         "$image" >/dev/null
     echo "$name" >"$workdir/gitea-container-name"
 
-    local container_ip
-    container_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name")
+    # Retry: docker run -d returns before the network attachment always has
+    # an IP assigned yet on every runner/docker version observed.
+    local container_ip=""
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        container_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name")
+        [ -n "$container_ip" ] && break
+        sleep 1
+    done
+    if [ -z "$container_ip" ]; then
+        echo "gitea container never got a network IP (docker inspect empty)" >&2
+        docker logs "$name" >&2 || true
+        exit 1
+    fi
     local base_url="http://${container_ip}:3000"
 
     local ready_ms="${E2E_CONTAINER_READY_MS:-60000}"
     local poll_ms="${E2E_POLL_INTERVAL_MS:-500}"
     local waited=0
-    until curl -sSf "${base_url}/api/healthz" >/dev/null 2>&1; do
+    # --max-time: without it, a curl against an unreachable/blackholed
+    # address can hang far longer than this loop's own ready_ms budget
+    # instead of failing fast into the next retry.
+    until curl -sSf --max-time 5 "${base_url}/api/healthz" >/dev/null 2>&1; do
         sleep "$(node -e "console.log(${poll_ms}/1000)")"
         waited=$((waited + poll_ms))
         if [ "$waited" -ge "$ready_ms" ]; then
-            echo "gitea container did not become healthy within ${ready_ms}ms" >&2
+            echo "gitea container did not become healthy within ${ready_ms}ms (base_url=${base_url})" >&2
             docker logs "$name" >&2 || true
             exit 1
         fi
@@ -409,12 +423,12 @@ provision_gitea_container() {
     # scoped token below: Gitea 1.22's scoped-token API rejects /user/repos
     # under `write:repository` alone (verified directly -- 403), and this is
     # a one-shot local bootstrap call, not something exposed to the suites.
-    curl -sSf -u "${admin_user}:${admin_pass}" -X POST -H 'Content-Type: application/json' \
+    curl -sSf --max-time 15 -u "${admin_user}:${admin_pass}" -X POST -H 'Content-Type: application/json' \
         -d '{"name":"e2e-sandbox","auto_init":true}' \
         "${base_url}/api/v1/user/repos" >/dev/null
 
     local token_json
-    token_json=$(curl -sS -u "${admin_user}:${admin_pass}" -X POST \
+    token_json=$(curl -sS --max-time 15 -u "${admin_user}:${admin_pass}" -X POST \
         -H 'Content-Type: application/json' \
         -d '{"name":"e2e-token","scopes":["write:repository"]}' \
         "${base_url}/api/v1/users/${admin_user}/tokens")
