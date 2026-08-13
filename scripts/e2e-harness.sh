@@ -405,7 +405,13 @@ provision_gitea_container() {
         docker logs "$name" >&2 || true
         exit 1
     fi
-    local base_url="http://${container_ip}:3000"
+    # NOSONAR-justified plain HTTP (shell:S5332, x5 below): base_url never
+    # leaves the Docker bridge network this run created -- container_ip is a
+    # per-run internal address, admin_pass/token are freshly random and
+    # discarded when the container is torn down at cleanup, and there is no
+    # TLS-terminating endpoint to speak to on an ephemeral local sandbox
+    # container. Not a real clear-text-credential exposure.
+    local base_url="http://${container_ip}:3000" # NOSONAR
 
     local ready_ms="${E2E_CONTAINER_READY_MS:-60000}"
     local poll_ms="${E2E_POLL_INTERVAL_MS:-500}"
@@ -413,11 +419,11 @@ provision_gitea_container() {
     # --max-time: without it, a curl against an unreachable/blackholed
     # address can hang far longer than this loop's own ready_ms budget
     # instead of failing fast into the next retry.
-    until curl -sSf --max-time 5 "${base_url}/api/healthz" >/dev/null 2>&1; do
+    until curl -sSf --max-time 5 "${base_url}/api/healthz" >/dev/null 2>&1; do # NOSONAR
         sleep "$(node -e "console.log(${poll_ms}/1000)")"
         waited=$((waited + poll_ms))
         if [ "$waited" -ge "$ready_ms" ]; then
-            echo "gitea container did not become healthy within ${ready_ms}ms (base_url=${base_url})" >&2
+            echo "gitea container did not become healthy within ${ready_ms}ms (base_url=${base_url})" >&2 # NOSONAR
             docker logs "$name" >&2 || true
             exit 1
         fi
@@ -438,15 +444,15 @@ provision_gitea_container() {
     # a one-shot local bootstrap call, not something exposed to the suites.
     curl -sSf --max-time 15 -u "${admin_user}:${admin_pass}" -X POST -H 'Content-Type: application/json' \
         -d '{"name":"e2e-sandbox","auto_init":true}' \
-        "${base_url}/api/v1/user/repos" >/dev/null
+        "${base_url}/api/v1/user/repos" >/dev/null # NOSONAR
 
     local token_json
     token_json=$(curl -sS --max-time 15 -u "${admin_user}:${admin_pass}" -X POST \
         -H 'Content-Type: application/json' \
         -d '{"name":"e2e-token","scopes":["write:repository"]}' \
-        "${base_url}/api/v1/users/${admin_user}/tokens")
+        "${base_url}/api/v1/users/${admin_user}/tokens") # NOSONAR
     local token
-    token=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).sha1)' <<<"$token_json")
+    token=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).sha1)' <<<"$token_json") # NOSONAR
 
     export E2E_GIT_USERNAME="$admin_user"
     export E2E_GIT_TOKEN="$token"

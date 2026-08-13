@@ -5,13 +5,14 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-08-13
-**Active Feature:** Real-provider E2E Phase 2 (multi-run isolation) implemented on `test/real-provider-e2e`, not yet pushed/PR'd. Phase 0+1 CI is green end-to-end including real GitHub/GitLab E2E runs; Gitea leg temporarily disabled in CI pending runner-topology follow-up (see Outstanding Items) — code untouched, passes locally.
+**Active Feature:** Real-provider E2E Phase 2 (multi-run isolation) pushed to `test/real-provider-e2e`; PR #124 open against `main`. First push (c8382cb) broke CI outright — `ci.yml` used the `runner` context inside a job-level `env:` block, which GitHub rejects at parse time (0 jobs created for that run) — and failed SonarCloud's Security Rating gate (weak-hash + clear-text-protocol + unpinned-action findings). Both fixed in a follow-up commit on the same branch/PR (see Latest Evidence). Phase 0+1 CI is green end-to-end including real GitHub/GitLab E2E runs; Gitea leg temporarily disabled in CI pending runner-topology follow-up (see Outstanding Items) — code untouched, passes locally.
 **Parallel Work:** PR #87 (4x Dependabot security alerts via npm overrides) and Issue #57 (live-credential smoke test).
 
 ## Outstanding Items
 
-0. **Open the Phase 0+1+2 PR** — no PR exists yet for `test/real-provider-e2e` -> `main`; open one
-   covering all three phases once pushed (see item below re: the gitea leg first).
+0. **Confirm PR #124 CI is green after the workflow-file/Sonar fix** — push the fix commit, watch
+   the `CI/CD` run and SonarCloud check actually complete (the first push never produced a `CI/CD`
+   run at all), before considering Phase 2 done.
 0a. **Re-enable the gitea leg in CI** (`.github/workflows/ci.yml`, "Determine whether this provider leg should run" step) — disabled 2026-08-13 after two rounds of real-CI-only failures (host-port/127.0.0.1 unreachable from this self-hosted fleet's sibling-container topology, then a curl hang) got fixed but a third run wasn't attempted before the user asked to pause it; harness code (`scripts/e2e-harness.sh`'s gitea path, `e2e/suites/gitea.e2e.test.ts`) is unchanged and passes locally every time (`npm run test:e2e -- --provider gitea`). While disabled, fork PRs get zero E2E coverage (gitea is normally the only leg that needs no secrets). Resolve before opening the PR, or explicitly defer.
 1. **feat-025 manual verification** — Tree view code is complete and all automated checks pass; manual Obsidian verification in a real vault remains for user to confirm functionality (tree hierarchy, folder expand/collapse, checkboxes, Show synced toggle).
 2. **PR #87** — Dependabot security patches via npm overrides; awaiting review/merge.
@@ -19,6 +20,31 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Latest Evidence
 
+- [x] Real-provider E2E Phase 2 follow-up fix (same branch/PR #124): `ci.yml`'s `provider-e2e` job
+  set `E2E_WORKDIR` in job-level `env:` using `${{ runner.temp }}` — `runner` isn't an allowed
+  context there (only `github`/`inputs`/`matrix`/`needs`/`secrets`/`strategy`/`vars` are), which
+  makes GitHub Actions reject the whole workflow file at parse time; confirmed via `actionlint`
+  and via the GitHub API (`jobs_url` for the c8382cb push run returned `total_count: 0` — no job
+  was ever created). Fixed by computing `E2E_WORKDIR` in an unconditional first step instead,
+  exporting it through `$GITHUB_ENV` (uses `$RUNNER_TEMP`, the step-level equivalent). Also fixed
+  the SonarCloud Quality Gate failure (Security Rating D on new code, required ≥ A):
+  `scripts/e2e-namespace.sh`'s `e2e_branch_hash` used `sha1sum`/`shasum` (CRITICAL, shell:S4790
+  weak-hash — not a real security use, just a collision-avoidance digest, but Sonar flags SHA-1
+  regardless of context) — switched to `sha256sum`/`shasum -a 256`; five `curl`/log lines in
+  `scripts/e2e-harness.sh`'s gitea provisioning that talk `http://` to a per-run Docker-bridge-only
+  container (shell:S5332 clear-text-protocol) — annotated `# NOSONAR` with an inline justification
+  (address never leaves the run's own Docker network, credentials are freshly random and
+  discarded at cleanup); `.github/workflows/ci.yml`'s new `npm ci` (githubactions:S6505, missing
+  `--ignore-scripts`) and `actions/checkout@v6`/`actions/setup-node@v6`/`dorny/paths-filter@v3` in
+  the two new jobs plus the three new standalone workflow files (githubactions:S7637, unpinned
+  action refs) — pinned to full commit SHAs, `npm ci` in the new job got `--ignore-scripts`
+  (husky's `prepare` hook isn't needed in CI). Left the pre-existing `build-artifact` job's
+  checkout/setup-node/npm ci untouched (not flagged, out of this fix's scope).
+  Verification: `actionlint` (downloaded v1.7.12 binary) — 0 errors on all 4 workflow files
+  (aside from an expected false-positive on the `32gb-ram` custom self-hosted label, which
+  actionlint can't know about); `bash -n` on all 5 changed/touched shell scripts — all parse;
+  `npx eslint .` — 0 errors; `npm run build` (incl. Obsidian 1.11.0 compat typecheck) — clean;
+  `npx vitest run` — 527 passed. Not yet re-verified against real CI/SonarCloud (push pending).
 - [x] Real-provider E2E Phase 2 (multi-run isolation): added `scripts/e2e-namespace.sh` (single
   canonical `e2e/pr/<n>/<provider>/run-<id>-<attempt>` / `e2e/branch/<sanitized-id>/<provider>/
   run-<id>-<attempt>` identity generator, sourced by every other layer — no branch-naming logic

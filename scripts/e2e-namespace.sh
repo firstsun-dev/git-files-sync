@@ -16,13 +16,16 @@ set -euo pipefail
 
 # Deterministic short hash so differently-slashed branch names that would
 # otherwise sanitize to the same string (feature/foo-bar vs feature-foo/bar)
-# can never collide.
+# can never collide. sha256sum (not sha1sum/md5sum) -- purely a
+# collision-avoidance digest, not a security control, but SHA-1/MD5 trip
+# Sonar's weak-hash rule (S4790) regardless of context, and sha256sum is
+# just as available.
 e2e_branch_hash() {
     local name="$1"
-    if command -v sha1sum >/dev/null 2>&1; then
-        printf '%s' "$name" | sha1sum | cut -c1-8
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$name" | sha256sum | cut -c1-8
     else
-        printf '%s' "$name" | shasum | cut -c1-8
+        printf '%s' "$name" | shasum -a 256 | cut -c1-8
     fi
 }
 

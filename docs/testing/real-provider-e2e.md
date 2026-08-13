@@ -100,7 +100,7 @@ Branch-only runs (`push` to a non-PR branch, `workflow_dispatch`, `schedule`):
 e2e/branch/<sanitized-source-branch>-<short-hash>/<provider>/run-<run-id>-<run-attempt>
 ```
 
-The short hash (first 8 hex chars of a SHA-1 of the *original* branch name) exists so two
+The short hash (first 8 hex chars of a SHA-256 of the *original* branch name) exists so two
 differently-slashed branch names that sanitize to the same string — `feature/foo-bar` and
 `feature-foo/bar` both sanitize to `feature-foo-bar` — still get distinct identities and can never
 collide. `run-<run-id>-<run-attempt>` (from `GITHUB_RUN_ID`/`GITHUB_RUN_ATTEMPT`, or a

@@ -38,7 +38,7 @@ jobs:
       # this pull_request_target event, which is the base branch, not the
       # PR head. This is the trust boundary: only ever this repo's own
       # scripts run, never anything from the PR being closed.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Delete e2e/pr/${{ github.event.pull_request.number }}/** namespace
         env:
