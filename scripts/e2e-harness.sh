@@ -442,15 +442,15 @@ provision_gitea_container() {
     # scoped token below: Gitea 1.22's scoped-token API rejects /user/repos
     # under `write:repository` alone (verified directly -- 403), and this is
     # a one-shot local bootstrap call, not something exposed to the suites.
-    curl -sSf --max-time 15 -u "${admin_user}:${admin_pass}" -X POST -H 'Content-Type: application/json' \
-        -d '{"name":"e2e-sandbox","auto_init":true}' \
-        "${base_url}/api/v1/user/repos" >/dev/null # NOSONAR
+    # Single-line (not line-continued): Sonar's NOSONAR suppression is
+    # line-scoped and attributes shell:S5332 to the `curl` line itself, which
+    # can't carry a trailing comment while also ending in a `\` continuation.
+    local repo_payload='{"name":"e2e-sandbox","auto_init":true}'
+    curl -sSf --max-time 15 -u "${admin_user}:${admin_pass}" -X POST -H 'Content-Type: application/json' -d "$repo_payload" "${base_url}/api/v1/user/repos" >/dev/null # NOSONAR
 
     local token_json
-    token_json=$(curl -sS --max-time 15 -u "${admin_user}:${admin_pass}" -X POST \
-        -H 'Content-Type: application/json' \
-        -d '{"name":"e2e-token","scopes":["write:repository"]}' \
-        "${base_url}/api/v1/users/${admin_user}/tokens") # NOSONAR
+    local token_payload='{"name":"e2e-token","scopes":["write:repository"]}'
+    token_json=$(curl -sS --max-time 15 -u "${admin_user}:${admin_pass}" -X POST -H 'Content-Type: application/json' -d "$token_payload" "${base_url}/api/v1/users/${admin_user}/tokens") # NOSONAR
     local token
     token=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).sha1)' <<<"$token_json") # NOSONAR
 
