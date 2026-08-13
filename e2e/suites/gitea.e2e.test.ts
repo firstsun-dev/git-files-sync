@@ -18,7 +18,9 @@ describe('GiteaService E2E', () => {
     }, timeouts.containerReadyMs + 30_000);
 
     afterAll(async () => {
-        await adapter.teardown(ctx);
+        // Guard against beforeAll failing before ctx is assigned (e.g. Docker/
+        // container-readiness failure) — teardown must not throw in that case either.
+        if (ctx) await adapter.teardown(ctx);
     });
 
     it('testConnection reports the repo and branch as reachable', async () => {

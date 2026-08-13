@@ -17,9 +17,18 @@ if (!provider) {
 
 const passthrough = args.filter((_, i) => i !== providerIndex && i !== providerIndex + 1);
 
+// Runs the provider's own contract suite plus the shared SyncManager suite
+// (parametrized by E2E_PROVIDER, see e2e/suites/sync-manager.e2e.test.ts) in
+// the same command/container lifecycle, so one `npm run test:e2e` per
+// provider covers both without a second npm script or CI step.
 const result = spawnSync(
     'npx',
-    ['vitest', 'run', '-c', 'vitest.e2e.config.ts', `e2e/suites/${provider}.e2e.test.ts`, ...passthrough],
+    [
+        'vitest', 'run', '-c', 'vitest.e2e.config.ts',
+        `e2e/suites/${provider}.e2e.test.ts`,
+        'e2e/suites/sync-manager.e2e.test.ts',
+        ...passthrough,
+    ],
     {
         stdio: 'inherit',
         env: { ...process.env, E2E_PROVIDER: provider },

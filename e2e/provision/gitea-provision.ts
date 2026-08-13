@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { runNamespace } from '../namespace';
 import { globalSecrets, logInfo } from '../redact';
 import { giteaImage, timeouts } from '../config/env';
-import { createNetwork, removeNetwork, removeContainer, hostPortFor, waitUntilReady, docker } from './docker';
+import { createNetwork, removeNetwork, removeContainer, hostPortFor, waitUntilReady, docker, containerLogsAllowFailure } from './docker';
 
 const execFileAsync = promisify(execFile);
 
@@ -86,9 +86,15 @@ export async function provisionGitea(): Promise<GiteaEnvironment> {
 
         return { baseUrl, owner: ADMIN_USERNAME, repo: SANDBOX_REPO, token, containerName, networkName };
     } catch (e) {
-        // Provisioning failed partway through — clean up what we started before rethrowing.
+        // Provisioning failed partway through. A readiness timeout in particular
+        // gives no clue *why* Gitea never came up (self-hosted runner Docker/
+        // network hiccup vs. a real startup failure) without runner shell access
+        // -- attach the container's own logs to the error before it's torn down,
+        // so a future CI failure is diagnosable straight from the job output.
+        const logs = await containerLogsAllowFailure(containerName);
         await teardownGitea({ containerName, networkName } as GiteaEnvironment);
-        throw e;
+        const message = e instanceof Error ? e.message : String(e);
+        throw new Error(`${message}\n\n-- gitea container logs (tail) --\n${logs}`);
     }
 }
 
@@ -128,6 +134,10 @@ async function createSandboxRepo(baseUrl: string, token: string): Promise<void> 
 
 /** Best-effort cleanup — safe to call even if provisioning only partially completed. */
 export async function teardownGitea(env: Pick<GiteaEnvironment, 'containerName' | 'networkName'>): Promise<void> {
+    if (process.env.E2E_KEEP_BRANCH === '1' || process.env.E2E_KEEP_BRANCH === 'true') {
+        logInfo(`E2E_KEEP_BRANCH set — leaving container ${env.containerName} running for debugging`);
+        return;
+    }
     logInfo(`Removing container ${env.containerName}`);
     await removeContainer(env.containerName);
     logInfo(`Removing network ${env.networkName}`);

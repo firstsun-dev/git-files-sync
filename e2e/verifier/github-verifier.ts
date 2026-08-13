@@ -56,7 +56,6 @@ export class GitHubVerifier implements RemoteVerifier {
         return tree.find(item => item.path === path)?.mode ?? null;
     }
 
-    /** GitHub-specific: commit shas on `ref`, newest first — used to assert a batch/rename landed as exactly one commit. */
     async listCommitShas(ref: string, perPage = 30): Promise<string[]> {
         const url = `${API_BASE}/repos/${this.owner}/${this.repo}/commits?sha=${encodeURIComponent(ref)}&per_page=${perPage}`;
         const res = await fetch(url, { headers: this.headers() });

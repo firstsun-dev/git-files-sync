@@ -51,6 +51,10 @@ export async function provisionGitLab(): Promise<GitLabEnvironment> {
 
 /** Best-effort cleanup — deletes the run-specific branch. Must not throw. */
 export async function teardownGitLab(env: GitLabEnvironment): Promise<void> {
+    if (process.env.E2E_KEEP_BRANCH === '1' || process.env.E2E_KEEP_BRANCH === 'true') {
+        logInfo(`E2E_KEEP_BRANCH set — leaving branch ${env.branch} in place for debugging`);
+        return;
+    }
     try {
         logInfo(`Removing branch ${env.branch}`);
         const encodedProjectId = encodeURIComponent(env.projectId);

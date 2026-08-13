@@ -45,4 +45,12 @@ export class GiteaVerifier implements RemoteVerifier {
     async fileMissing(path: string, ref: string): Promise<boolean> {
         return (await this.getFile(path, ref)) === null;
     }
+
+    async listCommitShas(ref: string, perPage = 30): Promise<string[]> {
+        const url = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/commits?sha=${encodeURIComponent(ref)}&limit=${perPage}`;
+        const res = await fetch(url, { headers: this.headers() });
+        if (!res.ok) throw new Error(`GiteaVerifier.listCommitShas failed: ${res.status} ${await res.text()}`);
+        const data = await res.json() as Array<{ sha: string }>;
+        return data.map(item => item.sha);
+    }
 }
