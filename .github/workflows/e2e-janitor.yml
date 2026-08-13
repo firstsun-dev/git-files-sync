@@ -1,0 +1,48 @@
+name: E2E janitor
+
+# Layer 3 of the cleanup hierarchy (docs/testing/real-provider-e2e.md):
+# TTL-based garbage collection of e2e/** branches on the dedicated E2E
+# sandbox repos, independent of whether layer 1 (current-run cleanup, in
+# scripts/e2e-harness.sh) or layer 2 (PR-close / branch-delete cleanup, in
+# e2e-pr-cleanup.yml / e2e-branch-cleanup.yml) ever ran -- covers runner
+# crashes, forced cancellations, workflow timeouts, and cleanup-step
+# failures in either of the other two layers. Scheduled, not triggered by
+# any repo event, so it always runs from the default branch's own workflow
+# file/scripts.
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      ttl_hours:
+        description: 'Delete e2e/** branches older than this many hours'
+        default: '24'
+
+permissions:
+  contents: read
+
+jobs:
+  janitor:
+    name: E2E janitor / ${{ matrix.provider }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Gitea has no persistent branches to sweep -- its whole container
+        # is torn down per-run by scripts/e2e-harness.sh cleanup.
+        provider: [github, gitlab]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Sweep stale e2e/** branches
+        env:
+          E2E_PROVIDER: ${{ matrix.provider }}
+          TTL_HOURS: ${{ github.event.inputs.ttl_hours }}
+          E2E_GITHUB_OWNER: ${{ vars.E2E_GITHUB_OWNER }}
+          E2E_GITHUB_REPO: ${{ vars.E2E_GITHUB_REPO }}
+          E2E_GITHUB_TOKEN: ${{ secrets.E2E_GITHUB_TOKEN }}
+          E2E_GITLAB_PROJECT_ID: ${{ secrets.E2E_GITLAB_PROJECT_ID }}
+          E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
+        run: |
+          [ -n "$TTL_HOURS" ] && export E2E_JANITOR_TTL_SECONDS=$((TTL_HOURS * 3600))
+          scripts/e2e-janitor.sh

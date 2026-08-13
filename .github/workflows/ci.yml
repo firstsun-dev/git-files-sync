@@ -50,6 +50,8 @@ jobs:
               - 'src/utils/symlink.ts'
               - 'e2e/**'
               - 'scripts/e2e-harness.sh'
+              - 'scripts/e2e-namespace.sh'
+              - 'scripts/e2e-namespace-cleanup.sh'
               - 'scripts/run-e2e.sh'
               - 'package.json'
               - 'package-lock.json'
@@ -80,6 +82,19 @@ jobs:
       max-parallel: 3
       matrix:
         provider: [github, gitlab, gitea]
+    # One group per source (PR number, else branch)/provider, so a repeated
+    # push or a workflow rerun cancels its own predecessor instead of piling
+    # up runner/provider load -- but this is NOT a cleanup mechanism (see
+    # scripts/e2e-harness.sh's per-run branch naming): a cancelled run's
+    # branch can still be mid-delete when the next one starts, which is
+    # exactly why every run gets its own unique branch regardless of
+    # cancellation. `concurrency:` at job level *does* support the `matrix`
+    # context (unlike job-level `if:`, see the comment below), so each
+    # matrix leg gets its own group.
+    concurrency:
+      group: >-
+        e2e-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('branch-{0}', github.ref_name) }}-${{ matrix.provider }}
+      cancel-in-progress: true
     env:
       E2E_GITHUB_OWNER: ${{ vars.E2E_GITHUB_OWNER }}
       E2E_GITHUB_REPO: ${{ vars.E2E_GITHUB_REPO }}
@@ -91,6 +106,17 @@ jobs:
       E2E_GITLAB_PROJECT_ID: ${{ secrets.E2E_GITLAB_PROJECT_ID }}
       E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
       E2E_KEEP_BRANCH: ${{ github.event.inputs.keep_branch }}
+      # Identity inputs for scripts/e2e-namespace.sh (via e2e-harness.sh's
+      # `provision`): PR runs get e2e/pr/<number>/**, everything else
+      # (push/workflow_dispatch/schedule) is a branch-only run under
+      # e2e/branch/<id>/**. github.head_ref is only set for pull_request
+      # events; ref_name covers push/dispatch/schedule.
+      E2E_PR_NUMBER: ${{ github.event.pull_request.number }}
+      E2E_SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
+      # Unique per run_id/run_attempt/provider so a previous killed job's
+      # local files can never leak into this one -- never a shared/reused
+      # directory across runs (see docs/testing/real-provider-e2e.md).
+      E2E_WORKDIR: ${{ runner.temp }}/git-files-sync-e2e/${{ github.run_id }}/${{ github.run_attempt }}/${{ matrix.provider }}
     steps:
       # Per-provider gate (needs `matrix`, so it runs as a step, not the job-level
       # `if:` above -- see the comment on that `if:` for why). A fork PR (head repo
@@ -139,30 +165,25 @@ jobs:
         if: steps.gate.outputs.run == 'true'
 
       # Arrange/Assert/cleanup are Shell + Git (scripts/e2e-harness.sh); Act
-      # stays production TypeScript (npx vitest). $E2E_WORKDIR is fixed for
-      # the whole job so all four steps below share the same run state/
-      # generated runtime adapters (see scripts/e2e-harness.sh's own
-      # `workdir` comment) -- set once here rather than depending on each
-      # step's own default.
+      # stays production TypeScript (npx vitest). E2E_WORKDIR/E2E_PR_NUMBER/
+      # E2E_SOURCE_BRANCH are set once at job level (see the job `env:`
+      # above) so all steps below share the same run state/identity.
       - name: Provision isolated branch/container
         if: steps.gate.outputs.run == 'true'
         env:
           E2E_PROVIDER: ${{ matrix.provider }}
-          E2E_WORKDIR: ${{ runner.temp }}/e2e-${{ matrix.provider }}
         run: scripts/e2e-harness.sh provision
 
       - name: Seed baseline fixture
         if: steps.gate.outputs.run == 'true'
         env:
           E2E_PROVIDER: ${{ matrix.provider }}
-          E2E_WORKDIR: ${{ runner.temp }}/e2e-${{ matrix.provider }}
         run: scripts/e2e-harness.sh seed
 
       - name: Run provider E2E (production TypeScript, real provider)
         if: steps.gate.outputs.run == 'true'
         env:
           E2E_PROVIDER: ${{ matrix.provider }}
-          E2E_WORKDIR: ${{ runner.temp }}/e2e-${{ matrix.provider }}
         run: |
           set -a
           # shellcheck disable=SC1091
@@ -175,14 +196,17 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         env:
           E2E_PROVIDER: ${{ matrix.provider }}
-          E2E_WORKDIR: ${{ runner.temp }}/e2e-${{ matrix.provider }}
         run: scripts/e2e-harness.sh verify
 
+      # `if: always()` -- cleanup is best-effort, never a prerequisite for
+      # the next run (see scripts/e2e-harness.sh's cmd_cleanup and
+      # docs/testing/real-provider-e2e.md's cleanup hierarchy); a
+      # cancelled/killed job still gets a shot at this step, but the next
+      # run never depends on it succeeding.
       - name: Cleanup
         if: always() && steps.gate.outputs.run == 'true'
         env:
           E2E_PROVIDER: ${{ matrix.provider }}
-          E2E_WORKDIR: ${{ runner.temp }}/e2e-${{ matrix.provider }}
         run: scripts/e2e-harness.sh cleanup
 
   # Aggregates the matrix into a single required status so branch protection

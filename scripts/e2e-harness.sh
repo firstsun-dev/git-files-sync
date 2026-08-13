@@ -13,18 +13,40 @@
 #                      the expected number of commits) — the fine-grained,
 #                      per-scenario assertions live in the generated verifier
 #                      modules the suites import directly, not here
-#   cleanup            delete the isolated branch / tear down the container
-#   sweep              best-effort delete of stale run branches (github/gitlab)
+#   cleanup            best-effort delete of only *this run's* branch / tear
+#                      down the container -- never a prerequisite for the next
+#                      run (see docs/testing/real-provider-e2e.md's cleanup
+#                      hierarchy: PR-close/branch-delete cleanup and the
+#                      scheduled janitor are the other two layers, and neither
+#                      lives in this script)
+#
+# Branch naming for github/gitlab is delegated to scripts/e2e-namespace.sh --
+# the one canonical implementation also used by the PR-close cleanup,
+# branch-delete cleanup, and janitor workflows, so isolation semantics can't
+# drift between them.
 #
 # Config comes from environment variables (see docs/testing/real-provider-e2e.md
 # for the full table); provider-specific vars already supplied by CI
 # (E2E_GITHUB_*, E2E_GITLAB_*) are normalized into the generic surface below.
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/e2e-namespace.sh
+source "$script_dir/e2e-namespace.sh"
+
 provider="${E2E_PROVIDER:-}"
 if [ -z "$provider" ]; then
     echo "E2E_PROVIDER is not set (github|gitlab|gitea)." >&2
     exit 1
+fi
+
+# CI passes E2E_PR_NUMBER (PR runs) or E2E_SOURCE_BRANCH (branch-only runs)
+# explicitly. Local dev supplies neither, so fall back to the checkout's
+# current branch -- still deterministic per-branch, never a shared/reused
+# name across unrelated local runs (namespace() below still mixes in a
+# local run id).
+if [ -z "${E2E_PR_NUMBER:-}" ] && [ -z "${E2E_SOURCE_BRANCH:-}" ]; then
+    E2E_SOURCE_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo local)"
 fi
 
 # Must be stable across the separate provision/seed/vitest/cleanup process
@@ -116,10 +138,18 @@ normalize_env() {
 
 # --- git-protocol branch lifecycle ------------------------------------------
 
+# Delegates to scripts/e2e-namespace.sh (see its header) for the canonical
+# e2e/pr/<n>/<provider>/run-<id>-<attempt> or
+# e2e/branch/<id>/<provider>/run-<id>-<attempt> name. run_id/run_attempt fall
+# back to date+pid locally (never reused across invocations), matching every
+# other per-run identity CI supplies for free but local dev doesn't.
 namespace() {
-    local suffix="${GITHUB_RUN_ID:-}${GITHUB_RUN_ATTEMPT:+-$GITHUB_RUN_ATTEMPT}"
-    if [ -z "$suffix" ]; then suffix="$(date +%s)-$$"; fi
-    echo "gfs-e2e-${provider}-${suffix}"
+    local run_id="${GITHUB_RUN_ID:-}" run_attempt="${GITHUB_RUN_ATTEMPT:-}"
+    if [ -z "$run_id" ]; then
+        run_id="local-$(date +%s)-$$"
+        run_attempt="1"
+    fi
+    e2e_test_branch "$provider" "$run_id" "$run_attempt" "${E2E_PR_NUMBER:-}" "${E2E_SOURCE_BRANCH:-}"
 }
 
 clone_dir() { echo "$workdir/repo"; }
@@ -205,23 +235,6 @@ cmd_cleanup() {
     local dir; dir=$(clone_dir)
     log "Deleting isolated branch $E2E_TEST_BRANCH"
     git -C "$dir" push origin ":refs/heads/${E2E_TEST_BRANCH}" || true
-}
-
-cmd_sweep() {
-    normalize_env
-    setup_askpass
-    ensure_clone
-    local dir; dir=$(clone_dir)
-    local cutoff_epoch=$(($(date +%s) - 86400))
-    git -C "$dir" for-each-ref "refs/remotes/origin/gfs-e2e-${provider}-*" \
-        --format='%(refname:short) %(committerdate:unix)' |
-        while read -r ref ts; do
-            if [ "${ts:-0}" -lt "$cutoff_epoch" ]; then
-                local branch="${ref#origin/}"
-                log "Sweeping stale branch $branch"
-                git -C "$dir" push origin ":refs/heads/${branch}" || true
-            fi
-        done
 }
 
 # --- generated vitest runtime (never committed) -----------------------------
@@ -514,9 +527,11 @@ case "$cmd" in
     seed) cmd_seed ;;
     verify) cmd_verify ;;
     cleanup) cmd_cleanup ;;
-    sweep) cmd_sweep ;;
     *)
-        echo "Usage: $0 {provision|seed|verify|cleanup|sweep}" >&2
+        # Orphan-namespace sweeping lives in scripts/e2e-janitor.sh now, not
+        # here -- this script only ever touches the single branch its own
+        # run owns (see cmd_cleanup).
+        echo "Usage: $0 {provision|seed|verify|cleanup}" >&2
         exit 1
         ;;
 esac
