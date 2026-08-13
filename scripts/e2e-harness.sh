@@ -187,13 +187,17 @@ cmd_verify() {
 }
 
 cmd_cleanup() {
-    load_env_file
-    setup_askpass
+    # Gitea cleanup is pure `docker rm` -- no git credentials involved, and
+    # critically must not *require* any (unlike github/gitlab below): if
+    # `provision` itself failed before ever provisioning a token, cleanup
+    # still has to be able to tear down whatever container did start.
     if [ "$provider" = "gitea" ]; then
         cleanup_gitea_container
-        rm -f "$workdir/e2e.secrets.env"
+        rm -f "$workdir/e2e.env" "$workdir/e2e.secrets.env"
         return
     fi
+    load_env_file
+    setup_askpass
     if [ "$keep_branch" = "1" ]; then
         log "E2E_KEEP_BRANCH set — leaving $E2E_TEST_BRANCH in place"
         return
@@ -362,14 +366,22 @@ provision_gitea_container() {
     local image="${E2E_GITEA_IMAGE:-gitea/gitea:1.22}"
     local name="gfs-e2e-gitea-$$"
     log "Starting gitea container ($image)"
-    docker run -d --name "$name" -p 0:3000 \
+    # No -p host-port mapping: on a self-hosted runner that is *itself* a
+    # sibling container of the Docker daemon (confirmed to be this fleet's
+    # topology -- a published host port + `127.0.0.1` is only reachable from
+    # the Docker host's own network namespace, not from a sibling container's),
+    # a host-port + 127.0.0.1 URL is unreachable. The container's own bridge
+    # IP is reachable from any container on the same (default) Docker
+    # network, including the runner itself, whether the runner is bare-metal
+    # or a sibling container -- so use that instead.
+    docker run -d --name "$name" \
         -e GITEA__security__INSTALL_LOCK=true \
         "$image" >/dev/null
     echo "$name" >"$workdir/gitea-container-name"
 
-    local host_port
-    host_port=$(docker port "$name" 3000/tcp | head -1 | cut -d: -f2)
-    local base_url="http://127.0.0.1:${host_port}"
+    local container_ip
+    container_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name")
+    local base_url="http://${container_ip}:3000"
 
     local ready_ms="${E2E_CONTAINER_READY_MS:-60000}"
     local poll_ms="${E2E_POLL_INTERVAL_MS:-500}"
@@ -439,6 +451,13 @@ write_env_file() {
         echo "E2E_TEST_BRANCH=$E2E_TEST_BRANCH"
         echo "E2E_WORKDIR=$workdir"
         echo "E2E_RUNTIME_DIR=$runtime_dir"
+        # Not a credential itself -- the token lives only in the mode-700
+        # askpass file on disk at this path (still present for later steps
+        # in the same job, since it's written under $RUNNER_TEMP). Every git
+        # call the generated verifier makes (used by the vitest step, which
+        # never runs this script) needs these two set to authenticate.
+        echo "GIT_ASKPASS=$GIT_ASKPASS"
+        echo "GIT_TERMINAL_PROMPT=0"
     } >"$env_file"
     log "Wrote run state to $env_file (credentials excluded on purpose)"
 
