@@ -5,21 +5,46 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-08-13
-**Active Feature:** Real-provider E2E Phase 2 (multi-run isolation) pushed to `test/real-provider-e2e`; PR #124 open against `main`. First push (c8382cb) broke CI outright — `ci.yml` used the `runner` context inside a job-level `env:` block, which GitHub rejects at parse time (0 jobs created for that run) — and failed SonarCloud's Security Rating gate (weak-hash + clear-text-protocol + unpinned-action findings). Both fixed in a follow-up commit on the same branch/PR (see Latest Evidence). Phase 0+1 CI is green end-to-end including real GitHub/GitLab E2E runs; Gitea leg temporarily disabled in CI pending runner-topology follow-up (see Outstanding Items) — code untouched, passes locally.
+**Active Feature:** Real-provider E2E Phase 2 (multi-run isolation) on `test/real-provider-e2e`; PR #124 open against `main`, now fully green (CI/CD incl. real GitHub/GitLab/Gitea E2E, SonarCloud Security Rating A, lint/build/vitest). The initial Phase 2 push (c8382cb) had three real bugs, all fixed in three follow-up commits on the same branch/PR (see Latest Evidence): (1) `ci.yml` used the `runner` context inside job-level `env:`, which GitHub rejects at parse time (0 jobs ever created for that push); (2) SonarCloud Security Rating gate failure (weak-hash branch-hashing, unpinned actions, missing `--ignore-scripts`, cleartext-protocol findings on the local Gitea sandbox, plus a NOSONAR-placement bug on line-continued `curl` calls in a same-day follow-up); (3) `provider-e2e`'s concurrency group keyed PR runs by PR number and branch-only runs by branch name, so a push to a branch with an open PR fired both a `push` and a `pull_request` run in *different* groups that ran fully concurrently against the same shared GitLab sandbox and starved each other's real API calls (confirmed via two reproduced failures, fixed by keying the group by branch name alone regardless of trigger event). Phase 0+1 CI is green end-to-end including real GitHub/GitLab E2E runs; the CI `E2E / gitea` job still reports "success" but is actually gated off (its "Determine whether this provider leg should run" step outputs `run=false`, so every later step is skipped-not-failed) pending runner-topology follow-up (see item 0a) — code untouched, still verified locally instead (`npm run test:e2e -- --provider gitea`, 14/14, run twice this session against a live Docker sandbox while validating the harness edits above).
 **Parallel Work:** PR #87 (4x Dependabot security alerts via npm overrides) and Issue #57 (live-credential smoke test).
 
 ## Outstanding Items
 
-0. **Confirm PR #124 CI is green after the workflow-file/Sonar fix** — push the fix commit, watch
-   the `CI/CD` run and SonarCloud check actually complete (the first push never produced a `CI/CD`
-   run at all), before considering Phase 2 done.
-0a. **Re-enable the gitea leg in CI** (`.github/workflows/ci.yml`, "Determine whether this provider leg should run" step) — disabled 2026-08-13 after two rounds of real-CI-only failures (host-port/127.0.0.1 unreachable from this self-hosted fleet's sibling-container topology, then a curl hang) got fixed but a third run wasn't attempted before the user asked to pause it; harness code (`scripts/e2e-harness.sh`'s gitea path, `e2e/suites/gitea.e2e.test.ts`) is unchanged and passes locally every time (`npm run test:e2e -- --provider gitea`). While disabled, fork PRs get zero E2E coverage (gitea is normally the only leg that needs no secrets). Resolve before opening the PR, or explicitly defer.
+0a. **Re-enable the gitea leg in CI** (`.github/workflows/ci.yml`, "Determine whether this provider leg should run" step) — disabled 2026-08-13 after two rounds of real-CI-only failures (host-port/127.0.0.1 unreachable from this self-hosted fleet's sibling-container topology, then a curl hang) got fixed but a third run wasn't attempted before the user asked to pause it; harness code (`scripts/e2e-harness.sh`'s gitea path, `e2e/suites/gitea.e2e.test.ts`) is unchanged and passes locally every time (`npm run test:e2e -- --provider gitea`, most recently re-confirmed 14/14 twice this session). While disabled, fork PRs get zero E2E coverage (gitea is normally the only leg that needs no secrets). PR #124 is already open and green with this leg gated off; re-enabling is a follow-up, not a blocker.
 1. **feat-025 manual verification** — Tree view code is complete and all automated checks pass; manual Obsidian verification in a real vault remains for user to confirm functionality (tree hierarchy, folder expand/collapse, checkboxes, Show synced toggle).
 2. **PR #87** — Dependabot security patches via npm overrides; awaiting review/merge.
 3. **Issue #57** — Live-credential smoke test; pre-existing, relevant before pushing major sync work.
 
 ## Latest Evidence
 
+- [x] Real-provider E2E Phase 2, PR #124 fully green (2 more follow-up commits, same branch/PR):
+  (1) NOSONAR placement fix — the previous commit's `# NOSONAR` comments on the gitea-provisioning
+  `curl` calls landed on the *closing* line of each multi-line statement, but SonarCloud attributes
+  shell:S5332 to the *opening* `curl` line, which can't carry a trailing comment while also ending
+  in a `\` continuation; collapsed those two calls to single lines (payload JSON pulled into a
+  local var first) so the marker lands correctly — confirmed via SonarCloud's issues API (2 of 7
+  findings were still OPEN after the first fix, both on the curl lines themselves; 0 after this
+  one, Security Rating A). (2) Dedup push/pull_request races — `provider-e2e`'s concurrency group
+  keyed PR runs by PR number and branch-only runs by branch name, so a push to a branch with an
+  open PR (this branch, since it has an open PR) fired both a `push` and a `pull_request` run in
+  *different* concurrency groups for the same commit, running fully concurrently against the same
+  shared GitLab sandbox; reproduced twice (rerunning the `pull_request`-triggered run's GitLab leg
+  failed both times — first with 3 different real-API errors including `400: Deadline Exceeded`,
+  then with a plain `testConnection` 120s timeout — while the `push`-triggered run for the
+  identical commit passed cleanly both times). Fixed by keying the group by branch name alone
+  (`github.head_ref || github.ref_name`, same expression `E2E_SOURCE_BRANCH` already used)
+  regardless of trigger event, and updated `e2e-pr-cleanup.yml`/`e2e-branch-cleanup.yml`'s groups
+  to match (documented as sharing `provider-e2e`'s group so cleanup queues behind rather than races
+  an active run). Verified end-to-end: pushed the fix, both a `push` and a `pull_request` run fired
+  again for the same commit as expected, and this time the concurrency group correctly cancelled
+  one of them instead of letting them race — the surviving run passed 100% clean (GitHub/GitLab/
+  Gitea E2E, full CI, SonarCloud A). User explicitly chose "fix the dedup now" over deferring or
+  just re-running until green, when asked.
+  Verification: `actionlint` — 0 errors; `npx eslint .` — 0 errors; `npm run build` — clean;
+  `npx vitest run` — 527 passed; real end-to-end Gitea sandbox run (`npm run test:e2e --
+  --provider gitea`) — 14/14 passed, twice, exercising the edited curl calls directly; real CI —
+  PR #124's surviving run fully green including all three real-provider E2E legs and SonarCloud
+  Security Rating A.
 - [x] Real-provider E2E Phase 2 follow-up fix (same branch/PR #124): `ci.yml`'s `provider-e2e` job
   set `E2E_WORKDIR` in job-level `env:` using `${{ runner.temp }}` — `runner` isn't an allowed
   context there (only `github`/`inputs`/`matrix`/`needs`/`secrets`/`strategy`/`vars` are), which
