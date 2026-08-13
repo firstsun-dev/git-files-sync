@@ -1,10 +1,26 @@
 # Test Coverage
 
-All tests are in `tests/` and run with `npm run test` (Vitest).
+Unit and integration tests are in `tests/` and run with `npm run test` (Vitest). Real-provider E2E tests live under `e2e/` and run through `npm run test:e2e`.
 
-## Temporary E2E status
+## Test layers
 
-Real-provider E2E source has been temporarily removed from the plugin repository because the Obsidian official scanner treats Node-only E2E tooling as plugin source. The long-term E2E architecture is being evaluated separately.
+The test suite is organized into complementary layers rather than relying on mocked unit coverage alone.
+
+| Layer | Purpose |
+|---|---|
+| Unit / component | Isolate utilities, UI components, and individual behaviors |
+| Integration | Exercise sync and provider logic across internal boundaries |
+| Real-provider E2E | Run production sync/provider code against real Git servers and independently verify remote state |
+
+### Real-provider E2E
+
+The real-provider harness covers GitHub, GitLab, and Gitea provider contracts as well as `SyncManager` workflows.
+
+The provider suites exercise operations such as create, read, update, delete, batch operations, and rename behavior. `SyncManager` scenarios exercise push, pull, rename tracking, and metadata behavior against a real provider.
+
+CI additionally includes path-aware E2E execution, scheduled API-drift checks, cleanup of isolated test resources, and an E2E gate before the shared release workflow.
+
+See [Real-provider E2E](testing/real-provider-e2e.md) for the architecture, setup, CI behavior, and current known gaps.
 
 ---
 
@@ -132,7 +148,7 @@ Real-provider E2E source has been temporarily removed from the plugin repository
 
 ### Complex patterns
 | Case |
-|---|
+|---|---|
 | Negative patterns (`!important.log`) |
 | Directory-only patterns (`build/`) |
 | Deep wildcards (`**/temp/*`) |
