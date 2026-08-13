@@ -1,3 +1,11 @@
+## [1.5.8](https://github.com/firstsun-dev/git-files-sync/compare/1.5.7...1.5.8) (2026-08-13)
+
+## [1.5.7](https://github.com/firstsun-dev/git-files-sync/compare/1.5.6...1.5.7) (2026-08-07)
+
+### Bug Fixes
+
+* **scanner:** remove Node E2E source ([002000e](https://github.com/firstsun-dev/git-files-sync/commit/002000e86b3ea5fb29ecfb7e5a4ad691fcab5089))
+
 ## [1.5.6](https://github.com/firstsun-dev/git-files-sync/compare/1.5.5...1.5.6) (2026-08-07)
 
 ### Bug Fixes

@@ -2,6 +2,10 @@
 
 All tests are in `tests/` and run with `npm run test` (Vitest).
 
+## Temporary E2E status
+
+Real-provider E2E source has been temporarily removed from the plugin repository because the Obsidian official scanner treats Node-only E2E tooling as plugin source. The long-term E2E architecture is being evaluated separately.
+
 ---
 
 ## utils/path — `tests/utils/path.test.ts`
