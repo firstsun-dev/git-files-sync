@@ -150,6 +150,21 @@ npm run test   # vitest suite
 npm run lint   # eslint
 ```
 
+### Testing
+
+Git File Sync uses multiple testing layers:
+
+- **Unit and integration tests** — Vitest coverage for sync logic, provider services, path handling, binary files, UI components, and regressions.
+- **Real-provider E2E tests** — production `SyncManager` and provider implementations run against real Git servers, with remote state verified independently instead of reading writes back through the code under test.
+- **Provider coverage** — the E2E harness supports GitHub, GitLab, and Gitea. Gitea can run locally in Docker without external credentials; GitHub and GitLab use dedicated sandbox repositories.
+
+```bash
+npm run test
+npm run test:e2e -- --provider gitea
+```
+
+See [Real-provider E2E](docs/testing/real-provider-e2e.md) for the architecture, CI behavior, credentials, and current provider status.
+
 ## License
 
 MIT
