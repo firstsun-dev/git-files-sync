@@ -2,6 +2,8 @@
 
 Unit and integration tests are in `tests/` and run with `npm run test` (Vitest). Real-provider E2E tests live under `e2e/` and run through `npm run test:e2e`.
 
+For a behavior-oriented overview, see [Test Scenarios](testing/test-scenarios.md). For P0/P1/P2 priorities and coverage status, see [Test Matrix](testing/test-matrix.md).
+
 ## Test layers
 
 The test suite is organized into complementary layers rather than relying on mocked unit coverage alone.
@@ -148,7 +150,7 @@ See [Real-provider E2E](testing/real-provider-e2e.md) for the architecture, setu
 
 ### Complex patterns
 | Case |
-|---|
+|---|---|
 | Negative patterns (`!important.log`) |
 | Directory-only patterns (`build/`) |
 | Deep wildcards (`**/temp/*`) |
