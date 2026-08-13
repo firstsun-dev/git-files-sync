@@ -163,7 +163,7 @@ npm run test
 npm run test:e2e -- --provider gitea
 ```
 
-See [Real-provider E2E](docs/testing/real-provider-e2e.md) for the architecture, CI behavior, credentials, and current provider status.
+Testing docs: [high-level scenarios](docs/testing/test-scenarios.md) · [P0/P1/P2 test matrix](docs/testing/test-matrix.md) · [real-provider E2E](docs/testing/real-provider-e2e.md).
 
 ## License
 
