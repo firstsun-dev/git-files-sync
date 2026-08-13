@@ -40,6 +40,19 @@ export default tseslint.config(
 			"no-restricted-globals": "off",
 		},
 	},
+	{
+		// E2E harness glue runs under Node (vitest, `environment: 'node'`), not
+		// Obsidian's Electron renderer — needs `process`, same as scripts/. Unlike
+		// scripts/, it deliberately keeps fetch/globalThis/node:* built-ins out
+		// (see docs/testing/real-provider-e2e.md), so it does NOT get the same
+		// import/no-nodejs-modules / no-restricted-globals exemptions.
+		files: ["e2e/**/*.ts", "vitest.e2e.config.ts"],
+		languageOptions: {
+			globals: {
+				...globals.node,
+			},
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",
@@ -51,10 +64,5 @@ export default tseslint.config(
 		".claude/**",
 		".agents/**",
 		"coverage/**",
-		// Temporarily out of tsconfig scope pending the Phase 1 Shell/Git E2E
-		// harness rewrite (test/real-provider-e2e) -- not part of the lint gate
-		// until it's ported off the old Node harness.
-		"e2e/**",
-		"vitest.e2e.config.ts",
 	]),
 );

@@ -49,6 +49,8 @@ jobs:
               - 'src/utils/path.ts'
               - 'src/utils/symlink.ts'
               - 'e2e/**'
+              - 'scripts/e2e-harness.sh'
+              - 'scripts/run-e2e.sh'
               - 'package.json'
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
@@ -124,9 +126,52 @@ jobs:
       - run: npm ci
         if: steps.gate.outputs.run == 'true'
 
-      - name: Run provider E2E
+      # Arrange/Assert/cleanup are Shell + Git (scripts/e2e-harness.sh); Act
+      # stays production TypeScript (npx vitest). $E2E_WORKDIR is fixed for
+      # the whole job so all four steps below share the same run state/
+      # generated runtime adapters (see scripts/e2e-harness.sh's own
+      # `workdir` comment) -- set once here rather than depending on each
+      # step's own default.
+      - name: Provision isolated branch/container
         if: steps.gate.outputs.run == 'true'
-        run: node scripts/run-e2e-ci.mjs --provider=${{ matrix.provider }}
+        env:
+          E2E_PROVIDER: ${{ matrix.provider }}
+          E2E_WORKDIR: ${{ runner.temp }}/e2e-${{ matrix.provider }}
+        run: scripts/e2e-harness.sh provision
+
+      - name: Seed baseline fixture
+        if: steps.gate.outputs.run == 'true'
+        env:
+          E2E_PROVIDER: ${{ matrix.provider }}
+          E2E_WORKDIR: ${{ runner.temp }}/e2e-${{ matrix.provider }}
+        run: scripts/e2e-harness.sh seed
+
+      - name: Run provider E2E (production TypeScript, real provider)
+        if: steps.gate.outputs.run == 'true'
+        env:
+          E2E_PROVIDER: ${{ matrix.provider }}
+          E2E_WORKDIR: ${{ runner.temp }}/e2e-${{ matrix.provider }}
+        run: |
+          set -a
+          # shellcheck disable=SC1091
+          source "$E2E_WORKDIR/e2e.env"
+          [ -f "$E2E_WORKDIR/e2e.secrets.env" ] && source "$E2E_WORKDIR/e2e.secrets.env"
+          set +a
+          npx vitest run -c vitest.e2e.config.ts "e2e/suites/${{ matrix.provider }}.e2e.test.ts" e2e/suites/sync-manager.e2e.test.ts
+
+      - name: Independent verification
+        if: steps.gate.outputs.run == 'true'
+        env:
+          E2E_PROVIDER: ${{ matrix.provider }}
+          E2E_WORKDIR: ${{ runner.temp }}/e2e-${{ matrix.provider }}
+        run: scripts/e2e-harness.sh verify
+
+      - name: Cleanup
+        if: always() && steps.gate.outputs.run == 'true'
+        env:
+          E2E_PROVIDER: ${{ matrix.provider }}
+          E2E_WORKDIR: ${{ runner.temp }}/e2e-${{ matrix.provider }}
+        run: scripts/e2e-harness.sh cleanup
 
   # Aggregates the matrix into a single required status so branch protection
   # only has to reference one check name (see docs/testing/real-provider-e2e.md

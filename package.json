@@ -17,6 +17,7 @@
 		"lint": "eslint .",
 		"test": "vitest run",
 		"test:ui": "vitest --ui",
+		"test:e2e": "bash scripts/run-e2e.sh",
 		"prepare": "husky",
 		"semantic-release": "semantic-release"
 	},

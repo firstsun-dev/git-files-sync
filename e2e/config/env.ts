@@ -1,9 +1,17 @@
 /**
  * E2E-only environment/config loading. Deliberately separate from the
- * plugin's own settings — this reads process.env and CLI args, never vault
- * data, and only ever runs under `vitest.e2e.config.ts` (see
- * scripts/run-e2e.mjs for how E2E_PROVIDER gets set).
+ * plugin's own settings — this reads process.env, never vault data.
+ *
+ * Branch/container/credential provisioning itself happens in
+ * `scripts/e2e-harness.sh provision` (Shell + Git), before vitest ever
+ * starts — these factories only construct the real production
+ * GitServiceInterface implementation against whatever that step already
+ * resolved, via the env vars it exports (see docs/testing/real-provider-e2e.md).
  */
+import { GitHubService } from '../../src/services/github-service';
+import { GitLabService } from '../../src/services/gitlab-service';
+import { GiteaService } from '../../src/services/gitea-service';
+import type { GitServiceInterface } from '../../src/services/git-service-interface';
 
 export const SUPPORTED_PROVIDERS = ['gitea', 'gitlab', 'github'] as const;
 export type E2EProvider = typeof SUPPORTED_PROVIDERS[number];
@@ -12,7 +20,7 @@ export function isSupportedProvider(value: string): value is E2EProvider {
     return (SUPPORTED_PROVIDERS as readonly string[]).includes(value);
 }
 
-/** Which provider's suite to run, set by scripts/run-e2e.mjs from `--provider <name>`. */
+/** Which provider's suite to run, set by `npm run test:e2e -- --provider <name>`. */
 export function currentProvider(): E2EProvider {
     const value = process.env.E2E_PROVIDER;
     if (!value) {
@@ -29,56 +37,81 @@ export function currentProvider(): E2EProvider {
 
 /** Milliseconds config, overridable via env for slower CI runners. */
 export const timeouts = {
-    /** How long to wait for a freshly-started container to answer health checks. */
     containerReadyMs: Number(process.env.E2E_CONTAINER_READY_MS ?? 60_000),
-    /** Poll interval while waiting for a container to become ready. */
     pollIntervalMs: Number(process.env.E2E_POLL_INTERVAL_MS ?? 500),
-    /** Per-test timeout for suites that provision infrastructure. */
     testMs: Number(process.env.E2E_TEST_TIMEOUT_MS ?? 120_000),
 };
 
-export const giteaImage = process.env.E2E_GITEA_IMAGE ?? 'gitea/gitea:1.22';
+/** Path to the vitest-runtime adapters `scripts/e2e-harness.sh provision` generated. */
+export function runtimeDir(): string {
+    const dir = process.env.E2E_RUNTIME_DIR;
+    if (!dir) {
+        throw new Error(
+            'E2E_RUNTIME_DIR is not set. Run "scripts/e2e-harness.sh provision" before the E2E suites — ' +
+            'it generates the vitest-only requestUrl/timer/verifier adapters this harness needs and never commits.'
+        );
+    }
+    return dir;
+}
 
-/**
- * GitLab has no lightweight self-hostable image the way Gitea does (the
- * official `gitlab-ce` image takes minutes to become healthy and is far too
- * heavy to spin up per test run), so unlike Gitea's provisioner, GitLab E2E
- * targets a pre-existing sandbox project rather than a freshly provisioned
- * container. See e2e/provision/gitlab-provision.ts for what it does instead
- * (a run-specific branch inside that project).
- */
-export interface GitLabSandboxConfig {
-    baseUrl: string;
-    projectId: string;
-    token: string;
+export function requiredEnv(name: string): string {
+    const value = process.env[name];
+    if (!value) {
+        throw new Error(`${name} is not set. Run "scripts/e2e-harness.sh provision" first — see docs/testing/real-provider-e2e.md.`);
+    }
+    return value;
+}
+
+/** Branch `scripts/e2e-harness.sh provision` created/resolved for this run. */
+function testBranch(): string {
+    return requiredEnv('E2E_TEST_BRANCH');
+}
+
+export interface ProviderContext {
+    service: GitServiceInterface;
+    branch: string;
+}
+
+export function githubContext(): ProviderContext {
+    const owner = requiredEnv('E2E_GITHUB_OWNER');
+    const repo = requiredEnv('E2E_GITHUB_REPO');
+    const token = requiredEnv('E2E_GITHUB_TOKEN');
+    const service = new GitHubService();
+    service.updateConfig(token, owner, repo, '');
+    return { service, branch: testBranch() };
+}
+
+export function gitlabContext(): ProviderContext {
+    const baseUrl = process.env.E2E_GITLAB_BASE_URL ?? 'https://gitlab.com';
+    const projectId = requiredEnv('E2E_GITLAB_PROJECT_ID');
+    const token = requiredEnv('E2E_GITLAB_TOKEN');
+    const service = new GitLabService();
+    service.updateConfig(baseUrl, token, projectId, '');
+    return { service, branch: testBranch() };
 }
 
 /**
- * Reads the dedicated GitLab E2E sandbox project's credentials from env.
- * Requires a token with `api` scope (a Project Access Token on the sandbox
- * project, or a dedicated E2E user's Personal Access Token if Project Access
- * Tokens aren't available on the target GitLab plan) — `write_repository`
- * alone is not sufficient because the verifier and branch provisioning use
- * read/write REST endpoints outside the write_repository scope's coverage.
+ * Gitea has no dedicated sandbox repo the way GitHub/GitLab do — the harness
+ * provisions a whole disposable container + repo per run and hands back its
+ * URL/credentials generically (E2E_TEST_REPO_URL/E2E_GIT_USERNAME/
+ * E2E_GIT_TOKEN), since there's no stable owner/repo pair to name ahead of time.
  */
-export function gitlabSandboxConfig(): GitLabSandboxConfig {
-    const baseUrl = process.env.E2E_GITLAB_BASE_URL ?? 'https://gitlab.com';
-    const projectId = process.env.E2E_GITLAB_PROJECT_ID;
-    const token = process.env.E2E_GITLAB_TOKEN;
-
-    const missing: string[] = [];
-    if (!projectId) missing.push('E2E_GITLAB_PROJECT_ID');
-    if (!token) missing.push('E2E_GITLAB_TOKEN');
-    if (missing.length > 0) {
-        throw new Error(
-            `Missing required env var(s) for GitLab E2E: ${missing.join(', ')}. ` +
-            'Point these at a dedicated GitLab sandbox project (not an ordinary project) and a token ' +
-            'with `api` scope — a Project Access Token on the sandbox project, or a dedicated E2E ' +
-            'user\'s Personal Access Token if Project Access Tokens are unavailable on the plan. ' +
-            '`write_repository` scope alone is not sufficient. Optionally set E2E_GITLAB_BASE_URL ' +
-            '(defaults to https://gitlab.com).'
-        );
+export function giteaContext(): ProviderContext {
+    const repoUrl = new URL(requiredEnv('E2E_TEST_REPO_URL'));
+    const token = requiredEnv('E2E_GIT_TOKEN');
+    const [owner, repoWithGit] = repoUrl.pathname.replace(/^\//, '').split('/');
+    const repo = (repoWithGit ?? '').replace(/\.git$/, '');
+    if (!owner || !repo) {
+        throw new Error(`Could not parse owner/repo from E2E_TEST_REPO_URL "${repoUrl}"`);
     }
+    const baseUrl = `${repoUrl.protocol}//${repoUrl.host}`;
+    const service = new GiteaService();
+    service.updateConfig(baseUrl, token, owner, repo, '');
+    return { service, branch: testBranch() };
+}
 
-    return { baseUrl, projectId: projectId as string, token: token as string };
+export function contextFor(provider: E2EProvider): ProviderContext {
+    if (provider === 'github') return githubContext();
+    if (provider === 'gitlab') return gitlabContext();
+    return giteaContext();
 }
