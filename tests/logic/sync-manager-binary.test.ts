@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSyncManagerMocks, makeBuf, SyncManagerMocks } from './sync-manager-test-helpers';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
+import { gitBlobSha } from '../../src/utils/git-blob-sha';
 
 vi.mock('obsidian');
 // Every push/pull now shows a plan for review before applying; auto-confirm
@@ -22,32 +23,32 @@ describe('SyncManager – binary file handling', () => {
         mocks = createSyncManagerMocks();
     });
 
-    describe('pushFile with binary path (string)', () => {
+    describe('pushFiles with binary path (string)', () => {
         it('reads via adapter.readBinary for binary extensions', async () => {
             const { manager, mockAdapter, mockGitService } = mocks;
             const buf = makeBuf([137, 80, 78, 71]);
             vi.mocked(mockAdapter.exists).mockResolvedValue(true);
             vi.mocked(mockAdapter.readBinary).mockResolvedValue(buf);
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ sha: '', content: '' });
             vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: 'photo.png', sha: 'new-sha' });
 
-            await manager.pushFile('photo.png');
+            await manager.pushFiles(['photo.png']);
 
             expect(mockAdapter.readBinary).toHaveBeenCalledWith('photo.png');
             expect(mockAdapter.read).not.toHaveBeenCalled();
             expect(mockGitService.pushFile).toHaveBeenCalledWith(
-                'photo.png', buf, 'main', expect.any(String), '', undefined
+                'photo.png', buf, 'main', expect.any(String), undefined, undefined
             );
         });
 
         it('skips push when binary content is already in sync', async () => {
             const { manager, mockAdapter, mockGitService } = mocks;
             const buf = makeBuf([1, 2, 3, 4]);
+            const contentSha = await gitBlobSha(buf);
             vi.mocked(mockAdapter.exists).mockResolvedValue(true);
             vi.mocked(mockAdapter.readBinary).mockResolvedValue(buf);
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ sha: 'existing-sha', content: buf });
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path: 'photo.png', sha: contentSha, symlink: false }]);
 
-            await manager.pushFile('photo.png');
+            await manager.pushFiles(['photo.png']);
 
             expect(mockGitService.pushFile).not.toHaveBeenCalled();
         });
@@ -55,14 +56,15 @@ describe('SyncManager – binary file handling', () => {
         it('updates metadata when binary is already in sync', async () => {
             const { manager, mockAdapter, mockGitService, mockSettings } = mocks;
             const buf = makeBuf([1, 2, 3]);
+            const contentSha = await gitBlobSha(buf);
             vi.mocked(mockAdapter.exists).mockResolvedValue(true);
             vi.mocked(mockAdapter.readBinary).mockResolvedValue(buf);
-            vi.mocked(mockGitService.getFile).mockResolvedValue({ sha: 'existing-sha', content: buf });
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path: 'photo.png', sha: contentSha, symlink: false }]);
 
-            await manager.pushFile('photo.png');
+            await manager.pushFiles(['photo.png']);
 
             expect(mockSettings.syncMetadata['photo.png']).toMatchObject({
-                lastSyncedSha: 'existing-sha',
+                lastSyncedSha: contentSha,
             });
         });
     });

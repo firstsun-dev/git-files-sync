@@ -221,6 +221,7 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'syncConflictModal.keepRemote': '保留远程',
 	'syncConflictModal.keepRemote.tooltip': '以远程内容覆盖本机',
 	'syncConflictModal.cancel': '取消',
+	'syncConflictModal.binaryChanged': '此二进制文件的本地与远程版本均已更改，无法显示逐行差异。',
 
 	'syncPlanModal.title.push': '查看推送计划',
 	'syncPlanModal.title.pull': '查看拉取计划',
@@ -228,11 +229,28 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'syncPlanModal.section.additions': '新增',
 	'syncPlanModal.section.modifications': '修改',
 	'syncPlanModal.section.moves': '移动',
+	'syncPlanModal.section.acceptedRemote': '在本地接受远程版本',
+	'syncPlanModal.section.skippedConflicts': '已跳过的冲突',
 	'syncPlanModal.section.deletions': '删除',
 	'syncPlanModal.deletionWarning': '此操作将永久删除远程上的 {count} 个文件，且无法撤销。',
 	'syncPlanModal.movedFrom': '从 {path} 移动而来',
 	'syncPlanModal.confirm': '应用',
 	'syncPlanModal.cancel': '取消',
+
+	'batchConflictModal.title': '在推送 {total} 个文件前，先解决 {count} 个冲突',
+	'batchConflictModal.description': '{safeCount} 个文件已就绪。{conflictCount} 个文件同时在本地与远程发生更改，请先解决后再继续。',
+	'batchConflictModal.keepLocalAll': '全部保留本地',
+	'batchConflictModal.keepRemoteAll': '全部保留远程',
+	'batchConflictModal.skipAll': '全部跳过',
+	'batchConflictModal.row.badge': '本地已更改 · 远程已更改',
+	'batchConflictModal.row.binary': '二进制文件',
+	'batchConflictModal.row.viewDiff': '查看差异',
+	'batchConflictModal.row.keepLocal': '保留本地',
+	'batchConflictModal.row.keepRemote': '保留远程',
+	'batchConflictModal.row.skip': '跳过',
+	'batchConflictModal.continue': '继续',
+	'batchConflictModal.cancel': '取消',
+	'batchConflictModal.unresolvedWarning': '请先为每个冲突选择解决方式，才能继续。',
 };
 
 export default zhCn;

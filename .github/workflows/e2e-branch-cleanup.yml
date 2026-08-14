@@ -1,0 +1,55 @@
+name: E2E branch cleanup
+
+# Layer 2 of the cleanup hierarchy (docs/testing/real-provider-e2e.md):
+# authoritative for the e2e/branch/<id>/** namespace once its source branch
+# is deleted. `delete` events always run from the default branch's workflow
+# file (the deleted ref can't supply one), so this is inherently trusted --
+# no `pull_request_target`-style checkout concern applies here.
+on:
+  delete:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    name: E2E branch cleanup / ${{ matrix.provider }}
+    if: github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Gitea has no persistent branches to clean up -- its whole
+        # container is torn down per-run by scripts/e2e-harness.sh cleanup.
+        provider: [github, gitlab]
+    # Same group naming as the provider-e2e job in ci.yml (e2e-<source-
+    # branch>-<provider>) so this cleanup queues behind, rather than races,
+    # an E2E run still in flight for the same branch/provider.
+    # cancel-in-progress: false -- must never cancel an active E2E run, only
+    # run after it. github.event.ref's prefix isn't consistently documented
+    # across event types, so strip any leading refs/heads/ the same way the
+    # `run:` step below does, to match ci.yml's github.head_ref ||
+    # github.ref_name (always already short).
+    concurrency:
+      group: e2e-${{ github.event.ref }}-${{ matrix.provider }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Delete e2e/branch/<id>/** namespace
+        env:
+          E2E_PROVIDER: ${{ matrix.provider }}
+          # github.event.ref's exact format (full "refs/heads/foo" vs short
+          # "foo") isn't consistently documented across event types; strip
+          # any refs/heads/ prefix so this always matches the short branch
+          # name ci.yml's provider-e2e job used at provision time
+          # (github.head_ref || github.ref_name -- both already short).
+          E2E_SOURCE_BRANCH_RAW: ${{ github.event.ref }}
+          E2E_GITHUB_OWNER: ${{ vars.E2E_GITHUB_OWNER }}
+          E2E_GITHUB_REPO: ${{ vars.E2E_GITHUB_REPO }}
+          E2E_GITHUB_TOKEN: ${{ secrets.E2E_GITHUB_TOKEN }}
+          E2E_GITLAB_PROJECT_ID: ${{ secrets.E2E_GITLAB_PROJECT_ID }}
+          E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
+        run: |
+          export E2E_SOURCE_BRANCH="${E2E_SOURCE_BRANCH_RAW#refs/heads/}"
+          scripts/e2e-namespace-cleanup.sh

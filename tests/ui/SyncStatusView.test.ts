@@ -764,7 +764,7 @@ describe('SyncStatusView post-push status update', () => {
     // successfully-pushed paths 'synced' directly from the push result instead
     // of trusting an immediate remote re-read.
     it('marks pushed files synced from the push result instead of re-fetching the remote tree', async () => {
-        const pushAllFiles = vi.fn().mockResolvedValue({
+        const pushFiles = vi.fn().mockResolvedValue({
             success: 2, failed: 0, conflicts: 0, errors: [],
             syncedPaths: [{ path: 'a.md', sha: 'sha-a' }, { path: 'b.md', sha: 'sha-b' }],
         });
@@ -772,7 +772,7 @@ describe('SyncStatusView post-push status update', () => {
         const plugin = {
             settings: { branch: 'main', vaultFolder: '' },
             gitService: {},
-            sync: { pushAllFiles },
+            sync: { pushFiles },
         } as unknown as GitLabFilesPush;
         const app = { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } };
         const leaf = { app } as unknown as WorkspaceLeaf;
@@ -788,7 +788,7 @@ describe('SyncStatusView post-push status update', () => {
             executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string>): Promise<void>
         }).executeBatchOperation('modified', 'push', ['a.md', 'b.md']);
 
-        expect(pushAllFiles).toHaveBeenCalledTimes(1);
+        expect(pushFiles).toHaveBeenCalledTimes(1);
         // The fix: no remote tree re-fetch right after push (that read is what
         // can lag GitHub's write and misreport the file as still modified).
         expect(refreshSpy).not.toHaveBeenCalled();
@@ -803,13 +803,15 @@ describe('SyncStatusView post-push status update', () => {
     // approach as the batch path above instead of re-deriving status from a
     // (misleading) "not on remote" signal.
     it('marks a single pushed file synced from the push result instead of forcing unsynced', async () => {
-        const pushFile = vi.fn().mockResolvedValue({ sha: 'new-sha' });
+        const pushFiles = vi.fn().mockResolvedValue({
+            success: 1, failed: 0, conflicts: 0, errors: [], syncedPaths: [{ path: 'note.md', sha: 'new-sha' }],
+        });
         const getFile = vi.fn();
 
         const plugin = {
             settings: { branch: 'main', vaultFolder: '' },
             gitService: { getFile },
-            sync: { pushFile },
+            sync: { pushFiles },
         } as unknown as GitLabFilesPush;
         const app = { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } };
         const leaf = { app } as unknown as WorkspaceLeaf;
@@ -823,19 +825,20 @@ describe('SyncStatusView post-push status update', () => {
             runSingleFile(fileStatus: FileStatus, op: 'push' | 'pull'): Promise<void>
         }).runSingleFile(fileStatus, 'push');
 
-        expect(pushFile).toHaveBeenCalledTimes(1);
+        expect(pushFiles).toHaveBeenCalledTimes(1);
+        expect(pushFiles).toHaveBeenCalledWith(['note.md']);
         // No live remote re-check when the push result already confirms sync.
         expect(getFile).not.toHaveBeenCalled();
         expect(statuses.get('note.md')).toMatchObject({ path: 'note.md', status: 'synced', remoteSha: 'new-sha' });
     });
 
     it('reuses a snapshot only when the branch head is unchanged', async () => {
-        const pushAllFiles = vi.fn().mockResolvedValue({ success: 1, failed: 0, conflicts: 0, errors: [], syncedPaths: [] });
+        const pushFiles = vi.fn().mockResolvedValue({ success: 1, failed: 0, conflicts: 0, errors: [], syncedPaths: [] });
         const tree: GitTreeEntry[] = [{ path: 'a.md', symlink: false, sha: 'sha-a' }];
         const getBranchHead = vi.fn().mockResolvedValue('commit-1');
         const plugin = {
             settings: { branch: 'main', vaultFolder: '', rootPath: '' },
-            gitService: { getBranchHead }, sync: { pushAllFiles },
+            gitService: { getBranchHead }, sync: { pushFiles },
         } as unknown as GitLabFilesPush;
         const leaf = { app: { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } } } as unknown as WorkspaceLeaf;
         const view = new SyncStatusView(leaf, plugin);
@@ -845,14 +848,14 @@ describe('SyncStatusView post-push status update', () => {
             executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string>): Promise<void>
         }).executeBatchOperation('selected', 'push', ['a.md']);
 
-        expect(pushAllFiles).toHaveBeenCalledWith(['a.md'], expect.any(Function), tree);
+        expect(pushFiles).toHaveBeenCalledWith(['a.md'], expect.any(Function), tree);
     });
 
     it('fetches a fresh tree when the branch head changed after refresh', async () => {
-        const pushAllFiles = vi.fn().mockResolvedValue({ success: 1, failed: 0, conflicts: 0, errors: [], syncedPaths: [] });
+        const pushFiles = vi.fn().mockResolvedValue({ success: 1, failed: 0, conflicts: 0, errors: [], syncedPaths: [] });
         const plugin = {
             settings: { branch: 'main', vaultFolder: '', rootPath: '' },
-            gitService: { getBranchHead: vi.fn().mockResolvedValue('commit-2') }, sync: { pushAllFiles },
+            gitService: { getBranchHead: vi.fn().mockResolvedValue('commit-2') }, sync: { pushFiles },
         } as unknown as GitLabFilesPush;
         const leaf = { app: { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } } } as unknown as WorkspaceLeaf;
         const view = new SyncStatusView(leaf, plugin);
@@ -864,7 +867,7 @@ describe('SyncStatusView post-push status update', () => {
             executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string>): Promise<void>
         }).executeBatchOperation('selected', 'push', ['a.md']);
 
-        expect(pushAllFiles).toHaveBeenCalledWith(['a.md'], expect.any(Function), undefined);
+        expect(pushFiles).toHaveBeenCalledWith(['a.md'], expect.any(Function), undefined);
     });
 
     it('still does a full remote refresh after a pull (unaffected by this fix)', async () => {

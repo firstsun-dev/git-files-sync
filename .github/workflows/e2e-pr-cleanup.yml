@@ -1,0 +1,53 @@
+name: E2E PR cleanup
+
+# Layer 2 of the cleanup hierarchy (docs/testing/real-provider-e2e.md):
+# authoritative for the e2e/pr/<number>/** namespace once a PR closes,
+# merged or not. `pull_request_target` (not `pull_request`) so this always
+# runs the workflow file from the base branch -- trusted code -- with
+# `contents: read`+secrets available even for a fork PR, while never
+# checking out or executing anything from the closing PR's own branch (see
+# the checkout step below: no `ref:` override, so it resolves to the base
+# branch/trusted commit that triggered the event, never the PR head).
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    name: E2E PR cleanup / ${{ matrix.provider }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Gitea has no persistent branches to clean up -- its whole
+        # container is torn down per-run by scripts/e2e-harness.sh cleanup.
+        provider: [github, gitlab]
+    # Same group naming as the provider-e2e job in ci.yml (e2e-<branch>-
+    # <provider>, keyed by the PR's source branch, not its number -- see
+    # that job's concurrency comment for why) so this cleanup queues behind,
+    # rather than races, an E2E run still in flight for the same branch/
+    # provider. cancel-in-progress: false -- this must never cancel an
+    # active E2E run; it only needs to run after it.
+    concurrency:
+      group: e2e-${{ github.event.pull_request.head.ref }}-${{ matrix.provider }}
+      cancel-in-progress: false
+    steps:
+      # No `ref:` -- actions/checkout defaults to the commit that triggered
+      # this pull_request_target event, which is the base branch, not the
+      # PR head. This is the trust boundary: only ever this repo's own
+      # scripts run, never anything from the PR being closed.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Delete e2e/pr/${{ github.event.pull_request.number }}/** namespace
+        env:
+          E2E_PROVIDER: ${{ matrix.provider }}
+          E2E_PR_NUMBER: ${{ github.event.pull_request.number }}
+          E2E_GITHUB_OWNER: ${{ vars.E2E_GITHUB_OWNER }}
+          E2E_GITHUB_REPO: ${{ vars.E2E_GITHUB_REPO }}
+          E2E_GITHUB_TOKEN: ${{ secrets.E2E_GITHUB_TOKEN }}
+          E2E_GITLAB_PROJECT_ID: ${{ secrets.E2E_GITLAB_PROJECT_ID }}
+          E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
+        run: scripts/e2e-namespace-cleanup.sh

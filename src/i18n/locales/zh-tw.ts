@@ -221,6 +221,7 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'syncConflictModal.keepRemote': '保留遠端',
 	'syncConflictModal.keepRemote.tooltip': '以遠端內容覆蓋本機',
 	'syncConflictModal.cancel': '取消',
+	'syncConflictModal.binaryChanged': '此二進位檔案的本機與遠端版本皆已變更，無法顯示逐行差異。',
 
 	'syncPlanModal.title.push': '檢視推送計畫',
 	'syncPlanModal.title.pull': '檢視拉取計畫',
@@ -228,11 +229,28 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'syncPlanModal.section.additions': '新增',
 	'syncPlanModal.section.modifications': '修改',
 	'syncPlanModal.section.moves': '移動',
+	'syncPlanModal.section.acceptedRemote': '在本機接受遠端版本',
+	'syncPlanModal.section.skippedConflicts': '已略過的衝突',
 	'syncPlanModal.section.deletions': '刪除',
 	'syncPlanModal.deletionWarning': '此操作將永久刪除遠端上的 {count} 個檔案，且無法復原。',
 	'syncPlanModal.movedFrom': '從 {path} 移動而來',
 	'syncPlanModal.confirm': '套用',
 	'syncPlanModal.cancel': '取消',
+
+	'batchConflictModal.title': '在推送 {total} 個檔案前，先解決 {count} 個衝突',
+	'batchConflictModal.description': '{safeCount} 個檔案已就緒。{conflictCount} 個檔案同時在本機與遠端變更，請先解決後再繼續。',
+	'batchConflictModal.keepLocalAll': '全部保留本機',
+	'batchConflictModal.keepRemoteAll': '全部保留遠端',
+	'batchConflictModal.skipAll': '全部略過',
+	'batchConflictModal.row.badge': '本機已變更 · 遠端已變更',
+	'batchConflictModal.row.binary': '二進位檔案',
+	'batchConflictModal.row.viewDiff': '檢視差異',
+	'batchConflictModal.row.keepLocal': '保留本機',
+	'batchConflictModal.row.keepRemote': '保留遠端',
+	'batchConflictModal.row.skip': '略過',
+	'batchConflictModal.continue': '繼續',
+	'batchConflictModal.cancel': '取消',
+	'batchConflictModal.unresolvedWarning': '請先為每個衝突選擇解決方式，才能繼續。',
 };
 
 export default zhTw;
