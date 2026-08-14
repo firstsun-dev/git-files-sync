@@ -200,17 +200,32 @@ jobs:
           E2E_PROVIDER: ${{ matrix.provider }}
         run: scripts/e2e-harness.sh seed
 
+      # Retried (not just run once): observed failures against the real
+      # providers include transient runner-network blips unrelated to the
+      # suite/product code (e.g. a bare `getaddrinfo ENOTFOUND gitlab.com`
+      # mid-test on 2026-08-14, run 31770197590) that a same-attempt rerun
+      # simply doesn't reproduce. Safe to retry the whole step from scratch:
+      # each suite's `runId`/branch paths are randomized per vitest process
+      # (see e.g. e2e/suites/sync-manager.e2e.test.ts), so a failed
+      # attempt's partial remote state never collides with the retry -- a
+      # genuine product/test bug still fails identically every attempt and
+      # exhausts the retries.
       - name: Run provider E2E (production TypeScript, real provider)
         if: steps.gate.outputs.run == 'true'
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
         env:
           E2E_PROVIDER: ${{ matrix.provider }}
-        run: |
-          set -a
-          # shellcheck disable=SC1091
-          source "$E2E_WORKDIR/e2e.env"
-          [ -f "$E2E_WORKDIR/e2e.secrets.env" ] && source "$E2E_WORKDIR/e2e.secrets.env"
-          set +a
-          npx vitest run -c vitest.e2e.config.ts "e2e/suites/${{ matrix.provider }}.e2e.test.ts" e2e/suites/sync-manager.e2e.test.ts
+        with:
+          timeout_minutes: 15
+          max_attempts: 2
+          retry_wait_seconds: 15
+          command: |
+            set -a
+            # shellcheck disable=SC1091
+            source "$E2E_WORKDIR/e2e.env"
+            [ -f "$E2E_WORKDIR/e2e.secrets.env" ] && source "$E2E_WORKDIR/e2e.secrets.env"
+            set +a
+            npx vitest run -c vitest.e2e.config.ts "e2e/suites/${{ matrix.provider }}.e2e.test.ts" e2e/suites/sync-manager.e2e.test.ts
 
       - name: Independent verification
         if: steps.gate.outputs.run == 'true'
