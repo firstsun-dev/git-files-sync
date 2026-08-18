@@ -48,8 +48,8 @@ export class BatchConflictResolutionModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.addClass('sync-conflict-modal');
-        contentEl.addClass('batch-conflict-modal');
+        this.modalEl.addClass('sync-conflict-modal');
+        this.modalEl.addClass('batch-conflict-modal');
 
         contentEl.createEl('h2', {
             text: t('batchConflictModal.title', { count: this.conflicts.length, total: this.totalFiles })
