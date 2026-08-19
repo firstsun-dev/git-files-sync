@@ -1,5 +1,6 @@
 import { vi, Mocked } from 'vitest';
 import { SyncManager } from '../../src/logic/sync-manager';
+import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
 import { App, DataAdapter } from 'obsidian';
 import { GitLabFilesPushSettings } from '../../src/settings';
 import { GitServiceInterface } from '../../src/services/git-service-interface';
@@ -55,7 +56,7 @@ export function createSyncManagerMocks(): SyncManagerMocks {
         rootPath: '',
     } as unknown as GitLabFilesPushSettings;
 
-    const manager = new SyncManager(mockApp, mockGitService, mockSettings);
+    const manager = new SyncManager(mockApp, mockGitService, mockSettings, undefined, undefined, undefined, new ObsidianSyncInteraction(mockApp));
     // @ts-ignore - accessing private for test
     manager.saveSettings = vi.fn().mockResolvedValue(undefined);
 

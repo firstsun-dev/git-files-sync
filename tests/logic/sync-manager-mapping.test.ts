@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SyncManager } from '../../src/logic/sync-manager';
+import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
 
 import { App, TFile } from 'obsidian';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
@@ -78,7 +79,7 @@ describe('SyncManager Mapping', () => {
             return this;
         } as never);
         mockSettings.syncMetadata = {};
-        manager = new SyncManager(mockApp, mockGitService, mockSettings);
+        manager = new SyncManager(mockApp, mockGitService, mockSettings, undefined, undefined, undefined, new ObsidianSyncInteraction(mockApp));
     });
 
     it('should strip vaultFolder when pushing', async () => {
@@ -123,7 +124,7 @@ describe('SyncManager Mapping', () => {
 
     it('should handle root-level files correctly when no vaultFolder', async () => {
         mockSettings.vaultFolder = '';
-        manager = new SyncManager(mockApp, mockGitService, mockSettings);
+        manager = new SyncManager(mockApp, mockGitService, mockSettings, undefined, undefined, undefined, new ObsidianSyncInteraction(mockApp));
 
         const path = 'root.md';
         const mockFile = Object.assign(new TFile(), { path, name: 'root.md' });

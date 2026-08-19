@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { SyncManager, BatchPushConflict, ConflictResolution } from '../../src/logic/sync-manager';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
 import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
+import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
 // `import type` deliberately, not a value import: src/settings.ts also
 // exports settings-tab UI (GitLabSyncSettingTab -> FolderSuggest ->
 // AbstractInputSuggest etc.) which pulls in far more of `obsidian` than this
@@ -94,7 +95,8 @@ describe('SyncManager E2E', () => {
     }, timeouts.containerReadyMs + 30_000);
 
     function newManager(vault: FakeVault, settings: GitLabFilesPushSettings): SyncManager {
-        return new SyncManager(fakeApp(vault), service, settings, undefined, () => false);
+        const app = fakeApp(vault);
+        return new SyncManager(app, service, settings, undefined, () => false, undefined, new ObsidianSyncInteraction(app));
     }
 
     it('pushes a new local file, verified independently of the service', async () => {

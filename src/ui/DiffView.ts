@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 import { renderDiffPanel } from './components/DiffPanel';
-import { type FileStatus } from './types';
+import { type FileDiff } from '../logic/sync/types';
 import { t } from '../i18n';
 
 export const SYNC_DIFF_VIEW_TYPE = 'sync-diff-view';
@@ -18,7 +18,7 @@ export class DiffView extends ItemView {
     private path: string | null = null;
     private remoteContent?: string | ArrayBuffer;
     private localContent?: string | ArrayBuffer;
-    private isSymlink = false;
+    private kind: FileDiff['kind'] = 'text';
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
@@ -36,11 +36,11 @@ export class DiffView extends ItemView {
     /** The file currently on screen, so the caller can tell when it goes stale. */
     getPath(): string | null { return this.path; }
 
-    setDiff(fileStatus: FileStatus): void {
-        this.path = fileStatus.path;
-        this.remoteContent = fileStatus.remoteContent;
-        this.localContent = fileStatus.localContent;
-        this.isSymlink = fileStatus.isSymlink === true;
+    setDiff(diff: FileDiff): void {
+        this.path = diff.path;
+        this.remoteContent = diff.remoteContent;
+        this.localContent = diff.localContent;
+        this.kind = diff.kind;
         // Obsidian reads the title from getDisplayText(); nudge it to re-read.
         this.leaf.setViewState({ type: SYNC_DIFF_VIEW_TYPE, active: true }).catch(() => { /* title only */ });
         this.render();
@@ -66,7 +66,7 @@ export class DiffView extends ItemView {
         container.createDiv({ cls: 'ssv-diff-pane-path', text: this.path });
         const body = container.createDiv({ cls: 'ssv-diff-pane' });
 
-        if (this.isSymlink) {
+        if (this.kind === 'symlink') {
             body.createDiv({ cls: 'ssv-diff-binary', text: t('fileListItem.diff.symlinkChanged') });
             return;
         }

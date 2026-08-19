@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi, beforeEach, Mocked } from 'vitest';
 import { SyncManager, BatchPushConflict, ConflictResolution } from '../../src/logic/sync-manager';
+import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
 import { App, DataAdapter, TFile } from 'obsidian';
 import { GitLabFilesPushSettings } from '../../src/settings';
 import { GitServiceInterface } from '../../src/services/git-service-interface';
@@ -88,7 +89,7 @@ describe('SyncManager Batch Operations', () => {
             syncMetadata: {},
         } as unknown as GitLabFilesPushSettings;
 
-        manager = new SyncManager(mockApp, mockGitService, mockSettings);
+        manager = new SyncManager(mockApp, mockGitService, mockSettings, undefined, undefined, undefined, new ObsidianSyncInteraction(mockApp));
         // @ts-ignore - accessing private for test
         manager.saveSettings = vi.fn().mockResolvedValue(undefined);
     });

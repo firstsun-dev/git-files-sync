@@ -1,73 +1,57 @@
 # Session Handoff
 
-**Date:** 2026-08-13
-**Branch:** `test/real-provider-e2e` (PR #124 open against `main`)
+**Date:** 2026-08-19
+**Branch:** `refactor/sync-domain-pipeline` based on `origin/main@6fc3d6b`
+**Active Feature:** feat-026 / issue #105 — sync architecture refactor
 
-## Completed This Session
+## Current Stopping Point
 
-PR #124 ("feat(e2e): real-provider E2E with multi-run isolation (Phases 0-2)") is now fully
-green. It started this session already containing the Phase 2 multi-run-isolation work
-(namespace scheme, 3-layer cleanup hierarchy, per-source/provider concurrency) from a prior
-session, but the first push (`c8382cb`) had three real bugs, all found and fixed here:
+The requested architecture refactor and automated regression safety net are implemented. Do not start the VS Code-like source-control redesign on this branch. The only Definition-of-Done item that cannot be executed in this environment is real Obsidian desktop/mobile manual verification.
 
-1. `ci.yml`'s `provider-e2e` job set `E2E_WORKDIR` using `${{ runner.temp }}` inside a job-level
-   `env:` block — the `runner` context isn't allowed there, so GitHub Actions rejected the whole
-   workflow file at parse time (0 jobs ever created for that push, no `CI/CD` check run at all).
-   Fixed by computing `E2E_WORKDIR` in an unconditional first step instead, via `$GITHUB_ENV`.
-2. SonarCloud's Security Rating gate failed (D, required ≥A): `sha1sum` in the branch-hashing
-   helper (switched to `sha256sum`), unpinned `actions/checkout`/`setup-node`/`paths-filter` in
-   the new jobs/workflows (pinned to full SHAs), missing `--ignore-scripts` on the new job's
-   `npm ci`, and justified `# NOSONAR` suppressions on `http://` calls that only ever talk to a
-   per-run Docker-bridge-only Gitea sandbox. A same-day follow-up fixed a NOSONAR-placement bug
-   (marker landed on the wrong line of two multi-line `curl` statements).
-3. `provider-e2e`'s concurrency group keyed PR runs by PR number and branch-only runs by branch
-   name — different groups for the same branch when it has an open PR, so a push fired both a
-   `push` and a `pull_request` run *concurrently* against the same shared GitLab sandbox and
-   starved each other's real API calls. Reproduced twice (real `400: Deadline Exceeded` and a
-   `testConnection` timeout on the `pull_request`-triggered run, while the `push`-triggered run
-   for the identical commit passed cleanly both times). Fixed by keying the group by branch name
-   alone (`github.head_ref || github.ref_name`) regardless of trigger event, and updating the two
-   cleanup workflows' groups to match. User was asked and explicitly chose "fix the dedup now"
-   over deferring. Verified by re-pushing: the duplicate run this time correctly got cancelled by
-   the concurrency group instead of racing, and the survivor passed 100% clean.
+## Implemented Architecture
 
-All automated checks pass and were captured as evidence in `progress.md`: `actionlint` 0 errors,
-`npx eslint .` 0 errors, `npm run build` clean, `npx vitest run` 527 passed, a live local Gitea
-E2E run (14/14, run twice against real Docker), and PR #124's CI/CD run fully green (real
-GitHub/GitLab/Gitea E2E, SonarCloud Security Rating A, Node 22/24 tests, build/release/package).
+- `src/ui/SyncStatusView.ts` and `src/logic/sync-manager.ts` are thin compatibility entrypoints.
+- Actual `src/ui/sync-status/SyncStatusView.ts` is 11.5 KB / 251 lines and composes state, renderer, controller, navigator, operations and workspace.
+- `SyncStatusViewState` owns presentation state; `SyncStatusSelectors` are pure and table-tested; `SyncStatusRenderer` owns list/tree/group/header rendering.
+- Every row/group/action command enters `SyncStatusController`; `SyncStatusOperations` performs UI notifications/confirmation and calls `SyncWorkspace` for mutations.
+- `SyncManagerWorkspace` owns refresh, remote-tree snapshot validation/reuse, push/pull, `FileDiff`, local/remote deletion, move, metadata mutations, provider URLs and UI-safe workspace info. Sync-status UI code no longer imports provider/tree/settings or vault mutation helpers.
+- `SyncStatusRefreshService` owns discovery, hidden files, path mapping, status classification, out-of-band move reconciliation and live modify/rename transitions.
+- Actual `src/logic/sync/SyncManager.ts` is 13.7 KB / 298 lines, preserves the historical public API, and delegates batch use cases to `PushCoordinator` and `PullCoordinator`.
+- Historical `src/logic/sync-manager.ts` is now a pure domain re-export. `src/logic/**` has no UI imports; production and modal characterization tests inject `ObsidianSyncInteraction` at the composition boundary.
+- Domain components include `SyncScanner`, pure `SyncPlanner`, `SyncMetadataStore`, `PushExecutor`, `PullExecutor`, `RemoteDeleteExecutor`, `ConflictResolver`, `SyncExecutor`, `SyncDiffService`, and the injected `SyncInteractionPort`.
+- `DiffView` consumes only `FileDiff`.
+- New tests cover state/selectors/controller, planner matrix, scanner/metadata, every executor, diff, push coordinator, workspace snapshot behavior, and real Scanner/Manager/Workspace integration paths.
 
-## Exact Next Step
+## Verification Evidence
 
-**PR #124 is ready** — https://github.com/firstsun-dev/git-files-sync/pull/124. Nothing is
-currently blocking it (note: `main`'s branch protection ruleset is disabled, so CI status isn't
-enforced, but it's genuinely green regardless). Next step is for the user to review and merge it,
-or ask for further changes.
-
-After merge, pick up:
-
-**Priority 1: item 0a in `progress.md`** — re-enable the gitea leg in CI (currently gated off in
-`ci.yml`'s "Determine whether this provider leg should run" step after earlier runner-topology
-failures that were already fixed in code but never re-verified live). Harness code passes locally
-every time; this is a "flip the gate back on and watch one more real CI run" task, not new
-development.
-
-**Priority 2:** Pick next issue from GitHub Project #6 backlog (see `feature_list.json` — re-sync
-against GitHub Issues first, it's the source of truth).
-
-## Verification Baseline
-
-```
-actionlint (v1.7.12 binary)     -> 0 errors on all 4 workflow files
-npx eslint .                    -> 0 errors
-npm run build                   -> clean (incl. Obsidian 1.11.0 compat typecheck)
-npx vitest run                  -> 36 files, 527 tests passed
-npm run test:e2e -- --provider gitea -> 14/14 passed (real local Docker sandbox, run twice)
-PR #124 CI/CD (surviving run)   -> fully green: E2E/github, E2E/gitlab, E2E/gitea (gated-skip),
-                                    E2E gate, CI Lint, Test Node 22/24, Build and Release,
-                                    Package Artifact, SonarCloud Code Analysis (Security Rating A)
+```text
+npx eslint .                 -> PASS, 0 errors
+npm run build                -> PASS, incl. Obsidian 1.11 compatibility
+npx vitest run               -> PASS, 54 files / 598 tests
+git diff --check             -> PASS
+npm run test:e2e -- --provider gitea -> PASS, 2 files / 14 tests; container removed
 ```
 
-## Active Branches
+The independent verifier used the closest available low-tier model because the AGENTS-required Haiku model is unavailable.
 
-- **test/real-provider-e2e** — PR #124 open against `main`, green, ready for review/merge.
-- **main** — unaffected, no changes.
+## Required Manual Smoke Before Marking Complete
+
+Desktop:
+
+1. Open sync view → refresh → local-only file → Push → refresh → synced.
+2. Remote-only → Pull → local file created → synced.
+3. Modified → Diff → Push/Pull.
+4. Conflict → resolve → refresh.
+
+Mobile:
+
+1. Open sync view → refresh → select one file → Diff → Push.
+2. Remote-only → select file → Pull.
+
+After manual confirmation, mark feat-026 complete and archive its active progress entry. Then branch `feat/vscode-source-control-ui` from the updated `main`.
+
+## Workspace Safety
+
+- `.codex-gitlab.env` is untracked and must remain untouched/uncommitted.
+- Prior detached tracked changes remain preserved in `stash@{0}` with message `pre-refactor preserved tracked changes from detached 1.5.6 checkout`.
+- No commit or push has been made for this refactor workspace.

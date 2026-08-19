@@ -15,6 +15,10 @@ import { WhatsNewModal } from './ui/WhatsNewModal';
 import { CHANGELOG, getUnseenReleases } from './changelog';
 import { compareVersions } from './utils/version';
 import { t, setLanguageOverride } from './i18n';
+import { ObsidianSyncInteraction } from './ui/ObsidianSyncInteraction';
+import { SyncStatusRefreshService } from './logic/sync/SyncStatusRefreshService';
+import { SyncDiffService } from './logic/sync/SyncDiffService';
+import { SyncManagerWorkspace, type SyncWorkspace } from './logic/sync/SyncWorkspace';
 
 export type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
 
@@ -27,6 +31,8 @@ export default class GitLabFilesPush extends Plugin {
 	settings: GitLabFilesPushSettings;
 	gitService: GitServiceInterface;
 	sync: SyncManager;
+	syncWorkspace: SyncWorkspace;
+	syncStatusRefresh: SyncStatusRefreshService;
 	gitignoreManager: GitignoreManager;
 	private gitignoreConfigKey = '';
 	private pushRibbonEl: HTMLElement;
@@ -71,7 +77,29 @@ export default class GitLabFilesPush extends Plugin {
 			this.settings,
 			this.saveSettings.bind(this),
 			(path) => this.gitignoreManager.isIgnored(this.getNormalizedPath(path)),
+			undefined,
+			new ObsidianSyncInteraction(this.app),
 		);
+		this.syncStatusRefresh = new SyncStatusRefreshService({
+			app: this.app,
+			settings: () => this.settings,
+			gitService: () => this.gitService,
+			gitignoreManager: () => this.gitignoreManager,
+			syncManager: () => this.sync,
+			filterFilesByVaultFolder: files => this.filterFilesByVaultFolder(files),
+			filterPathByVaultFolder: path => this.filterPathByVaultFolder(path),
+			getNormalizedPath: path => this.getNormalizedPath(path),
+			getVaultPath: path => this.getVaultPath(path),
+		}, this.sync.status);
+		this.syncWorkspace = new SyncManagerWorkspace({
+			manager: () => this.sync,
+			gitService: () => this.gitService,
+			settings: () => this.settings,
+			refreshService: this.syncStatusRefresh,
+			diffService: new SyncDiffService(this.sync.status, (sha, path) => this.gitService.getBlob(sha, path)),
+			normalizePath: path => this.getNormalizedPath(path),
+			app: this.app,
+		});
 
 		this.statusBarEl = this.addStatusBarItem();
 		this.statusBarEl.addClass('gfs-status-bar-connection');

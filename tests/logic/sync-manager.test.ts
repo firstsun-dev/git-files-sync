@@ -7,6 +7,7 @@ import { App, TFile } from 'obsidian';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
 import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
 import { gitBlobSha } from '../../src/utils/git-blob-sha';
+import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
 
 vi.mock('../../src/ui/SyncConflictModal');
 // Every push/pull now shows a plan for review before applying. These tests
@@ -108,7 +109,7 @@ describe('SyncManager', () => {
         mockSettings.syncMetadata = {};
         // Default: file exists in vault
         vi.spyOn(mockApp.vault, 'getFileByPath').mockReturnValue(new TFile());
-        manager = new SyncManager(mockApp, mockGitLab, mockSettings);
+        manager = new SyncManager(mockApp, mockGitLab, mockSettings, undefined, undefined, undefined, new ObsidianSyncInteraction(mockApp));
     });
 
     it('publishes a confirmed synced status whenever it records sync metadata', async () => {
@@ -126,6 +127,8 @@ describe('SyncManager', () => {
             mockSettings,
             undefined,
             (path) => path === 'private.md',
+            undefined,
+            new ObsidianSyncInteraction(mockApp),
         );
         const file = Object.assign(new TFile(), { path: 'private.md', name: 'private.md' });
         const readSpy = vi.spyOn(mockApp.vault, 'read').mockResolvedValue('secret');
