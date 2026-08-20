@@ -1,3 +1,33 @@
+## [1.5.9](https://github.com/firstsun-dev/git-files-sync/compare/1.5.8...1.5.9) (2026-08-20)
+
+### Bug Fixes
+
+* **ci:** harden provider e2e failures ([948df28](https://github.com/firstsun-dev/git-files-sync/commit/948df28a122510468233c243d4bf32ab8fbab47f))
+* **ci:** move matrix-dependent E2E gating out of job-level if ([155e55c](https://github.com/firstsun-dev/git-files-sync/commit/155e55c14fa7a8c19cfaa83da7d27d37605e6cef))
+* **e2e:** dedupe push/pull_request E2E runs on the same branch ([04cd91a](https://github.com/firstsun-dev/git-files-sync/commit/04cd91a55e11a94ed5794bb80133a876fffafae5)), closes [#124](https://github.com/firstsun-dev/git-files-sync/issues/124)
+* **e2e:** fix CI workflow-file rejection and Sonar security gate ([a44520a](https://github.com/firstsun-dev/git-files-sync/commit/a44520aa5393f3329c562b5d89beabce19daf7a6))
+* **e2e:** fix commit-count pagination bug, guard teardown, log gitea failures ([147736e](https://github.com/firstsun-dev/git-files-sync/commit/147736e7a11ac053d8e220c6beadd191fae25d03))
+* **e2e:** fix NOSONAR placement on line-continued curl calls ([b944023](https://github.com/firstsun-dev/git-files-sync/commit/b94402395368b1994409c00fd6f72af8444e739b))
+* **e2e:** fix real CI failures found by the first live run ([b3c6b81](https://github.com/firstsun-dev/git-files-sync/commit/b3c6b81a4b05248af8306abf62e9ebfc85d03deb))
+* **e2e:** prevent indefinite curl hangs in gitea provisioning ([2e083c2](https://github.com/firstsun-dev/git-files-sync/commit/2e083c2397e4c36b7fc2abc9211e504498aae9e1))
+* **gitea:** preserve update semantics in mixed batch commits ([6569895](https://github.com/firstsun-dev/git-files-sync/commit/65698953adcf11bfef9ae8d1ae90e0a020d0fa95))
+* **sync:** resolve batch conflicts before atomic push ([c8b4a84](https://github.com/firstsun-dev/git-files-sync/commit/c8b4a842ccbaaf4b73bd871025bc3909237eefc7))
+* **sync:** route all push entry points through the batch push pipeline ([2d93d77](https://github.com/firstsun-dev/git-files-sync/commit/2d93d774762f5872ecdda260f1a1f57e940fc8d7))
+* **sync:** unify push pull and move decisions ([dff95db](https://github.com/firstsun-dev/git-files-sync/commit/dff95dbc9d09fa938c74ac7e30ee067c2e8ded89))
+* **ui:** make conflict viewer use available desktop space ([c802166](https://github.com/firstsun-dev/git-files-sync/commit/c8021661deaaa92c0d39867d525702b404c1f548))
+
+### Documentation
+
+* **e2e:** document real-provider E2E setup, CI, and troubleshooting ([60e2d2c](https://github.com/firstsun-dev/git-files-sync/commit/60e2d2cd6ae99d004b0ae58a3bf9fa1afe30b33a))
+* **progress:** record Phase 0 E2E reconcile evidence ([a4de430](https://github.com/firstsun-dev/git-files-sync/commit/a4de430783a89c13eac19c8ce800eb6e36c93be9))
+* **progress:** record PR [#124](https://github.com/firstsun-dev/git-files-sync/issues/124)'s three CI/Sonar fixes and final green state ([c42fa35](https://github.com/firstsun-dev/git-files-sync/commit/c42fa3525fb792e81f1d47027ed49d1b35a6f419))
+* **progress:** record real CI results and gitea-disable follow-up ([c3acf83](https://github.com/firstsun-dev/git-files-sync/commit/c3acf831eb0bef0335ae5d4f64c08a938cb57e7b))
+* record provider ci verification ([5f9d528](https://github.com/firstsun-dev/git-files-sync/commit/5f9d528bfa0fdc88227838d9cf1c3ce23dd77106))
+
+### Code Refactoring
+
+* **sync:** delete legacy single-file push orchestration ([3b3fd2e](https://github.com/firstsun-dev/git-files-sync/commit/3b3fd2e87a96e24d05116cc3a274d91c5c2e2467))
+
 ## [1.5.8](https://github.com/firstsun-dev/git-files-sync/compare/1.5.7...1.5.8) (2026-08-13)
 
 ## [1.5.7](https://github.com/firstsun-dev/git-files-sync/compare/1.5.6...1.5.7) (2026-08-07)
