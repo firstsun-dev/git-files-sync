@@ -6,29 +6,28 @@
 
 ## Completed This Session
 
-Fixed the reported false conflict for a tracked rename whose content was also edited, then audited
-and removed the remaining sync-decision bypasses. Move classification previously returned before
-reaching `SyncPlanner` and used a duplicate `oldEntry.sha === lastSyncedSha` safety check;
-`PushCoordinator`, `PullCoordinator`, and single pull also retained separate SHA predicates after
-the planner extraction.
+Investigated the failed real-provider CI after the unified planner commit. The move paths passed;
+GitHub exhausted two attempts on a 503 and `UND_ERR_SOCKET`, while GitLab exhausted two attempts
+on provider deadline errors. The tests then surfaced secondary count/existence assertions that
+hid those original request failures.
 
-Added operation-aware `SyncPlanner.planFor(push|pull)`, `MoveFacts`, and the `move` domain action.
-Normal push, batch pull/preview, single pull, and tracked move now consume planner decisions. A
-free destination produces one move containing current local content; an occupied destination
-remains a conflict. A remote-only change now pulls rather than being mistaken for two-sided
-divergence. Content-fetched text/binary paths normalize equal bytes to the provider blob SHA, so
-binary behavior and GitLab legacy baselines remain compatible.
+Hardened CI with three provider attempts, explicit push-result diagnostics in SyncManager E2E,
+and workflow contract coverage. When the shared push/PR concurrency group cancels a duplicate
+matrix, its aggregate gate now reports the replacement neutrally and emits `run-ci=false`, so it
+does not leave an additional aggregate red check or run downstream CI twice. Real failures remain
+blocking. Updated the real-provider E2E documentation to match.
 
-The clean-code skill drove the TDD sequence: the coordinator regression failed first with the
-file under `skippedConflicts`, then passed after the planner integration. No commit or push was
-performed. The pre-existing untracked `.codex-gitlab.env` remains untouched.
+No commit or push was performed for this follow-up. The pre-existing untracked
+`.codex-gitlab.env` remains untouched.
 
 ## Verification Evidence
 
 ```text
 npx eslint .      -> PASS, 0 errors
 npm run build     -> PASS, incl. Obsidian 1.11 compatibility
-npx vitest run    -> PASS, 54 files / 610 tests
+npx vitest run    -> PASS, 56 files / 613 tests
+npm run test:e2e -- --provider gitea -> PASS, 2 files / 14 tests; container removed
+actionlint v1.7.12 .github/workflows/ci.yml -> PASS, 0 errors
 git diff --check  -> PASS
 ```
 
@@ -37,7 +36,6 @@ locally in this session.
 
 ## Exact Next Step
 
-Manually verify in Obsidian that moving and editing a tracked file shows it under Moves and that
-Apply creates the new path with edited content while removing the old path. Also verify an
-existing remote destination still appears as a skipped conflict. After the remaining desktop and
-mobile smoke paths pass, feat-026 can be marked complete.
+After explicit commit/push authorization, push the CI hardening follow-up and monitor the complete
+GitHub workflow. On success, verify the run-scoped GitHub/GitLab `e2e/**/run-*` sandbox branches
+were deleted. Then complete the remaining Obsidian desktop/mobile move smoke tests.

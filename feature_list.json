@@ -8,7 +8,7 @@
       "description": "Preserve sync behavior while extracting SyncStatusView presentation state/controller boundaries and SyncManager scanner/planner/executor/workspace boundaries with regression and integration coverage.",
       "dependencies": [],
       "status": "in-progress",
-      "evidence": "In progress on refactor/sync-domain-pipeline: push, pull, single pull, and move decisions now route through SyncPlanner; View 11.5 KB and Manager facade 13.7 KB; 610 tests and automated gates green, desktop/mobile manual smoke pending."
+      "evidence": "In progress on refactor/sync-domain-pipeline: unified sync decisions are covered; duplicate E2E cancellation is neutralized, provider retries are strengthened, and 613 tests plus local Gitea E2E are green; real CI and desktop/mobile smoke pending."
     },
     {
       "id": "feat-004",
