@@ -7,7 +7,7 @@ import { contentsEqual, isBinaryPath } from '../../utils/path';
 import type { PullExecutor } from './PullExecutor';
 import type { SyncScanner } from './SyncScanner';
 import { SyncPlanner } from './SyncPlanner';
-import type { SyncPlan, SyncPlanEntry, SyncResult } from './types';
+import type { PlannedFileAction, SyncPlan, SyncPlanEntry, SyncResult } from './types';
 import { isSyncPlanEmpty } from './types';
 
 type BatchOutcome = 'done' | 'unchanged' | 'conflict';
@@ -106,13 +106,9 @@ export class PullCoordinator {
         const repoPath = this.dependencies.scanner.toRepoPath(path);
         const entry = tree?.get(this.dependencies.scanner.toTreePath(repoPath));
         if (tree && !entry) return 'skip';
-        if (!await this.fileExists(file)) return 'addition';
         if (!entry?.sha || entry.symlink) return 'modification';
-        const localSha = await gitBlobSha(await this.dependencies.scanner.readContent(file));
-        if (localSha === entry.sha) return 'unchanged';
-        await this.dependencies.migrateBaseline(path, repoPath, entry);
-        const baseline = this.dependencies.settings.syncMetadata[path];
-        return baseline && entry.sha !== baseline.lastSyncedSha ? 'conflict' : 'modification';
+        const decision = await this.planFromTree(file, path, isString, entry);
+        return this.planKindFor(decision);
     }
 
     private async processFile(
@@ -131,15 +127,12 @@ export class PullCoordinator {
         }
         const remote = await this.dependencies.gitService().getFile(repoPath, this.dependencies.settings.branch);
         if (!remote.sha) throw new Error('File not found in remote');
-        if (await this.fileExists(file)) {
-            const localContent = await this.dependencies.scanner.readContent(file);
-            if (contentsEqual(localContent, remote.content)) {
-                await this.dependencies.updateMetadata(path, remote.sha);
-                return 'unchanged';
-            }
-            const baseline = this.dependencies.settings.syncMetadata[path];
-            if (baseline && !this.sameBaseline(baseline.lastSyncedSha, remote)) return 'conflict';
+        const decision = await this.planFromRemote(file, path, isString, remote);
+        if (decision.action === 'none') {
+            await this.dependencies.updateMetadata(path, remote.sha);
+            return 'unchanged';
         }
+        if (decision.action === 'resolve-conflict') return 'conflict';
         const target = typeof file === 'string' ? { path, name } : file;
         await this.dependencies.executor.pull(target, remote.content, remote.sha, true, this.symlinkTarget(remote));
         return 'done';
@@ -151,27 +144,61 @@ export class PullCoordinator {
         isString: boolean,
         entry: GitTreeEntry,
     ): Promise<BatchOutcome | null> {
-        if (entry.symlink || !entry.sha || !await this.fileExists(file)) return null;
-        const localSha = await gitBlobSha(await this.dependencies.scanner.readContent(file));
-        const baseline = this.dependencies.settings.syncMetadata[path];
-        const classification = this.planner.classify({
-            local: { path, exists: true, blobSha: localSha, kind: isBinaryPath(path) ? 'binary' : 'text' },
-            remote: {
-                path,
-                repoPath: this.dependencies.scanner.toRepoPath(path),
-                exists: true,
-                blobSha: entry.sha,
-                kind: 'text',
-            },
-            base: { blobSha: baseline?.lastSyncedSha },
-        });
-        if (classification === 'synced') {
+        if (entry.symlink || !entry.sha) return null;
+        const decision = await this.planFromTree(file, path, isString, entry);
+        if (decision.action === 'none') {
             await this.dependencies.updateMetadata(path, entry.sha);
             return 'unchanged';
         }
-        await this.dependencies.migrateBaseline(path, this.dependencies.scanner.toRepoPath(path), entry);
-        const migratedBaseline = this.dependencies.settings.syncMetadata[path];
-        return migratedBaseline && entry.sha !== migratedBaseline.lastSyncedSha ? 'conflict' : null;
+        return decision.action === 'resolve-conflict' ? 'conflict' : null;
+    }
+
+    private async planFromTree(
+        file: TFile | string,
+        path: string,
+        isString: boolean,
+        entry: GitTreeEntry,
+    ): Promise<PlannedFileAction> {
+        const repoPath = this.dependencies.scanner.toRepoPath(path);
+        await this.dependencies.migrateBaseline(path, repoPath, entry);
+        const exists = await this.fileExists(file);
+        const kind = isBinaryPath(path) ? 'binary' : 'text';
+        const localSha = exists ? await gitBlobSha(await this.dependencies.scanner.readContent(file)) : undefined;
+        return this.planner.planFor('pull', {
+            local: { path, exists, blobSha: localSha, kind },
+            remote: { path, repoPath, exists: true, blobSha: entry.sha, kind },
+            base: { blobSha: this.dependencies.settings.syncMetadata[path]?.lastSyncedSha },
+        });
+    }
+
+    private async planFromRemote(
+        file: TFile | string,
+        path: string,
+        isString: boolean,
+        remote: GitFile,
+    ): Promise<PlannedFileAction> {
+        const exists = await this.fileExists(file);
+        const kind = isBinaryPath(path) ? 'binary' : 'text';
+        const localContent = exists ? await this.dependencies.scanner.readContent(file) : undefined;
+        let localSha: string | undefined;
+        if (localContent !== undefined) {
+            localSha = contentsEqual(localContent, remote.content) ? remote.sha : await gitBlobSha(localContent);
+        }
+        const baseline = this.dependencies.settings.syncMetadata[path]?.lastSyncedSha;
+        const blobBaseline = baseline === remote.revision ? remote.sha : baseline;
+        return this.planner.planFor('pull', {
+            local: { path, exists, blobSha: localSha, kind },
+            remote: { path, repoPath: this.dependencies.scanner.toRepoPath(path), exists: true, blobSha: remote.sha, kind },
+            base: { blobSha: blobBaseline },
+        });
+    }
+
+    private planKindFor(decision: PlannedFileAction): PlanKind {
+        if (decision.action === 'pull-create') return 'addition';
+        if (decision.action === 'pull-overwrite') return 'modification';
+        if (decision.action === 'resolve-conflict') return 'conflict';
+        if (decision.action === 'none') return 'unchanged';
+        return 'skip';
     }
 
     private fileExists(file: TFile | string): Promise<boolean> | boolean {
@@ -188,10 +215,6 @@ export class PullCoordinator {
 
     private symlinkTarget(remote: GitFile): string | undefined {
         return remote.isSymlink ? remote.symlinkTarget ?? '' : undefined;
-    }
-
-    private sameBaseline(sha: string, remote: GitFile): boolean {
-        return sha === remote.sha || sha === remote.revision;
     }
 
     private notifyResult(result: SyncResult): void {

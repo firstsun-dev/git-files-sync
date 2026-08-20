@@ -6,6 +6,7 @@ import { SyncManager, BatchPushConflict, ConflictResolution } from '../../src/lo
 import { App, TFile } from 'obsidian';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
 import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
+import { SyncConflictModal } from '../../src/ui/SyncConflictModal';
 import { gitBlobSha } from '../../src/utils/git-blob-sha';
 import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
 
@@ -705,6 +706,24 @@ describe('SyncManager', () => {
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             await manager.pullFile(mockFile);
             expect(consoleSpy).toHaveBeenCalled();
+        });
+
+        it('pulls a remote-only change without opening conflict resolution', async () => {
+            const path = 'remote-edited.md';
+            const file = Object.assign(new TFile(), { path, name: path });
+            const baseSha = await gitBlobSha('base content');
+            mockSettings.syncMetadata[path] = {
+                lastSyncedSha: baseSha,
+                lastSyncedAt: 0,
+                lastKnownPath: path,
+            };
+            vi.spyOn(mockApp.vault, 'read').mockResolvedValue('base content');
+            vi.mocked(mockGitLab.getFile).mockResolvedValue({ content: 'remote edit', sha: 'remote-edit-sha' });
+
+            await manager.pullFile(file);
+
+            expect(mockApp.vault.modify).toHaveBeenCalledWith(file, 'remote edit');
+            expect(SyncConflictModal).not.toHaveBeenCalled();
         });
     });
 

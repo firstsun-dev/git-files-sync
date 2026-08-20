@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SyncPlanner } from '../../../src/logic/sync/SyncPlanner';
-import type { SyncFacts, SyncClassification } from '../../../src/logic/sync/types';
+import type { MoveFacts, SyncFacts, SyncClassification } from '../../../src/logic/sync/types';
 
 const planner = new SyncPlanner();
 
@@ -47,5 +47,42 @@ describe('SyncPlanner', () => {
 
         expect(planner.plan(binary)).toMatchObject({ classification: 'local-only', action: 'push-create', kind: 'binary' });
         expect(planner.plan(symlink)).toMatchObject({ classification: 'remote-only', action: 'pull-create', kind: 'symlink' });
+    });
+
+    it('plans an edited rename as one move regardless of an older content baseline', () => {
+        const move: MoveFacts = {
+            local: { path: 'new.md', exists: true, blobSha: 'local-edit', kind: 'text' },
+            source: { path: 'old.md', repoPath: 'old.md', exists: true, blobSha: 'remote-source', kind: 'text' },
+            destination: { path: 'new.md', repoPath: 'new.md', exists: false, kind: 'text' },
+        };
+
+        expect(planner.planMove(move)).toMatchObject({
+            path: 'new.md',
+            repoPath: 'new.md',
+            classification: 'local-modified',
+            action: 'move',
+        });
+    });
+
+    it('resolves a move target collision as a conflict', () => {
+        const move: MoveFacts = {
+            local: { path: 'new.md', exists: true, blobSha: 'local', kind: 'text' },
+            source: { path: 'old.md', repoPath: 'old.md', exists: true, blobSha: 'source', kind: 'text' },
+            destination: { path: 'new.md', repoPath: 'new.md', exists: true, blobSha: 'target', kind: 'text' },
+        };
+
+        expect(planner.planMove(move)).toMatchObject({ classification: 'conflict', action: 'resolve-conflict' });
+    });
+
+    it.each([
+        ['push', facts('local', 'base', 'base'), 'local-modified', 'push-update'],
+        ['push', facts('base', 'remote', 'base'), 'remote-modified', 'resolve-conflict'],
+        ['pull', facts('local', 'base', 'base'), 'local-modified', 'pull-overwrite'],
+        ['pull', facts('base', 'remote', 'base'), 'remote-modified', 'pull-overwrite'],
+        ['push', facts('local', 'remote'), 'local-modified', 'push-update'],
+        ['pull', facts('local', 'remote'), 'remote-modified', 'pull-overwrite'],
+        ['pull', facts('local', 'remote', 'base'), 'conflict', 'resolve-conflict'],
+    ] as const)('plans %s operations through one decision matrix', (direction, input, classification, action) => {
+        expect(planner.planFor(direction, input)).toMatchObject({ classification, action });
     });
 });

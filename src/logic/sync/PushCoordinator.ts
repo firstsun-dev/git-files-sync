@@ -363,15 +363,17 @@ export class PushCoordinator {
     ): Promise<BatchOutcome | 'queued'> {
         const repoPath = this.dependencies.scanner.toRepoPath(path);
         const oldRepoPath = this.dependencies.scanner.toRepoPath(oldPath);
-        if (tree.get(this.dependencies.scanner.toTreePath(repoPath))) return 'conflict';
-
+        const destination = tree.get(this.dependencies.scanner.toTreePath(repoPath));
         let oldEntry = tree.get(this.dependencies.scanner.toTreePath(oldRepoPath));
-        await this.dependencies.migrateBaseline(oldPath, oldRepoPath, oldEntry);
         const revision = await this.refreshGitLabRevision(oldRepoPath, oldEntry);
         if (revision) oldEntry = { ...oldEntry!, sha: revision.sha };
-        const metadata = this.dependencies.settings.syncMetadata[path] ?? this.dependencies.settings.syncMetadata[oldPath];
-        const safeToDelete = !oldEntry?.sha || !metadata?.lastSyncedSha || oldEntry.sha === metadata.lastSyncedSha;
-        if (oldEntry?.sha && !safeToDelete) return 'conflict';
+        const kind = isBinaryPath(path) ? 'binary' : 'text';
+        const decision = this.planner.planMove({
+            local: { path, exists: true, blobSha: await gitBlobSha(content), kind },
+            source: { path: oldPath, repoPath: oldRepoPath, exists: oldEntry !== undefined, blobSha: oldEntry?.sha, kind },
+            destination: { path, repoPath, exists: destination !== undefined, blobSha: destination?.sha, kind },
+        });
+        if (decision.action === 'resolve-conflict') return 'conflict';
 
         moves.push({ path, name, repoPath, oldPath, oldRepoPath, content, oldRevision: revision?.revision });
         return 'queued';
@@ -394,7 +396,7 @@ export class PushCoordinator {
         if (entry?.symlink) return 'unchanged';
         const localKind = isBinaryPath(path) ? 'binary' : 'text';
         const lastSynced = this.dependencies.settings.syncMetadata[path];
-        const classification = this.planner.classify({
+        const decision = this.planner.planFor('push', {
             local: { path, exists: true, blobSha: await gitBlobSha(content), kind: localKind },
             remote: {
                 path,
@@ -405,11 +407,11 @@ export class PushCoordinator {
             },
             base: { blobSha: lastSynced?.lastSyncedSha },
         });
-        if (classification === 'synced' && entry?.sha) {
+        if (decision.action === 'none' && entry?.sha) {
             await this.dependencies.updateMetadata(path, entry.sha);
             return 'unchanged';
         }
-        if (entry?.sha && lastSynced && entry.sha !== lastSynced.lastSyncedSha) return 'conflict';
+        if (decision.action === 'resolve-conflict') return 'conflict';
         return 'queued';
     }
 

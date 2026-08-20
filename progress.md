@@ -4,8 +4,8 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-08-19
-**Active Feature:** feat-026 / issue #105 — sync architecture refactor on `refactor/sync-domain-pipeline`. Automated implementation is complete: the actual View is 11.5 KB, the Manager facade is 13.7 KB, UI commands cross `SyncWorkspace`, and scanner/planner/coordinator/executor/diff boundaries have focused and integration coverage. Only real Obsidian desktop/mobile manual verification remains before declaring the feature complete.
+**Last Updated:** 2026-08-20
+**Active Feature:** feat-026 / issue #105 — sync architecture refactor on `refactor/sync-domain-pipeline`. `SyncPlanner` is now the decision source for normal push, batch pull/preview, single pull, and moves. Edited tracked renames with a free destination plan one move instead of being auto-skipped; remote-only changes pull without false conflicts; real two-sided divergence and occupied move destinations remain conflicts. Automated implementation is green; real Obsidian desktop/mobile manual verification remains before declaring the feature complete.
 **Parallel Work:** PR #87 (4x Dependabot security alerts via npm overrides) and Issue #57 (live-credential smoke test).
 
 ## Outstanding Items
@@ -16,6 +16,8 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 3. **Issue #57** — Live-credential smoke test; pre-existing, relevant before pushing major sync work.
 
 ## Latest Evidence
+
+- [x] Issue #105 unified sync decisions and move regression (2026-08-20): added operation-aware `SyncPlanner.planFor(push|pull)`, `MoveFacts`, and the `move` domain action. Normal push, batch pull and preview, single pull, and tracked moves now consume planner decisions instead of reimplementing SHA conflict checks. Removed `PushCoordinator.queueMove`'s stale-metadata gate, so an edited tracked rename with a free destination appears under Moves and commits once; occupied destinations remain conflicts. Fixed the complementary pull false positive: a remote-only change now pulls, while real two-sided divergence still resolves as conflict. Content-fetched text/binary paths normalize equal bytes to the provider blob SHA before planning, preserving binary and GitLab legacy-baseline behavior. Added planner operation matrix, coordinator move regression, batch pull, and single pull coverage. Verification: `npx eslint .` — 0 errors; `npm run build` — clean including Obsidian 1.11 compatibility; `npx vitest run` — 54 files / 610 tests; `git diff --check` — clean. Manual Obsidian verification remains.
 
 - [x] Issue #105 architecture implementation (2026-08-19): extracted `SyncStatusRenderer` and `SyncStatusComposition`; `SyncStatusView.ts` is 11.5 KB / 251 lines. Extracted `PullCoordinator` and `PushCoordinator`; `SyncManager.ts` is 13.7 KB / 298 lines and retains its public compatibility API. `SyncManagerWorkspace` now owns refresh/tree-snapshot reuse, push/pull, diff, local/remote deletion, move, metadata mutations, provider URLs and UI-safe workspace info; sync-status UI code no longer reaches provider/tree/settings/vault mutation helpers, and `src/logic/**` has no UI imports. Legacy refresh characterization cases now target the extracted service instead of private View delegates; legacy modal tests explicitly inject the Obsidian interaction adapter. Added real refresh integration plus focused push-coordinator/workspace regression tests. Independent verification: `npx eslint .` — 0 errors; `npm run build` — clean including Obsidian 1.11 compatibility; `npx vitest run` — 54 files / 598 tests; `npm run test:e2e -- --provider gitea` — 2 files / 14 tests with container cleanup; `git diff --check` — clean. Desktop/mobile Obsidian smoke remains manual.
 

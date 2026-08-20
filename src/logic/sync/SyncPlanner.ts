@@ -1,9 +1,11 @@
 import type {
     ContentKind,
+    MoveFacts,
     PlannedFileAction,
     SyncAction,
     SyncClassification,
     SyncFacts,
+    SyncOperation,
 } from './types';
 
 /** Pure comparison of local, remote, and last-synced snapshots. */
@@ -46,7 +48,52 @@ export class SyncPlanner {
         };
     }
 
+    planFor(operation: SyncOperation, facts: SyncFacts): PlannedFileAction {
+        const classification = this.classifyForOperation(operation, facts);
+        return {
+            path: facts.local.path || facts.remote.path,
+            repoPath: facts.remote.repoPath,
+            kind: this.contentKind(facts),
+            classification,
+            action: this.actionForOperation(operation, classification),
+        };
+    }
+
+    planMove(facts: MoveFacts): PlannedFileAction {
+        const destinationOccupied = facts.destination.exists;
+        const contentClassification: SyncClassification = facts.local.blobSha === facts.source.blobSha
+            ? 'synced'
+            : 'local-modified';
+        const classification: SyncClassification = destinationOccupied ? 'conflict' : contentClassification;
+        return {
+            path: facts.local.path,
+            repoPath: facts.destination.repoPath,
+            kind: facts.local.kind,
+            classification,
+            action: destinationOccupied ? 'resolve-conflict' : 'move',
+        };
+    }
+
     private contentKind(facts: SyncFacts): ContentKind {
         return facts.local.exists ? facts.local.kind : facts.remote.kind;
+    }
+
+    private classifyForOperation(operation: SyncOperation, facts: SyncFacts): SyncClassification {
+        const classification = this.classify(facts);
+        if (classification !== 'conflict' || facts.base.blobSha) return classification;
+        return operation === 'push' ? 'local-modified' : 'remote-modified';
+    }
+
+    private actionForOperation(operation: SyncOperation, classification: SyncClassification): SyncAction {
+        if (classification === 'synced') return 'none';
+        if (classification === 'conflict') return 'resolve-conflict';
+        if (operation === 'push') {
+            if (classification === 'local-only') return 'push-create';
+            if (classification === 'local-modified') return 'push-update';
+            return 'resolve-conflict';
+        }
+        if (classification === 'remote-only') return 'pull-create';
+        if (classification === 'local-only') return 'none';
+        return 'pull-overwrite';
     }
 }

@@ -52,18 +52,20 @@ function createHarness(overrides: {
     } as unknown as SyncScanner;
     const commitBatch = vi.fn().mockImplementation(async (
         pushes: Array<{ path: string }>,
-        _moves: unknown[],
+        moves: Array<{ path: string }>,
         result: PushResults,
     ) => {
-        result.success += pushes.length;
-        result.syncedPaths.push(...pushes.map(push => ({ path: push.path, sha: `sha:${push.path}` })));
+        const committed = [...pushes, ...moves];
+        result.success += committed.length;
+        result.syncedPaths.push(...committed.map(entry => ({ path: entry.path, sha: `sha:${entry.path}` })));
     });
     const saveSettings = vi.fn().mockResolvedValue(undefined);
     const confirmPlan = vi.fn().mockResolvedValue(overrides.confirmPlan ?? true);
+    const syncSettings = settings();
     const coordinator = new PushCoordinator({
         app: { vault: { getFileByPath: vi.fn().mockReturnValue({}) } } as unknown as App,
         gitService: () => provider,
-        settings: settings(),
+        settings: syncSettings,
         scanner,
         executor: { commitBatch, pushSymlink: vi.fn() } as unknown as PushExecutor,
         conflicts: { findStale: vi.fn().mockResolvedValue([]), applyRemote: vi.fn() } as unknown as ConflictResolver,
@@ -76,7 +78,7 @@ function createHarness(overrides: {
         notify: vi.fn(),
         serviceName: () => 'GitHub',
     });
-    return { coordinator, listFilesDetailed, commitBatch, confirmPlan, saveSettings };
+    return { coordinator, listFilesDetailed, commitBatch, confirmPlan, saveSettings, settings: syncSettings };
 }
 
 describe('PushCoordinator', () => {
@@ -119,5 +121,31 @@ describe('PushCoordinator', () => {
 
         await expect(harness.coordinator.pushFiles(['a.md'])).rejects.toThrow('provider unavailable');
         expect(harness.commitBatch).not.toHaveBeenCalled();
+    });
+
+    it('plans an edited tracked rename as a move when the destination is free', async () => {
+        const harness = createHarness();
+        harness.settings.syncMetadata['notes/new.md'] = {
+            lastSyncedSha: 'stale-baseline',
+            lastSyncedAt: 0,
+            lastKnownPath: 'notes/new.md',
+            renamedFrom: 'notes/old.md',
+        };
+        harness.listFilesDetailed.mockResolvedValue([
+            { path: 'notes/old.md', symlink: false, sha: 'current-source' },
+        ]);
+
+        const result = await harness.coordinator.pushFiles(['notes/new.md']);
+
+        expect(harness.confirmPlan).toHaveBeenCalledWith(expect.objectContaining({
+            moves: [{ path: 'notes/new.md', name: 'new.md', movedFrom: 'notes/old.md' }],
+            skippedConflicts: [],
+        }));
+        expect(harness.commitBatch).toHaveBeenCalledWith(
+            [],
+            [expect.objectContaining({ path: 'notes/new.md', oldPath: 'notes/old.md', content: 'content:notes/new.md' })],
+            expect.any(Object),
+        );
+        expect(result).toMatchObject({ success: 1, conflicts: 0, skippedConflicts: 0 });
     });
 });

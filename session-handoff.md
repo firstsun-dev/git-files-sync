@@ -1,57 +1,43 @@
 # Session Handoff
 
-**Date:** 2026-08-19
-**Branch:** `refactor/sync-domain-pipeline` based on `origin/main@6fc3d6b`
+**Date:** 2026-08-20
+**Branch:** `refactor/sync-domain-pipeline` (PR #127)
 **Active Feature:** feat-026 / issue #105 — sync architecture refactor
 
-## Current Stopping Point
+## Completed This Session
 
-The requested architecture refactor and automated regression safety net are implemented. Do not start the VS Code-like source-control redesign on this branch. The only Definition-of-Done item that cannot be executed in this environment is real Obsidian desktop/mobile manual verification.
+Fixed the reported false conflict for a tracked rename whose content was also edited, then audited
+and removed the remaining sync-decision bypasses. Move classification previously returned before
+reaching `SyncPlanner` and used a duplicate `oldEntry.sha === lastSyncedSha` safety check;
+`PushCoordinator`, `PullCoordinator`, and single pull also retained separate SHA predicates after
+the planner extraction.
 
-## Implemented Architecture
+Added operation-aware `SyncPlanner.planFor(push|pull)`, `MoveFacts`, and the `move` domain action.
+Normal push, batch pull/preview, single pull, and tracked move now consume planner decisions. A
+free destination produces one move containing current local content; an occupied destination
+remains a conflict. A remote-only change now pulls rather than being mistaken for two-sided
+divergence. Content-fetched text/binary paths normalize equal bytes to the provider blob SHA, so
+binary behavior and GitLab legacy baselines remain compatible.
 
-- `src/ui/SyncStatusView.ts` and `src/logic/sync-manager.ts` are thin compatibility entrypoints.
-- Actual `src/ui/sync-status/SyncStatusView.ts` is 11.5 KB / 251 lines and composes state, renderer, controller, navigator, operations and workspace.
-- `SyncStatusViewState` owns presentation state; `SyncStatusSelectors` are pure and table-tested; `SyncStatusRenderer` owns list/tree/group/header rendering.
-- Every row/group/action command enters `SyncStatusController`; `SyncStatusOperations` performs UI notifications/confirmation and calls `SyncWorkspace` for mutations.
-- `SyncManagerWorkspace` owns refresh, remote-tree snapshot validation/reuse, push/pull, `FileDiff`, local/remote deletion, move, metadata mutations, provider URLs and UI-safe workspace info. Sync-status UI code no longer imports provider/tree/settings or vault mutation helpers.
-- `SyncStatusRefreshService` owns discovery, hidden files, path mapping, status classification, out-of-band move reconciliation and live modify/rename transitions.
-- Actual `src/logic/sync/SyncManager.ts` is 13.7 KB / 298 lines, preserves the historical public API, and delegates batch use cases to `PushCoordinator` and `PullCoordinator`.
-- Historical `src/logic/sync-manager.ts` is now a pure domain re-export. `src/logic/**` has no UI imports; production and modal characterization tests inject `ObsidianSyncInteraction` at the composition boundary.
-- Domain components include `SyncScanner`, pure `SyncPlanner`, `SyncMetadataStore`, `PushExecutor`, `PullExecutor`, `RemoteDeleteExecutor`, `ConflictResolver`, `SyncExecutor`, `SyncDiffService`, and the injected `SyncInteractionPort`.
-- `DiffView` consumes only `FileDiff`.
-- New tests cover state/selectors/controller, planner matrix, scanner/metadata, every executor, diff, push coordinator, workspace snapshot behavior, and real Scanner/Manager/Workspace integration paths.
+The clean-code skill drove the TDD sequence: the coordinator regression failed first with the
+file under `skippedConflicts`, then passed after the planner integration. No commit or push was
+performed. The pre-existing untracked `.codex-gitlab.env` remains untouched.
 
 ## Verification Evidence
 
 ```text
-npx eslint .                 -> PASS, 0 errors
-npm run build                -> PASS, incl. Obsidian 1.11 compatibility
-npx vitest run               -> PASS, 54 files / 598 tests
-git diff --check             -> PASS
-npm run test:e2e -- --provider gitea -> PASS, 2 files / 14 tests; container removed
+npx eslint .      -> PASS, 0 errors
+npm run build     -> PASS, incl. Obsidian 1.11 compatibility
+npx vitest run    -> PASS, 54 files / 610 tests
+git diff --check  -> PASS
 ```
 
-The independent verifier used the closest available low-tier model because the AGENTS-required Haiku model is unavailable.
+The AGENTS-required Haiku verifier was unavailable in this environment, so verification ran
+locally in this session.
 
-## Required Manual Smoke Before Marking Complete
+## Exact Next Step
 
-Desktop:
-
-1. Open sync view → refresh → local-only file → Push → refresh → synced.
-2. Remote-only → Pull → local file created → synced.
-3. Modified → Diff → Push/Pull.
-4. Conflict → resolve → refresh.
-
-Mobile:
-
-1. Open sync view → refresh → select one file → Diff → Push.
-2. Remote-only → select file → Pull.
-
-After manual confirmation, mark feat-026 complete and archive its active progress entry. Then branch `feat/vscode-source-control-ui` from the updated `main`.
-
-## Workspace Safety
-
-- `.codex-gitlab.env` is untracked and must remain untouched/uncommitted.
-- Prior detached tracked changes remain preserved in `stash@{0}` with message `pre-refactor preserved tracked changes from detached 1.5.6 checkout`.
-- No commit or push has been made for this refactor workspace.
+Manually verify in Obsidian that moving and editing a tracked file shows it under Moves and that
+Apply creates the new path with edited content while removing the old path. Also verify an
+existing remote destination still appears as a skipped conflict. After the remaining desktop and
+mobile smoke paths pass, feat-026 can be marked complete.

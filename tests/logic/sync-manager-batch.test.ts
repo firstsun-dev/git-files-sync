@@ -361,6 +361,26 @@ describe('SyncManager Batch Operations', () => {
             expect(adapter.write).not.toHaveBeenCalled();
         });
 
+        it('pulls a remote-only change when the local file still matches the baseline', async () => {
+            const path = 'remote-edited.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            const baseSha = await gitBlobSha('base content');
+            mockSettings.syncMetadata = {
+                [path]: { lastSyncedSha: baseSha, lastSyncedAt: 0, lastKnownPath: path }
+            };
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('base content');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'remote-edit-sha' }
+            ]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote edit', sha: 'remote-edit-sha' });
+
+            const results = await manager.pullAllFiles([path]);
+
+            expect(results).toMatchObject({ success: 1, conflicts: 0 });
+            expect(adapter.write).toHaveBeenCalledWith(path, 'remote edit');
+        });
+
         it('migrates a legacy GitLab last_commit_id baseline instead of creating a false pull conflict', async () => {
             const path = 'legacy.md';
             const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;

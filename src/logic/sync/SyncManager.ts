@@ -1,5 +1,5 @@
 import { TFile, App } from 'obsidian';
-import { GitServiceInterface, GitTreeEntry, GitFile } from '../../services/git-service-interface';
+import { GitServiceInterface, GitTreeEntry } from '../../services/git-service-interface';
 import { GitLabFilesPushSettings, getServiceName } from '../../settings';
 import {
     type PushResults,
@@ -8,7 +8,8 @@ import {
     isSyncPlanEmpty,
 } from './types';
 import { logger } from '../../utils/logger';
-import { contentsEqual } from '../../utils/path';
+import { contentsEqual, isBinaryPath } from '../../utils/path';
+import { gitBlobSha } from '../../utils/git-blob-sha';
 import { SyncStatusService } from '../sync-status-service';
 import { PushExecutor } from './PushExecutor';
 import { PullExecutor } from './PullExecutor';
@@ -18,6 +19,7 @@ import { ConflictResolver } from './ConflictResolver';
 import { SyncExecutor } from './SyncExecutor';
 import { PullCoordinator } from './PullCoordinator';
 import { PushCoordinator } from './PushCoordinator';
+import { SyncPlanner } from './SyncPlanner';
 import {
     HeadlessSyncInteraction,
     type SyncInteractionPort,
@@ -35,6 +37,7 @@ export class SyncManager {
     private readonly scanner: SyncScanner;
     private readonly pullCoordinator: PullCoordinator;
     private readonly pushCoordinator: PushCoordinator;
+    private readonly planner = new SyncPlanner();
     private readonly interaction: SyncInteractionPort;
     readonly status: SyncStatusService;
 
@@ -189,16 +192,30 @@ export class SyncManager {
             const exists = await this.fileExists(fileOrPath);
             const localContent = exists ? await this.getFileContent(fileOrPath) : null;
             const lastSynced = this.settings.syncMetadata[path];
+            const kind = isBinaryPath(path) ? 'binary' : 'text';
+            const baseline = lastSynced?.lastSyncedSha === remote.revision ? remote.sha : lastSynced?.lastSyncedSha;
+            let localSha: string | undefined;
+            if (localContent !== null) {
+                localSha = contentsEqual(localContent, remote.content) ? remote.sha : await gitBlobSha(localContent);
+            }
+            const decision = this.planner.planFor('pull', {
+                local: {
+                    path,
+                    exists,
+                    blobSha: localSha,
+                    kind,
+                },
+                remote: { path, repoPath, exists: true, blobSha: remote.sha, kind },
+                base: { blobSha: baseline },
+            });
 
-            if (exists && localContent !== null && this.contentsEqual(localContent, remote.content)) {
-                // Still update metadata even if content matches
+            if (decision.action === 'none') {
                 await this.updateMetadata(path, remote.sha);
                 this.interaction.notify(`${name} is already up to date.`);
                 return;
             }
 
-            // Conflict detection for pull (only if local exists)
-            if (exists && remote.sha && lastSynced && !this.isSameBaseline(lastSynced.lastSyncedSha, remote)) {
+            if (decision.action === 'resolve-conflict') {
                 this.interaction.openConflict(name, localContent ?? '', remote.content, (choice) => {
                     void (async () => {
                         try {
@@ -224,15 +241,6 @@ export class SyncManager {
         } catch (e) {
             this.handleError(`Failed to pull ${name} from ${this.serviceName}`, e);
         }
-    }
-
-    private contentsEqual(a: string | ArrayBuffer, b: string | ArrayBuffer): boolean {
-        return contentsEqual(a, b);
-    }
-
-    /** Check if remote baseline matches metadata, supporting lazy migration of old metadata. */
-    private isSameBaseline(lastSyncedSha: string, remoteFile: GitFile): boolean {
-        return lastSyncedSha === remoteFile.sha || lastSyncedSha === remoteFile.revision;
     }
 
     private async performPull(file: TFile | {path: string, name: string}, remoteContent: string | ArrayBuffer, remoteSha: string, silent = false, symlinkTarget?: string) {

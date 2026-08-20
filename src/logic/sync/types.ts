@@ -29,6 +29,12 @@ export interface SyncFacts {
     base: BaseSnapshot;
 }
 
+export interface MoveFacts {
+    local: LocalSnapshot;
+    source: RemoteSnapshot;
+    destination: RemoteSnapshot;
+}
+
 export type SyncClassification =
     | 'synced'
     | 'local-modified'
@@ -39,11 +45,14 @@ export type SyncClassification =
 
 export type SyncAction =
     | 'none'
+    | 'move'
     | 'push-create'
     | 'push-update'
     | 'pull-create'
     | 'pull-overwrite'
     | 'resolve-conflict';
+
+export type SyncOperation = 'push' | 'pull';
 
 export interface PlannedFileAction {
     path: string;
