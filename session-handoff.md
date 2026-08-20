@@ -17,8 +17,9 @@ matrix, its aggregate gate now reports the replacement neutrally and emits `run-
 does not leave an additional aggregate red check or run downstream CI twice. Real failures remain
 blocking. Updated the real-provider E2E documentation to match.
 
-No commit or push was performed for this follow-up. The pre-existing untracked
-`.codex-gitlab.env` remains untouched.
+Committed as `948df28` (`fix(ci): harden provider e2e failures`) and pushed to
+`origin/refactor/sync-domain-pipeline`. The pre-existing untracked `.codex-gitlab.env` remains
+untouched.
 
 ## Verification Evidence
 
@@ -29,6 +30,8 @@ npx vitest run    -> PASS, 56 files / 613 tests
 npm run test:e2e -- --provider gitea -> PASS, 2 files / 14 tests; container removed
 actionlint v1.7.12 .github/workflows/ci.yml -> PASS, 0 errors
 git diff --check  -> PASS
+real CI run 32338116598 -> PASS after failed-only rerun of a disabled Gitea leg assigned to an offline runner
+GitHub/GitLab sandbox branch query -> PASS, no e2e/pr/127 or source-branch refs remain
 ```
 
 The AGENTS-required Haiku verifier was unavailable in this environment, so verification ran
@@ -36,6 +39,6 @@ locally in this session.
 
 ## Exact Next Step
 
-After explicit commit/push authorization, push the CI hardening follow-up and monitor the complete
-GitHub workflow. On success, verify the run-scoped GitHub/GitLab `e2e/**/run-*` sandbox branches
-were deleted. Then complete the remaining Obsidian desktop/mobile move smoke tests.
+Complete the remaining Obsidian desktop/mobile move smoke tests. Verify moving and editing a
+tracked file appears under Moves and applies as one remote move, while an occupied remote
+destination remains a skipped conflict.
