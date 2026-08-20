@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { SyncManager, BatchPushConflict, ConflictResolution } from '../../src/logic/sync-manager';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
 import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
+import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
+import { describePushResult } from '../support/push-result-diagnostic';
 // `import type` deliberately, not a value import: src/settings.ts also
 // exports settings-tab UI (GitLabSyncSettingTab -> FolderSuggest ->
 // AbstractInputSuggest etc.) which pulls in far more of `obsidian` than this
@@ -94,7 +96,8 @@ describe('SyncManager E2E', () => {
     }, timeouts.containerReadyMs + 30_000);
 
     function newManager(vault: FakeVault, settings: GitLabFilesPushSettings): SyncManager {
-        return new SyncManager(fakeApp(vault), service, settings, undefined, () => false);
+        const app = fakeApp(vault);
+        return new SyncManager(app, service, settings, undefined, () => false, undefined, new ObsidianSyncInteraction(app));
     }
 
     it('pushes a new local file, verified independently of the service', async () => {
@@ -106,7 +109,8 @@ describe('SyncManager E2E', () => {
 
         const result = await manager.pushFiles([filePath]);
 
-        expect(result.success).toBe(1);
+        expect(result.success, describePushResult(result)).toBe(1);
+        expect(result.failed, describePushResult(result)).toBe(0);
         const pushedSha = result.syncedPaths.find(p => p.path === filePath)?.sha;
         expect(pushedSha).toBeTruthy();
         const remote = await verifier.getFile(filePath, branch);
@@ -121,7 +125,9 @@ describe('SyncManager E2E', () => {
         vault.writeLocal(filePath, 'steady state');
         const settings = makeSettings(branch);
         const manager = newManager(vault, settings);
-        await manager.pushFiles([filePath]);
+        const initialPush = await manager.pushFiles([filePath]);
+        expect(initialPush.success, describePushResult(initialPush)).toBe(1);
+        expect(initialPush.failed, describePushResult(initialPush)).toBe(0);
 
         const shasBefore = await verifier.listCommitShas(branch);
         const result = await manager.pushFiles([filePath]);
@@ -164,7 +170,9 @@ describe('SyncManager E2E', () => {
         vault.writeLocal(filePath, 'baseline');
         const settings = makeSettings(branch);
         const manager = newManager(vault, settings);
-        await manager.pushFiles([filePath]);
+        const initialPush = await manager.pushFiles([filePath]);
+        expect(initialPush.success, describePushResult(initialPush)).toBe(1);
+        expect(initialPush.failed, describePushResult(initialPush)).toBe(0);
         const baselineMeta = settings.syncMetadata[filePath];
 
         // Diverge both sides from the synced baseline.
@@ -190,7 +198,9 @@ describe('SyncManager E2E', () => {
         vault.writeLocal(oldPath, 'move me');
         const settings = makeSettings(branch);
         const manager = newManager(vault, settings);
-        await manager.pushFiles([oldPath]);
+        const initialPush = await manager.pushFiles([oldPath]);
+        expect(initialPush.success, describePushResult(initialPush)).toBe(1);
+        expect(initialPush.failed, describePushResult(initialPush)).toBe(0);
 
         vault.renameLocal(oldPath, newPath);
         await manager.trackRename(newPath, oldPath);
@@ -204,7 +214,9 @@ describe('SyncManager E2E', () => {
         // `!isString && fileOrPath instanceof TFile` before consulting
         // `renamedFrom`).
         const newFile: TFileLike = vault.fileAt(newPath);
-        await manager.pushFiles([newFile as unknown as string]);
+        const moveResult = await manager.pushFiles([newFile as unknown as string]);
+        expect(moveResult.success, describePushResult(moveResult)).toBe(1);
+        expect(moveResult.failed, describePushResult(moveResult)).toBe(0);
 
         expect(await verifier.fileMissing(oldPath, branch)).toBe(true);
         const remote = await verifier.getFile(newPath, branch);
@@ -222,7 +234,9 @@ describe('SyncManager E2E', () => {
         vault.writeLocal(filePath, 'delete me');
         const settings = makeSettings(branch);
         const manager = newManager(vault, settings);
-        await manager.pushFiles([filePath]);
+        const initialPush = await manager.pushFiles([filePath]);
+        expect(initialPush.success, describePushResult(initialPush)).toBe(1);
+        expect(initialPush.failed, describePushResult(initialPush)).toBe(0);
         expect(await verifier.fileMissing(filePath, branch)).toBe(false);
 
         await service.deleteFile(filePath, branch, 'e2e: delete file');
@@ -242,8 +256,8 @@ describe('SyncManager E2E', () => {
 
         const results = await manager.pushFiles(paths);
 
-        expect(results.success).toBe(paths.length);
-        expect(results.failed).toBe(0);
+        expect(results.success, describePushResult(results)).toBe(paths.length);
+        expect(results.failed, describePushResult(results)).toBe(0);
         for (const p of paths) {
             const remote = await verifier.getFile(p, branch);
             expect(remote?.content).toBe(`content for ${p}`);

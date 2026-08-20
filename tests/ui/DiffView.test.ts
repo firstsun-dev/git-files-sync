@@ -29,7 +29,7 @@ describe('DiffView', () => {
     it('renders the side-by-side grid for a text diff', async () => {
         const view = makeDiffView();
         await view.onOpen();
-        view.setDiff({ path: 'notes/todo.md', status: 'modified', remoteContent: 'a', localContent: 'b' });
+        view.setDiff({ path: 'notes/todo.md', kind: 'text', remoteContent: 'a', localContent: 'b' });
 
         expect(view.getPath()).toBe('notes/todo.md');
         expect(body(view).querySelector('.ssv-diff-grid')).not.toBeNull();
@@ -40,7 +40,7 @@ describe('DiffView', () => {
     it('wraps the diff in its own query container', async () => {
         const view = makeDiffView();
         await view.onOpen();
-        view.setDiff({ path: 'a.md', status: 'modified', remoteContent: 'a', localContent: 'b' });
+        view.setDiff({ path: 'a.md', kind: 'text', remoteContent: 'a', localContent: 'b' });
 
         expect(body(view).querySelector('.ssv-diff-pane')).not.toBeNull();
     });
@@ -48,7 +48,7 @@ describe('DiffView', () => {
     it('shows a symlink message instead of a text diff', async () => {
         const view = makeDiffView();
         await view.onOpen();
-        view.setDiff({ path: 'link', status: 'modified', isSymlink: true });
+        view.setDiff({ path: 'link', kind: 'symlink' });
 
         expect(body(view).querySelector('.ssv-diff-binary')?.textContent).toBe('Symlink target changed');
     });
@@ -58,15 +58,15 @@ describe('DiffView', () => {
         await view.onOpen();
         expect(view.getDisplayText()).toBe('Diff');
 
-        view.setDiff({ path: 'notes/todo.md', status: 'modified', remoteContent: 'a', localContent: 'b' });
+        view.setDiff({ path: 'notes/todo.md', kind: 'text', remoteContent: 'a', localContent: 'b' });
         expect(view.getDisplayText()).toBe('Diff: notes/todo.md');
     });
 
     it('replaces the previous file rather than appending to it', async () => {
         const view = makeDiffView();
         await view.onOpen();
-        view.setDiff({ path: 'a.md', status: 'modified', remoteContent: 'a', localContent: 'b' });
-        view.setDiff({ path: 'b.md', status: 'modified', remoteContent: 'c', localContent: 'd' });
+        view.setDiff({ path: 'a.md', kind: 'text', remoteContent: 'a', localContent: 'b' });
+        view.setDiff({ path: 'b.md', kind: 'text', remoteContent: 'c', localContent: 'd' });
 
         expect(view.getPath()).toBe('b.md');
         expect(body(view).querySelectorAll('.ssv-diff-pane')).toHaveLength(1);
@@ -144,7 +144,7 @@ describe('SyncStatusView diff pane', () => {
     it('closes the pane when the file it shows is pushed', async () => {
         const existing = makeDiffView();
         await existing.onOpen();
-        existing.setDiff(modified('a.md'));
+        existing.setDiff({ ...modified('a.md'), kind: 'text' });
         const { view, leaves } = makeView([existing]);
 
         internals(view).closeDiffPaneFor(['a.md']);
@@ -155,7 +155,7 @@ describe('SyncStatusView diff pane', () => {
     it('leaves a pane showing an unrelated file alone', async () => {
         const existing = makeDiffView();
         await existing.onOpen();
-        existing.setDiff(modified('a.md'));
+        existing.setDiff({ ...modified('a.md'), kind: 'text' });
         const { view, leaves } = makeView([existing]);
 
         internals(view).closeDiffPaneFor(['other.md']);

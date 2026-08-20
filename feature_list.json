@@ -1,7 +1,15 @@
 {
   "_note": "GitHub Issues (firstsun-dev/git-files-sync, Project #6) is the source of truth for the full backlog and priority/estimate fields. This file mirrors only the active feature and the next few candidates so an agent session has a local, offline checkpoint — sync it against `gh issue list --repo firstsun-dev/git-files-sync --state open` at the start of a session rather than treating it as authoritative.",
-  "_lastSync": "2026-08-07: Archived feat-001 through feat-025 (complete). Backlog candidates below.",
+  "_lastSync": "2026-08-19: Synced against open GitHub issues; issue #105 is the active architecture refactor.",
   "features": [
+    {
+      "id": "feat-026",
+      "name": "refactor(sync): separate planning, execution, conflicts, metadata, and UI (issue #105)",
+      "description": "Preserve sync behavior while extracting SyncStatusView presentation state/controller boundaries and SyncManager scanner/planner/executor/workspace boundaries with regression and integration coverage.",
+      "dependencies": [],
+      "status": "in-progress",
+      "evidence": "Commits dff95db/948df28 on refactor/sync-domain-pipeline: unified sync decisions and CI hardening are covered; 613 tests, local Gitea E2E, and real CI run 32338116598 are green; desktop/mobile smoke pending."
+    },
     {
       "id": "feat-004",
       "name": "fix: resolve sonarqube issues (issue #45)",

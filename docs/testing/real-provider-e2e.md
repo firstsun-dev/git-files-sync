@@ -122,6 +122,9 @@ sandbox and starved each other (observed as real GitLab API timeouts under that 
 Keying by branch name alone means the later of the two cancels the earlier instead. The two
 cleanup workflows below share this same group naming for the same branch, with
 `cancel-in-progress: false`, so cleanup queues behind rather than races an active run.
+The cancelled duplicate's `e2e-gate` reports the replacement as neutral and sets `run-ci=false`,
+so it neither leaves a misleading aggregate failure nor starts a second copy of downstream CI.
+The surviving run remains responsible for the real provider result and release gate.
 **Cancellation is not a cleanup mechanism.** A cancelled run's `cleanup` step may never execute, or
 may be mid-delete when the runner is terminated; the next run is still safe because it always
 allocates a brand-new `run-<run-id>-<run-attempt>` branch rather than deleting and reusing the old
@@ -263,9 +266,10 @@ changes -> provider-e2e [github | gitlab | gitea, parallel] -> e2e-gate -> CI (s
 ```
 
 `e2e-gate` runs with `if: always()` and treats `provider-e2e`'s aggregate result as pass-through
-on `success` or `skipped` (the latter covers path-filtered-out runs), and a hard failure on
-anything else — so a real provider regression blocks the release instead of shipping and being
-caught after the fact.
+on `success` or `skipped` (the latter covers path-filtered-out runs), a neutral replacement on
+`cancelled` (with downstream CI suppressed for that duplicate run), and a hard failure on any
+other result. A real provider regression therefore still blocks the release instead of shipping
+and being caught after the fact.
 
 **Branch protection** (not something this repo checkout can change — a GitHub repo-settings
 change, left for whoever has admin access): add `E2E / gitea` as a required status check.

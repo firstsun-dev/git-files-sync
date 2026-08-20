@@ -2,8 +2,9 @@ import { App, Modal, setIcon, ButtonComponent } from 'obsidian';
 import { t, TranslationKey } from '../i18n';
 import { SyncPlan, SyncPlanEntry } from './types';
 import { ICONS } from './components/icons';
+import type { SyncPlanDirection } from '../logic/sync/SyncInteractionPort';
 
-export type SyncPlanDirection = 'push' | 'pull' | 'delete';
+export type { SyncPlanDirection } from '../logic/sync/SyncInteractionPort';
 
 const SECTION_ORDER: Array<{ key: keyof SyncPlan; icon: string; titleKey: TranslationKey; destructive: boolean }> = [
     { key: 'additions', icon: ICONS.addition, titleKey: 'syncPlanModal.section.additions', destructive: false },

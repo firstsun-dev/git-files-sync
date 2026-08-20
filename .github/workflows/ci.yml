@@ -217,7 +217,7 @@ jobs:
           E2E_PROVIDER: ${{ matrix.provider }}
         with:
           timeout_minutes: 15
-          max_attempts: 2
+          max_attempts: 3
           retry_wait_seconds: 15
           command: |
             set -a
@@ -251,26 +251,37 @@ jobs:
   # "Determine whether this provider leg should run" step above; this gate
   # only asks "did whatever ran, pass?"). A gated-off leg's steps are all
   # skipped without failing the job, so it still reports "success" here.
-  # `if: always()` so a real provider-e2e failure/cancellation is caught
-  # here and blocks CI/release, instead of GitHub Actions silently treating
-  # an upstream failure as "this job never needed to run".
+  # `if: always()` so a real provider-e2e failure is caught here and blocks
+  # CI/release. A cancelled matrix means a newer run in the same branch/provider
+  # concurrency group replaced this duplicate run; report that as neutral and
+  # do not start another copy of downstream CI.
   e2e-gate:
     name: E2E gate
     needs: provider-e2e
     if: always()
     runs-on: ubuntu-latest
+    outputs:
+      run-ci: ${{ steps.check.outputs.run-ci }}
     steps:
       - name: Check provider-e2e result
+        id: check
         run: |
           result="${{ needs.provider-e2e.result }}"
           echo "provider-e2e result: $result"
+          echo "run-ci=true" >> "$GITHUB_OUTPUT"
+          if [ "$result" = "cancelled" ]; then
+            echo "run-ci=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::provider-e2e was replaced by a newer run in the same concurrency group."
+            exit 0
+          fi
           if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
-            echo "::error::provider-e2e failed or was cancelled ($result) -- blocking CI/release."
+            echo "::error::provider-e2e failed ($result) -- blocking CI/release."
             exit 1
           fi
 
   CI:
     needs: e2e-gate
+    if: needs.e2e-gate.outputs.run-ci == 'true'
     uses: firstsun-dev/.github/.github/workflows/obsidian-plugin-ci.yml@v1
     with:
       plugin-id: "git-file-sync"

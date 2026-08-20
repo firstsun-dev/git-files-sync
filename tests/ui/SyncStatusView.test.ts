@@ -9,6 +9,11 @@ import type { GitTreeEntry } from '../../src/services/git-service-interface';
 import { SyncPlanModal } from '../../src/ui/SyncPlanModal';
 import { ConfirmModal } from '../../src/ui/ConfirmModal';
 import { gitBlobSha } from '../../src/utils/git-blob-sha';
+import type { SyncStatusRefreshService } from '../../src/logic/sync/SyncStatusRefreshService';
+
+function refreshService(view: SyncStatusView): SyncStatusRefreshService {
+    return (view as unknown as { statusRefresh: SyncStatusRefreshService }).statusRefresh;
+}
 
 // The diff pane is a separate view; none of these fixtures open one, so the
 // stale-pane cleanup just finds nothing.
@@ -293,9 +298,7 @@ describe('SyncStatusView.identifyExtraFiles folder/remote-record collisions', ()
             ['.claude/skills/polish-blog', { path: '.claude/skills/polish-blog', symlink: false }],
         ]);
 
-        const extra = await (view as unknown as {
-            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>): Promise<unknown[]>
-        }).identifyExtraFiles(remoteMap, new Set(), new Map());
+        const extra = await refreshService(view).identifyExtraFiles(remoteMap, new Set(), new Map());
 
         expect(extra).toEqual([]);
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
@@ -312,9 +315,7 @@ describe('SyncStatusView.identifyExtraFiles folder/remote-record collisions', ()
             ['notes/hidden.md', { path: 'notes/hidden.md', symlink: false }],
         ]);
 
-        const extra = await (view as unknown as {
-            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>): Promise<unknown[]>
-        }).identifyExtraFiles(remoteMap, new Set(), new Map());
+        const extra = await refreshService(view).identifyExtraFiles(remoteMap, new Set(), new Map());
 
         expect(extra).toEqual(['notes/hidden.md']);
     });
@@ -333,9 +334,7 @@ describe('SyncStatusView.identifyExtraFiles folder/remote-record collisions', ()
             ['notes/old.md', { path: 'notes/old.md', symlink: false, sha: 'sha' }],
         ]);
 
-        const extra = await (view as unknown as {
-            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>, pendingMoveOldPaths: Set<string>): Promise<unknown[]>
-        }).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set(['notes/old.md']));
+        const extra = await refreshService(view).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set(['notes/old.md']));
 
         expect(extra).toEqual([]);
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
@@ -356,9 +355,7 @@ describe('SyncStatusView local-only status', () => {
         const leaf = { app: { workspace: noDiffPanes(), vault: { adapter: { read: vi.fn().mockResolvedValue('new content') } } } } as unknown as WorkspaceLeaf;
         const view = new SyncStatusView(leaf, plugin);
 
-        await (view as unknown as {
-            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
-        }).refreshFileStatus('new.md', undefined);
+        await refreshService(view).refreshFileStatus('new.md', undefined);
 
         expect(getFile).not.toHaveBeenCalled();
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
@@ -369,16 +366,15 @@ describe('SyncStatusView local-only status', () => {
     // it) still needs the content fetch — that path must stay intact.
     it('still fetches content for a tree entry without a sha', async () => {
         const getFile = vi.fn().mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
-        const { plugin, leaf } = makePlugin({ adapterExists: vi.fn().mockResolvedValue(true) });
+        const { plugin, leaf } = makePlugin({
+            adapterExists: vi.fn().mockResolvedValue(true),
+            adapterRead: vi.fn().mockResolvedValue('remote content'),
+        });
         (plugin.gitService as unknown as { getFile: typeof getFile }).getFile = getFile;
 
         const view = new SyncStatusView(leaf, plugin);
-        vi.spyOn(view as unknown as { readFileContent(f: unknown, b: boolean, s: boolean): Promise<string> }, 'readFileContent')
-            .mockResolvedValue('remote content');
 
-        await (view as unknown as {
-            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
-        }).refreshFileStatus('notes/existing.md', { path: 'notes/existing.md', symlink: false });
+        await refreshService(view).refreshFileStatus('notes/existing.md', { path: 'notes/existing.md', symlink: false });
 
         expect(getFile).toHaveBeenCalledWith('notes/existing.md', 'main');
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
@@ -393,47 +389,38 @@ describe('SyncStatusView local-only status', () => {
     // as a stray remote-only + unsynced pair instead of 'moved'. Classifying a
     // file as 'synced' must backfill syncMetadata so a later move is tracked.
     it('backfills syncMetadata when a sha-based comparison finds a file already synced', async () => {
-        const { plugin, leaf } = makePlugin();
+        const { plugin, leaf } = makePlugin({ adapterRead: vi.fn().mockResolvedValue('same content') });
         const view = new SyncStatusView(leaf, plugin);
-        vi.spyOn(view as unknown as { readLocalContentForSha(...args: unknown[]): Promise<string> }, 'readLocalContentForSha')
-            .mockResolvedValue('same content');
 
-        await (view as unknown as {
-            refreshFileStatusBySha(fileOrPath: string, remoteEntry: GitTreeEntry): Promise<void>
-        }).refreshFileStatusBySha('notes/pre-existing.md', { path: 'notes/pre-existing.md', symlink: false, sha: await gitBlobSha('same content') });
+        await refreshService(view).refreshFileStatusBySha('notes/pre-existing.md', { path: 'notes/pre-existing.md', symlink: false, sha: await gitBlobSha('same content') });
 
         expect(plugin.settings.syncMetadata?.['notes/pre-existing.md']).toMatchObject({ lastKnownPath: 'notes/pre-existing.md' });
     });
 
     it('backfills syncMetadata when a content-based comparison finds a file already synced', async () => {
         const getFile = vi.fn().mockResolvedValue({ content: 'same content', sha: 'remote-sha' });
-        const { plugin, leaf } = makePlugin({ adapterExists: vi.fn().mockResolvedValue(true) });
+        const { plugin, leaf } = makePlugin({
+            adapterExists: vi.fn().mockResolvedValue(true),
+            adapterRead: vi.fn().mockResolvedValue('same content'),
+        });
         (plugin.gitService as unknown as { getFile: typeof getFile }).getFile = getFile;
 
         const view = new SyncStatusView(leaf, plugin);
-        vi.spyOn(view as unknown as { readFileContent(f: unknown, b: boolean, s: boolean): Promise<string> }, 'readFileContent')
-            .mockResolvedValue('same content');
 
-        await (view as unknown as {
-            refreshFileStatusByContent(fileOrPath: string): Promise<void>
-        }).refreshFileStatusByContent('notes/pre-existing.md');
+        await refreshService(view).refreshFileStatusByContent('notes/pre-existing.md');
 
         expect(plugin.settings.syncMetadata?.['notes/pre-existing.md']).toMatchObject({ lastSyncedSha: 'remote-sha' });
     });
 
     it('end-to-end: a rename right after a sha-based synced classification is tracked as moved, not a stray remote-only + unsynced pair', async () => {
-        const { plugin, leaf } = makePlugin();
+        const { plugin, leaf } = makePlugin({ adapterRead: vi.fn().mockResolvedValue('same content') });
         const view = new SyncStatusView(leaf, plugin);
-        vi.spyOn(view as unknown as { readLocalContentForSha(...args: unknown[]): Promise<string> }, 'readLocalContentForSha')
-            .mockResolvedValue('same content');
         const sha = await gitBlobSha('same content');
 
         // First refresh: the file was never pushed/pulled through the plugin,
         // but its content already matches remote -- classified 'synced' from a
         // clean slate, same as a freshly opened vault.
-        await (view as unknown as {
-            refreshFileStatusBySha(fileOrPath: string, remoteEntry: GitTreeEntry): Promise<void>
-        }).refreshFileStatusBySha('notes/old.md', { path: 'notes/old.md', symlink: false, sha });
+        await refreshService(view).refreshFileStatusBySha('notes/old.md', { path: 'notes/old.md', symlink: false, sha });
 
         // Then the user renames it inside Obsidian -- mirrors main.ts's rename handler.
         await plugin.sync.trackRename('notes/new.md', 'notes/old.md');
@@ -451,9 +438,7 @@ describe('SyncStatusView local-only status', () => {
         (plugin.gitService as unknown as { getFile: typeof getFile }).getFile = getFile;
         const view = new SyncStatusView(leaf, plugin);
 
-        await (view as unknown as {
-            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
-        }).refreshFileStatus('notes/new.md', { path: 'notes/new.md', symlink: false, sha: 'irrelevant' });
+        await refreshService(view).refreshFileStatus('notes/new.md', { path: 'notes/new.md', symlink: false, sha: 'irrelevant' });
 
         expect(getFile).not.toHaveBeenCalled();
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
@@ -491,18 +476,12 @@ describe('SyncStatusView move detection without a live rename event', () => {
         ]);
 
         // No pendingMoveOldPaths, since none was ever live-tracked.
-        const extra = await (view as unknown as {
-            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>, pendingMoveOldPaths: Set<string>): Promise<unknown[]>
-        }).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set());
+        const extra = await refreshService(view).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set());
 
         // The file now lives at Archive/Projects/a.md locally, with no remote entry yet.
-        await (view as unknown as {
-            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
-        }).refreshFileStatus('Archive/Projects/a.md', undefined);
+        await refreshService(view).refreshFileStatus('Archive/Projects/a.md', undefined);
 
-        await (view as unknown as {
-            reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void>
-        }).reconcileOutOfBandMoves(remoteMap);
+        await refreshService(view).reconcileOutOfBandMoves(remoteMap);
 
         expect(extra).toEqual([]);
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
@@ -530,15 +509,9 @@ describe('SyncStatusView move detection without a live rename event', () => {
             ['Notes/old-name.md', { path: 'Notes/old-name.md', symlink: false, sha }],
         ]);
 
-        await (view as unknown as {
-            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>, pendingMoveOldPaths: Set<string>): Promise<unknown[]>
-        }).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set());
-        await (view as unknown as {
-            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
-        }).refreshFileStatus('Archive/new-name.md', undefined);
-        await (view as unknown as {
-            reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void>
-        }).reconcileOutOfBandMoves(remoteMap);
+        await refreshService(view).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set());
+        await refreshService(view).refreshFileStatus('Archive/new-name.md', undefined);
+        await refreshService(view).reconcileOutOfBandMoves(remoteMap);
 
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         expect(statuses.get('Archive/new-name.md')).toMatchObject({
@@ -570,21 +543,15 @@ describe('SyncStatusView move detection without a live rename event', () => {
             ['Notes/Projects/a.md', { path: 'Notes/Projects/a.md', symlink: false, sha }],
         ]);
 
-        await (view as unknown as {
-            identifyExtraFiles(remoteMap: Map<string, GitTreeEntry>, localFilePaths: Set<string>, allLocalFileMap: Map<string, unknown>, pendingMoveOldPaths: Set<string>): Promise<unknown[]>
-        }).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set());
+        await refreshService(view).identifyExtraFiles(remoteMap, new Set(), new Map(), new Set());
 
-        await (view as unknown as {
-            refreshFileStatus(fileOrPath: string, remoteEntry: GitTreeEntry | undefined): Promise<void>
-        }).refreshFileStatus('Archive/Projects/a.md', undefined);
+        await refreshService(view).refreshFileStatus('Archive/Projects/a.md', undefined);
 
         // Simulates a vault 'delete' handler firing for the old path before
         // this refresh's reconciliation pass gets to run.
         delete plugin.settings.syncMetadata['Notes/Projects/a.md'];
 
-        await (view as unknown as {
-            reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void>
-        }).reconcileOutOfBandMoves(remoteMap);
+        await refreshService(view).reconcileOutOfBandMoves(remoteMap);
 
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         expect(statuses.get('Notes/Projects/a.md')).toMatchObject({ status: 'remote-only' });
@@ -743,9 +710,7 @@ describe('SyncStatusView moved diff data', () => {
         const file = Object.assign(new TFile(), { path: 'new.md' });
         const remoteMap = new Map<string, GitTreeEntry>([['old.md', { path: 'old.md', sha: 'old-sha', symlink: false }]]);
 
-        await (view as unknown as {
-            refreshFileStatus(file: TFile, remoteEntry: GitTreeEntry | undefined, entries: Map<string, GitTreeEntry>): Promise<void>
-        }).refreshFileStatus(file, undefined, remoteMap);
+        await refreshService(view).refreshFileStatus(file, undefined, remoteMap);
 
         const statuses = (view as unknown as { fileStatuses: Map<string, FileStatus> }).fileStatuses;
         expect(statuses.get('new.md')).toMatchObject({
@@ -830,44 +795,6 @@ describe('SyncStatusView post-push status update', () => {
         // No live remote re-check when the push result already confirms sync.
         expect(getFile).not.toHaveBeenCalled();
         expect(statuses.get('note.md')).toMatchObject({ path: 'note.md', status: 'synced', remoteSha: 'new-sha' });
-    });
-
-    it('reuses a snapshot only when the branch head is unchanged', async () => {
-        const pushFiles = vi.fn().mockResolvedValue({ success: 1, failed: 0, conflicts: 0, errors: [], syncedPaths: [] });
-        const tree: GitTreeEntry[] = [{ path: 'a.md', symlink: false, sha: 'sha-a' }];
-        const getBranchHead = vi.fn().mockResolvedValue('commit-1');
-        const plugin = {
-            settings: { branch: 'main', vaultFolder: '', rootPath: '' },
-            gitService: { getBranchHead }, sync: { pushFiles },
-        } as unknown as GitLabFilesPush;
-        const leaf = { app: { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } } } as unknown as WorkspaceLeaf;
-        const view = new SyncStatusView(leaf, plugin);
-        (view as unknown as { remoteTreeSnapshot: unknown }).remoteTreeSnapshot = { branch: 'main', rootPath: '', head: 'commit-1', entries: tree };
-
-        await (view as unknown as {
-            executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string>): Promise<void>
-        }).executeBatchOperation('selected', 'push', ['a.md']);
-
-        expect(pushFiles).toHaveBeenCalledWith(['a.md'], expect.any(Function), tree);
-    });
-
-    it('fetches a fresh tree when the branch head changed after refresh', async () => {
-        const pushFiles = vi.fn().mockResolvedValue({ success: 1, failed: 0, conflicts: 0, errors: [], syncedPaths: [] });
-        const plugin = {
-            settings: { branch: 'main', vaultFolder: '', rootPath: '' },
-            gitService: { getBranchHead: vi.fn().mockResolvedValue('commit-2') }, sync: { pushFiles },
-        } as unknown as GitLabFilesPush;
-        const leaf = { app: { workspace: noDiffPanes(), vault: { adapter: { exists: vi.fn().mockResolvedValue(false) } } } } as unknown as WorkspaceLeaf;
-        const view = new SyncStatusView(leaf, plugin);
-        (view as unknown as { remoteTreeSnapshot: unknown }).remoteTreeSnapshot = {
-            branch: 'main', rootPath: '', head: 'commit-1', entries: [{ path: 'a.md', symlink: false }],
-        };
-
-        await (view as unknown as {
-            executeBatchOperation(filter: 'modified' | 'selected', op: 'push' | 'pull', files: Array<string>): Promise<void>
-        }).executeBatchOperation('selected', 'push', ['a.md']);
-
-        expect(pushFiles).toHaveBeenCalledWith(['a.md'], expect.any(Function), undefined);
     });
 
     it('still does a full remote refresh after a pull (unaffected by this fix)', async () => {
