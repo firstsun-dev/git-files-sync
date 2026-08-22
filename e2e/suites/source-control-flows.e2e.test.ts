@@ -337,4 +337,98 @@ describe('Source Control Flows E2E', () => {
             await s.expectNoCommitSince(headBefore);
         });
     });
+
+    // ------------------------------------------------------------------
+    // Phase 5 — Mixed batch operations
+    // ------------------------------------------------------------------
+    describe('mixed batch operations', () => {
+        it.skipIf(!isGitHub)('pushes a create + modify + rename in one commit', async () => {
+            const s = scenario();
+            const create = path('mixed-cmr/create.md');
+            const modify = path('mixed-cmr/modify.md');
+            const oldMove = path('mixed-cmr/old.md');
+            const newMove = path('mixed-cmr/moved.md');
+            await s.baseline(modify, 'm-v1');
+            await s.baseline(oldMove, 'move-me');
+
+            s.writeLocal(create, 'create content');
+            s.writeLocal(modify, 'm-v2');
+            s.renameLocal(oldMove, newMove);
+            await s.manager.trackRename(newMove, oldMove);
+
+            const headBefore = await s.head();
+            const result = await s.push([create, modify, s.tfile(newMove)]);
+            expect(result.success, describePushResult(result)).toBe(3);
+            expect(result.failed, describePushResult(result)).toBe(0);
+
+            await s.expectRemoteContent(create, 'create content');
+            await s.expectRemoteContent(modify, 'm-v2');
+            await s.expectRemoteMissing(oldMove);
+            await s.expectRemoteContent(newMove, 'move-me');
+            await s.expectSingleCommitSince(headBefore);
+        });
+
+        it('pushes create + modify + pure rename + rename-with-modify in one commit', async () => {
+            const s = scenario();
+            const create = path('mixed-lifecycle/create.md');
+            const modify = path('mixed-lifecycle/modify.md');
+            const renameOld = path('mixed-lifecycle/rename-old.md');
+            const renameNew = path('mixed-lifecycle/rename-new.md');
+            const moveOld = path('mixed-lifecycle/move-old.md');
+            const moveNew = path('mixed-lifecycle/move-new.md');
+            await s.baseline(modify, 'm-v1');
+            await s.baseline(renameOld, 'r-v1');
+            await s.baseline(moveOld, 'mv-v1');
+
+            s.writeLocal(create, 'create content');
+            s.writeLocal(modify, 'm-v2');
+            s.renameLocal(renameOld, renameNew);
+            await s.manager.trackRename(renameNew, renameOld);
+            s.renameLocal(moveOld, moveNew);
+            s.writeLocal(moveNew, 'mv-v2');
+            await s.manager.trackRename(moveNew, moveOld);
+
+            const headBefore = await s.head();
+            const result = await s.push([create, modify, s.tfile(renameNew), s.tfile(moveNew)]);
+            expect(result.success, describePushResult(result)).toBe(4);
+            expect(result.failed, describePushResult(result)).toBe(0);
+
+            await s.expectRemoteContent(create, 'create content');
+            await s.expectRemoteContent(modify, 'm-v2');
+            await s.expectRemoteMissing(renameOld);
+            await s.expectRemoteContent(renameNew, 'r-v1');
+            await s.expectRemoteMissing(moveOld);
+            await s.expectRemoteContent(moveNew, 'mv-v2');
+            await s.expectSingleCommitSince(headBefore);
+        });
+
+        it('locks the current contract for a safe + conflict batch (safe files commit, conflict skipped)', async () => {
+            const s = scenario();
+            const safe = path('mixed-safe-conflict/a.md');
+            const conflict = path('mixed-safe-conflict/b.md');
+            const created = path('mixed-safe-conflict/c.md');
+            await s.baseline(safe, 'a-v1');
+            await s.baseline(conflict, 'b-v1');
+
+            s.writeLocal(safe, 'a-v2');
+            s.writeLocal(conflict, 'b-local');
+            await s.modifyRemote(conflict, 'b-remote');
+            s.writeLocal(created, 'c-new');
+
+            fixture.setConflictResolver(() => 'skip');
+            const headBefore = await s.head();
+            const result = await s.push([safe, conflict, created]);
+            expect(result.success, describePushResult(result)).toBe(2);
+            expect(result.failed, describePushResult(result)).toBe(0);
+            expect(result.conflicts, describePushResult(result)).toBe(1);
+            expect(result.skippedConflicts, describePushResult(result)).toBe(1);
+
+            // Current contract: safe files land in one commit; the conflict is
+            // skipped (remote stays 'b-remote'), not atomic. Locked here.
+            await s.expectRemoteContent(safe, 'a-v2');
+            await s.expectRemoteContent(conflict, 'b-remote');
+            await s.expectRemoteContent(created, 'c-new');
+            await s.expectSingleCommitSince(headBefore);
+        });
+    });
 });
