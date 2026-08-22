@@ -116,6 +116,9 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 
 	'settings.whatsNewBanner.title': 'v{version} 更新重點',
 	'settings.whatsNewBanner.dismiss': '關閉提示',
+	'settings.releaseHistory.name': '版本更新紀錄',
+	'settings.releaseHistory.desc': '查看目前與過往版本的更新內容',
+	'settings.releaseHistory.button': '查看更新紀錄',
 
 	'syncStatus.viewTitle': '同步狀態',
 	'syncStatus.emptyPrompt': '點擊「重新整理」以檢查同步狀態',
@@ -259,6 +262,8 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.filter.remoteChanges': '遠端變更',
 	'sourceControl.filter.conflicts': '衝突',
 	'sourceControl.filter.synced': '已同步',
+	'sourceControl.filter.showSynced': '顯示已同步',
+	'sourceControl.section.all': '全部',
 	'sourceControl.section.readyToPush': '待推送',
 	'sourceControl.section.changes': '變更',
 	'sourceControl.section.remoteChanges': '遠端變更',

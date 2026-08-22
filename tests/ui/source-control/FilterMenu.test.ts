@@ -11,48 +11,65 @@ const zeroCounts: Record<SourceControlFilter, number> = {
 
 describe('renderFilterMenu', () => {
     let container: HTMLElement;
-    let onChange: (filter: SourceControlFilter) => void;
+    let callbacks: { onFilterChange: (f: SourceControlFilter) => void; onToggleShowSynced: (s: boolean) => void };
 
     beforeEach(() => {
         container = createContainer();
-        onChange = vi.fn();
+        callbacks = { onFilterChange: vi.fn(), onToggleShowSynced: vi.fn() };
     });
 
-    it('renders all six filters in spec order', () => {
-        renderFilterMenu(container, 'all', zeroCounts, onChange);
+    it('renders the five action chips (no synced chip) when showSynced is false', () => {
+        renderFilterMenu(container, 'all', zeroCounts, false, callbacks);
+
+        const filters = Array.from(container.querySelectorAll('.scv-filter-option')).map(el => el.getAttribute('data-filter'));
+        expect(filters).toEqual(['all', 'changes', 'ready-to-push', 'remote-changes', 'conflicts']);
+    });
+
+    it('appends the synced chip when showSynced is true', () => {
+        renderFilterMenu(container, 'all', { ...zeroCounts, synced: 7 }, true, callbacks);
 
         const filters = Array.from(container.querySelectorAll('.scv-filter-option')).map(el => el.getAttribute('data-filter'));
         expect(filters).toEqual(['all', 'changes', 'ready-to-push', 'remote-changes', 'conflicts', 'synced']);
+        const syncedOption = container.querySelector('.scv-filter-option[data-filter="synced"]');
+        expect(syncedOption?.querySelector('.scv-filter-count')?.textContent).toBe('7');
     });
 
-    it('marks the current filter as active', () => {
-        renderFilterMenu(container, 'conflicts', zeroCounts, onChange);
+    it('marks the current filter chip as active', () => {
+        renderFilterMenu(container, 'conflicts', zeroCounts, false, callbacks);
 
         const active = container.querySelector('.scv-filter-option.is-active');
         expect(active?.getAttribute('data-filter')).toBe('conflicts');
     });
 
     it('shows the per-filter count from the ViewModel', () => {
-        renderFilterMenu(container, 'all', { ...zeroCounts, conflicts: 3 }, onChange);
+        renderFilterMenu(container, 'all', { ...zeroCounts, conflicts: 3 }, false, callbacks);
 
         const conflictsOption = container.querySelector('.scv-filter-option[data-filter="conflicts"]');
         expect(conflictsOption?.querySelector('.scv-filter-count')?.textContent).toBe('3');
     });
 
-    it('calls onChange with the clicked filter value (filter switching)', () => {
-        renderFilterMenu(container, 'all', zeroCounts, onChange);
+    it('calls onFilterChange with the clicked filter value', () => {
+        renderFilterMenu(container, 'all', zeroCounts, false, callbacks);
 
         (container.querySelector('.scv-filter-option[data-filter="remote-changes"]') as HTMLButtonElement).click();
 
-        expect(onChange).toHaveBeenCalledWith('remote-changes');
+        expect(callbacks.onFilterChange).toHaveBeenCalledWith('remote-changes');
     });
 
-    it('does not call onChange for filters that were not clicked', () => {
-        renderFilterMenu(container, 'all', zeroCounts, onChange);
+    it('renders the Show synced toggle reflecting the showSynced state', () => {
+        renderFilterMenu(container, 'all', zeroCounts, false, callbacks);
+        const checkbox = container.querySelector('.scv-filter-show-synced-checkbox') as HTMLInputElement;
+        expect(checkbox).not.toBeNull();
+        expect(checkbox.checked).toBe(false);
+    });
 
-        (container.querySelector('.scv-filter-option[data-filter="synced"]') as HTMLButtonElement).click();
+    it('calls onToggleShowSynced when the Show synced checkbox changes', () => {
+        renderFilterMenu(container, 'all', zeroCounts, false, callbacks);
 
-        expect(onChange).toHaveBeenCalledTimes(1);
-        expect(onChange).toHaveBeenCalledWith('synced');
+        const checkbox = container.querySelector('.scv-filter-show-synced-checkbox') as HTMLInputElement;
+        checkbox.checked = true;
+        checkbox.dispatchEvent(new Event('change'));
+
+        expect(callbacks.onToggleShowSynced).toHaveBeenCalledWith(true);
     });
 });

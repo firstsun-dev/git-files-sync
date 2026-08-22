@@ -57,11 +57,33 @@ jobs:
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
 
+  # Fast local gate: run cheap deterministic checks in parallel before any
+  # real-provider E2E spends remote API time. The release-critical reusable CI
+  # still runs after E2E below; this is only an early failure gate.
+  preflight:
+    name: Preflight / ${{ matrix.check }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      max-parallel: 3
+      matrix:
+        check: [lint, test, build]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Run ${{ matrix.check }}
+        run: bash scripts/run-preflight.sh "${{ matrix.check }}"
+
   # Real-provider E2E: one matrix job covering GitHub, GitLab, and Gitea (see
-  # docs/testing/real-provider-e2e.md).
+  # docs/testing/real-provider-e2e.md). It starts only after the fast local
+  # preflight passes, then provider legs run in parallel.
   provider-e2e:
     name: E2E / ${{ matrix.provider }}
-    needs: changes
+    needs: [changes, preflight]
     runs-on: [self-hosted, linux, x64, 32gb-ram]
     # Runs when sync/provider-relevant paths changed, or unconditionally on
     # workflow_dispatch/schedule/a push to main (main always gets the full
@@ -156,6 +178,15 @@ jobs:
           # fork PRs get no E2E coverage at all.
           if [ "${{ matrix.provider }}" = "gitea" ]; then
             run=false
+            # Make the disabled state explicit in the run log + summary so a
+            # green "E2E / gitea" job is never mistaken for "Gitea E2E passed".
+            echo "::notice::Gitea E2E is disabled in CI (runner Docker networking — see TODO below). Suite/harness code passes locally; re-enable by removing this block."
+            {
+              echo "### Gitea E2E: disabled"
+              echo "Reason: runner Docker networking — container provisioning against this runner fleet needs investigation (bridge-IP reachability, health-check timing)."
+              echo "Suite/harness code is untouched and passes locally (\`npm run test:e2e -- --provider gitea\`). The Gitea infrastructure fix is tracked separately; do not infer three-provider coverage from a green gitea leg."
+              echo "Re-enable by removing the gitea block in the \"Determine whether this provider leg should run\" step."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "${{ github.event_name }}" = "pull_request" ] \
             && [ "${{ matrix.provider }}" != "gitea" ] \
@@ -184,29 +215,24 @@ jobs:
       - run: npm ci --ignore-scripts
         if: steps.gate.outputs.run == 'true'
 
-      # Arrange/Assert/cleanup are Shell + Git (scripts/e2e-harness.sh); Act
-      # stays production TypeScript (npx vitest). E2E_WORKDIR/E2E_PR_NUMBER/
-      # E2E_SOURCE_BRANCH are set once at job level (see the job `env:`
-      # above) so all steps below share the same run state/identity.
-      - name: Provision isolated branch/container
-        if: steps.gate.outputs.run == 'true'
-        env:
-          E2E_PROVIDER: ${{ matrix.provider }}
-        run: scripts/e2e-harness.sh provision
-
-      - name: Seed baseline fixture
-        if: steps.gate.outputs.run == 'true'
-        env:
-          E2E_PROVIDER: ${{ matrix.provider }}
-        run: scripts/e2e-harness.sh seed
-
+      # One entry point for the whole real-provider E2E flow: scripts/run-e2e.sh
+      # provisions the isolated branch/container, seeds the baseline fixture,
+      # runs the suites listed in scripts/e2e-suites.txt (the single source of
+      # truth — CI and local run the same command, so the suite list is never
+      # duplicated here), and cleans up via its EXIT trap. New suites are added
+      # in scripts/e2e-suites.txt only; run-e2e.sh's own forward/reverse checks
+      # fail the run if a suite file isn't registered (or vice versa).
+      # E2E_WORKDIR is set by the "Compute run-scoped workdir" step above; the
+      # job `env:` supplies the provider secrets and run identity
+      # (E2E_PR_NUMBER/E2E_SOURCE_BRANCH) that run-e2e.sh/e2e-harness.sh consume.
+      #
       # Retried (not just run once): observed failures against the real
       # providers include transient runner-network blips unrelated to the
       # suite/product code (e.g. a bare `getaddrinfo ENOTFOUND gitlab.com`
       # mid-test on 2026-08-14, run 31770197590) that a same-attempt rerun
-      # simply doesn't reproduce. Safe to retry the whole step from scratch:
-      # each suite's `runId`/branch paths are randomized per vitest process
-      # (see e.g. e2e/suites/sync-manager.e2e.test.ts), so a failed
+      # simply doesn't reproduce. Safe to retry from scratch: run-e2e.sh
+      # re-provisions a fresh isolated branch each attempt and every suite's
+      # runId/branch paths are randomized per vitest process, so a failed
       # attempt's partial remote state never collides with the retry -- a
       # genuine product/test bug still fails identically every attempt and
       # exhausts the retries.
@@ -219,19 +245,7 @@ jobs:
           timeout_minutes: 15
           max_attempts: 3
           retry_wait_seconds: 15
-          command: |
-            set -a
-            # shellcheck disable=SC1091
-            source "$E2E_WORKDIR/e2e.env"
-            [ -f "$E2E_WORKDIR/e2e.secrets.env" ] && source "$E2E_WORKDIR/e2e.secrets.env"
-            set +a
-            npx vitest run -c vitest.e2e.config.ts "e2e/suites/${{ matrix.provider }}.e2e.test.ts" e2e/suites/sync-manager.e2e.test.ts
-
-      - name: Independent verification
-        if: steps.gate.outputs.run == 'true'
-        env:
-          E2E_PROVIDER: ${{ matrix.provider }}
-        run: scripts/e2e-harness.sh verify
+          command: scripts/run-e2e.sh --provider "${{ matrix.provider }}"
 
       # `if: always()` -- cleanup is best-effort, never a prerequisite for
       # the next run (see scripts/e2e-harness.sh's cmd_cleanup and

@@ -121,3 +121,25 @@ describe('GitLabSyncSettingTab ignore patterns setting', () => {
     expect(textarea.value).toBe('draft/\n*.tmp');
   });
 });
+
+describe('GitLabSyncSettingTab release history', () => {
+  it('keeps release history accessible after the current-version banner was dismissed', () => {
+    vi.useFakeTimers();
+    const plugin = createPluginStub(vi.fn().mockResolvedValue({ repoOk: true, branchOk: true }));
+    plugin.manifest = { version: '1.5.0' } as GitLabFilesPush['manifest'];
+    plugin.settings.bannerDismissedVersion = '1.5.0';
+    const tab = new GitLabSyncSettingTab(new App(), plugin);
+    tab.containerEl = createContainer();
+
+    try {
+      tab.display();
+
+      expect(tab.containerEl.querySelector('.gfs-whats-new-banner')).toBeNull();
+      const buttons = Array.from(tab.containerEl.querySelectorAll('button'));
+      expect(buttons.some(button => button.textContent === 'View release history')).toBe(true);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+});

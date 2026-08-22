@@ -5,7 +5,6 @@ import type { SourceControlFilter } from '../../logic/source-control/SourceContr
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
 import { renderDiffPanel } from '../components/DiffPanel';
-import { renderChangeSection } from './ChangeSection';
 import { renderChangeTree, type ChangeTreeCallbacks } from './ChangeTree';
 import { renderFilterMenu } from './FilterMenu';
 import { renderSourceControlHeader } from './SourceControlHeader';
@@ -24,22 +23,22 @@ export interface SourceControlViewCallbacks {
     loadDiffContent?: (item: SourceControlItem) => Promise<SourceControlDiffContent | null>;
 }
 
-type SectionFilter = Exclude<SourceControlFilter, 'all'>;
-
-/** The five Source Control sections, in the order the spec lists them. */
-const SECTION_FILTERS: SectionFilter[] = ['ready-to-push', 'changes', 'remote-changes', 'conflicts', 'synced'];
-
-const SECTION_TITLE_KEYS: Record<SectionFilter, TranslationKey> = {
-    'ready-to-push':  'sourceControl.section.readyToPush',
-    changes:          'sourceControl.section.changes',
-    'remote-changes': 'sourceControl.section.remoteChanges',
-    conflicts:        'sourceControl.section.conflicts',
-    synced:           'sourceControl.section.synced',
+/** Active-filter header title keys. Every filter renders one header + a flat tree (no section breakdown). */
+const FILTER_HEADER_KEYS: Record<SourceControlFilter, TranslationKey> = {
+    all:               'sourceControl.section.all',
+    changes:           'sourceControl.section.changes',
+    'ready-to-push':   'sourceControl.section.readyToPush',
+    'remote-changes':  'sourceControl.section.remoteChanges',
+    conflicts:         'sourceControl.section.conflicts',
+    synced:            'sourceControl.section.synced',
 };
 
+/** Tree shaping so the change tree stays a compact change view, not a full Explorer. */
+const TREE_OPTIONS = { collapseSingleChild: true };
+
 /**
- * Composes the Source Control UI (Header, Filter, ChangeTree/sections, Diff
- * panel) from `SourceControlViewModel` state, per
+ * Composes the Source Control UI (Header, Filter, change tree, Diff panel)
+ * from `SourceControlViewModel` state, per
  * docs/source-control-refactor/phase-3-source-control-ui.md.
  *
  * Pure presentation + wiring: push/diff intent is handed to injected
@@ -48,10 +47,17 @@ const SECTION_TITLE_KEYS: Record<SectionFilter, TranslationKey> = {
  * the one exception — it goes straight to `PushSelectionStore` (Phase 1
  * state), since "ready to push" is just a set membership change, not a sync
  * action.
+ *
+ * Rendering semantics (status-grouping fix):
+ * - Every filter — including "All" — renders a single flat tree. "All" no
+ *   longer breaks the view into CHANGES / REMOTE CHANGES / SYNCED sections, so
+ *   a change never appears twice and SYNCED never leaks into All.
+ * - Synced is hidden by default (`showSynced = false`): the `synced` chip is
+ *   absent and synced rows render nowhere. The "Show synced" toggle opts in.
  */
 export class SourceControlView {
     private filter: SourceControlFilter = 'all';
-    private readonly collapsedSections = new Set<SectionFilter>();
+    private showSynced = false;
     private readonly collapsedFolders = new Set<string>();
     private selectedChangeId: ChangeId | null = null;
     private container?: HTMLElement;
@@ -86,6 +92,7 @@ export class SourceControlView {
     }
 
     getFilter(): SourceControlFilter { return this.filter; }
+    getShowSynced(): boolean { return this.showSynced; }
     getSelectedChangeId(): ChangeId | null { return this.selectedChangeId; }
 
     private rerender(): void {
@@ -93,7 +100,7 @@ export class SourceControlView {
     }
 
     private renderMain(container: HTMLElement): void {
-        const state = this.viewModel.getState(this.filter);
+        const state = this.viewModel.getState(this.filter, this.showSynced);
 
         renderSourceControlHeader(
             container,
@@ -101,12 +108,24 @@ export class SourceControlView {
             { onPush: () => { void this.callbacks.onPush(this.selection.getSelectedChangeIds()); } },
         );
 
-        renderFilterMenu(container, this.filter, state.counts, (filter) => {
-            this.filter = filter;
-            this.rerender();
-        });
+        renderFilterMenu(
+            container,
+            this.filter,
+            state.counts,
+            this.showSynced,
+            {
+                onFilterChange: (filter) => { this.filter = filter; this.rerender(); },
+                onToggleShowSynced: (show) => {
+                    this.showSynced = show;
+                    // If the user hid synced while viewing it, fall back to All.
+                    if (!show && this.filter === 'synced') this.filter = 'all';
+                    this.rerender();
+                },
+            },
+        );
 
         const body = container.createDiv({ cls: 'scv-body' });
+        this.renderActiveFilterHeader(body, state.filter, state.items.length);
         if (state.items.length === 0) {
             body.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
             return;
@@ -118,33 +137,14 @@ export class SourceControlView {
             onOpenDiff: (item) => this.openDiff(item),
         };
 
-        if (this.filter === 'all') {
-            this.renderSections(body, treeCallbacks);
-        } else {
-            renderChangeTree(body, state.items, this.collapsedFolders, treeCallbacks);
-        }
+        renderChangeTree(body, state.items, this.collapsedFolders, treeCallbacks, TREE_OPTIONS);
     }
 
-    private renderSections(body: HTMLElement, treeCallbacks: ChangeTreeCallbacks): void {
-        for (const sectionFilter of SECTION_FILTERS) {
-            const items = this.viewModel.getState(sectionFilter).items;
-            if (items.length === 0) continue;
-
-            renderChangeSection(
-                body,
-                {
-                    id: sectionFilter,
-                    title: t(SECTION_TITLE_KEYS[sectionFilter]),
-                    items,
-                    collapsed: this.collapsedSections.has(sectionFilter),
-                    collapsedFolders: this.collapsedFolders,
-                },
-                {
-                    ...treeCallbacks,
-                    onToggleSection: (id) => this.toggleSection(id),
-                },
-            );
-        }
+    /** Renders the single active-filter header (e.g. "ALL (132)") above the flat tree. */
+    private renderActiveFilterHeader(container: HTMLElement, filter: SourceControlFilter, count: number): void {
+        const header = container.createDiv({ cls: 'scv-active-filter-header' });
+        header.createSpan({ cls: 'scv-active-filter-title', text: t(FILTER_HEADER_KEYS[filter]) });
+        header.createSpan({ cls: 'scv-active-filter-count', text: String(count) });
     }
 
     private renderDiffPane(container: HTMLElement): void {
@@ -169,19 +169,14 @@ export class SourceControlView {
 
     private async loadAndRenderDiff(container: HTMLElement, changeId: ChangeId): Promise<void> {
         if (!this.callbacks.loadDiffContent) return;
-        const item = this.viewModel.getState('all').items.find(i => i.id === changeId);
+        const item = this.viewModel.getState('all', this.showSynced).items.find(i => i.id === changeId)
+            ?? this.viewModel.getState('synced', this.showSynced).items.find(i => i.id === changeId);
         if (!item) return;
 
         const content = await this.callbacks.loadDiffContent(item);
         // Stale response guard: the selection may have moved on while awaiting.
         if (!content || this.selectedChangeId !== changeId) return;
         renderDiffPanel(container, content.remote, content.local);
-    }
-
-    private toggleSection(id: SectionFilter): void {
-        if (this.collapsedSections.has(id)) this.collapsedSections.delete(id);
-        else this.collapsedSections.add(id);
-        this.rerender();
     }
 
     private toggleFolder(path: string): void {

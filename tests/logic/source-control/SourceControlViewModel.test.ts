@@ -62,16 +62,19 @@ describe('SourceControlViewModel', () => {
         expect(viewModel.getState('all').items[0]?.operationStatus).toBe('running');
     });
 
-    it('excludes synced changes from "changes" but keeps them in "synced" and "all"', () => {
+    it('excludes synced changes from "changes" and "all", surfacing them only via "synced" + showSynced', () => {
         const synced: SyncChange = { id: toChangeId('c-1'), path: 'a.md', kind: 'synced' };
         const { viewModel } = buildViewModel([synced]);
 
+        // Synced is not actionable: it never appears under All or Changes.
+        expect(viewModel.getState('all').items).toEqual([]);
         expect(viewModel.getState('changes').items).toEqual([]);
-        expect(viewModel.getState('synced').items.map(i => i.id)).toEqual([toChangeId('c-1')]);
-        expect(viewModel.getState('all').items.map(i => i.id)).toEqual([toChangeId('c-1')]);
+        // Hidden by default: the synced filter yields nothing until the user opts in.
+        expect(viewModel.getState('synced').items).toEqual([]);
+        expect(viewModel.getState('synced', true).items.map(i => i.id)).toEqual([toChangeId('c-1')]);
     });
 
-    it('counts every filter bucket regardless of the active filter', () => {
+    it('counts every filter bucket from the single-source summary, regardless of the active filter', () => {
         const changes: SyncChange[] = [
             { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
             { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
@@ -80,15 +83,19 @@ describe('SourceControlViewModel', () => {
         ];
         const { viewModel } = buildViewModel(changes);
 
+        // showSynced = false (default): synced contributes 0 to counts and is absent from All.
         const { counts } = viewModel.getState('all');
         expect(counts).toEqual({
-            all: 4,
-            changes: 3,
+            all: 3,
+            changes: 1,
             'ready-to-push': 0,
             'remote-changes': 1,
             conflicts: 1,
-            synced: 1,
+            synced: 0,
         });
+
+        // showSynced = true: the raw synced count (1) surfaces.
+        expect(viewModel.getState('all', true).counts.synced).toBe(1);
     });
 
     it('keeps ChangeId stable across a rename', () => {
