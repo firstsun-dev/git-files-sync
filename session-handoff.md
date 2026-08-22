@@ -1,42 +1,68 @@
 # Session Handoff
 
 **Date:** 2026-08-23
-**Branch:** `feat/sync-status-workflow-ui` (8 commits ahead of `claude/source-control-foundation` @ `f449125`)
-**Active Feature:** sync-status-workflow-ui plan — code + UX convergence COMPLETE; manual Obsidian verification remains.
+**Branch:** `feat/sync-status-workflow-ui` (4 commits ahead of `claude/source-control-foundation` @ `f449125`)
+**Active Feature:** sync-status-workflow-ui plan (`.kilo/plans/1787412338771-sync-status-workflow-ui.md`) — code complete; manual Obsidian verification remains.
+**Side task done this session:** CI parallel-validation DAG refactor (uncommitted working-tree change on this branch).
 
-## Completed This Session (UX convergence pass)
+## Done This Session — CI DAG refactor
 
-The review of PR #135 flagged that the PR mixed too many workflow concepts (VS Code staged / Git status / sync queue). Converged the UI to a single sync-intent workflow, view-layer only (domain untouched):
+Refactored `.github/workflows/ci.yml` (and `docs/testing/real-provider-e2e.md`) so all four
+validation jobs start in parallel after a push instead of lint/test/build waiting behind the
+real-provider E2E matrix (the user's 8-phase plan).
 
-1. **Renamed `SELECTED FOR SYNC` → `SYNC QUEUE`** (i18n en/zh-cn/zh-tw). The queue stays a compact read-only action preview (badge + name + diff-stat, no checkbox); selection happens in the tree below.
-2. **Filter redesigned to `All / Needs Sync / Remote / Conflict / Synced`** via a UI chip model (`FilterChip { id, filter, showSynced, labelKey, count }`) in `FilterMenu.ts`:
-   - `Needs Sync` (domain `all`, showSynced=false) = actionable set, **default** — keeps a quiet workspace quiet.
-   - `All` (domain `all`, showSynced=true) composes actionable+synced by concatenating `getState('all', false).items` + `getState('synced', true).items` in `SourceControlView` — the domain `all` filter still returns actionable-only, so no domain change was needed.
-   - `Remote` / `Conflict` / `Synced` map to `remote-changes` / `conflicts` / `synced` (showSynced=true). `Local` (domain `changes`) dropped.
-   - `onFilterChange(filter, showSynced)`; chip `data-filter` is now the chip id (`all`/`needsSync`/`remote`/`conflict`/`synced`), not the domain value.
-   - Filter-menu counts fetched once via `getState('all', true).counts` (synced count populated) regardless of active chip.
-3. **Badge tooltips** `Added`→`Added locally`, `Modified`→`Modified locally` (i18n; the badge `setTooltip(badge, subtitle)` already wired, no code change).
-4. **Mobile sync bar** → `N files selected` label + `Sync` button (`sourceControl.mobile.filesSelected`/`mobile.sync`), replacing the single full-width `SELECTED FOR SYNC (N)` button. CSS: `.scv-mobile-sync-count` removed, `.scv-mobile-sync-label` added; bar is flex label+button.
-
-Prior commits already on the branch: `8c69cc8` (ViewModel projections + RefreshState), `625fad2` (4 chips + selected section), `759b717` (refresh button + op indicator), `dd8ddd5` (ChangePresentation adapter + diff-stat + mobile), `853793c` (selected-section rows, drop show-synced toggle, colored diff-stat), `a9d3e98` (whole-view scroll, clear-selection, click-to-collapse), `7538e0a` (Selected section → read-only action queue).
-
-Domain-untouched invariant verified:
-`git diff claude/source-control-foundation -- src/logic/source-control/`
-shows ONLY `RefreshState.ts` (new) + `SourceControlViewModel.ts` (edited). The filter redesign touched no domain file (`SourceControlFilter.ts` / `types.ts` / `SourceControlSummary.ts` unchanged).
-
-## Verification Evidence
-
-```text
-npx eslint .      -> PASS, 0 errors
-npm run build     -> PASS, incl. Obsidian 1.11.0 compat typecheck + esbuild
-npx vitest run    -> 632/633 PASS (1 failure: tests/ci-workflow.test.ts, caused by an
-                    uncommitted .github/workflows/ci.yml NOT touched by this work — pre-existing)
-git diff claude/source-control-foundation -- src/logic/source-control/ -> only RefreshState.ts + SourceControlViewModel.ts
+New DAG:
+```
+changes ──► provider-e2e ──┐
+lint ──────────────────────┤
+unit-test (Node 22|24) ─────┤──► required-checks ──► package
+build ──────────────────────┘                  └────► publish (main only)
 ```
 
-## Exact Next Step
+Removed: `preflight`, `e2e-gate`, the shared reusable `firstsun-dev/.github` `CI` workflow call
+(its internal release fired before any E2E gate, so it couldn't release-after-gate without
+inlining), and the standalone `build-artifact` job (raw-artifact upload folded into `CI / Build`).
+Added: `CI / Lint`, `CI / Unit Test (Node 22|24)`, `CI / Build`, `CI / Provider E2E / <provider>`,
+`CI / Required Checks` (aggregate gate), `Release / Package`, `Release / Publish`. The
+`provider-e2e` job's internals are unchanged (gitea-disabled notice, concurrency group
+`e2e-<branch>-<provider>`, run-scoped `E2E_WORKDIR`, retry, `if: always()` cleanup) — only `name`
+and `needs: [changes]` (dropped `preflight`) changed, so the cleanup workflows' shared concurrency
+naming still matches. All third-party actions pinned to commit SHAs.
 
-- `git add` the convergence changes (src/ui/source-control/FilterMenu.ts, SourceControlView.ts, ChangeItem.ts comment, src/i18n/locales/{en,zh-cn,zh-tw}.ts, styles.css, tests/ui/source-control/{FilterMenu,SourceControlView,ChangePresentation}.test.ts, progress.md, session-handoff.md) and commit (husky runs lint+build). Exclude the unrelated working-tree noise (.claude deletions, .codex/, .kilo/, pnpm-lock.yaml, .github/workflows/ci.yml).
-- `npm run deploy` to copy `main.js`/`manifest.json`/`styles.css` into the local Obsidian vault plugin folder.
-- Manual Obsidian verification (desktop + mobile): `SYNC QUEUE` section, 5-chip filter (`Needs Sync` default, `All` includes synced, `Synced` chip), badge hover tooltips (`Modified locally`/`Added locally`), diff-stat `+N -M` spans, mobile `N files selected` + `Sync` bar, refresh button states.
-- Then open PR #135 against `claude/source-control-foundation` (confirm base branch with user first).
+Verification evidence:
+```text
+actionlint v1.7.7 .github/workflows/ci.yml  -> 0 errors (only known 32gb-ram false positive)
+python3 -c yaml.safe_load(ci.yml)           -> parses
+```
+Source tree (eslint/build/vitest) is untouched by this change.
+
+## Prior Session — Sync Status Workflow UI (code complete, manual verify pending)
+
+Implemented the full four-commit "Sync Status Workflow UI" feature on this branch, each commit
+passing the husky pre-commit hook (`npm run lint && npm run build`):
+
+1. `8c69cc8` — `SourceControlViewModel` gains `selectedItems` + `refreshStatus` projections and a
+   `refresh()` delegate backed by a new `RefreshState` holder (idle/loading/failed).
+2. `625fad2` — Filter chips drop `ready-to-push` (now 4: All/Local/Remote/Conflict). New
+   `renderSelectedSection()` shows "SELECTED FOR SYNC (N)".
+3. `754b717` — Refresh button (idle/loading/failed); `OperationIndicator` icon+text labels.
+4. `dd8ddd5` — New `ChangePresentation` UI adapter (`remote-only` badged `D`). Diff-stat threaded
+   through rows (eager local-only + lazy two-sided); responsive mobile (filter dropdown, sticky
+   bottom sync bar, flatter tree).
+
+Domain-untouched invariant verified:
+`git diff claude/source-control-foundation -- src/logic/source-control/` shows ONLY
+`RefreshState.ts` (new) + `SourceControlViewModel.ts` (edited).
+
+## Exact Next Steps
+
+1. **CI refactor follow-ups** (see `progress.md` 0b/0c):
+   - Real PR run of the new workflow + 3-5 PR-execution-time comparisons (rollout plan) before
+     deleting old assumptions. NOTE: the `ci.yml` change is currently an **uncommitted** working-
+     tree change mixed with the UI feature's in-progress edits — stage/select carefully before
+     committing (`git add .github/workflows/ci.yml docs/testing/real-provider-e2e.md`).
+   - Manual GitHub branch-protection switch to require `CI / Required Checks` (needs repo admin).
+2. **sync-status-workflow-ui manual Obsidian verification** (desktop + mobile): refresh button
+   states, "SELECTED FOR SYNC" section, per-row subtitles/badges (esp. `remote-only` → `D`),
+   diff-stat `+N -M` spans, mobile filter dropdown + bottom sync bar. Then open a PR against
+   `claude/source-control-foundation` (confirm base branch name with the user first).

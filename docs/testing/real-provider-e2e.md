@@ -122,9 +122,10 @@ sandbox and starved each other (observed as real GitLab API timeouts under that 
 Keying by branch name alone means the later of the two cancels the earlier instead. The two
 cleanup workflows below share this same group naming for the same branch, with
 `cancel-in-progress: false`, so cleanup queues behind rather than races an active run.
-The cancelled duplicate's `e2e-gate` reports the replacement as neutral and sets `run-ci=false`,
-so it neither leaves a misleading aggregate failure nor starts a second copy of downstream CI.
-The surviving run remains responsible for the real provider result and release gate.
+The cancelled duplicate's `CI / Required Checks` treats the cancelled leg as a failure, but that
+run is for the superseded commit — the surviving run (the one GitHub uses for the latest commit)
+is responsible for the real provider result and release gate, so the cancelled duplicate's red
+gate is harmless and doesn't start any release work (it gates `package`/`publish`).
 **Cancellation is not a cleanup mechanism.** A cancelled run's `cleanup` step may never execute, or
 may be mid-delete when the runner is terminated; the next run is still safe because it always
 allocates a brand-new `run-<run-id>-<run-attempt>` branch rather than deleting and reusing the old
@@ -221,15 +222,26 @@ source of truth after its container is created, so it's the one credential persi
 
 ## CI
 
-`.github/workflows/ci.yml` runs a `provider-e2e` matrix job (`github`, `gitlab`, `gitea`) as five
-steps per leg — provision, seed, the real vitest run, independent verify, cleanup (`if: always()`
-so cleanup runs even if an earlier step failed) — gated on relevant paths (`src/services/**`,
+`.github/workflows/ci.yml` runs four validation jobs **in parallel** right after a push/PR, with no
+validation waiting on E2E:
+
+- `CI / Lint` — `eslint .`
+- `CI / Unit Test (Node 22|24)` — `vitest run --coverage`, matrix `fail-fast: false`
+- `CI / Build` — `tsc -noEmit` + Obsidian 1.11.0 compat typecheck + esbuild; uploads
+  `main.js`/`manifest.json`/`styles.css` as an artifact for ad-hoc PR install (non-main branches
+  only)
+- `CI / Provider E2E / <provider>` — the real-provider matrix below
+
+`CI / Provider E2E / <provider>` is the matrix job (`github`, `gitlab`, `gitea`): provision, seed,
+the real vitest run, independent verify, cleanup (`if: always()` so cleanup runs even if an
+earlier step failed). Only this job depends on the `changes` job's path gate (`src/services/**`,
 `src/logic/sync-manager.ts`, `e2e/**`, `scripts/e2e-harness.sh`, `scripts/e2e-namespace.sh`, etc. —
-computed by the `changes` job, since GitHub Actions' own `on.*.paths` would gate the *entire*
-workflow file, including the always-must-run `CI`/release job). It always runs in full on
-`workflow_dispatch`, `schedule` (weekly, Monday 06:00 UTC, for API-drift detection), and pushes to
-`main`. The job carries a per-source/provider `concurrency` group (see "Isolation model" above) and
-sets `E2E_WORKDIR`/`E2E_PR_NUMBER`/`E2E_SOURCE_BRANCH` once at job level, shared by every step.
+computed by the `CI / Detect Changes` job, since GitHub Actions' own `on.*.paths` would gate the
+*entire* workflow file, including the always-must-run validation/release jobs). It always runs in
+full on `workflow_dispatch`, `schedule` (weekly, Monday 06:00 UTC, for API-drift detection), and
+pushes to `main`. The job carries a per-source/provider `concurrency` group (see "Isolation model"
+above) and sets `E2E_WORKDIR`/`E2E_PR_NUMBER`/`E2E_SOURCE_BRANCH` once at job level, shared by every
+step.
 
 Two more workflows round out the isolation model's other cleanup layers — see "Isolation model"
 above for what each does and why:
@@ -262,20 +274,29 @@ given event; once it runs, it's expected to have what it needs.
 ## Release gating
 
 ```
-changes -> provider-e2e [github | gitlab | gitea, parallel] -> e2e-gate -> CI (shared workflow, includes semantic-release)
+changes ──► provider-e2e [github | gitlab | gitea, parallel] ──┐
+lint ─────────────────────────────────────────────────────────┤
+unit-test (Node 22|24) ───────────────────────────────────────┤──► required-checks ──► package
+build ────────────────────────────────────────────────────────┘                  └──► publish (main only)
 ```
 
-`e2e-gate` runs with `if: always()` and treats `provider-e2e`'s aggregate result as pass-through
-on `success` or `skipped` (the latter covers path-filtered-out runs), a neutral replacement on
-`cancelled` (with downstream CI suppressed for that duplicate run), and a hard failure on any
-other result. A real provider regression therefore still blocks the release instead of shipping
-and being caught after the fact.
+All four validation jobs start in parallel; a lint/unit/build error now surfaces in <1-2 min
+instead of after the real-provider matrix. `CI / Required Checks` runs with `if: always()` and
+passes only when every validation job reports `success` or `skipped` (a path-filtered-out or
+fork-gated-off `provider-e2e` leg reports `success` because its steps are skipped, not failed).
+Any other result — including a `cancelled` matrix leg replaced by a newer run in the same
+concurrency group — fails the gate; the surviving run is the one whose gate result GitHub uses
+for the latest commit. `Release / Package` and `Release / Publish` both run only after the gate
+passes, so a real provider regression still blocks the release instead of shipping and being
+caught after the fact. `Release / Publish` additionally requires `main`/`master` (semantic-release
+only releases on those branches — see `.releaserc.json`).
 
 **Branch protection** (not something this repo checkout can change — a GitHub repo-settings
-change, left for whoever has admin access): add `E2E / gitea` as a required status check.
-GitHub/GitLab (`E2E / github`, `E2E / gitlab`) are deliberately **not** required at the
-branch-protection level, so a fork PR (which only runs Gitea) is never wedged by checks it
-structurally cannot produce.
+change, left for whoever has admin access): add `CI / Required Checks` as the single required
+status check. GitHub/GitLab (`CI / Provider E2E / github`, `CI / Provider E2E / gitlab`) are
+deliberately **not** required at the branch-protection level, and Gitea is currently disabled in
+CI (see the "Determine whether this provider leg should run" step), so a fork PR (which runs no
+real-provider leg) is never wedged by checks it structurally cannot produce.
 
 ## Cleanup / troubleshooting
 
@@ -304,10 +325,11 @@ structurally cannot produce.
   credentials available in this environment) — not yet actually executed against live
   GitHub/GitLab sandboxes from this checkout.
 - The `provider-e2e` matrix job targets `runs-on: [self-hosted, linux, x64, 32gb-ram]`; its
-  actual execution on that fleet, and the `e2e-gate` -> `CI` dependency chain end-to-end in a
-  real workflow run, are unverified from this checkout (no self-hosted runner access here).
-- Branch-protection required-check configuration (`E2E / gitea`) is a manual follow-up for
-  whoever has admin access to the repo.
+  actual execution on that fleet, and the parallel-validation DAG → `required-checks` →
+  `publish` chain end-to-end in a real workflow run, are unverified from this checkout (no
+  self-hosted runner access here).
+- Branch-protection required-check configuration (`CI / Required Checks`) is a manual follow-up
+  for whoever has admin access to the repo.
 - The official Obsidian community-plugin scanner rescan (as opposed to this repo's own
   grep-based self-audit, `docs/obsidian-scanner-audit.md`) hasn't been re-run against this
   harness from this checkout.
