@@ -249,6 +249,24 @@ const en = {
 	'batchConflictModal.continue': 'Continue',
 	'batchConflictModal.cancel': 'Cancel',
 	'batchConflictModal.unresolvedWarning': 'Choose a resolution for every conflict before continuing.',
+
+	'sourceControl.viewTitle': 'Source Control',
+	'sourceControl.filter.all': 'All',
+	'sourceControl.filter.changes': 'Changes',
+	'sourceControl.filter.readyToPush': 'Ready to Push',
+	'sourceControl.filter.remoteChanges': 'Remote Changes',
+	'sourceControl.filter.conflicts': 'Conflicts',
+	'sourceControl.filter.synced': 'Synced',
+	'sourceControl.section.readyToPush': 'READY TO PUSH',
+	'sourceControl.section.changes': 'CHANGES',
+	'sourceControl.section.remoteChanges': 'REMOTE CHANGES',
+	'sourceControl.section.conflicts': 'CONFLICTS',
+	'sourceControl.section.synced': 'SYNCED',
+	'sourceControl.push': ' Push ({count})',
+	'sourceControl.push.tooltip': 'Push {count} ready file(s)',
+	'sourceControl.empty': 'No changes',
+	'sourceControl.diff.selectPrompt': 'Select a change to see its diff.',
+	'sourceControl.detail.back': ' Back',
 };
 
 export default en;

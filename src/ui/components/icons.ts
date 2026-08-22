@@ -18,6 +18,10 @@ export const ICONS = {
     diffOpen: 'chevron-up',
     moved:    'move',
     revert:   'undo-2',
+    error:    'alert-triangle',
+    chevronRight: 'chevron-right',
+    chevronDown:  'chevron-down',
+    back:     'arrow-left',
     // Search filter
     search:   'search',
     clear:    'x',

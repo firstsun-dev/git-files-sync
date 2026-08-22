@@ -251,6 +251,24 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'batchConflictModal.continue': '继续',
 	'batchConflictModal.cancel': '取消',
 	'batchConflictModal.unresolvedWarning': '请先为每个冲突选择解决方式，才能继续。',
+
+	'sourceControl.viewTitle': '源代码管理',
+	'sourceControl.filter.all': '全部',
+	'sourceControl.filter.changes': '更改',
+	'sourceControl.filter.readyToPush': '待推送',
+	'sourceControl.filter.remoteChanges': '远程更改',
+	'sourceControl.filter.conflicts': '冲突',
+	'sourceControl.filter.synced': '已同步',
+	'sourceControl.section.readyToPush': '待推送',
+	'sourceControl.section.changes': '更改',
+	'sourceControl.section.remoteChanges': '远程更改',
+	'sourceControl.section.conflicts': '冲突',
+	'sourceControl.section.synced': '已同步',
+	'sourceControl.push': ' 推送 ({count})',
+	'sourceControl.push.tooltip': '推送 {count} 个已就绪的文件',
+	'sourceControl.empty': '没有更改',
+	'sourceControl.diff.selectPrompt': '选择一项更改以查看差异。',
+	'sourceControl.detail.back': ' 返回',
 };
 
 export default zhCn;

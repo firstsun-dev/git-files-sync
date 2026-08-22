@@ -251,6 +251,24 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'batchConflictModal.continue': '繼續',
 	'batchConflictModal.cancel': '取消',
 	'batchConflictModal.unresolvedWarning': '請先為每個衝突選擇解決方式，才能繼續。',
+
+	'sourceControl.viewTitle': '原始碼控制',
+	'sourceControl.filter.all': '全部',
+	'sourceControl.filter.changes': '變更',
+	'sourceControl.filter.readyToPush': '待推送',
+	'sourceControl.filter.remoteChanges': '遠端變更',
+	'sourceControl.filter.conflicts': '衝突',
+	'sourceControl.filter.synced': '已同步',
+	'sourceControl.section.readyToPush': '待推送',
+	'sourceControl.section.changes': '變更',
+	'sourceControl.section.remoteChanges': '遠端變更',
+	'sourceControl.section.conflicts': '衝突',
+	'sourceControl.section.synced': '已同步',
+	'sourceControl.push': ' 推送 ({count})',
+	'sourceControl.push.tooltip': '推送 {count} 個已就緒的檔案',
+	'sourceControl.empty': '沒有變更',
+	'sourceControl.diff.selectPrompt': '選擇一項變更以檢視差異。',
+	'sourceControl.detail.back': ' 返回',
 };
 
 export default zhTw;
