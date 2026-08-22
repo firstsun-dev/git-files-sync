@@ -198,8 +198,8 @@ jobs:
       # runs the suites listed in scripts/e2e-suites.txt (the single source of
       # truth — CI and local run the same command, so the suite list is never
       # duplicated here), and cleans up via its EXIT trap. New suites are added
-      # in scripts/e2e-suites.txt only; scripts/check-e2e-suite-registration.mjs
-      # (wired into `npm run lint`) fails CI if a suite file isn't registered.
+      # in scripts/e2e-suites.txt only; run-e2e.sh's own forward/reverse checks
+      # fail the run if a suite file isn't registered (or vice versa).
       # E2E_WORKDIR is set by the "Compute run-scoped workdir" step above; the
       # job `env:` supplies the provider secrets and run identity
       # (E2E_PR_NUMBER/E2E_SOURCE_BRANCH) that run-e2e.sh/e2e-harness.sh consume.
