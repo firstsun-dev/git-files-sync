@@ -426,4 +426,131 @@ describe('SourceControlView', () => {
             expect(container.querySelector('.scv-change-rename-from')?.textContent).toBe('old.md');
         });
     });
+
+    describe('diff stat caching', () => {
+        async function flush(): Promise<void> {
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+        }
+
+        it('eager-loads local-only stats on render and shows them in the row', async () => {
+            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 5, deletions: 0 });
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { loadDiffStat },
+            );
+            view.render(container);
+            await flush();
+
+            expect(loadDiffStat).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local-only' }));
+            expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+5');
+        });
+
+        it('does not re-fetch a stat that is already cached on rerender', async () => {
+            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 2, deletions: 0 });
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { loadDiffStat },
+            );
+            view.render(container);
+            await flush();
+            expect(loadDiffStat).toHaveBeenCalledTimes(1);
+
+            view.render(container);
+            await flush();
+            // Eager load skips items already in the cache, so no second fetch.
+            expect(loadDiffStat).toHaveBeenCalledTimes(1);
+        });
+
+        it('clears the diff stat cache on refresh so stats re-fetch', async () => {
+            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 5, deletions: 0 });
+            const onRefresh = vi.fn();
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { loadDiffStat, onRefresh },
+            );
+            view.render(container);
+            await flush();
+            expect(loadDiffStat).toHaveBeenCalledTimes(1);
+
+            (container.querySelector('.scv-refresh-btn') as HTMLButtonElement).click();
+            expect(onRefresh).toHaveBeenCalledTimes(1);
+            // The refresh handler clears the cache; a subsequent render re-eager-loads.
+            view.render(container);
+            await flush();
+            expect(loadDiffStat).toHaveBeenCalledTimes(2);
+        });
+
+        it('lazily loads a two-sided change stat on open and caches it', async () => {
+            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 1, deletions: 4 });
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                { loadDiffStat },
+            );
+            view.render(container);
+            await flush();
+            // Two-sided changes are not eager-loaded.
+            expect(loadDiffStat).not.toHaveBeenCalled();
+            expect(container.querySelector('.scv-diff-stat')).toBeNull();
+
+            (container.querySelector('.scv-change-item') as HTMLElement).click();
+            await flush();
+
+            expect(loadDiffStat).toHaveBeenCalledTimes(1);
+            expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+1 -4');
+        });
+    });
+
+    describe('mobile layout', () => {
+        afterEach(() => { Platform.isMobile = false; });
+
+        it('renders a filter dropdown instead of chips on mobile', () => {
+            Platform.isMobile = true;
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
+            ]);
+            view.render(container);
+
+            expect(container.querySelector('.scv-filter-dropdown')).not.toBeNull();
+            expect(container.querySelectorAll('.scv-filter-option')).toHaveLength(0);
+        });
+
+        it('hides the header push button and shows a sticky bottom sync bar on mobile when there is a selection', () => {
+            Platform.isMobile = true;
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+            ]);
+            selection.includeForPush(toChangeId('c-1'));
+            view.render(container);
+
+            expect(container.querySelector('.scv-push-btn')).toBeNull();
+            expect(container.querySelector('.scv-mobile-sync-bar')).not.toBeNull();
+            expect(container.querySelector('.scv-mobile-sync-count')?.textContent).toBe('1');
+        });
+
+        it('omits the mobile bottom sync bar when nothing is selected for push', () => {
+            Platform.isMobile = true;
+            const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            view.render(container);
+
+            expect(container.querySelector('.scv-mobile-sync-bar')).toBeNull();
+        });
+
+        it('triggers onPush from the mobile bottom sync bar button', () => {
+            Platform.isMobile = true;
+            const onPush = vi.fn();
+            const { view, selection } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { onPush },
+            );
+            selection.includeForPush(toChangeId('c-1'));
+            view.render(container);
+
+            (container.querySelector('.scv-mobile-sync-btn') as HTMLButtonElement).click();
+
+            expect(onPush).toHaveBeenCalledWith([toChangeId('c-1')]);
+        });
+    });
 });

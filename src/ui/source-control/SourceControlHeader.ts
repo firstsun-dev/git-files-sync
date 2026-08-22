@@ -23,6 +23,13 @@ export interface SourceControlHeaderCallbacks {
     onRefresh: () => void;
 }
 
+export interface SourceControlHeaderOptions {
+    /** When false the in-header Sync button is omitted (e.g. mobile uses a bottom bar instead). */
+    showPush?: boolean;
+    /** Mobile layout flag, currently unused for branching but threaded for future header tweaks. */
+    isMobile?: boolean;
+}
+
 /**
  * Renders the Sync status view's connection/branch/last-sync info, Sync
  * button, and Refresh button. No title here -- Obsidian's own tab header
@@ -34,10 +41,11 @@ export function renderSourceControlHeader(
     container: HTMLElement,
     props: SourceControlHeaderProps,
     callbacks: SourceControlHeaderCallbacks,
+    options: SourceControlHeaderOptions = {},
 ): void {
     const header = container.createDiv({ cls: 'scv-header' });
     const titleRow = header.createDiv({ cls: 'scv-header-title-row' });
-    renderPushButton(titleRow, props.readyToPushCount, callbacks.onPush);
+    if (options.showPush !== false) renderPushButton(titleRow, props.readyToPushCount, callbacks.onPush);
     renderRefreshButton(titleRow, props.refreshStatus, callbacks.onRefresh);
 
     renderInfoStrip(header, props.workspaceInfo);

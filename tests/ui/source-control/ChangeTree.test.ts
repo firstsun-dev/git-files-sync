@@ -49,6 +49,35 @@ describe('renderChangeTree', () => {
         expect(badges).toEqual(['M', 'A', '!']);
     });
 
+    it('badges a remote-only (locally deleted) change as D', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'gone.md', kind: 'remote-only' })];
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        expect(container.querySelector('.scv-badge')?.textContent).toBe('D');
+    });
+
+    it('renders a status subtitle next to the change name', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' })];
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        expect(container.querySelector('.scv-change-subtitle')?.textContent).toBe('Modified');
+    });
+
+    it('renders the diff stat from the getDiffStat callback when available', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' })];
+        callbacks.getDiffStat = () => ({ additions: 3, deletions: 1 });
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+3 -1');
+    });
+
+    it('omits the diff stat span when no stat is cached', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' })];
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        expect(container.querySelector('.scv-diff-stat')).toBeNull();
+    });
+
     it('shows the previous path for a rename, keyed by the stable ChangeId', () => {
         const items = [
             item({ id: toChangeId('c-1'), path: 'new-name.md', previousPath: 'old-name.md', kind: 'moved' }),

@@ -435,11 +435,11 @@
     opacity: 0.85;
 }
 
-.scv-badge-local-only,
-.scv-badge-remote-only    { color: var(--color-green); }
+.scv-badge-local-only       { color: var(--color-green); }
 .scv-badge-local-modified,
 .scv-badge-remote-modified { color: var(--text-warning); }
-.scv-badge-moved          { color: var(--color-purple); }
+.scv-badge-remote-only      { color: var(--text-warning); }
+.scv-badge-moved           { color: var(--color-purple); }
 .scv-badge-conflict       { color: var(--color-red); }
 .scv-badge-synced         { color: var(--text-muted); }
 
@@ -457,6 +457,23 @@
 .scv-change-name-text {
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.scv-change-subtitle {
+    color: var(--text-faint);
+    font-family: var(--font-interface);
+    font-size: 0.92em;
+    font-weight: normal;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.scv-diff-stat {
+    font-family: var(--font-monospace);
+    font-size: 0.72em;
+    color: var(--text-muted);
+    flex-shrink: 0;
     white-space: nowrap;
 }
 
@@ -786,6 +803,58 @@
     .scv-filter-option { padding: 4px 8px; font-size: 0.76em; }
     .scv-change-item { padding: 6px 10px; }
     .scv-change-name { font-size: 0.76em; }
+}
+
+/* ── Mobile (Platform.isMobile) layout: filter dropdown + bottom sync bar ── */
+.scv-mobile .scv-filter-dropdown {
+    width: 100%;
+    padding: 6px 8px;
+    font-size: 0.85em;
+    margin-bottom: 6px;
+}
+
+.scv-mobile .scv-filter-show-synced {
+    margin-top: 4px;
+}
+
+.scv-mobile-sync-bar {
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: var(--background-primary);
+    border-top: 1px solid var(--background-modifier-border);
+    z-index: 1;
+}
+
+.scv-mobile-sync-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    font-size: 0.9em;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.scv-mobile-sync-btn:hover { background: var(--interactive-accent-hover); }
+
+.scv-mobile-sync-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.18);
+    font-size: 0.85em;
 }
 
 /* ── Settings connection status badge ──────────────────────────── */

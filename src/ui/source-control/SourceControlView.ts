@@ -4,6 +4,7 @@ import type { PushSelectionStore } from '../../logic/source-control/PushSelectio
 import type { SourceControlFilter } from '../../logic/source-control/SourceControlFilter';
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
+import type { ChangeStat } from './ChangePresentation';
 import { ICONS } from '../components/icons';
 import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
 import { renderDiffPanel } from '../components/DiffPanel';
@@ -35,6 +36,13 @@ export interface SourceControlViewCallbacks {
      * it opens the file on the remote (in the browser) instead.
      */
     onOpenRemoteFile?: (item: SourceControlItem) => void | Promise<void>;
+    /**
+     * Supplies the +/- diff stat for a change row. For a `local-only` change
+     * this is expected to be a cheap in-memory read (no provider call); for
+     * others it may involve a remote fetch. The view caches results and
+     * clears the cache on refresh. Omit to leave rows without a stat.
+     */
+    loadDiffStat?: (item: SourceControlItem) => Promise<ChangeStat | null>;
 }
 
 /** Active-filter header title keys. Every filter renders one header + a flat tree (no section breakdown). */
@@ -49,6 +57,8 @@ const FILTER_HEADER_KEYS: Record<SourceControlFilter, TranslationKey> = {
 
 /** Tree shaping so the change tree stays a compact change view, not a full Explorer. */
 const TREE_OPTIONS = { collapseSingleChild: true };
+/** Mobile tree: collapse single-child folders and cap depth so the tree stays flat on a phone. */
+const MOBILE_TREE_OPTIONS = { collapseSingleChild: true, maxDepth: 2 };
 
 /**
  * Composes the Source Control UI (Header, Filter, change tree, Diff panel)
@@ -75,6 +85,8 @@ export class SourceControlView {
     private searchQuery = '';
     private readonly collapsedFolders = new Set<string>();
     private selectedChangeId: ChangeId | null = null;
+    /** Cached +/- diff stats per change id (null = attempted but unavailable), cleared on refresh. */
+    private readonly diffStatCache = new Map<ChangeId, ChangeStat | null>();
     /** Mobile detail view only: which layout the diff renders in, toggled explicitly rather than by container width, so only one ever takes up space. */
     private mobileDiffLayout: DiffLayout = 'unified';
     private container?: HTMLElement;
@@ -120,6 +132,8 @@ export class SourceControlView {
     private renderMain(container: HTMLElement): void {
         const state = this.viewModel.getState(this.filter, this.showSynced);
 
+        const isMobile = Platform.isMobile;
+
         renderSourceControlHeader(
             container,
             {
@@ -129,8 +143,12 @@ export class SourceControlView {
             },
             {
                 onPush: () => { void this.callbacks.onPush(this.selection.getSelectedChangeIds()); },
-                onRefresh: () => this.callbacks.onRefresh(),
+                onRefresh: () => {
+                    this.diffStatCache.clear();
+                    this.callbacks.onRefresh();
+                },
             },
+            { isMobile, showPush: !isMobile },
         );
 
         this.renderSearchBox(container);
@@ -149,6 +167,7 @@ export class SourceControlView {
                     this.rerender();
                 },
             },
+            { isMobile },
         );
 
         const query = this.searchQuery.trim().toLowerCase();
@@ -168,9 +187,14 @@ export class SourceControlView {
             onToggleSelect: (id, selected) => this.toggleSelect(id, selected),
             onToggleFolderSelect: (ids, selected) => this.toggleFolderSelect(ids, selected),
             onOpenDiff: (item) => this.openDiff(item),
+            getDiffStat: (id) => this.diffStatCache.get(id) ?? undefined,
         };
 
-        renderChangeTree(body, items, this.collapsedFolders, treeCallbacks, TREE_OPTIONS);
+        renderChangeTree(body, items, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
+
+        this.eagerLoadLocalStats(items);
+
+        if (isMobile) this.renderMobileSyncBar(container, state.counts['ready-to-push']);
     }
 
     /**
@@ -314,6 +338,52 @@ export class SourceControlView {
 
         this.selectedChangeId = item.id;
         if (this.callbacks.onOpenDiff) void this.callbacks.onOpenDiff(item);
+        // Lazy-load the diff stat for two-sided changes (local-only is eager);
+        // re-render once it lands so the row shows its +/- without blocking.
+        void this.lazyLoadStat(item);
         this.rerender();
+    }
+
+    /**
+     * Eagerly resolves +/- stats for visible `local-only` rows: these are
+     * cheap in-memory reads (no provider call), so showing them immediately
+     * keeps the change list informative without a remote round-trip. Fires
+     * once per render for any uncached local-only item and re-renders a
+     * single time when the batch settles. A `null` result (binary/missing
+     * content) is cached too, so it isn't retried on every rerender.
+     */
+    private eagerLoadLocalStats(items: readonly SourceControlItem[]): void {
+        if (!this.callbacks.loadDiffStat) return;
+        const pending = items.filter(item => item.kind === 'local-only' && !this.diffStatCache.has(item.id));
+        if (pending.length === 0) return;
+        void Promise.all(pending.map(async item => {
+            const stat = await this.callbacks.loadDiffStat!(item);
+            this.diffStatCache.set(item.id, stat ?? null);
+        })).then(() => this.rerender());
+    }
+
+    /**
+     * Lazily resolves the +/- stat for a single two-sided change on open,
+     * caching it so subsequent renders show the stat without a refetch.
+     */
+    private async lazyLoadStat(item: SourceControlItem): Promise<void> {
+        if (!this.callbacks.loadDiffStat || this.diffStatCache.has(item.id)) return;
+        const stat = await this.callbacks.loadDiffStat(item);
+        this.diffStatCache.set(item.id, stat ?? null);
+        if (stat) this.rerender();
+    }
+
+    /**
+     * Mobile-only sticky bottom bar: a single Sync button spanning the row,
+     * shown when there's at least one change selected for push. The header's
+     * push button is hidden on mobile to save vertical space.
+     */
+    private renderMobileSyncBar(container: HTMLElement, readyCount: number): void {
+        if (readyCount === 0) return;
+        const bar = container.createDiv({ cls: 'scv-mobile-sync-bar' });
+        const btn = bar.createEl('button', { cls: 'scv-mobile-sync-btn' });
+        btn.createSpan({ cls: 'scv-mobile-sync-label', text: t('sourceControl.section.selectedForSync') });
+        btn.createSpan({ cls: 'scv-mobile-sync-count', text: String(readyCount) });
+        btn.addEventListener('click', () => { void this.callbacks.onPush(this.selection.getSelectedChangeIds()); });
     }
 }
