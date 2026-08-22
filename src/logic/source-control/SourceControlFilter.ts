@@ -1,4 +1,4 @@
-import type { PushSelectionStore } from './PushSelectionStore';
+import type { SelectionState } from './state/SelectionState';
 import type { SyncChange } from './types';
 
 export type SourceControlFilter =
@@ -11,10 +11,10 @@ export type SourceControlFilter =
 
 /**
  * Whether `change` belongs under `filter`. `ready-to-push` is defined purely
- * by `PushSelectionStore` membership — it's a user selection, not a fact
+ * by `SelectionState` membership — it's a user selection, not a fact
  * derivable from the change's kind alone.
  */
-export function matchesFilter(change: SyncChange, filter: SourceControlFilter, selection: PushSelectionStore): boolean {
+export function matchesFilter(change: SyncChange, filter: SourceControlFilter, selection: SelectionState): boolean {
     switch (filter) {
         case 'all': return true;
         case 'changes': return change.kind !== 'synced';

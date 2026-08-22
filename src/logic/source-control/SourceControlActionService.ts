@@ -1,7 +1,7 @@
 import type { SyncWorkspace } from '../sync/SyncWorkspace';
 import type { ChangeRepository } from './ChangeRepository';
 import { emptyExecutionResult, type ExecutionResult } from './ExecutionResult';
-import type { OperationState } from './OperationState';
+import type { OperationState } from './state/OperationState';
 import type { SourceControlItem } from './SourceControlViewModel';
 import type { ChangeId, SyncChange } from './types';
 

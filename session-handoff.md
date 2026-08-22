@@ -1,81 +1,68 @@
 # Session Handoff
 
 **Date:** 2026-08-22
-**Branch:** `feat/source-control-integration` (worktree `/tmp/kilo/pr130`,
-based on `origin/claude/source-control-foundation` @ `ec44025`)
-**Active Feature:** feat-026 / issue #105 — Source Control UI refactor, PR130
+**Branch:** `refactor/source-control-state-model` (PR131, base
+`feat/source-control-integration` PR #130 `b3379b7`)
+**Active Feature:** feat-026 / issue #105 — Source Control refactor
 (plan: `docs/source-control-refactor/roadmap.md`)
 
-## Completed this session — PR130 (A1–A4)
+## Completed this session — PR131 (Phase 2: unify state model)
 
-Landed the execution-result + three-state (success/conflict/failed) semantics
-in the Source Control logic layer. **No UI work** (per the user's directive —
-UI already exists; it lacked this three-state model). **No sync-domain
-changes** — reused existing executor conflict semantics.
+Reorganized Source Control UI state from scattered View-local fields + direct
+store access into one `SourceControlState` container, with the ViewModel as the
+single facade the View reads from and mutates through. **No behavior change**
+— pure refactor; all 553 tests pass.
 
-- **A1 `OperationState.ts`**: `OperationStatus` now includes `'conflict'`; added
-  `conflict(changeId)`. Conflict is a distinct lifecycle from `'failed'`
-  (needs-resolution, resolvable, not an error).
-- **A2 `ExecutionResult.ts` (new)**: thin UI projection
-  `{ completed: ChangeId[]; conflicts: ChangeId[]; failed: ChangeId[] }` +
-  `emptyExecutionResult()`. Derived in `SourceControlActionService` from
-  `PushResults`/`SyncResult`/`RemoteDeleteResult` — **not** a new sync model.
-- **A2 `SourceControlActionService.ts`**: `push`/`pull`/`deleteRemote`/
-  `deleteLocal`/`resolveConflict` now return `Promise<ExecutionResult>`.
-  `push` reads `PushResults.conflictedPaths` → marks those `'conflict'`
-  (conflict takes precedence over error). New `classify()` helper maps
-  per-path outcome → `OperationStatus` + `ExecutionResult` in one pass.
-- **A3 `SourceControlViewModel.ts`**: `SourceControlViewState` gains
-  `lastOperationResult: ExecutionResult | null`; `setOperationResult` /
-  `clearOperationResult` so the UI can render a batch summary. The `'conflicts'`
-  filter stays change-model-driven (`change.kind === 'conflict'`); operation
-  `'conflict'` status is the per-change push outcome — complementary, not
-  overlapping.
-- **A4 tests**: new `ExecutionResult.test.ts`; extended `OperationState.test.ts`
-  (conflict lifecycle), `SourceControlActionService.test.ts` (conflict mapping,
-  mixed 7/3/1 batch, conflict-precedence, throw → all-failed, pull/deleteRemote/
-  resolveConflict return values), `SourceControlViewModel.test.ts` (operation-
-  result exposure).
-
-### Known asymmetry (by design, not a gap)
-
-`PushResults` exposes per-path `conflictedPaths`; `SyncResult` (pull) carries
-only a `conflicts` count. So push maps conflicts to `ChangeId`s; pull conflicts
-surface through change-model reclassification (`kind: 'conflict'`) on the next
-repository refresh, not through this projection. Documented in code + tests.
+- New `src/logic/source-control/state/`:
+  - `SourceControlState.ts` — thin container composing the change model + every
+    UI state slice (selection, operation, filter, expanded nodes, selected
+    change). Not a god-object: each slice keeps its own invariants.
+  - `SelectionState.ts` — moved/renamed from `PushSelectionStore` (same API).
+  - `OperationState.ts` — moved from `src/logic/source-control/` (incl. the
+    `'conflict'` status from PR #130).
+  - `FilterState.ts` — new (active filter; was View-local).
+  - `ExpandedNodesState.ts` — new (collapsed sections + folders; was View-local).
+  - `SelectedChangeState.ts` — new (selected change id; was View-local).
+- `SourceControlViewModel` — now constructed from `SourceControlState`; is the
+  mutation facade (`setFilter`, `toggleSection/Folder`, `selectForPush`/
+  `deselectFromPush`, `selectForDiff`/`clearSelection`, `getCollapsedFolders`,
+  `setOperationResult`/`clear`). The View no longer reaches any store directly.
+- `SourceControlView` — thinned: holds **no state** (no `filter`/
+  `collapsedSections`/`collapsedFolders`/`selectedChangeId`); reads everything
+  from the ViewModel and mutates only through it. `getFilter`/`getSelected
+  ChangeId` moved to the ViewModel. Constructor is now `(viewModel, callbacks)`.
+- `main.ts` / `SourceControlItemView` — construct `SourceControlState`; plugin
+  exposes `sourceControlState` (replaces `pushSelectionStore`/`operationState`).
+- `SourceControlFilter.matchesFilter` — selection param type is `SelectionState`.
+- Tests: moved `OperationState.test.ts`/`PushSelectionStore.test.ts` into
+  `state/` (renamed to `SelectionState.test.ts`); new `FilterState.test.ts` /
+  `ExpandedNodesState.test.ts` / `SelectedChangeState.test.ts`; updated
+  ViewModel/View/ItemView/ActionService tests for the new construction.
 
 ## Verification evidence
 
 ```text
 npx eslint .   -> 0 errors
 npm run build  -> PASS (tsc + Obsidian 1.11.0 compat + esbuild)
-npx vitest run -> 66 files / 700 tests PASS
-  (source-control logic: 7 files / 60 tests PASS)
+npx vitest run -> 59 files / 553 tests
 ```
 
 ## Exact next step
 
-1. Review/commit PR130 on `feat/source-control-integration` (uncommitted now;
-   user has not requested a commit). PR targets `claude/source-control-foundation`.
-2. **Separately land the integration WIP** in worktree
-   `bridge-cse_01S28SbagdQFNToUPv8peeau` (Phase A view-wiring + Phase E legacy
-   deletion — already green there: eslint 0, build PASS, 531 tests). It touches
-   `main.ts`/`SourceControlItemView.ts`/deletions — **disjoint** from PR130's
-   `src/logic/source-control/*` files, so the two merge independently. That WIP
-   still needs **manual Obsidian verification** before commit (DoD for UI
-   surfaces).
-3. **Phase B (PR131) — batch conflict workflow**: `ConflictClassifier`
-   (content / delete-modify / rename / binary) + conflict section in ViewModel
-   (`conflicts: ChangeViewModel[]`) driven by the change model. Reuses
-   `src/logic/sync/ConflictResolver.ts` semantics — do not recreate.
-
-After B: Phase C (PR132, conflict resolution UX — `ConflictPanel`,
-`DiffLayoutSelector`, Accept Local/Remote/Manual Merge, Resolve All), then
-Phase D (PR133, context menu + command palette → `SourceControlActionService`),
-then Phase E (PR134, remove any remaining legacy paths).
+1. Review/commit PR131 (uncommitted now) + push; PR base = PR #130 branch.
+2. PR #129 (foundation + integration `4e647fb`) and PR #130 (conflict status
+   `b3379b7`) still need **manual Obsidian verification** before final merge
+   (DoD for the UI surface). PR131 doesn't change runtime behavior, so it
+   shares that same manual-verification requirement once stacked.
+3. Remaining Clean-Plan items: Phase 3 (action pipeline — already mostly clean,
+   verify no direct sync in UI: confirmed clean; single/batch already unified),
+   Phase 5 (view split — mostly done; `ConflictPanel` is Phase C feature, deferred),
+   Phase 7 (docs reorg into `docs/source-control/*`), Phase 6 (workflow test
+   coverage — PR135). The user's directive: clean architecture first, then
+   conflict UX (Phase C).
 
 ## Local working tree
 
-- Worktree `/tmp/kilo/pr130` is session-local; the branch ref
-  `feat/source-control-integration` persists. `node_modules` was installed via
-  `npm ci` for the gate.
+- `package-lock.json` modified (from `npm ci`); not committed. npm caches were
+  cleared this session to free disk (`~/.npm/_npx`, `~/.npm/_cacache`).
+  `/tmp/kilo/pr130/node_modules` was removed to free space (regenerable).

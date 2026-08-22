@@ -2,9 +2,10 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { WorkspaceLeaf } from 'obsidian';
 import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from '../../../src/ui/source-control/SourceControlItemView';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
-import { OperationState } from '../../../src/logic/source-control/OperationState';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
+import { SourceControlState } from '../../../src/logic/source-control/state/SourceControlState';
+import { OperationState } from '../../../src/logic/source-control/state/OperationState';
+import { SelectionState } from '../../../src/logic/source-control/state/SelectionState';
 import { toChangeId } from '../../../src/logic/source-control/types';
 import { SyncStatusService } from '../../../src/logic/sync-status-service';
 import type GitLabFilesPush from '../../../src/main';
@@ -15,17 +16,17 @@ beforeAll(() => { setupObsidianDOM(); });
 function buildPlugin() {
     const repository = new ChangeRepository();
     repository.replace([{ id: toChangeId('a.md'), path: 'a.md', kind: 'local-only' }]);
-    const selection = new PushSelectionStore();
+    const selection = new SelectionState();
     const operations = new OperationState();
-    const viewModel = new SourceControlViewModel(repository, selection, operations);
+    const state = new SourceControlState(repository, selection, operations);
+    const viewModel = new SourceControlViewModel(state);
     const push = vi.fn().mockResolvedValue(undefined);
     const loadDiffContent = vi.fn().mockResolvedValue(null);
     const status = new SyncStatusService();
 
     const plugin = {
         changeRepository: repository,
-        pushSelectionStore: selection,
-        operationState: operations,
+        sourceControlState: state,
         sourceControlViewModel: viewModel,
         sourceControlActions: { push, loadDiffContent },
         sync: { status },

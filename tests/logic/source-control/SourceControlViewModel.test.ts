@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { emptyExecutionResult } from '../../../src/logic/source-control/ExecutionResult';
-import { OperationState } from '../../../src/logic/source-control/OperationState';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
+import { SourceControlState } from '../../../src/logic/source-control/state/SourceControlState';
+import { OperationState } from '../../../src/logic/source-control/state/OperationState';
+import { SelectionState } from '../../../src/logic/source-control/state/SelectionState';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 
 function buildViewModel(changes: SyncChange[]) {
     const repository = new ChangeRepository();
     repository.replace(changes);
-    const selection = new PushSelectionStore();
+    const selection = new SelectionState();
     const operations = new OperationState();
-    const viewModel = new SourceControlViewModel(repository, selection, operations);
-    return { viewModel, selection, operations };
+    const state = new SourceControlState(repository, selection, operations);
+    const viewModel = new SourceControlViewModel(state);
+    return { viewModel, selection, operations, state };
 }
 
 describe('SourceControlViewModel', () => {

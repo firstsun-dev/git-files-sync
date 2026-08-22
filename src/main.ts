@@ -19,11 +19,12 @@ import { SyncStatusRefreshService } from './logic/sync/SyncStatusRefreshService'
 import { SyncDiffService } from './logic/sync/SyncDiffService';
 import { SyncManagerWorkspace, type SyncWorkspace } from './logic/sync/SyncWorkspace';
 import { ChangeRepository } from './logic/source-control/ChangeRepository';
-import { OperationState } from './logic/source-control/OperationState';
-import { PushSelectionStore } from './logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
 import { SourceControlActionService } from './logic/source-control/SourceControlActionService';
 import { toSyncChanges } from './logic/source-control/FileStatusAdapter';
+import { SourceControlState } from './logic/source-control/state/SourceControlState';
+import { SelectionState } from './logic/source-control/state/SelectionState';
+import { OperationState } from './logic/source-control/state/OperationState';
 
 export type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
 
@@ -40,8 +41,7 @@ export default class GitLabFilesPush extends Plugin {
 	syncStatusRefresh: SyncStatusRefreshService;
 	gitignoreManager: GitignoreManager;
 	changeRepository: ChangeRepository;
-	pushSelectionStore: PushSelectionStore;
-	operationState: OperationState;
+	sourceControlState: SourceControlState;
 	sourceControlViewModel: SourceControlViewModel;
 	sourceControlActions: SourceControlActionService;
 	private unsubscribeChangeRepository?: () => void;
@@ -106,16 +106,13 @@ export default class GitLabFilesPush extends Plugin {
 		});
 
 		this.changeRepository = new ChangeRepository();
-		this.pushSelectionStore = new PushSelectionStore();
-		this.operationState = new OperationState();
-		this.sourceControlViewModel = new SourceControlViewModel(
-			this.changeRepository,
-			this.pushSelectionStore,
-			this.operationState,
-		);
+		const selection = new SelectionState();
+		const operations = new OperationState();
+		this.sourceControlState = new SourceControlState(this.changeRepository, selection, operations);
+		this.sourceControlViewModel = new SourceControlViewModel(this.sourceControlState);
 		this.sourceControlActions = new SourceControlActionService(
 			this.changeRepository,
-			this.operationState,
+			operations,
 			this.syncWorkspace,
 		);
 		// Keeps ChangeRepository (and therefore the Source Control view) in
@@ -124,7 +121,7 @@ export default class GitLabFilesPush extends Plugin {
 		this.unsubscribeChangeRepository = this.sync.status.subscribe((statuses) => {
 			const changes = toSyncChanges([...statuses.values()]);
 			this.changeRepository.replace(changes);
-			this.pushSelectionStore.refresh(changes.map(change => change.id));
+			selection.refresh(changes.map(change => change.id));
 		});
 
 		this.statusBarEl = this.addStatusBarItem();
