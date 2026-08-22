@@ -37,14 +37,35 @@ export class SourceControlScenario {
     private readonly service: GitServiceInterface;
     private readonly verifier: GitVerifierType;
     private readonly branch: string;
+    /**
+     * Memoizes remote reads (each of which is a real `git fetch` round trip)
+     * between remote mutations. Invalidated by `invalidatingProxy` below
+     * whenever `manager.pushFiles`/`pullFile` or `service.pushFile`/
+     * `deleteFile` is called on the wrapped instances this scenario hands
+     * out — including indirectly, e.g. via the selection stack's
+     * `actionService.push`, which calls `manager.pushFiles` through
+     * `BoundarySyncWorkspace` rather than through this class's own `push()`.
+     * Wrapping the instances themselves (instead of only this class's
+     * wrapper methods) is what makes that indirect path safe to cache too.
+     */
+    private readonly remoteCache = new Map<string, unknown>();
 
     constructor(fixture: SyncManagerFixture) {
         this.vault = fixture.createVault();
         this.settings = fixture.makeSettings();
-        this.manager = fixture.newManager(this.vault, this.settings);
-        this.service = fixture.service;
+        const invalidate = (): void => this.remoteCache.clear();
+        this.manager = invalidatingProxy(fixture.newManager(this.vault, this.settings), ['pushFiles', 'pullFile'], invalidate);
+        this.service = invalidatingProxy(fixture.service, ['pushFile', 'deleteFile'], invalidate);
         this.verifier = fixture.verifier;
         this.branch = fixture.branch;
+    }
+
+    /** Runs `fn` once and memoizes it under `key` until the next remote mutation. */
+    private async cachedRemote<T>(key: string, fn: () => Promise<T>): Promise<T> {
+        if (this.remoteCache.has(key)) return this.remoteCache.get(key) as T;
+        const value = await fn();
+        this.remoteCache.set(key, value);
+        return value;
     }
 
     // --- local vault ops -------------------------------------------------
@@ -113,36 +134,40 @@ export class SourceControlScenario {
     // --- independent remote assertions (via the git-CLI verifier) --------
 
     async remoteContent(path: string): Promise<{ content: string; sha: string } | null> {
-        return this.verifier.getFile(path, this.branch);
+        return this.cachedRemote(`file:${path}`, () => this.verifier.getFile(path, this.branch));
     }
 
     async expectRemoteContent(path: string, expected: string): Promise<void> {
-        const remote = await this.verifier.getFile(path, this.branch);
+        const remote = await this.cachedRemote(`file:${path}`, () => this.verifier.getFile(path, this.branch));
         expect(remote?.content, `remote content for ${path}`).toBe(expected);
     }
 
     async expectRemoteMissing(path: string): Promise<void> {
-        expect(await this.verifier.fileMissing(path, this.branch), `expected ${path} missing on remote`).toBe(true);
+        expect(await this.cachedRemote(`missing:${path}`, () => this.verifier.fileMissing(path, this.branch)), `expected ${path} missing on remote`).toBe(true);
     }
 
     async expectRemoteExists(path: string): Promise<void> {
-        expect(await this.verifier.fileMissing(path, this.branch), `expected ${path} present on remote`).toBe(false);
+        expect(await this.cachedRemote(`missing:${path}`, () => this.verifier.fileMissing(path, this.branch)), `expected ${path} present on remote`).toBe(false);
     }
 
     /** Current branch tip sha. */
     async head(): Promise<string> {
-        const [tip] = await this.verifier.listCommitShas(this.branch, 1);
+        const [tip] = await this.cachedRemote('shas:2', () => this.verifier.listCommitShas(this.branch, 2));
         return tip!;
     }
 
     /** Newest-first commit shas on the branch (independent of the service). */
     async listCommitShas(count: number): Promise<string[]> {
+        if (count <= 2) {
+            const shas = await this.cachedRemote('shas:2', () => this.verifier.listCommitShas(this.branch, 2));
+            return shas.slice(0, count);
+        }
         return this.verifier.listCommitShas(this.branch, count);
     }
 
     /** Asserts exactly one new commit landed since `headBefore` (the new commit's parent is `headBefore`). */
     async expectSingleCommitSince(headBefore: string): Promise<void> {
-        const [headAfter, headAfterParent] = await this.verifier.listCommitShas(this.branch, 2);
+        const [headAfter, headAfterParent] = await this.cachedRemote('shas:2', () => this.verifier.listCommitShas(this.branch, 2));
         expect(headAfter, 'expected a new commit on the branch').not.toBe(headBefore);
         expect(headAfterParent, 'expected exactly one new commit since baseline').toBe(headBefore);
     }
@@ -202,6 +227,29 @@ export interface SelectionStack {
     readonly operations: OperationState;
     readonly actionService: SourceControlActionService;
     readonly workspace: BoundarySyncWorkspace;
+}
+
+/**
+ * Wraps `target` so that calling any method named in `mutatingMethods` still
+ * behaves exactly as before, but also invokes `onMutation` once the call
+ * resolves. Every other property/method passes through untouched. Used to
+ * invalidate SourceControlScenario's remote-read cache on every path that
+ * can mutate the remote — including ones this file doesn't call directly
+ * (e.g. BoundarySyncWorkspace invoking `manager.pushFiles`).
+ */
+function invalidatingProxy<T extends object>(target: T, mutatingMethods: (keyof T)[], onMutation: () => void): T {
+    return new Proxy(target, {
+        get(obj, prop, receiver): unknown {
+            const value: unknown = Reflect.get(obj, prop, receiver);
+            if (typeof value !== 'function') return value;
+            if (!mutatingMethods.includes(prop as keyof T)) return value.bind(obj);
+            return async (...args: unknown[]) => {
+                const result: unknown = await (value as (...a: unknown[]) => unknown).apply(obj, args);
+                onMutation();
+                return result;
+            };
+        },
+    });
 }
 
 /** Builds a SyncChange with a path-derived ChangeId (mirrors FileStatusAdapter). */
