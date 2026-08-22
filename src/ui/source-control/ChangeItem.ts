@@ -18,7 +18,7 @@ export interface ChangeItemCallbacks {
  * kind-specific presentation (badge letter, kind label, rename display)
  * comes from {@link presentChange} so this component stays a pure renderer.
  *
- * The kind's short label (e.g. "Modified") is shown as the badge tooltip
+ * The kind's short label (e.g. "Modified locally") is shown as the badge tooltip
  * rather than an inline subtitle, so the row reads `M  name  +3 -1`
  * without the `M`/`Modified` redundancy. A row selected for push gets an
  * `is-selected` class so the tree can keep it visible but visually muted

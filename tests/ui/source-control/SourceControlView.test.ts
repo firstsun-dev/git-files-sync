@@ -38,7 +38,7 @@ describe('SourceControlView', () => {
     });
 
     describe('filter switching', () => {
-        it('renders "All" as a single flat tree (no section breakdown) and excludes synced', () => {
+        it('defaults to "Needs Sync" as a single flat tree (actionable only, synced excluded)', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
@@ -47,18 +47,32 @@ describe('SourceControlView', () => {
             ]);
             view.render(container);
 
-            // No section grouping under All — every filter renders one flat tree.
+            // No section grouping — every filter renders one flat tree.
             expect(container.querySelectorAll('.scv-section')).toHaveLength(0);
-            // Active-filter header reads "ALL".
-            expect(container.querySelector('.scv-active-filter-title')?.textContent).toBe('ALL');
+            // Default chip is Needs Sync (actionable), so the header reads "Needs Sync".
+            expect(container.querySelector('.scv-active-filter-title')?.textContent).toBe('Needs Sync');
             expect(container.querySelector('.scv-active-filter-count')?.textContent).toBe('3');
-            // Actionable items only: synced is absent from All.
-            const kinds = Array.from(container.querySelectorAll('.scv-change-item')).map(el => el.getAttribute('class'));
-            expect(kinds.some(c => c?.includes('scv-kind-synced'))).toBe(false);
+            // Actionable items only: synced is absent from Needs Sync.
+            expect(container.querySelector('.scv-kind-synced')).toBeNull();
             expect(container.querySelectorAll('.scv-change-item')).toHaveLength(3);
         });
 
-        it('does not render a SYNCED section under the All filter (status-grouping fix)', () => {
+        it('the "All" chip composes actionable + synced rows into one tree', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
+            ]);
+            view.render(container);
+
+            (container.querySelector('.scv-filter-option[data-filter="all"]') as HTMLButtonElement).click();
+
+            expect(container.querySelector('.scv-active-filter-title')?.textContent).toBe('ALL');
+            expect(container.querySelector('.scv-active-filter-count')?.textContent).toBe('2');
+            expect(container.querySelectorAll('.scv-change-item')).toHaveLength(2);
+            expect(container.querySelector('.scv-kind-synced')).not.toBeNull();
+        });
+
+        it('does not render section grouping under any filter', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
@@ -77,7 +91,7 @@ describe('SourceControlView', () => {
             ]);
             view.render(container);
 
-            (container.querySelector('.scv-filter-option[data-filter="conflicts"]') as HTMLButtonElement).click();
+            (container.querySelector('.scv-filter-option[data-filter="conflict"]') as HTMLButtonElement).click();
 
             expect(container.querySelectorAll('.scv-section')).toHaveLength(0);
             expect(container.querySelectorAll('.scv-change-item')).toHaveLength(1);
@@ -88,25 +102,24 @@ describe('SourceControlView', () => {
             const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
             view.render(container);
 
-            (container.querySelector('.scv-filter-option[data-filter="conflicts"]') as HTMLButtonElement).click();
+            (container.querySelector('.scv-filter-option[data-filter="conflict"]') as HTMLButtonElement).click();
 
             expect(container.querySelector('.scv-empty')).not.toBeNull();
         });
     });
 
-    describe('synced surfacing removed', () => {
-        it('never renders a synced chip or a Show synced toggle', () => {
+    describe('synced surfacing', () => {
+        it('renders a Synced chip', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
             ]);
             view.render(container);
 
-            expect(container.querySelector('.scv-filter-option[data-filter="synced"]')).toBeNull();
-            expect(container.querySelector('.scv-filter-show-synced-checkbox')).toBeNull();
+            expect(container.querySelector('.scv-filter-option[data-filter="synced"]')).not.toBeNull();
         });
 
-        it('excludes synced rows from every filter view', () => {
+        it('excludes synced rows from the default Needs Sync view', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
@@ -115,6 +128,19 @@ describe('SourceControlView', () => {
 
             expect(container.querySelectorAll('.scv-change-item')).toHaveLength(1);
             expect(container.querySelector('.scv-kind-synced')).toBeNull();
+        });
+
+        it('shows only synced rows under the Synced chip', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
+            ]);
+            view.render(container);
+
+            (container.querySelector('.scv-filter-option[data-filter="synced"]') as HTMLButtonElement).click();
+
+            expect(container.querySelectorAll('.scv-change-item')).toHaveLength(1);
+            expect(container.querySelector('.scv-kind-synced')).not.toBeNull();
         });
     });
 
@@ -144,7 +170,7 @@ describe('SourceControlView', () => {
             expect(selection.isIncluded(toChangeId('c-1'))).toBe(false);
         });
 
-        it('renders the "SELECTED FOR SYNC" section only when at least one actionable change is selected', () => {
+        it('renders the "SYNC QUEUE" section only when at least one actionable change is selected', () => {
             const { view, selection } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'synced' },
@@ -157,7 +183,7 @@ describe('SourceControlView', () => {
             view.render(container);
             const section = container.querySelector('.scv-selected-section');
             expect(section).not.toBeNull();
-            expect(section?.querySelector('.scv-selected-section-title')?.textContent).toBe('SELECTED FOR SYNC');
+            expect(section?.querySelector('.scv-selected-section-title')?.textContent).toBe('SYNC QUEUE');
             expect(section?.querySelector('.scv-selected-section-count')?.textContent).toBe('1');
         });
 
@@ -215,7 +241,7 @@ describe('SourceControlView', () => {
             expect(container.querySelector('.scv-selected-section')).toBeNull();
         });
 
-        it('excludes synced changes from the SELECTED FOR SYNC count even when selected', () => {
+        it('excludes synced changes from the SYNC QUEUE count even when selected', () => {
             const { view, selection } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'synced' },
@@ -570,7 +596,7 @@ describe('SourceControlView', () => {
 
             expect(container.querySelector('.scv-push-btn')).toBeNull();
             expect(container.querySelector('.scv-mobile-sync-bar')).not.toBeNull();
-            expect(container.querySelector('.scv-mobile-sync-count')?.textContent).toBe('1');
+            expect(container.querySelector('.scv-mobile-sync-label')?.textContent).toBe('1 files selected');
         });
 
         it('omits the mobile bottom sync bar when nothing is selected for push', () => {

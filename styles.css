@@ -879,10 +879,18 @@
     left: 0;
     right: 0;
     display: flex;
+    align-items: center;
+    gap: 10px;
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
     background: var(--background-primary);
     border-top: 1px solid var(--background-modifier-border);
     z-index: 1;
+}
+
+.scv-mobile-sync-label {
+    flex: 0 1 auto;
+    color: var(--text-muted);
+    font-size: 0.85em;
 }
 
 .scv-mobile-sync-btn {
@@ -892,7 +900,7 @@
     justify-content: center;
     gap: 6px;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--radius-m);
     background: var(--interactive-accent);
     color: var(--text-on-accent);
     font-size: 0.9em;
@@ -901,17 +909,6 @@
 }
 
 .scv-mobile-sync-btn:hover { background: var(--interactive-accent-hover); }
-
-.scv-mobile-sync-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 20px;
-    padding: 0 6px;
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.18);
-    font-size: 0.85em;
-}
 
 /* ── Settings connection status badge ──────────────────────────── */
 .gfs-connection-status {

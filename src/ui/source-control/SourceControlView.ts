@@ -74,19 +74,21 @@ const MOBILE_TREE_OPTIONS = { collapseSingleChild: true, maxDepth: 2 };
  * action.
  *
  * Rendering semantics (status-grouping fix):
- * - Every filter — including "All" — renders a single flat tree. "All" no
- *   longer breaks the view into CHANGES / REMOTE CHANGES / SYNCED sections, so
- *   a change never appears twice and SYNCED never leaks into All.
- * - Synced is not surfaced in the UI: there is no `synced` chip and no
- *   "Show synced" toggle, so a quiet workspace stays quiet. The domain
- *   `synced` filter/summary are still computed by the ViewModel but simply
- *   have no entry point here.
- * - Selected changes get a first-class "SELECTED FOR SYNC (N)" region
- *   (between the filter and the tree) listing the working push batch; the
- *   same rows remain in the tree, visually muted via `is-selected`.
+ * - Every filter chip renders a single flat tree. "All" composes the
+ *   actionable set with the synced bucket (a view-layer composition; the
+ *   domain `all` filter still returns actionable rows only), so a change
+ *   never appears twice.
+ * - Synced is surfaced via its own "Synced" chip and included under "All"
+ *   (both opt-in); the default "Needs Sync" chip keeps a quiet workspace
+ *   quiet by showing actionable rows only.
+ * - Selected changes get a first-class "SYNC QUEUE (N)" region (between the
+ *   filter and the tree) listing the working push batch as read-only rows;
+ *   the same rows remain in the tree (no muting — selection happens there).
  */
 export class SourceControlView {
+    /** Active chip, as (domain filter, showSynced). Defaults to "Needs Sync" — the actionable set — so a quiet workspace stays quiet. */
     private filter: SourceControlFilter = 'all';
+    private showSynced = false;
     private searchQuery = '';
     private readonly collapsedFolders = new Set<string>();
     private selectedChangeId: ChangeId | null = null;
@@ -134,9 +136,14 @@ export class SourceControlView {
     }
 
     private renderMain(container: HTMLElement): void {
-        const state = this.viewModel.getState(this.filter);
-
         const isMobile = Platform.isMobile;
+
+        // Counts for the filter menu always carry the synced count (the menu
+        // needs it for the All/Synced chips), so fetch them with showSynced
+        // regardless of the active chip. The active chip's own tree items use
+        // the per-chip getState call below.
+        const counts = this.viewModel.getState('all', true).counts;
+        const state = this.viewModel.getState(this.filter, this.showSynced);
 
         renderSourceControlHeader(
             container,
@@ -167,14 +174,21 @@ export class SourceControlView {
 
         renderFilterMenu(
             container,
-            this.filter,
-            state.counts,
-            { onFilterChange: (filter) => { this.filter = filter; this.rerender(); } },
+            { filter: this.filter, showSynced: this.showSynced },
+            counts,
+            { onFilterChange: (filter, showSynced) => { this.filter = filter; this.showSynced = showSynced; this.rerender(); } },
             { isMobile },
         );
 
         const query = this.searchQuery.trim().toLowerCase();
-        const items = query ? state.items.filter(item => item.path.toLowerCase().includes(query)) : state.items;
+        // "All" chip composes the actionable set with the synced bucket — the
+        // domain `all` filter only returns actionable rows, so the synced rows
+        // are appended here in the view rather than via a domain change.
+        let items = state.items;
+        if (this.filter === 'all' && this.showSynced) {
+            items = items.concat(this.viewModel.getState('synced', true).items);
+        }
+        const filtered = query ? items.filter(item => item.path.toLowerCase().includes(query)) : items;
 
         // The scroll container: selected section + active-filter header + tree
         // all live here so the whole lower region scrolls as one. Pinned
@@ -183,15 +197,15 @@ export class SourceControlView {
         // instead of blowing out the layout under `.scv-root { overflow: hidden }`.
         const body = container.createDiv({ cls: 'scv-body' });
         this.renderSelectedSection(body, state.selectedItems, treeCallbacks);
-        this.renderActiveFilterHeader(body, state.filter, items.length);
-        if (items.length === 0) {
+        this.renderActiveFilterHeader(body, this.filter, this.showSynced, filtered.length);
+        if (filtered.length === 0) {
             body.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
             return;
         }
 
-        renderChangeTree(body, items, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
+        renderChangeTree(body, filtered, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
 
-        this.eagerLoadLocalStats(items);
+        this.eagerLoadLocalStats(filtered);
         this.eagerLoadSelectedStats(state.selectedItems);
 
         if (isMobile) this.renderMobileSyncBar(container, state.counts['ready-to-push']);
@@ -248,23 +262,27 @@ export class SourceControlView {
         if (cursor !== null) newInput.setSelectionRange(cursor, cursor);
     }
 
-    /** Renders the single active-filter header (e.g. "ALL (132)") above the flat tree. */
-    private renderActiveFilterHeader(container: HTMLElement, filter: SourceControlFilter, count: number): void {
+    /** Renders the single active-filter header (e.g. "NEEDS SYNC (132)") above the flat tree. */
+    private renderActiveFilterHeader(container: HTMLElement, filter: SourceControlFilter, showSynced: boolean, count: number): void {
+        // "All" (all + showSynced) reads "ALL"; the domain `all` filter with
+        // showSynced=false reads "NEEDS SYNC" instead of the generic "ALL".
+        const headerKey = (filter === 'all' && !showSynced)
+            ? 'sourceControl.filter.needsSync'
+            : FILTER_HEADER_KEYS[filter];
         const header = container.createDiv({ cls: 'scv-active-filter-header' });
-        header.createSpan({ cls: 'scv-active-filter-title', text: t(FILTER_HEADER_KEYS[filter]) });
+        header.createSpan({ cls: 'scv-active-filter-title', text: t(headerKey) });
         header.createSpan({ cls: 'scv-active-filter-count', text: String(count) });
     }
 
     /**
-     * Renders the "SELECTED FOR SYNC (N)" workspace — a read-only action
-     * preview of the working push batch. Each queued change is a compact row
-     * (badge + name + diff-stat, NO checkbox): this is not a second copy of
-     * the tree but the queue the Sync button will act on. Selection itself
-     * happens in the tree below, which keeps the same rows visible but
-     * muted via `is-selected` so context isn't lost. The set comes straight
-     * from the ViewModel's single-source `selectedItems` projection (same
-     * definition as the Sync button count), so the section and the button
-     * can never drift.
+     * Renders the "SYNC QUEUE (N)" workspace — a read-only action preview of
+     * the working push batch. Each queued change is a compact row (badge +
+     * name + diff-stat, NO checkbox): this is not a second copy of the tree
+     * but the queue the Sync button will act on. Selection itself happens in
+     * the tree below, which keeps the same rows visible (no muting) so
+     * context isn't lost. The set comes straight from the ViewModel's
+     * single-source `selectedItems` projection (same definition as the Sync
+     * button count), so the section and the button can never drift.
      */
     private renderSelectedSection(
         container: HTMLElement,
@@ -419,16 +437,16 @@ export class SourceControlView {
     }
 
     /**
-     * Mobile-only sticky bottom bar: a single Sync button spanning the row,
-     * shown when there's at least one change selected for push. The header's
-     * push button is hidden on mobile to save vertical space.
+     * Mobile-only sticky bottom bar: a "N files selected" label plus a Sync
+     * button, shown only when at least one change is selected for push. The
+     * header's push button is hidden on mobile to save vertical space.
      */
     private renderMobileSyncBar(container: HTMLElement, readyCount: number): void {
         if (readyCount === 0) return;
         const bar = container.createDiv({ cls: 'scv-mobile-sync-bar' });
+        bar.createSpan({ cls: 'scv-mobile-sync-label', text: t('sourceControl.mobile.filesSelected', { count: readyCount }) });
         const btn = bar.createEl('button', { cls: 'scv-mobile-sync-btn' });
-        btn.createSpan({ cls: 'scv-mobile-sync-label', text: t('sourceControl.section.selectedForSync') });
-        btn.createSpan({ cls: 'scv-mobile-sync-count', text: String(readyCount) });
+        btn.createSpan({ cls: 'scv-mobile-sync-btn-label', text: t('sourceControl.mobile.sync') });
         btn.addEventListener('click', () => { void this.callbacks.onPush(this.selection.getSelectedChangeIds()); });
     }
 }

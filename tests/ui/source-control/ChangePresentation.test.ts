@@ -15,13 +15,13 @@ describe('presentChange', () => {
         const view = presentChange(item({ id: toChangeId('a'), path: 'a.md', kind: 'local-only' }), 'a.md');
         expect(view.badge.letter).toBe('A');
         expect(view.badge.cls).toBe('local-only');
-        expect(view.subtitle).toBe('Added');
+        expect(view.subtitle).toBe('Added locally');
     });
 
     it('badges a local-modified change as M', () => {
         const view = presentChange(item({ id: toChangeId('a'), path: 'a.md', kind: 'local-modified' }), 'a.md');
         expect(view.badge.letter).toBe('M');
-        expect(view.subtitle).toBe('Modified');
+        expect(view.subtitle).toBe('Modified locally');
     });
 
     it('badges a remote-only (locally deleted) change as D with a tooltip', () => {
