@@ -43,3 +43,20 @@ export interface SyncChange {
     previousPath?: string;
     kind: SyncChangeKind;
 }
+
+/**
+ * A user-triggered sync operation, as unified across Source Control buttons,
+ * the context menu, single-file commands, and batch operations. All entry
+ * points express intent as one of these plus a set of `ChangeId`s.
+ */
+export type SourceControlActionKind = 'push' | 'pull' | 'delete-remote' | 'delete-local' | 'resolve-conflict';
+
+/**
+ * The output of `SourceControlActionService`: user intent resolved to the
+ * concrete `SyncChange`s it applies to. Carries no execution behavior itself —
+ * it's handed to a `SyncPlanExecutor` to actually run.
+ */
+export interface SyncPlan {
+    action: SourceControlActionKind;
+    changes: SyncChange[];
+}
