@@ -1,6 +1,6 @@
 import type { ChangeId } from './types';
 
-export type OperationStatus = 'idle' | 'running' | 'success' | 'failed';
+export type OperationStatus = 'idle' | 'running' | 'success' | 'failed' | 'conflict';
 
 /**
  * Tracks in-flight per-change operation status, independent of both the
@@ -23,6 +23,16 @@ export class OperationState {
 
     fail(changeId: ChangeId): void {
         this.status.set(changeId, 'failed');
+    }
+
+    /**
+     * Marks a change as needing resolution. This is a distinct lifecycle from
+     * `fail`: a conflict is a resolvable outcome (the executor reported both
+     * sides diverged), not an error. The UI must render it differently from a
+     * hard failure and offer resolution actions.
+     */
+    conflict(changeId: ChangeId): void {
+        this.status.set(changeId, 'conflict');
     }
 
     reset(changeId: ChangeId): void {

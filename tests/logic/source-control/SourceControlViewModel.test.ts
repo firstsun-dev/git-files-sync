@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
+import { emptyExecutionResult } from '../../../src/logic/source-control/ExecutionResult';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
@@ -104,5 +105,38 @@ describe('SourceControlViewModel', () => {
         expect(item?.id).toBe(toChangeId('c-1'));
         expect(item?.path).toBe('new.md');
         expect(item?.previousPath).toBe('old.md');
+    });
+
+    it('exposes no operation result until one is set', () => {
+        const { viewModel } = buildViewModel([]);
+
+        expect(viewModel.getState().lastOperationResult).toBeNull();
+    });
+
+    it('exposes the last operation result so the UI can render a batch summary', () => {
+        const { viewModel } = buildViewModel([
+            { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+        ]);
+
+        viewModel.setOperationResult({
+            completed: [toChangeId('c-1'), toChangeId('c-2'), toChangeId('c-3')],
+            conflicts: [toChangeId('c-4')],
+            failed: [toChangeId('c-5')],
+        });
+
+        expect(viewModel.getState().lastOperationResult).toEqual({
+            completed: [toChangeId('c-1'), toChangeId('c-2'), toChangeId('c-3')],
+            conflicts: [toChangeId('c-4')],
+            failed: [toChangeId('c-5')],
+        });
+    });
+
+    it('clears the operation result back to null', () => {
+        const { viewModel } = buildViewModel([]);
+        viewModel.setOperationResult(emptyExecutionResult());
+
+        viewModel.clearOperationResult();
+
+        expect(viewModel.getState().lastOperationResult).toBeNull();
     });
 });

@@ -118,6 +118,101 @@ describe('SourceControlActionService', () => {
 
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
         });
+
+        it('marks a conflicted path as conflict (not failed) and reports it in the result', async () => {
+            const push = vi.fn().mockResolvedValue(emptyPushResults({
+                syncedPaths: [{ path: 'a.md' }],
+                conflicts: 1,
+                conflictedPaths: ['b.md'],
+            }));
+            const { service, operations } = buildService(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+                ],
+                fakeWorkspace({ push }),
+            );
+
+            const result = await service.push([toChangeId('c-1'), toChangeId('c-2')]);
+
+            expect(operations.get(toChangeId('c-1'))).toBe('success');
+            expect(operations.get(toChangeId('c-2'))).toBe('conflict');
+            expect(result).toEqual({
+                completed: [toChangeId('c-1')],
+                conflicts: [toChangeId('c-2')],
+                failed: [],
+            });
+        });
+
+        it('classifies a mixed batch into completed, conflicts, and failed', async () => {
+            const push = vi.fn().mockResolvedValue(emptyPushResults({
+                syncedPaths: [{ path: 'a.md' }, { path: 'b.md' }, { path: 'c.md' }],
+                conflicts: 1,
+                conflictedPaths: ['d.md'],
+                errors: [{ file: 'e.md', error: 'boom' }],
+            }));
+            const { service, operations } = buildService(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'local-only' },
+                    { id: toChangeId('c-3'), path: 'c.md', kind: 'local-only' },
+                    { id: toChangeId('c-4'), path: 'd.md', kind: 'local-modified' },
+                    { id: toChangeId('c-5'), path: 'e.md', kind: 'local-modified' },
+                ],
+                fakeWorkspace({ push }),
+            );
+
+            const result = await service.push([
+                toChangeId('c-1'), toChangeId('c-2'), toChangeId('c-3'),
+                toChangeId('c-4'), toChangeId('c-5'),
+            ]);
+
+            expect(operations.get(toChangeId('c-1'))).toBe('success');
+            expect(operations.get(toChangeId('c-4'))).toBe('conflict');
+            expect(operations.get(toChangeId('c-5'))).toBe('failed');
+            expect(result).toEqual({
+                completed: [toChangeId('c-1'), toChangeId('c-2'), toChangeId('c-3')],
+                conflicts: [toChangeId('c-4')],
+                failed: [toChangeId('c-5')],
+            });
+        });
+
+        it('prefers conflict over error when a path appears in both lists', async () => {
+            const push = vi.fn().mockResolvedValue(emptyPushResults({
+                conflicts: 1,
+                conflictedPaths: ['a.md'],
+                errors: [{ file: 'a.md', error: 'also errored' }],
+            }));
+            const { service, operations } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                fakeWorkspace({ push }),
+            );
+
+            const result = await service.push([toChangeId('c-1')]);
+
+            expect(operations.get(toChangeId('c-1'))).toBe('conflict');
+            expect(result.conflicts).toEqual([toChangeId('c-1')]);
+            expect(result.failed).toEqual([]);
+        });
+
+        it('returns a fully-failed ExecutionResult when SyncWorkspace throws', async () => {
+            const push = vi.fn().mockRejectedValue(new Error('network down'));
+            const { service } = buildService(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'local-only' },
+                ],
+                fakeWorkspace({ push }),
+            );
+
+            const result = await service.push([toChangeId('c-1'), toChangeId('c-2')]);
+
+            expect(result).toEqual({
+                completed: [],
+                conflicts: [],
+                failed: [toChangeId('c-1'), toChangeId('c-2')],
+            });
+        });
     });
 
     describe('pull', () => {
@@ -144,6 +239,30 @@ describe('SourceControlActionService', () => {
             await service.pull([toChangeId('c-1')]);
 
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
+        });
+
+        it('returns an ExecutionResult classifying pulled changes as completed or failed', async () => {
+            const pull = vi.fn().mockResolvedValue(emptySyncResult({
+                errors: [{ file: 'b.md', error: 'boom' }],
+            }));
+            const { service } = buildService(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'remote-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-modified' },
+                ],
+                fakeWorkspace({ pull }),
+            );
+
+            const result = await service.pull([toChangeId('c-1'), toChangeId('c-2')]);
+
+            // SyncResult carries only a conflict count, not per-path conflict
+            // info, so pull conflicts surface through change-model reclassification
+            // (kind: 'conflict') rather than this projection.
+            expect(result).toEqual({
+                completed: [toChangeId('c-1')],
+                conflicts: [],
+                failed: [toChangeId('c-2')],
+            });
         });
     });
 
@@ -218,6 +337,22 @@ describe('SourceControlActionService', () => {
             await service.resolveConflict(toChangeId('c-1'), 'remote');
 
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
+        });
+
+        it('returns an ExecutionResult for a successful resolution', async () => {
+            const push = vi.fn().mockResolvedValue(emptyPushResults());
+            const { service } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'conflict' }],
+                fakeWorkspace({ push }),
+            );
+
+            const result = await service.resolveConflict(toChangeId('c-1'), 'local');
+
+            expect(result).toEqual({
+                completed: [toChangeId('c-1')],
+                conflicts: [],
+                failed: [],
+            });
         });
     });
 

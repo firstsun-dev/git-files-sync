@@ -1,5 +1,6 @@
 import type { SyncWorkspace } from '../sync/SyncWorkspace';
 import type { ChangeRepository } from './ChangeRepository';
+import { emptyExecutionResult, type ExecutionResult } from './ExecutionResult';
 import type { OperationState } from './OperationState';
 import type { SourceControlItem } from './SourceControlViewModel';
 import type { ChangeId, SyncChange } from './types';
@@ -37,63 +38,85 @@ export class SourceControlActionService {
         private readonly workspace: SyncWorkspace,
     ) {}
 
-    /** Pushes one or more changes (single push and batch push share this path). */
-    async push(changeIds: readonly ChangeId[]): Promise<void> {
+    /**
+     * Pushes one or more changes (single push and batch push share this path).
+     * Returns an `ExecutionResult` projecting the batch outcome: paths the
+     * executor reported as conflicts (via `PushResults.conflictedPaths`) become
+     * `conflicts` (needs-resolution), not `failed`.
+     */
+    async push(changeIds: readonly ChangeId[]): Promise<ExecutionResult> {
         const targets = this.resolve(changeIds);
-        if (targets.length === 0) return;
+        if (targets.length === 0) return emptyExecutionResult();
 
         this.startAll(targets);
         try {
             const results = await this.workspace.push(targets.map(target => target.path));
+            const conflicted = new Set(results.conflictedPaths ?? []);
             const failed = new Set(results.errors.map(error => error.file));
-            this.finishAll(targets, path => (failed.has(path) ? 'failed' : 'success'));
+            return this.classify(targets, path => {
+                if (conflicted.has(path)) return 'conflict';
+                if (failed.has(path)) return 'failed';
+                return 'success';
+            });
         } catch {
-            this.failAll(targets);
+            return this.failAll(targets);
         }
     }
 
-    /** Pulls one or more changes. */
-    async pull(changeIds: readonly ChangeId[]): Promise<void> {
+    /**
+     * Pulls one or more changes. `SyncResult` carries only a conflict count,
+     * not per-path conflict info, so pull conflicts cannot be mapped to
+     * `ChangeId`s here; they surface through change-model reclassification
+     * (`kind: 'conflict'`) on the next repository refresh. Errors map to
+     * `failed`; everything else is `completed`.
+     */
+    async pull(changeIds: readonly ChangeId[]): Promise<ExecutionResult> {
         const targets = this.resolve(changeIds);
-        if (targets.length === 0) return;
+        if (targets.length === 0) return emptyExecutionResult();
 
         this.startAll(targets);
         try {
             const results = await this.workspace.pull(targets.map(target => target.path));
             const failed = new Set(results.errors.map(error => error.file));
-            this.finishAll(targets, path => (failed.has(path) ? 'failed' : 'success'));
+            return this.classify(targets, path => (failed.has(path) ? 'failed' : 'success'));
         } catch {
-            this.failAll(targets);
+            return this.failAll(targets);
         }
     }
 
     /** Deletes one or more changes from the remote only. */
-    async deleteRemote(changeIds: readonly ChangeId[]): Promise<void> {
+    async deleteRemote(changeIds: readonly ChangeId[]): Promise<ExecutionResult> {
         const targets = this.resolve(changeIds);
-        if (targets.length === 0) return;
+        if (targets.length === 0) return emptyExecutionResult();
 
         this.startAll(targets);
         try {
             const result = await this.workspace.deleteRemote(targets.map(target => target.path));
             const failed = new Set(result.errors.map(error => error.path));
-            this.finishAll(targets, path => (failed.has(path) ? 'failed' : 'success'));
+            return this.classify(targets, path => (failed.has(path) ? 'failed' : 'success'));
         } catch {
-            this.failAll(targets);
+            return this.failAll(targets);
         }
     }
 
-    /** Deletes one or more changes from the local vault only. No batch primitive exists on `SyncWorkspace`, so each runs independently and one failure doesn't block the rest. */
-    async deleteLocal(changeIds: readonly ChangeId[]): Promise<void> {
+    /**
+     * Deletes one or more changes from the local vault only. No batch primitive exists on `SyncWorkspace`, so each runs independently and one failure doesn't block the rest.
+     */
+    async deleteLocal(changeIds: readonly ChangeId[]): Promise<ExecutionResult> {
         const targets = this.resolve(changeIds);
+        const result = emptyExecutionResult();
         for (const target of targets) {
             this.operations.start(target.id);
             try {
                 await this.workspace.deleteLocal(target.path);
                 this.operations.succeed(target.id);
+                result.completed.push(target.id);
             } catch {
                 this.operations.fail(target.id);
+                result.failed.push(target.id);
             }
         }
+        return result;
     }
 
     /**
@@ -102,9 +125,9 @@ export class SourceControlActionService {
      * two primitives every other action uses, so no separate conflict-apply
      * pathway is introduced.
      */
-    async resolveConflict(changeId: ChangeId, resolution: ConflictResolution): Promise<void> {
+    async resolveConflict(changeId: ChangeId, resolution: ConflictResolution): Promise<ExecutionResult> {
         const change = this.changes.getById(changeId);
-        if (!change) return;
+        if (!change) return emptyExecutionResult();
 
         this.operations.start(changeId);
         try {
@@ -114,8 +137,10 @@ export class SourceControlActionService {
                 await this.workspace.pullOne(change.path);
             }
             this.operations.succeed(changeId);
+            return { completed: [changeId], conflicts: [], failed: [] };
         } catch {
             this.operations.fail(changeId);
+            return { completed: [], conflicts: [], failed: [changeId] };
         }
     }
 
@@ -145,14 +170,38 @@ export class SourceControlActionService {
         for (const target of targets) this.operations.start(target.id);
     }
 
-    private finishAll(targets: readonly SyncChange[], statusFor: (path: string) => 'success' | 'failed'): void {
+    /**
+     * Maps each targeted change to a per-change `OperationStatus` and
+     * accumulates the `ExecutionResult` projection in one pass. Conflict takes
+     * precedence over failure when a path appears in both executor lists.
+     */
+    private classify(
+        targets: readonly SyncChange[],
+        statusFor: (path: string) => 'success' | 'failed' | 'conflict',
+    ): ExecutionResult {
+        const result = emptyExecutionResult();
         for (const target of targets) {
-            if (statusFor(target.path) === 'success') this.operations.succeed(target.id);
-            else this.operations.fail(target.id);
+            const status = statusFor(target.path);
+            if (status === 'success') {
+                this.operations.succeed(target.id);
+                result.completed.push(target.id);
+            } else if (status === 'conflict') {
+                this.operations.conflict(target.id);
+                result.conflicts.push(target.id);
+            } else {
+                this.operations.fail(target.id);
+                result.failed.push(target.id);
+            }
         }
+        return result;
     }
 
-    private failAll(targets: readonly SyncChange[]): void {
-        for (const target of targets) this.operations.fail(target.id);
+    private failAll(targets: readonly SyncChange[]): ExecutionResult {
+        const result = emptyExecutionResult();
+        for (const target of targets) {
+            this.operations.fail(target.id);
+            result.failed.push(target.id);
+        }
+        return result;
     }
 }

@@ -23,6 +23,28 @@ describe('OperationState', () => {
         expect(state.get(toChangeId('change-a'))).toBe('failed');
     });
 
+    it('marks a change as conflict, distinct from failed (needs-resolution, not an error)', () => {
+        const state = new OperationState();
+
+        state.start(toChangeId('change-a'));
+        state.conflict(toChangeId('change-a'));
+
+        expect(state.get(toChangeId('change-a'))).toBe('conflict');
+    });
+
+    it('treats conflict and failed as independent lifecycles', () => {
+        const state = new OperationState();
+
+        state.start(toChangeId('conflicted'));
+        state.conflict(toChangeId('conflicted'));
+
+        state.start(toChangeId('errored'));
+        state.fail(toChangeId('errored'));
+
+        expect(state.get(toChangeId('conflicted'))).toBe('conflict');
+        expect(state.get(toChangeId('errored'))).toBe('failed');
+    });
+
     it('tracks multiple changes independently', () => {
         const state = new OperationState();
 
