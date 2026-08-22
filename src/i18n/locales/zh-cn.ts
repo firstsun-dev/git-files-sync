@@ -120,10 +120,6 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'settings.releaseHistory.desc': '查看当前与过往版本的更新内容',
 	'settings.releaseHistory.button': '查看更新记录',
 
-	'settings.releaseHistory.name': '发布记录',
-	'settings.releaseHistory.desc': '查看此插件过去的发布说明。',
-	'settings.releaseHistory.button': '查看记录',
-
 	'syncStatus.viewTitle': '同步状态',
 	'syncStatus.emptyPrompt': '点击「刷新」以检查同步状态',
 	'syncStatus.progress.checkingWithCount': '检查文件中… {current}/{total}（{pct}%）',

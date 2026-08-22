@@ -120,10 +120,6 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'settings.releaseHistory.desc': '查看目前與過往版本的更新內容',
 	'settings.releaseHistory.button': '查看更新紀錄',
 
-	'settings.releaseHistory.name': '發布紀錄',
-	'settings.releaseHistory.desc': '查看此外掛過去的發布說明。',
-	'settings.releaseHistory.button': '查看紀錄',
-
 	'syncStatus.viewTitle': '同步狀態',
 	'syncStatus.emptyPrompt': '點擊「重新整理」以檢查同步狀態',
 	'syncStatus.progress.checkingWithCount': '檢查檔案中… {current}/{total}（{pct}%）',
