@@ -135,6 +135,11 @@ export class SourceControlScenario {
         return tip!;
     }
 
+    /** Newest-first commit shas on the branch (independent of the service). */
+    async listCommitShas(count: number): Promise<string[]> {
+        return this.verifier.listCommitShas(this.branch, count);
+    }
+
     /** Asserts exactly one new commit landed since `headBefore` (the new commit's parent is `headBefore`). */
     async expectSingleCommitSince(headBefore: string): Promise<void> {
         const [headAfter, headAfterParent] = await this.verifier.listCommitShas(this.branch, 2);

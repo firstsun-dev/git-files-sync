@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { createSyncManagerFixture, describePushResult, type SyncManagerFixture } from '../support/sync-manager-fixture';
-import { SourceControlScenario } from '../support/source-control-scenarios';
+import { SourceControlScenario, change } from '../support/source-control-scenarios';
 import { timeouts } from '../config/env';
 
 // Auto-confirm the plan-review + conflict modals so a push can proceed
@@ -428,6 +428,118 @@ describe('Source Control Flows E2E', () => {
             await s.expectRemoteContent(safe, 'a-v2');
             await s.expectRemoteContent(conflict, 'b-remote');
             await s.expectRemoteContent(created, 'c-new');
+            await s.expectSingleCommitSince(headBefore);
+        });
+    });
+
+    // ------------------------------------------------------------------
+    // Phase 6 — Source Control selection workflows
+    //
+    // Drives the real SourceControlActionService + PushSelectionStore +
+    // ChangeRepository on top of the real SyncManager (via the thin
+    // BoundarySyncWorkspace), so the ChangeId -> path -> workspace.push
+    // selection filter is the real production code, not a mock.
+    // ------------------------------------------------------------------
+    describe('selection workflows', () => {
+        it('pushes only the selected subset, leaving unselected files untouched', async () => {
+            const s = scenario();
+            const a = path('subset/a.md');
+            const b = path('subset/b.md');
+            const c = path('subset/c.md');
+            await s.baseline(a, 'a-v1');
+            await s.baseline(b, 'b-v1');
+            await s.baseline(c, 'c-v1');
+            s.writeLocal(a, 'a-v2');
+            s.writeLocal(b, 'b-v2');
+            s.writeLocal(c, 'c-v2');
+
+            const ca = change(a, 'local-modified');
+            const cb = change(b, 'local-modified');
+            const cc = change(c, 'local-modified');
+            const { selection, actionService, operations } = s.selectionStack([ca, cb, cc]);
+            selection.includeForPush(ca.id);
+            selection.includeForPush(cc.id);
+
+            const headBefore = await s.head();
+            await actionService.push([ca.id, cc.id]);
+
+            expect(operations.get(ca.id)).toBe('success');
+            expect(operations.get(cc.id)).toBe('success');
+            expect(operations.get(cb.id), 'unselected change stays idle').toBe('idle');
+            await s.expectRemoteContent(a, 'a-v2');
+            await s.expectRemoteContent(c, 'c-v2');
+            await s.expectRemoteContent(b, 'b-v1');
+            await s.expectSingleCommitSince(headBefore);
+            // Current contract: the action service marks operations but does
+            // not clear selection or refresh the repository, so the selection
+            // is retained (locked here).
+            expect(selection.isIncluded(ca.id)).toBe(true);
+            expect(selection.isIncluded(cc.id)).toBe(true);
+        });
+
+        it.skipIf(!isGitHub)('pushes a subset then the remaining subset as two separate commits', async () => {
+            const s = scenario();
+            const a = path('subset-then-rest/a.md');
+            const b = path('subset-then-rest/b.md');
+            const c = path('subset-then-rest/c.md');
+            await s.baseline(a, 'a-v1');
+            await s.baseline(b, 'b-v1');
+            await s.baseline(c, 'c-v1');
+            s.writeLocal(a, 'a-v2');
+            s.writeLocal(b, 'b-v2');
+            s.writeLocal(c, 'c-v2');
+
+            const ca = change(a, 'local-modified');
+            const cb = change(b, 'local-modified');
+            const cc = change(c, 'local-modified');
+            const { selection, actionService, operations } = s.selectionStack([ca, cb, cc]);
+
+            const head0 = await s.head();
+            selection.includeForPush(ca.id);
+            selection.includeForPush(cc.id);
+            await actionService.push([ca.id, cc.id]);
+            const head1 = await s.head();
+            await s.expectSingleCommitSince(head0);
+
+            selection.includeForPush(cb.id);
+            await actionService.push([cb.id]);
+            const head2 = await s.head();
+            expect(head2, 'second push is a separate commit').not.toBe(head1);
+            const [, head2Parent] = await s.listCommitShas(2);
+            expect(head2Parent).toBe(head1);
+
+            expect(operations.get(ca.id)).toBe('success');
+            expect(operations.get(cb.id)).toBe('success');
+            expect(operations.get(cc.id)).toBe('success');
+            await s.expectRemoteContent(a, 'a-v2');
+            await s.expectRemoteContent(b, 'b-v2');
+            await s.expectRemoteContent(c, 'c-v2');
+        });
+
+        it.skipIf(!isGitHub)('rename yields a path-derived ChangeId; selecting the new id pushes the move', async () => {
+            const s = scenario();
+            const oldP = path('selection-rename/a.md');
+            const newP = path('selection-rename/archive/a.md');
+            await s.baseline(oldP, 'v1');
+
+            s.renameLocal(oldP, newP);
+            await s.manager.trackRename(newP, oldP);
+
+            // Current model: ChangeId is path-derived, so the moved change
+            // carries a NEW id (the new path) with previousPath set; the old
+            // path's id is gone. Locking this assumption protects the status
+            // model against an accidental path->identity regression.
+            const moved = change(newP, 'moved', oldP);
+            const { selection, actionService, operations } = s.selectionStack([moved]);
+            selection.refresh([moved.id]);
+            selection.includeForPush(moved.id);
+
+            const headBefore = await s.head();
+            await actionService.push([moved.id]);
+
+            expect(operations.get(moved.id)).toBe('success');
+            await s.expectRemoteMissing(oldP);
+            await s.expectRemoteContent(newP, 'v1');
             await s.expectSingleCommitSince(headBefore);
         });
     });
