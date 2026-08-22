@@ -1,44 +1,62 @@
 # Session Handoff
 
-**Date:** 2026-08-20
-**Branch:** `refactor/sync-domain-pipeline` (PR #127)
-**Active Feature:** feat-026 / issue #105 — sync architecture refactor
+**Date:** 2026-08-22
+**Branch:** `feat/sync-status-workflow-ui` (4 commits ahead of `claude/source-control-foundation` @ `f449125`)
+**Active Feature:** sync-status-workflow-ui plan (`.kilo/plans/1787412338771-sync-status-workflow-ui.md`) — COMPLETE
 
 ## Completed This Session
 
-Investigated the failed real-provider CI after the unified planner commit. The move paths passed;
-GitHub exhausted two attempts on a 503 and `UND_ERR_SOCKET`, while GitLab exhausted two attempts
-on provider deadline errors. The tests then surfaced secondary count/existence assertions that
-hid those original request failures.
+Implemented the full four-commit "Sync Status Workflow UI" feature. All four
+commits land on `feat/sync-status-workflow-ui`, each passing the husky
+pre-commit hook (`npm run lint && npm run build`):
 
-Hardened CI with three provider attempts, explicit push-result diagnostics in SyncManager E2E,
-and workflow contract coverage. When the shared push/PR concurrency group cancels a duplicate
-matrix, its aggregate gate now reports the replacement neutrally and emits `run-ci=false`, so it
-does not leave an additional aggregate red check or run downstream CI twice. Real failures remain
-blocking. Updated the real-provider E2E documentation to match.
+1. `8c69cc8` — `SourceControlViewModel` gains `selectedItems` +
+   `refreshStatus` projections and a `refresh()` delegate backed by a new
+   `RefreshState` holder (idle/loading/failed, mirrors `OperationState`).
+   `main.ts` wires `() => syncWorkspace.refresh()` as the delegate. 5-arg
+   ViewModel constructor; 3 test helpers updated.
+2. `625fad2` — Filter chips drop `ready-to-push` (now 4: All/Local/Remote/
+   Conflict via new `sourceControl.filter.local/remote/conflict` i18n; domain
+   `data-filter` values unchanged). New `renderSelectedSection()` shows
+   "SELECTED FOR SYNC (N)" above the tree.
+3. `759b717` — Refresh button (idle icon-only / loading "Refreshing…"
+   spinning+disabled / failed "Refresh failed") in the header; `onRefresh`
+   added to `SourceControlViewCallbacks`; `OperationIndicator` now renders
+   icon + text label; `SourceControlItemView.runRefresh()` renders on start
+   and settle, swallows rejection.
+4. `dd8ddd5` — New `ChangePresentation` UI adapter (badge letter/subtitle/
+   rename/tooltip per kind; `remote-only` badged `D` not `A`). Diff-stat
+   threaded through rows: local-only stats eager-loaded from in-memory
+   `sync.status` (no provider call) + cached; two-sided stats lazy-load on
+   open; cache clears on refresh (null results cached too, to avoid an
+   eager-retry rerender loop that initially OOM'd the test worker).
+   Responsive mobile: chips → single filter `<select>`, header push button
+   hidden, sticky bottom sync bar, flatter tree (`maxDepth: 2`).
 
-Committed as `948df28` (`fix(ci): harden provider e2e failures`) and pushed to
-`origin/refactor/sync-domain-pipeline`. The pre-existing untracked `.codex-gitlab.env` remains
-untouched.
+Domain-untouched invariant verified:
+`git diff claude/source-control-foundation -- src/logic/source-control/`
+shows ONLY `RefreshState.ts` (new) + `SourceControlViewModel.ts` (edited).
 
 ## Verification Evidence
 
 ```text
 npx eslint .      -> PASS, 0 errors
-npm run build     -> PASS, incl. Obsidian 1.11 compatibility
-npx vitest run    -> PASS, 56 files / 613 tests
-npm run test:e2e -- --provider gitea -> PASS, 2 files / 14 tests; container removed
-actionlint v1.7.12 .github/workflows/ci.yml -> PASS, 0 errors
-git diff --check  -> PASS
-real CI run 32338116598 -> PASS after failed-only rerun of a disabled Gitea leg assigned to an offline runner
-GitHub/GitLab sandbox branch query -> PASS, no e2e/pr/127 or source-branch refs remain
+npm run build     -> PASS, incl. Obsidian 1.11.0 compat typecheck + esbuild
+npx vitest run    -> PASS, 61 files / 629 tests
+git diff claude/source-control-foundation -- src/logic/source-control/ -> only RefreshState.ts + SourceControlViewModel.ts
 ```
 
-The AGENTS-required Haiku verifier was unavailable in this environment, so verification ran
-locally in this session.
+Pre-commit husky hook (`npm run lint && npm run build`) ran green on every
+commit.
 
 ## Exact Next Step
 
-Complete the remaining Obsidian desktop/mobile move smoke tests. Verify moving and editing a
-tracked file appears under Moves and applies as one remote move, while an occupied remote
-destination remains a skipped conflict.
+The plan's four commits are all landed and locally green. Remaining before
+declaring the feature fully done per AGENTS.md Definition of Done:
+- Manual Obsidian verification (desktop + mobile) of the runtime UI surface:
+  refresh button states, "SELECTED FOR SYNC" section, per-row subtitles/badges
+  (esp. `remote-only` → `D` "Deleted locally"), diff-stat `+N -M` spans, and
+  the mobile filter dropdown + bottom sync bar.
+- If opening a PR is desired, push `feat/sync-status-workflow-ui` and open a PR
+  against the base branch (`claude/source-control-foundation`) with the four
+  commits; the base branch name should be confirmed with the user first.
