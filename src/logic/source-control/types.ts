@@ -14,3 +14,32 @@ export type ChangeId = string & { readonly [changeIdBrand]: never };
 export function toChangeId(id: string): ChangeId {
     return id as ChangeId;
 }
+
+/**
+ * How a pending change relates local and remote state, independent of any
+ * push/pull selection or in-flight operation. Mirrors `SyncClassification`
+ * from the sync domain plus `moved`, since a tracked rename/move is a
+ * distinct case the Source Control UI must render differently.
+ */
+export type SyncChangeKind =
+    | 'local-only'
+    | 'local-modified'
+    | 'remote-only'
+    | 'remote-modified'
+    | 'moved'
+    | 'conflict'
+    | 'synced';
+
+/**
+ * A single pending sync change as consumed by the Source Control ViewModel
+ * layer. Deliberately decoupled from `PlannedFileAction`/`FileStatus` in the
+ * sync domain: this is the read-only projection the UI layer works with, keyed
+ * by the stable `ChangeId` rather than path.
+ */
+export interface SyncChange {
+    id: ChangeId;
+    path: string;
+    /** Present when this change is a tracked rename/move, for display only. */
+    previousPath?: string;
+    kind: SyncChangeKind;
+}
