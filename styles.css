@@ -195,6 +195,17 @@
 }
 
 /* ── Active filter header ─────────────────────────────────────── */
+.scv-collapsible-header { cursor: pointer; user-select: none; }
+
+.scv-section-toggle {
+    flex-shrink: 0;
+    color: var(--text-faint);
+    font-size: 0.7em;
+    line-height: 1;
+    width: 1.2em;
+    text-align: center;
+}
+
 .scv-active-filter-header {
     display: flex;
     align-items: center;
@@ -269,36 +280,6 @@
 .scv-selected-section-list {
     display: flex;
     flex-direction: column;
-}
-
-.scv-queue-item {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 10px;
-    font-family: var(--font-monospace);
-    font-size: 0.80em;
-    color: var(--text-normal);
-    cursor: pointer;
-}
-
-.scv-queue-item:hover {
-    background: var(--background-modifier-hover);
-}
-
-.scv-queue-name {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    overflow: hidden;
-}
-
-.scv-queue-name-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 /* ── Push button ───────────────────────────────────────────────── */

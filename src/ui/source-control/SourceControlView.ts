@@ -9,7 +9,7 @@ import { ICONS } from '../components/icons';
 import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
 import { renderDiffPanel } from '../components/DiffPanel';
 import { renderChangeTree, type ChangeTreeCallbacks } from './ChangeTree';
-import { renderSelectedQueueItem } from './ChangeItem';
+import { renderChangeItem } from './ChangeItem';
 import { renderFilterMenu } from './FilterMenu';
 import { renderSourceControlHeader, type SourceControlWorkspaceInfo } from './SourceControlHeader';
 
@@ -81,9 +81,11 @@ const MOBILE_TREE_OPTIONS = { collapseSingleChild: true, maxDepth: 2 };
  * - Synced is surfaced via its own "Synced" chip and included under "All"
  *   (both opt-in); the default "Needs Sync" chip keeps a quiet workspace
  *   quiet by showing actionable rows only.
- * - Selected changes get a first-class "SYNC QUEUE (N)" region (between the
- *   filter and the tree) listing the working push batch as read-only rows;
- *   the same rows remain in the tree (no muting — selection happens there).
+ * - Selected changes get a first-class "CHECKED CHANGES (N)" region (between
+ *   the filter and the tree) listing the working push batch. Checking a row
+ *   in the tree moves it up into Checked Changes and out of the tree;
+ *   unchecking it there moves it back down — mirroring VS Code's
+ *   Staged/Changes split so a change never appears in both places at once.
  */
 export class SourceControlView {
     /** Active chip, as (domain filter, showSynced). Defaults to "Needs Sync" — the actionable set — so a quiet workspace stays quiet. */
@@ -91,6 +93,8 @@ export class SourceControlView {
     private showSynced = false;
     private searchQuery = '';
     private readonly collapsedFolders = new Set<string>();
+    /** Collapsed section regions ("Checked Changes" / "Changes"), persisted across rerenders like collapsed folders. */
+    private readonly collapsedSections = new Set<'checkedChanges' | 'changes'>();
     private selectedChangeId: ChangeId | null = null;
     /** Cached +/- diff stats per change id (null = attempted but unavailable), cleared on refresh. */
     private readonly diffStatCache = new Map<ChangeId, ChangeStat | null>();
@@ -189,23 +193,29 @@ export class SourceControlView {
             items = items.concat(this.viewModel.getState('synced', true).items);
         }
         const filtered = query ? items.filter(item => item.path.toLowerCase().includes(query)) : items;
+        // Selected changes live in the "Checked Changes" region above, so the
+        // lower tree only carries the remaining (unchecked) rows: a checked
+        // row disappears from here and reappears in the queue, mirroring VS
+        // Code's Staged/Changes split instead of duplicating it in both.
+        const unchecked = filtered.filter(item => !item.isReadyToPush);
 
-        // The scroll container: selected section + active-filter header + tree
+        // The scroll container: Checked Changes + active-filter header + tree
         // all live here so the whole lower region scrolls as one. Pinned
         // controls (header, search, filter) stay outside so they don't scroll
-        // away; a tall Selected section therefore scrolls with the tree
-        // instead of blowing out the layout under `.scv-root { overflow: hidden }`.
+        // away; a tall Checked Changes section therefore scrolls with the
+        // tree instead of blowing out the layout under
+        // `.scv-root { overflow: hidden }`.
         const body = container.createDiv({ cls: 'scv-body' });
         this.renderSelectedSection(body, state.selectedItems, treeCallbacks);
-        this.renderActiveFilterHeader(body, this.filter, this.showSynced, filtered.length);
-        if (filtered.length === 0) {
-            body.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
-            return;
+        this.renderActiveFilterHeader(body, this.filter, this.showSynced, unchecked.length);
+        if (!this.collapsedSections.has('changes')) {
+            if (unchecked.length === 0) {
+                body.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
+            } else {
+                renderChangeTree(body, unchecked, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
+                this.eagerLoadLocalStats(unchecked);
+            }
         }
-
-        renderChangeTree(body, filtered, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
-
-        this.eagerLoadLocalStats(filtered);
         this.eagerLoadSelectedStats(state.selectedItems);
 
         if (isMobile) this.renderMobileSyncBar(container, state.counts['ready-to-push']);
@@ -262,27 +272,38 @@ export class SourceControlView {
         if (cursor !== null) newInput.setSelectionRange(cursor, cursor);
     }
 
-    /** Renders the single active-filter header (e.g. "NEEDS SYNC (132)") above the flat tree. */
+    /** Renders the single active-filter header (e.g. "NEEDS SYNC (132)") above the flat tree; clicking it collapses/expands the Changes region. */
     private renderActiveFilterHeader(container: HTMLElement, filter: SourceControlFilter, showSynced: boolean, count: number): void {
         // "All" (all + showSynced) reads "ALL"; the domain `all` filter with
         // showSynced=false reads "NEEDS SYNC" instead of the generic "ALL".
         const headerKey = (filter === 'all' && !showSynced)
             ? 'sourceControl.filter.needsSync'
             : FILTER_HEADER_KEYS[filter];
-        const header = container.createDiv({ cls: 'scv-active-filter-header' });
+        const collapsed = this.collapsedSections.has('changes');
+        const header = container.createDiv({ cls: 'scv-active-filter-header scv-collapsible-header' });
+        header.setAttr('role', 'button');
+        header.setAttr('aria-expanded', String(!collapsed));
+        header.createSpan({ cls: 'scv-section-toggle', text: collapsed ? '▶' : '▼' });
         header.createSpan({ cls: 'scv-active-filter-title', text: t(headerKey) });
         header.createSpan({ cls: 'scv-active-filter-count', text: String(count) });
+        header.addEventListener('click', () => this.toggleSection('changes'));
+    }
+
+    private toggleSection(key: 'checkedChanges' | 'changes'): void {
+        if (this.collapsedSections.has(key)) this.collapsedSections.delete(key);
+        else this.collapsedSections.add(key);
+        this.rerender();
     }
 
     /**
-     * Renders the "SYNC QUEUE (N)" workspace — a read-only action preview of
-     * the working push batch. Each queued change is a compact row (badge +
-     * name + diff-stat, NO checkbox): this is not a second copy of the tree
-     * but the queue the Sync button will act on. Selection itself happens in
-     * the tree below, which keeps the same rows visible (no muting) so
-     * context isn't lost. The set comes straight from the ViewModel's
-     * single-source `selectedItems` projection (same definition as the Sync
-     * button count), so the section and the button can never drift.
+     * Renders the "CHECKED CHANGES (N)" region — the working push batch.
+     * Each queued change is a normal change row (badge + name + diff-stat)
+     * with its selection checkbox checked: unchecking it here moves the row
+     * back down into the tree, and checking a tree row moves it up here, so
+     * the queue and the tree stay disjoint. The set comes straight from the
+     * ViewModel's single-source `selectedItems` projection (same definition
+     * as the Sync button count), so the section and the button can never
+     * drift.
      */
     private renderSelectedSection(
         container: HTMLElement,
@@ -290,8 +311,12 @@ export class SourceControlView {
         callbacks: ChangeTreeCallbacks,
     ): void {
         if (selectedItems.length === 0) return;
+        const collapsed = this.collapsedSections.has('checkedChanges');
         const section = container.createDiv({ cls: 'scv-selected-section' });
-        const header = section.createDiv({ cls: 'scv-selected-section-header' });
+        const header = section.createDiv({ cls: 'scv-selected-section-header scv-collapsible-header' });
+        header.setAttr('role', 'button');
+        header.setAttr('aria-expanded', String(!collapsed));
+        header.createSpan({ cls: 'scv-section-toggle', text: collapsed ? '▶' : '▼' });
         header.createSpan({ cls: 'scv-selected-section-title', text: t('sourceControl.section.selectedForSync') });
         header.createSpan({ cls: 'scv-selected-section-count', text: String(selectedItems.length) });
 
@@ -301,11 +326,13 @@ export class SourceControlView {
         });
         clearBtn.createSpan({ cls: 'scv-selected-section-clear-label', text: t('sourceControl.section.clearSelection') });
         setTooltip(clearBtn, t('sourceControl.section.clearSelection.tooltip'));
-        clearBtn.addEventListener('click', () => this.clearSelection(selectedItems));
+        clearBtn.addEventListener('click', (evt) => { evt.stopPropagation(); this.clearSelection(selectedItems); });
+        header.addEventListener('click', () => this.toggleSection('checkedChanges'));
 
+        if (collapsed) return;
         const list = section.createDiv({ cls: 'scv-selected-section-list' });
         for (const item of selectedItems) {
-            renderSelectedQueueItem(list, item, basename(item.path), callbacks);
+            renderChangeItem(list, item, basename(item.path), callbacks);
         }
     }
 

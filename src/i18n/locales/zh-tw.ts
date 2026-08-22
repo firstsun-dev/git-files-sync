@@ -263,7 +263,7 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.filter.showSynced': '顯示已同步',
 	'sourceControl.section.all': '全部',
 	'sourceControl.section.readyToPush': '待推送',
-	'sourceControl.section.selectedForSync': '同步佇列',
+	'sourceControl.section.selectedForSync': '已勾選的變更',
 	'sourceControl.section.clearSelection': '清除',
 	'sourceControl.section.clearSelection.tooltip': '取消全部選取',
 	'sourceControl.section.changes': '變更',

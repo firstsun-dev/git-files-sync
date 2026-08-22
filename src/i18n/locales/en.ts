@@ -261,7 +261,7 @@ const en = {
 	'sourceControl.filter.showSynced': 'Show synced',
 	'sourceControl.section.all': 'ALL',
 	'sourceControl.section.readyToPush': 'READY TO PUSH',
-	'sourceControl.section.selectedForSync': 'SYNC QUEUE',
+	'sourceControl.section.selectedForSync': 'Checked Changes',
 	'sourceControl.section.clearSelection': 'Clear',
 	'sourceControl.section.clearSelection.tooltip': 'Deselect all changes',
 	'sourceControl.section.changes': 'CHANGES',
