@@ -15,8 +15,9 @@ vi.mock('../../src/ui/BatchConflictResolutionModal');
 // Provider matrix: Core scenarios run on every provider; Extended scenarios
 // (rename chains, unicode, batch-scale, etc.) exercise SyncManager/model
 // behavior that's provider-agnostic, so they run on GitHub only to keep
-// real-API CI fast and stable.
+// real-API CI fast and stable. Stress (1000-file) is opt-in via E2E_STRESS=1.
 const isGitHub = process.env.E2E_PROVIDER === 'github';
+const isStress = process.env.E2E_STRESS === '1';
 
 describe('Source Control Flows E2E', () => {
     let fixture: SyncManagerFixture;
@@ -664,5 +665,120 @@ describe('Source Control Flows E2E', () => {
             await s.expectRemoteContent(p, 'reconciled');
             await s.expectSingleCommitSince(headBefore);
         });
+    });
+
+    // ------------------------------------------------------------------
+    // Phase 8 — Path edge cases + batch scale
+    // ------------------------------------------------------------------
+    describe('path edge cases and batch scale', () => {
+        it.skipIf(!isGitHub)('creates, modifies, and renames a unicode-named file', async () => {
+            const s = scenario();
+            const original = path('unicode/筆記/測試文件.md');
+            const archived = path('unicode/筆記/已歸檔.md');
+            await s.baseline(original, 'unicode-v1');
+
+            s.writeLocal(original, 'unicode-v2');
+            let headBefore = await s.head();
+            let result = await s.push([original]);
+            expect(result.success, describePushResult(result)).toBe(1);
+            await s.expectRemoteContent(original, 'unicode-v2');
+            await s.expectSingleCommitSince(headBefore);
+
+            s.renameLocal(original, archived);
+            await s.manager.trackRename(archived, original);
+            headBefore = await s.head();
+            result = await s.push([s.tfile(archived)]);
+            expect(result.success, describePushResult(result)).toBe(1);
+            await s.expectRemoteMissing(original);
+            await s.expectRemoteContent(archived, 'unicode-v2');
+            await s.expectSingleCommitSince(headBefore);
+        });
+
+        it.skipIf(!isGitHub)('creates and modifies a file with spaces and symbols', async () => {
+            const s = scenario();
+            const p = path('spaces/folder/my note (draft).md');
+            await s.baseline(p, 'draft-v1');
+
+            s.writeLocal(p, 'draft-v2');
+            const headBefore = await s.head();
+            const result = await s.push([p]);
+            expect(result.success, describePushResult(result)).toBe(1);
+            await s.expectRemoteContent(p, 'draft-v2');
+            await s.expectSingleCommitSince(headBefore);
+        });
+
+        it.skipIf(!isGitHub)('moves and modifies a deeply nested file', async () => {
+            const s = scenario();
+            const oldP = path('deep/a/b/c/d/e/note.md');
+            const newP = path('deep/archive/x/y/z/w/note.md');
+            await s.baseline(oldP, 'deep-v1');
+
+            s.renameLocal(oldP, newP);
+            s.writeLocal(newP, 'deep-v2');
+            await s.manager.trackRename(newP, oldP);
+
+            const headBefore = await s.head();
+            const result = await s.push([s.tfile(newP)]);
+            expect(result.success, describePushResult(result)).toBe(1);
+            await s.expectRemoteMissing(oldP);
+            await s.expectRemoteContent(newP, 'deep-v2');
+            await s.expectSingleCommitSince(headBefore);
+        });
+
+        it.skipIf(!isGitHub)('creates 100 files in one commit', async () => {
+            const s = scenario();
+            const paths = Array.from({ length: 100 }, (_, i) => path(`batch-100/${String(i).padStart(3, '0')}.md`));
+            for (const p of paths) s.writeLocal(p, `content ${p}`);
+
+            const headBefore = await s.head();
+            const result = await s.push(paths);
+            expect(result.success, describePushResult(result)).toBe(100);
+            expect(result.failed, describePushResult(result)).toBe(0);
+            await s.expectSingleCommitSince(headBefore);
+            await s.expectRemoteContent(paths[0]!, `content ${paths[0]}`);
+            await s.expectRemoteContent(paths[50]!, `content ${paths[50]}`);
+            await s.expectRemoteContent(paths[99]!, `content ${paths[99]}`);
+        });
+
+        it.skipIf(!isGitHub)('pushes a 100-file mixed batch (modify + create + rename) in one commit', async () => {
+            const s = scenario();
+            const modifyPaths = Array.from({ length: 40 }, (_, i) => path(`mixed-100/modify/${i}.md`));
+            const createPaths = Array.from({ length: 30 }, (_, i) => path(`mixed-100/create/${i}.md`));
+            const renameOld = Array.from({ length: 30 }, (_, i) => path(`mixed-100/rename-old/${i}.md`));
+            const renameNew = Array.from({ length: 30 }, (_, i) => path(`mixed-100/rename-new/${i}.md`));
+
+            for (const p of modifyPaths) await s.baseline(p, 'v1');
+            for (const p of renameOld) await s.baseline(p, 'r-v1');
+            for (const p of modifyPaths) s.writeLocal(p, 'v2');
+            for (const p of createPaths) s.writeLocal(p, 'new');
+            for (let i = 0; i < renameOld.length; i++) {
+                s.renameLocal(renameOld[i]!, renameNew[i]!);
+                await s.manager.trackRename(renameNew[i]!, renameOld[i]!);
+            }
+
+            const headBefore = await s.head();
+            const all = [...modifyPaths, ...createPaths, ...renameNew.map(p => s.tfile(p))];
+            const result = await s.push(all);
+            expect(result.success, describePushResult(result)).toBe(100);
+            expect(result.failed, describePushResult(result)).toBe(0);
+            await s.expectSingleCommitSince(headBefore);
+
+            await s.expectRemoteContent(modifyPaths[0]!, 'v2');
+            await s.expectRemoteContent(createPaths[0]!, 'new');
+            await s.expectRemoteMissing(renameOld[0]!);
+            await s.expectRemoteContent(renameNew[0]!, 'r-v1');
+        });
+
+        it.skipIf(!isStress || !isGitHub)('stress: creates 1000 files', async () => {
+            const s = scenario();
+            const paths = Array.from({ length: 1000 }, (_, i) => path(`batch-1000/${String(i).padStart(4, '0')}.md`));
+            for (const p of paths) s.writeLocal(p, `content ${p}`);
+
+            const result = await s.push(paths);
+            expect(result.success, describePushResult(result)).toBe(1000);
+            expect(result.failed, describePushResult(result)).toBe(0);
+            await s.expectRemoteContent(paths[0]!, `content ${paths[0]}`);
+            await s.expectRemoteContent(paths[999]!, `content ${paths[999]}`);
+        }, 300_000);
     });
 });
