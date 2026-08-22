@@ -627,12 +627,12 @@ describe('Source Control Flows E2E', () => {
             await s.baseline(p, 'v1');
             s.writeLocal(p, 'v2');
 
-            const headAfterFirst = await s.head();
             const first = await s.push([p]);
             expect(first.success, describePushResult(first)).toBe(1);
             await s.expectRemoteContent(p, 'v2');
             const shaAfterFirst = s.metadataSha(p);
             expect(shaAfterFirst).toBeTruthy();
+            const headAfterFirst = await s.head();
 
             const second = await s.push([p]);
             expect(second.success, describePushResult(second)).toBe(0);
