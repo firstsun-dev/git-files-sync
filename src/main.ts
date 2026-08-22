@@ -6,8 +6,7 @@ import { GiteaService } from './services/gitea-service';
 import { GitServiceInterface, GitTreeEntry } from './services/git-service-interface';
 import { ConnectionTestResult } from './services/git-service-base';
 import { SyncManager } from './logic/sync-manager';
-import { SyncStatusView, SYNC_STATUS_VIEW_TYPE } from './ui/SyncStatusView';
-import { DiffView, SYNC_DIFF_VIEW_TYPE } from './ui/DiffView';
+import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from './ui/source-control/SourceControlItemView';
 import { GitignoreManager } from './logic/gitignore-manager';
 import { logger } from './utils/logger';
 import { ConfirmModal } from './ui/ConfirmModal';
@@ -19,6 +18,12 @@ import { ObsidianSyncInteraction } from './ui/ObsidianSyncInteraction';
 import { SyncStatusRefreshService } from './logic/sync/SyncStatusRefreshService';
 import { SyncDiffService } from './logic/sync/SyncDiffService';
 import { SyncManagerWorkspace, type SyncWorkspace } from './logic/sync/SyncWorkspace';
+import { ChangeRepository } from './logic/source-control/ChangeRepository';
+import { OperationState } from './logic/source-control/OperationState';
+import { PushSelectionStore } from './logic/source-control/PushSelectionStore';
+import { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
+import { SourceControlActionService } from './logic/source-control/SourceControlActionService';
+import { toSyncChanges } from './logic/source-control/FileStatusAdapter';
 
 export type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
 
@@ -34,6 +39,12 @@ export default class GitLabFilesPush extends Plugin {
 	syncWorkspace: SyncWorkspace;
 	syncStatusRefresh: SyncStatusRefreshService;
 	gitignoreManager: GitignoreManager;
+	changeRepository: ChangeRepository;
+	pushSelectionStore: PushSelectionStore;
+	operationState: OperationState;
+	sourceControlViewModel: SourceControlViewModel;
+	sourceControlActions: SourceControlActionService;
+	private unsubscribeChangeRepository?: () => void;
 	private gitignoreConfigKey = '';
 	private pushRibbonEl: HTMLElement;
 	private statusBarEl: HTMLElement;
@@ -46,26 +57,19 @@ export default class GitLabFilesPush extends Plugin {
 		this.addSettingTab(new GitLabSyncSettingTab(this.app, this));
 
 		this.registerView(
-			SYNC_STATUS_VIEW_TYPE,
-			(leaf) => new SyncStatusView(leaf, this)
-		);
-
-		// Desktop shows diffs here instead of inline in the sidebar, where a
-		// side-by-side view has no room. The sync panel opens and reuses it.
-		this.registerView(
-			SYNC_DIFF_VIEW_TYPE,
-			(leaf) => new DiffView(leaf)
+			SOURCE_CONTROL_VIEW_TYPE,
+			(leaf) => new SourceControlItemView(leaf, this)
 		);
 
 		this.addRibbonIcon('git-compare', t('main.ribbon.openSyncStatus'), async () => {
-			await this.activateSyncStatusView();
+			await this.activateSourceControlView();
 		});
 
 		this.addCommand({
 			id: 'open-sync-status',
 			name: t('main.command.openSyncStatus'),
 			callback: async () => {
-				await this.activateSyncStatusView();
+				await this.activateSourceControlView();
 			}
 		});
 
@@ -99,6 +103,28 @@ export default class GitLabFilesPush extends Plugin {
 			diffService: new SyncDiffService(this.sync.status, (sha, path) => this.gitService.getBlob(sha, path)),
 			normalizePath: path => this.getNormalizedPath(path),
 			app: this.app,
+		});
+
+		this.changeRepository = new ChangeRepository();
+		this.pushSelectionStore = new PushSelectionStore();
+		this.operationState = new OperationState();
+		this.sourceControlViewModel = new SourceControlViewModel(
+			this.changeRepository,
+			this.pushSelectionStore,
+			this.operationState,
+		);
+		this.sourceControlActions = new SourceControlActionService(
+			this.changeRepository,
+			this.operationState,
+			this.syncWorkspace,
+		);
+		// Keeps ChangeRepository (and therefore the Source Control view) in
+		// sync with the same SyncStatusService instance the sync domain
+		// already publishes to -- no separate refresh/polling path.
+		this.unsubscribeChangeRepository = this.sync.status.subscribe((statuses) => {
+			const changes = toSyncChanges([...statuses.values()]);
+			this.changeRepository.replace(changes);
+			this.pushSelectionStore.refresh(changes.map(change => change.id));
 		});
 
 		this.statusBarEl = this.addStatusBarItem();
@@ -207,7 +233,7 @@ export default class GitLabFilesPush extends Plugin {
 			this.app.vault.on('rename', (file, oldPath) => {
 				if (file instanceof TFile) {
 					void this.sync.trackRename(file.path, oldPath).then(() => {
-						this.notifySyncStatusViews(view => view.handleFileRenamed(file, oldPath));
+						this.syncStatusRefresh.handleFileRenamed(file, oldPath);
 					});
 				} else if (file instanceof TFolder) {
 					void this.trackFolderRename(file, oldPath);
@@ -217,12 +243,14 @@ export default class GitLabFilesPush extends Plugin {
 
 		// A saved edit inside the configured vault folder should update that
 		// row's status live rather than leaving it stale until the next manual
-		// refresh. Reuses whatever sync panel views are currently open; no-op
-		// when the panel isn't open or the file isn't in scope.
+		// refresh. This updates the shared SyncStatusService directly, which
+		// republishes to any open Source Control view (and to
+		// ChangeRepository) via the subscription set up above; no-op when the
+		// file isn't in scope.
 		this.registerEvent(
 			this.app.vault.on('modify', (file) => {
 				if (file instanceof TFile && this.filterPathByVaultFolder(file.path)) {
-					this.notifySyncStatusViews(view => void view.handleFileModified(file));
+					void this.syncStatusRefresh.handleFileModified(file);
 				}
 			})
 		);
@@ -235,15 +263,8 @@ export default class GitLabFilesPush extends Plugin {
 	}
 
 	private async refreshSyncStatusOnStartup(): Promise<void> {
-		await this.activateSyncStatusView();
-		const leaf = this.app.workspace.getLeavesOfType(SYNC_STATUS_VIEW_TYPE)[0];
-		if (leaf?.view instanceof SyncStatusView) await leaf.view.refreshAllStatuses();
-	}
-
-	private notifySyncStatusViews(callback: (view: SyncStatusView) => void): void {
-		for (const leaf of this.app.workspace.getLeavesOfType(SYNC_STATUS_VIEW_TYPE)) {
-			if (leaf.view instanceof SyncStatusView) callback(leaf.view);
-		}
+		await this.activateSourceControlView();
+		await this.syncWorkspace.refresh();
 	}
 
 	/**
@@ -261,7 +282,7 @@ export default class GitLabFilesPush extends Plugin {
 		for (const file of files) {
 			const oldPath = oldPrefix + file.path.slice(newPrefix.length);
 			await this.sync.trackRename(file.path, oldPath);
-			this.notifySyncStatusViews(view => view.handleFileRenamed(file, oldPath));
+			this.syncStatusRefresh.handleFileRenamed(file, oldPath);
 		}
 	}
 
@@ -372,16 +393,16 @@ export default class GitLabFilesPush extends Plugin {
 		if (this.pushRibbonEl) setTooltip(this.pushRibbonEl, this.pushRibbonLabel());
 	}
 
-	async activateSyncStatusView(): Promise<void> {
+	async activateSourceControlView(): Promise<void> {
 		const { workspace } = this.app;
 
-		let leaf = workspace.getLeavesOfType(SYNC_STATUS_VIEW_TYPE)[0];
+		let leaf = workspace.getLeavesOfType(SOURCE_CONTROL_VIEW_TYPE)[0];
 
 		if (!leaf) {
 			const rightLeaf = workspace.getRightLeaf(false);
 			if (rightLeaf) {
 				await rightLeaf.setViewState({
-					type: SYNC_STATUS_VIEW_TYPE,
+					type: SOURCE_CONTROL_VIEW_TYPE,
 					active: true,
 				});
 				leaf = rightLeaf;
@@ -565,7 +586,11 @@ export default class GitLabFilesPush extends Plugin {
 	}
 
 	onunload() {
-		// Cleanup is handled by Obsidian for registered components
+		// Cleanup of registered components (views, commands, DOM/vault event
+		// listeners) is handled by Obsidian. The ChangeRepository subscription
+		// isn't Obsidian-managed, so it's unsubscribed explicitly.
+		this.unsubscribeChangeRepository?.();
+		this.unsubscribeChangeRepository = undefined;
 	}
 
 	async loadSettings() {

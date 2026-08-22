@@ -1,7 +1,6 @@
-/* ── VaultBridge – Sync Status View ────────────────────────────── */
+/* ── VaultBridge – Source Control View ────────────────────────────── */
 
-/* Full-height flex column so the list can scroll independently */
-.sync-status-view {
+.scv-root {
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -10,135 +9,50 @@
     container-type: inline-size;
 }
 
-
-/* Header holds the search input, which must never be re-rendered (it would
-   lose focus mid-typing); the body is what renderView() rebuilds. */
-.ssv-header {
+.scv-header {
     flex-shrink: 0;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.ssv-body {
+.scv-header-title {
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+.scv-main {
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
 }
 
-/* ── Search filter ──────────────────────────────────────────────── */
-.ssv-search {
+.scv-desktop .scv-main {
+    flex-direction: row;
+}
+
+.scv-body {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    flex-shrink: 0;
-}
-
-.ssv-search-icon {
-    display: flex;
-    align-items: center;
-    color: var(--text-faint);
-    flex-shrink: 0;
-}
-
-.ssv-search-icon svg {
-    width: 14px;
-    height: 14px;
-}
-
-.ssv-search-input {
+    flex-direction: column;
     flex: 1;
-    min-width: 0;
-    height: 26px;
-    padding: 0 6px;
-    font-size: 0.82em;
-    background: var(--background-modifier-form-field);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 4px;
-    color: var(--text-normal);
+    min-height: 0;
+    overflow-y: auto;
 }
 
-.ssv-search-clear {
-    display: none;
-    align-items: center;
-    justify-content: center;
-    padding: 2px;
-    height: 22px;
-    width: 22px;
-    flex-shrink: 0;
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    color: var(--text-muted);
-    cursor: pointer;
-}
-
-.ssv-search.has-query .ssv-search-clear { display: flex; }
-
-.ssv-search-clear:hover { color: var(--text-normal); }
-
-.ssv-search-clear svg {
-    width: 14px;
-    height: 14px;
-}
-
-/* ── Info strip ─────────────────────────────────────────────────── */
-.ssv-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    background: var(--background-secondary);
-    border-bottom: 1px solid var(--background-modifier-border);
-    font-size: 0.75em;
-    color: var(--text-muted);
-    flex-wrap: wrap;
-    flex-shrink: 0;
-}
-
-@container (max-width: 400px) {
-    .ssv-info { gap: 4px; padding: 4px 8px; }
-    .ssv-info-sep { display: none; }
-}
-
-.ssv-info-item {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    font-weight: 500;
-    color: var(--text-normal);
-}
-
-.ssv-info-sep { color: var(--background-modifier-border); }
-
-.ssv-info-time {
-    font-weight: 400;
-    color: var(--text-muted);
-}
-
-/* ── Filter tabs ────────────────────────────────────────────────── */
-.ssv-tabs {
+/* ── Filter menu ───────────────────────────────────────────────── */
+.scv-filter-menu {
     display: flex;
     gap: 4px;
     padding: 8px 10px;
     border-bottom: 1px solid var(--background-modifier-border);
     overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     flex-shrink: 0;
-    /* When labels are still shown (container wide enough that the
-       icon-only fallback below hasn't kicked in) six-plus tabs can still
-       overflow before wrapping/hiding text. The scrollbar itself is
-       hidden for a cleaner look, so without this the cut-off edge reads
-       as "broken" rather than "scroll for more" — a soft fade signals
-       there's more to scroll to. */
-    -webkit-mask-image: linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent);
-    mask-image: linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent);
 }
 
-.ssv-tabs::-webkit-scrollbar { display: none; }
+.scv-filter-menu::-webkit-scrollbar { display: none; }
 
-.ssv-tab {
+.scv-filter-option {
     display: flex;
     align-items: center;
     gap: 5px;
@@ -155,23 +69,18 @@
     min-height: 28px;
 }
 
-@container (max-width: 400px) {
-    .ssv-tab-label { display: none; }
-    .ssv-tab { padding: 4px 8px; min-width: 32px; justify-content: center; }
-}
-
-.ssv-tab:hover {
+.scv-filter-option:hover {
     background: var(--background-modifier-hover);
     color: var(--text-normal);
 }
 
-.ssv-tab.active {
+.scv-filter-option.is-active {
     background: var(--interactive-accent);
     color: var(--text-on-accent);
     border-color: var(--interactive-accent);
 }
 
-.ssv-tab-count {
+.scv-filter-count {
     background: rgba(0, 0, 0, 0.12);
     border-radius: 10px;
     padding: 1px 6px;
@@ -179,226 +88,105 @@
     min-width: 18px;
     text-align: center;
 }
-.is-mobile .ssv-tabs {
-    padding: 10px;
-    gap: 8px;
-    flex-wrap: wrap;
-    overflow-x: visible;
-    /* Mobile wraps to a second row instead of scrolling, so the edge fade
-       (meant for the horizontal-scroll case) would just clip the wrapped
-       rows for no reason — turn it off. */
-    -webkit-mask-image: none;
-    mask-image: none;
-}
 
-.is-mobile .ssv-tab {
-    padding: 6px 14px;
-    font-size: 0.9em;
-    min-height: 36px;
-    border-radius: 10px;
-    flex: 1 0 auto;
-    justify-content: center;
-}
-
-.ssv-tab.active .ssv-tab-count {
+.scv-filter-option.is-active .scv-filter-count {
     background: rgba(255, 255, 255, 0.22);
 }
 
-.ssv-filter-select { display: none; }
-
-.is-mobile .ssv-filter-select {
-    display: block;
-    width: calc(100% - 20px);
-    min-height: 36px;
-    margin: 10px;
-}
-
-/* ── Action bar ─────────────────────────────────────────────────── */
-.ssv-action-bar {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    flex-shrink: 0;
-    background: var(--background-primary);
-}
-
-.ssv-action-bar-row {
+/* ── Push button ───────────────────────────────────────────────── */
+.scv-push-btn {
     display: flex;
     align-items: center;
-    gap: 4px;
-    width: 100%;
-}
-
-.ssv-tree-options {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    width: 100%;
-    padding-left: 4px;
-}
-
-.ssv-tree-option {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-muted);
-    font-size: 0.80em;
-    cursor: pointer;
-}
-
-.ssv-tree-option input { margin: 0; cursor: pointer; }
-
-@container (max-width: 450px) {
-    .ssv-btn-label { display: none; }
-    .ssv-btn { padding: 5px 8px; min-width: 34px; justify-content: center; }
-    .ssv-select-label { display: none; }
-    .ssv-bar-spacer { display: none; }
-}
-
-/* ── Mobile specific overrides ─────────────────────────────────── */
-
-.is-mobile .ssv-btn {
-    padding: 8px 14px;
-    font-size: 0.9em;
-    min-height: 38px;
-    flex: 1 0 auto;
     justify-content: center;
-}
-
-.is-mobile .ssv-action-bar {
-    gap: 8px;
-    padding: 10px;
-}
-
-.is-mobile .ssv-action-bar-row { flex-wrap: wrap; gap: 8px; }
-
-.is-mobile .ssv-bar-spacer {
-    display: none;
-}
-
-
-.ssv-bar-spacer { flex: 1; }
-
-.ssv-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 6px 11px;
+    gap: 6px;
+    width: calc(100% - 20px);
+    margin: 8px 10px;
+    padding: 7px 11px;
     border-radius: 5px;
-    font-size: 0.82em;
+    font-size: 0.85em;
     font-weight: 500;
     cursor: pointer;
-    white-space: nowrap;
     border: 1px solid transparent;
-    min-height: 30px;
-    transition: opacity 0.12s, background 0.12s;
+    background: var(--color-green);
+    color: white;
+    min-height: 32px;
+    flex-shrink: 0;
+    transition: opacity 0.12s;
 }
 
-.ssv-btn:disabled {
+.scv-push-btn:disabled {
     opacity: 0.38;
     cursor: not-allowed;
 }
 
-.ssv-btn:not(:disabled):hover { opacity: 0.82; }
+.scv-push-btn:not(:disabled):hover { opacity: 0.85; }
 
-.ssv-btn-refresh {
-    background: var(--background-secondary);
-    border-color: var(--background-modifier-border);
-    color: var(--text-normal);
-}
-
-.ssv-btn-push {
-    background: var(--color-green);
-    color: white;
-}
-
-.ssv-btn-pull {
-    background: var(--color-blue);
-    color: white;
-}
-
-.ssv-btn-delete {
-    background: var(--color-red);
-    color: white;
-}
-
-/* Indeterminate "select all" checkbox row */
-.ssv-select-row {
+/* ── Change sections & tree ───────────────────────────────────────── */
+.scv-section-header {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.80em;
+    padding: 6px 12px 6px 8px;
+    cursor: pointer;
     color: var(--text-muted);
-    cursor: pointer;
-    min-height: 30px;
-    padding: 0 4px;
+    font-size: 0.78em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
 }
 
-.ssv-select-row input[type="checkbox"] {
-    width: 15px;
-    height: 15px;
-    cursor: pointer;
-}
+.scv-section-header:hover { background: var(--background-modifier-hover); }
 
-/* ── Scrollable file list ───────────────────────────────────────── */
-.ssv-list {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-}
-
-/* ── Tree folders ──────────────────────────────────────────────── */
-.ssv-tree-children {
-    margin-left: 16px;
-    border-left: 1px solid var(--background-modifier-border);
-}
-
-.ssv-tree-folder-row {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    min-height: 34px;
-    padding: 6px 12px 6px 5px;
-    border-bottom: 1px solid var(--background-modifier-border-hover);
-    color: var(--text-normal);
-}
-
-.ssv-tree-folder-row:hover { background: var(--background-modifier-hover); }
-
-.ssv-folder-toggle {
+.scv-section-toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     padding: 0;
     border: 0;
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
-    font-family: var(--font-monospace);
-    font-size: 18px;
-    line-height: 1;
 }
 
-.ssv-folder-checkbox {
-    width: 16px;
-    height: 16px;
-    margin: 0;
-    flex-shrink: 0;
+.scv-section-title { flex: 1; }
+
+.scv-section-count {
+    background: var(--background-modifier-border);
+    border-radius: 10px;
+    padding: 1px 6px;
+    font-size: 0.9em;
+    min-width: 18px;
+    text-align: center;
+}
+
+.scv-tree-folder-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 32px;
+    padding: 4px 12px 4px 8px;
+    color: var(--text-normal);
     cursor: pointer;
 }
 
-.ssv-tree-folder-icon {
-    display: flex;
-    color: var(--text-warning);
+.scv-tree-folder-row:hover { background: var(--background-modifier-hover); }
+
+.scv-tree-folder-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
 }
 
-.ssv-tree-folder-icon .svg-icon { width: 16px; height: 16px; }
-
-.ssv-tree-folder-name {
+.scv-tree-folder-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -406,297 +194,161 @@
     font-weight: 600;
 }
 
-/* ── Empty / loading states ─────────────────────────────────────── */
-.ssv-empty {
+.scv-tree-children {
+    margin-left: 13px;
+    border-left: 1px solid var(--background-modifier-border);
+}
+
+/* ── Change item row ───────────────────────────────────────────── */
+.scv-change-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    padding: 5px 12px 5px 8px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background 0.1s;
+}
+
+.scv-change-item:hover { background: var(--background-modifier-hover); }
+
+.scv-change-item.scv-kind-local-only      { border-left-color: var(--color-green); }
+.scv-change-item.scv-kind-local-modified  { border-left-color: var(--text-warning); }
+.scv-change-item.scv-kind-remote-only     { border-left-color: var(--color-blue); }
+.scv-change-item.scv-kind-remote-modified { border-left-color: var(--color-blue); }
+.scv-change-item.scv-kind-moved           { border-left-color: var(--color-purple); }
+.scv-change-item.scv-kind-conflict        { border-left-color: var(--color-red); }
+.scv-change-item.scv-kind-synced          { border-left-color: var(--background-modifier-border); }
+
+.scv-change-select {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.scv-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    font-size: 0.68em;
+    font-weight: 700;
+    border-radius: 3px;
+    border: 1px solid currentColor;
+    opacity: 0.85;
+}
+
+.scv-badge-local-only,
+.scv-badge-remote-only    { color: var(--color-green); }
+.scv-badge-local-modified,
+.scv-badge-remote-modified { color: var(--text-warning); }
+.scv-badge-moved          { color: var(--color-purple); }
+.scv-badge-conflict       { color: var(--color-red); }
+.scv-badge-synced         { color: var(--text-muted); }
+
+.scv-change-name {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--font-monospace);
+    font-size: 0.80em;
+    color: var(--text-normal);
+}
+
+.scv-change-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.scv-change-rename-from {
+    color: var(--text-faint);
+    text-decoration: line-through;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.scv-change-rename-arrow {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-faint);
+    flex-shrink: 0;
+}
+
+.scv-change-rename-arrow .svg-icon { width: 12px; height: 12px; }
+
+/* ── Operation indicator ──────────────────────────────────────────── */
+.scv-op-indicator {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.scv-op-indicator .svg-icon { width: 14px; height: 14px; }
+
+.scv-op-running { color: var(--text-muted); }
+.scv-op-success { color: var(--color-green); }
+.scv-op-failed  { color: var(--color-red); }
+
+/* ── Empty state ───────────────────────────────────────────────── */
+.scv-empty {
     padding: 36px 20px;
     text-align: center;
     color: var(--text-muted);
     font-size: 0.88em;
 }
 
-/* ── Progress bar ───────────────────────────────────────────────── */
-.ssv-progress {
-    padding: 24px 16px;
-    text-align: center;
-}
-
-.ssv-progress-text {
-    font-size: 0.83em;
-    color: var(--text-muted);
-    margin-bottom: 10px;
-}
-
-.ssv-progress-bar {
-    width: 100%;
-    height: 4px;
-    background: var(--background-secondary);
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-.ssv-progress-fill {
-    height: 100%;
-    background: var(--interactive-accent);
-    transition: width 0.2s ease;
-    border-radius: 2px;
-}
-
-/* ── File item ──────────────────────────────────────────────────── */
-.ssv-file {
-    padding: 9px 12px;
-    border-bottom: 1px solid var(--background-modifier-border-hover);
-    border-left: 3px solid transparent;
-    transition: background 0.1s;
-}
-
-.ssv-file:hover { background: var(--background-modifier-hover); }
-
-.ssv-file.status-synced    { border-left-color: var(--color-green); }
-.ssv-file.status-modified  { border-left-color: var(--text-warning); }
-.ssv-file.status-unsynced  { border-left-color: var(--color-red); }
-.ssv-file.status-remote    { border-left-color: var(--color-blue); }
-.ssv-file.status-moved     { border-left-color: var(--color-purple); }
-.ssv-file.status-checking  { border-left-color: var(--background-modifier-border); }
-
-.ssv-file-row {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    min-height: 30px;
-}
-
-.ssv-file-checkbox {
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
-    cursor: pointer;
-}
-
-.ssv-file-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    flex-shrink: 0;
-}
-
-.ssv-icon-synced   { color: var(--color-green); }
-.ssv-icon-modified { color: var(--text-warning); }
-.ssv-icon-unsynced { color: var(--color-red); }
-.ssv-icon-remote   { color: var(--color-blue); }
-.ssv-icon-moved    { color: var(--color-purple); }
-.ssv-icon-checking { color: var(--text-muted); }
-
-.ssv-file-path {
+/* ── Inline diff pane (desktop side-by-side) ──────────────────────── */
+.scv-diff {
     flex: 1;
-    font-family: var(--font-monospace);
-    font-size: 0.80em;
-    color: var(--text-normal);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     min-width: 0;
-}
-
-/* Only the path is clickable, so it has to read as a link — the rest of the
-   row keeps its existing behaviour. Declared after .ssv-file-path so the
-   accent colour wins at equal specificity. */
-.ssv-file-path-link {
-    cursor: pointer;
-    color: var(--text-accent);
-}
-
-.ssv-file-path-link:hover {
-    text-decoration: underline;
-}
-
-.ssv-status-badge {
-    font-size: 0.70em;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 10px;
-    white-space: nowrap;
-    flex-shrink: 0;
-    border: 1px solid currentColor;
-    opacity: 0.85;
-}
-
-.ssv-badge-synced   { color: var(--color-green); }
-.ssv-badge-modified { color: var(--text-warning); }
-.ssv-badge-unsynced { color: var(--color-red); }
-.ssv-badge-remote   { color: var(--color-blue); }
-.ssv-badge-moved    { color: var(--color-purple); }
-.ssv-badge-checking { color: var(--text-muted); }
-
-/* Old path of a pending move, shown struck-through beneath the new one. */
-.ssv-moved-from {
-    margin-left: 25px;
-    font-family: var(--font-monospace);
-    font-size: 0.72em;
-    color: var(--text-faint);
-    text-decoration: line-through;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* ── Collapsed folder-move row ──────────────────────────────────── */
-.ssv-move-group-children {
-    margin-top: 6px;
-    margin-left: 41px; /* aligns under path, same as .ssv-file-actions */
-    border-left: 2px solid var(--background-modifier-border);
-    padding-left: 10px;
-}
-
-.ssv-move-group-child {
-    font-family: var(--font-monospace);
-    font-size: 0.74em;
-    color: var(--text-muted);
-    padding: 2px 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* ── Per-file action row ────────────────────────────────────────── */
-.ssv-file-actions {
-    display: flex;
-    gap: 5px;
-    margin-top: 7px;
-    padding-left: 41px; /* aligns under path */
-    flex-wrap: wrap;
-}
-
-.ssv-action-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    font-size: 0.76em;
-    border-radius: 4px;
-    cursor: pointer;
-    border: 1px solid var(--background-modifier-border);
-    background: transparent;
-    color: var(--text-normal);
-    white-space: nowrap;
-    min-height: 26px;
-    transition: background 0.1s, opacity 0.1s;
-}
-
-/* Consistent sizing for all Lucide icons used in the view */
-.ssv-file-icon .svg-icon {
-    width: 16px;
-    height: 16px;
-}
-
-.ssv-btn .svg-icon,
-.ssv-tab .svg-icon,
-.ssv-action-btn .svg-icon {
-    width: 15px;
-    height: 15px;
-}
-
-.ssv-info-icon {
-    display: inline-flex;
-    align-items: center;
-}
-
-.ssv-info-icon .svg-icon {
-    width: 13px;
-    height: 13px;
-}
-
-.is-mobile .ssv-action-btn {
-    padding: 8px 15px;
-    font-size: 0.85em;
-    min-height: 40px;
-}
-
-
-
-.ssv-action-btn:hover {
-    background: var(--background-modifier-hover);
-}
-
-.ssv-action-btn.push {
-    border-color: var(--color-green);
-    color: var(--color-green);
-}
-
-.ssv-action-btn.pull {
-    border-color: var(--color-blue);
-    color: var(--color-blue);
-}
-
-.ssv-action-btn.danger {
-    border-color: var(--color-red);
-    color: var(--color-red);
-}
-
-.ssv-action-btn.diff {
-    border-color: var(--background-modifier-border);
-    color: var(--text-muted);
-}
-
-/* ── Diff panel ─────────────────────────────────────────────────── */
-.ssv-diff {
-    display: none;
-    margin-top: 6px;
-    padding-left: 41px;
+    border-left: 1px solid var(--background-modifier-border);
+    overflow-y: auto;
+    padding: 10px 12px;
     container-type: inline-size;
 }
 
-.ssv-diff.visible { display: block; }
+.scv-diff-empty {
+    padding: 36px 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.88em;
+}
 
-/* Diff shown in its own workspace pane (desktop). It carries its own
-   container-type so the split/unified container query below resolves against
-   the pane's width — which is the entire point of moving it out of the
-   sidebar. */
-.sync-diff-view {
-    padding: 10px 14px;
-    overflow: hidden;
+/* ── Mobile detail view (list/detail with back button) ────────────── */
+.scv-detail {
     display: flex;
     flex-direction: column;
     height: 100%;
 }
 
-.ssv-diff-pane {
-    container-type: inline-size;
-}
-
-/* Desktop pane: let the diff fill the tab's full height instead of the
-   sidebar's capped max-height (mobile keeps the cap — see below). */
-.sync-diff-view .ssv-diff-pane-path {
+.scv-detail-back {
     flex-shrink: 0;
+    margin: 8px 10px;
+    padding: 6px 12px;
+    align-self: flex-start;
+    border-radius: 5px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    cursor: pointer;
+    font-size: 0.85em;
 }
 
-.sync-diff-view .ssv-diff-pane {
+.scv-detail-diff {
     flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-
-.sync-diff-view .ssv-diff-split {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-
-.sync-diff-view .ssv-diff-grid,
-.sync-diff-view .ssv-diff-unified {
-    flex: 1;
-    max-height: none;
-    min-height: 0;
-}
-
-.ssv-diff-pane-path {
-    font-family: var(--font-monospace);
-    font-size: 0.82em;
-    color: var(--text-muted);
-    margin-bottom: 8px;
-    overflow-wrap: anywhere;
+    overflow-y: auto;
+    padding: 0 12px 12px;
+    container-type: inline-size;
 }
 
 /* ── Side-by-side diff (default for wide panels) ──────────────────── */
@@ -812,35 +464,10 @@
 
 /* ── Mobile adjustments ─────────────────────────────────────────── */
 @container (max-width: 480px) {
-    .ssv-info { padding: 5px 10px; gap: 8px; }
-
-    .ssv-tabs { padding: 6px 8px; gap: 3px; }
-    .ssv-tab  { padding: 4px 8px; font-size: 0.76em; }
-    .ssv-tab-label { display: none; }
-
-    .ssv-action-bar { padding: 6px 8px; gap: 5px; }
-    .ssv-btn { padding: 5px 9px; font-size: 0.76em; }
-    .ssv-btn-label { display: none; }
-
-    .ssv-file { padding: 8px 10px; }
-    .ssv-file-path { font-size: 0.76em; }
-    .ssv-status-badge { display: none; } 
-
-    .ssv-file-actions { padding-left: 0; margin-top: 8px; }
-    .ssv-action-btn { flex: 1 1 auto; text-align: center; min-height: 32px; }
-    .ssv-action-btn .ssv-btn-label { display: none; }
-
-    .ssv-diff { padding-left: 0; }
-}
-
-/* Mobile label overrides — placed after container queries so source order wins */
-.is-mobile .ssv-btn-label,
-.is-mobile .ssv-tab-label {
-    display: inline;
-}
-
-.is-mobile .ssv-action-btn .ssv-btn-label {
-    display: inline;
+    .scv-filter-menu { padding: 6px 8px; gap: 3px; }
+    .scv-filter-option { padding: 4px 8px; font-size: 0.76em; }
+    .scv-change-item { padding: 6px 10px; }
+    .scv-change-name { font-size: 0.76em; }
 }
 
 /* ── Settings connection status badge ──────────────────────────── */
