@@ -22,11 +22,12 @@ export interface SourceControlViewState {
     items: SourceControlItem[];
     /**
      * The actionable changes the user has currently selected for push, as
-     * full row items. Empty when nothing is selected. Reuses the same
-     * `selected + non-synced` definition as `buildSummary.readyToPush` so the
-     * "SELECTED FOR SYNC (N)" section and the Sync button count can't drift.
+     * full row items — the working sync queue. Empty when nothing is
+     * selected. Reuses the same `selected + non-synced` definition as
+     * `buildSummary.readyToPush` so the "SYNC QUEUE (N)" section and the Sync
+     * button count can't drift.
      */
-    selectedItems: SourceControlItem[];
+    syncQueue: SourceControlItem[];
     /** Current view-wide refresh status, surfaced so the header can render its states. */
     refreshStatus: RefreshStatus;
     /** Single-source counts from {@link buildSummary} — the view never recomputes these. */
@@ -58,21 +59,30 @@ export interface SourceControlViewState {
 export class SourceControlViewModel {
     constructor(
         private readonly changes: ChangeRepository,
-        private readonly selection: PushSelectionStore,
+        private readonly selectionStore: PushSelectionStore,
         private readonly operations: OperationState,
         private readonly refreshSource: () => Promise<unknown>,
         private readonly refreshState: RefreshState,
     ) {}
 
+    /**
+     * The push-selection store, exposed so the view can toggle/clear
+     * selection without holding its own reference and reaching past the
+     * ViewModel. The view never touches a `PushSelectionStore` directly — it
+     * goes through `viewModel.selection` (`includeForPush`/`excludeFromPush`/
+     * `selectMany`/`deselectMany`/`getSelectedChangeIds`).
+     */
+    get selection(): PushSelectionStore { return this.selectionStore; }
+
     getState(filter: SourceControlFilter = 'all', showSynced = false): SourceControlViewState {
         const all = this.changes.getAll();
-        const summary = buildSummary(all, this.selection, showSynced);
+        const summary = buildSummary(all, this.selectionStore, showSynced);
         const items = all
-            .filter(change => matchesFilter(change, filter, this.selection))
+            .filter(change => matchesFilter(change, filter, this.selectionStore))
             .filter(() => this.isRenderable(filter, showSynced))
             .map(change => this.toItem(change));
-        const selectedItems = summary.readyToPush.map(change => this.toItem(change));
-        return { filter, items, selectedItems, refreshStatus: this.refreshState.get(), counts: summary.counts };
+        const syncQueue = summary.readyToPush.map(change => this.toItem(change));
+        return { filter, items, syncQueue, refreshStatus: this.refreshState.get(), counts: summary.counts };
     }
 
     /**
@@ -107,7 +117,7 @@ export class SourceControlViewModel {
             path: change.path,
             previousPath: change.previousPath,
             kind: change.kind,
-            isReadyToPush: this.selection.isIncluded(change.id),
+            isReadyToPush: this.selectionStore.isIncluded(change.id),
             operationStatus: this.operations.get(change.id),
         };
     }

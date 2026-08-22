@@ -41,6 +41,29 @@ export function renderChangeTree(
     renderNodes(container, nodes, byId, collapsedFolders, callbacks, options);
 }
 
+/**
+ * Renders `items` as a flat list (no folder nesting), one row per file with
+ * the folder path shown as a dimmed right-aligned suffix. Sorted by path so
+ * the order stays stable across renders. Used by the "Repository Changes"
+ * List view — the alternative to {@link renderChangeTree} — when folder
+ * nesting is more noise than signal (e.g. a flat vault or a long search
+ * result).
+ */
+export function renderChangeList(
+    container: HTMLElement,
+    items: readonly SourceControlItem[],
+    callbacks: ChangeTreeCallbacks,
+): void {
+    const list = container.createDiv({ cls: 'scv-change-list' });
+    const sorted = [...items].sort((a, b) => a.path.localeCompare(b.path));
+    for (const item of sorted) {
+        const slash = item.path.lastIndexOf('/');
+        const name = slash === -1 ? item.path : item.path.slice(slash + 1);
+        const folderPath = slash === -1 ? '' : item.path.slice(0, slash);
+        renderChangeItem(list, item, name, callbacks, { folderPath, listMode: true });
+    }
+}
+
 function renderNodes(
     container: HTMLElement,
     nodes: readonly ChangeTreeNode[],

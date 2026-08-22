@@ -21,7 +21,7 @@ function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCa
     const viewModel = new SourceControlViewModel(repository, selection, operations, refreshSource, refreshState);
     const onPush = callbacks.onPush ?? vi.fn();
     const onRefresh = callbacks.onRefresh ?? vi.fn();
-    const view = new SourceControlView(viewModel, selection, { onPush, onRefresh, ...callbacks }, () => ({
+    const view = new SourceControlView(viewModel, { onPush, onRefresh, ...callbacks }, () => ({
         serviceName: 'GitHub',
         branch: 'main',
         vaultFolder: '',
@@ -49,9 +49,11 @@ describe('SourceControlView', () => {
 
             // No section grouping — every filter renders one flat tree.
             expect(container.querySelectorAll('.scv-section')).toHaveLength(0);
-            // Default chip is Needs Sync (actionable), so the header reads "Needs Sync".
-            expect(container.querySelector('.scv-active-filter-title')?.textContent).toBe('Needs Sync');
-            expect(container.querySelector('.scv-active-filter-count')?.textContent).toBe('3');
+            // The repository region carries a single role label "Repository
+            // Changes" (the active filter is shown by the chips above), with
+            // the actionable row count.
+            expect(container.querySelector('.scv-repository-title')?.textContent).toBe('Repository Changes');
+            expect(container.querySelector('.scv-repository-count')?.textContent).toBe('3');
             // Actionable items only: synced is absent from Needs Sync.
             expect(container.querySelector('.scv-kind-synced')).toBeNull();
             expect(container.querySelectorAll('.scv-change-item')).toHaveLength(3);
@@ -66,8 +68,8 @@ describe('SourceControlView', () => {
 
             (container.querySelector('.scv-filter-option[data-filter="all"]') as HTMLButtonElement).click();
 
-            expect(container.querySelector('.scv-active-filter-title')?.textContent).toBe('ALL');
-            expect(container.querySelector('.scv-active-filter-count')?.textContent).toBe('2');
+            expect(container.querySelector('.scv-repository-title')?.textContent).toBe('Repository Changes');
+            expect(container.querySelector('.scv-repository-count')?.textContent).toBe('2');
             expect(container.querySelectorAll('.scv-change-item')).toHaveLength(2);
             expect(container.querySelector('.scv-kind-synced')).not.toBeNull();
         });
@@ -183,8 +185,8 @@ describe('SourceControlView', () => {
             view.render(container);
             const section = container.querySelector('.scv-selected-section');
             expect(section).not.toBeNull();
-            expect(section?.querySelector('.scv-selected-section-title')?.textContent).toBe('Checked Changes');
-            expect(section?.querySelector('.scv-selected-section-count')?.textContent).toBe('1');
+            expect(section?.querySelector('.scv-selected-section-title')?.textContent).toBe('Sync Queue');
+            expect(section?.querySelector('.scv-selected-section-subtitle')?.textContent).toBe('1 files selected');
         });
 
         it('moves the selected change into Checked Changes (with a checked checkbox) and out of the lower tree', () => {
@@ -251,7 +253,7 @@ describe('SourceControlView', () => {
             expect(container.querySelector('.scv-selected-section')).toBeNull();
         });
 
-        it('excludes synced changes from the Checked Changes count even when selected', () => {
+        it('excludes synced changes from the Sync Queue count even when selected', () => {
             const { view, selection } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'synced' },
@@ -260,7 +262,9 @@ describe('SourceControlView', () => {
             selection.includeForPush(toChangeId('c-2'));
             view.render(container);
 
-            expect(container.querySelector('.scv-selected-section-count')?.textContent).toBe('1');
+            // Only the actionable local-only change makes it into the queue;
+            // the synced selection is dropped from the queue's count.
+            expect(container.querySelector('.scv-selected-section-subtitle')?.textContent).toBe('1 files selected');
         });
     });
 
@@ -285,21 +289,90 @@ describe('SourceControlView', () => {
             expect(selection.isIncluded(toChangeId('c-1'))).toBe(true);
         });
 
-        it('collapses the Changes tree when its active-filter header is clicked, hiding the tree', () => {
+        it('collapses the Repository Changes tree when its header is clicked, hiding the tree', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
             ]);
             view.render(container);
 
-            const header = container.querySelector('.scv-active-filter-header') as HTMLElement;
+            const header = container.querySelector('.scv-repository-header') as HTMLElement;
             expect(header.getAttribute('aria-expanded')).toBe('true');
             expect(container.querySelectorAll('.scv-change-item').length).toBeGreaterThan(0);
 
             header.click();
 
-            expect(container.querySelector('.scv-active-filter-header')?.getAttribute('aria-expanded')).toBe('false');
+            expect(container.querySelector('.scv-repository-header')?.getAttribute('aria-expanded')).toBe('false');
             expect(container.querySelector('.scv-change-item')).toBeNull();
+        });
+
+        it('switching the view toggle to List does not collapse the region (toggle clicks stop propagation)', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+            ]);
+            view.render(container);
+
+            const listBtn = container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement;
+            listBtn.click();
+
+            // Region stays expanded and now renders the flat list variant.
+            expect(container.querySelector('.scv-repository-header')?.getAttribute('aria-expanded')).toBe('true');
+            expect(container.querySelector('.scv-change-list')).not.toBeNull();
+            expect(container.querySelector('.scv-view-toggle-btn[data-view="list"]')?.classList.contains('is-active')).toBe(true);
+            expect(container.querySelector('.scv-view-toggle-btn[data-view="tree"]')?.classList.contains('is-active')).toBe(false);
+        });
+    });
+
+    describe('view mode (Tree/List)', () => {
+        it('defaults to the Tree view (folder nesting, no path suffix)', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'blog/en/a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'blog/en/b.md', kind: 'local-only' },
+            ]);
+            view.render(container);
+
+            expect(container.querySelector('.scv-tree-folder')).not.toBeNull();
+            expect(container.querySelector('.scv-change-list')).toBeNull();
+            expect(container.querySelector('.scv-change-path')).toBeNull();
+            expect(container.querySelector('.scv-view-toggle-btn[data-view="tree"]')?.classList.contains('is-active')).toBe(true);
+        });
+
+        it('List view renders a flat list with the folder path as a suffix, no folder rows', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'blog/en/a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'archive/b.md', kind: 'local-only' },
+            ]);
+            view.render(container);
+
+            (container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement).click();
+
+            expect(container.querySelector('.scv-change-list')).not.toBeNull();
+            expect(container.querySelector('.scv-tree-folder')).toBeNull();
+            // Each row carries its folder path suffix for disambiguation.
+            const paths = Array.from(container.querySelectorAll('.scv-change-item-list .scv-change-path')).map(el => el.textContent);
+            expect(paths).toEqual(expect.arrayContaining(['blog/en', 'archive']));
+        });
+
+        it('persists the view mode across rerenders', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+            ]);
+            view.render(container);
+            (container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement).click();
+
+            view.render(container);
+
+            expect(container.querySelector('.scv-change-list')).not.toBeNull();
+        });
+
+        it('omits the path suffix for root-level files in List view', () => {
+            const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            view.render(container);
+            (container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement).click();
+
+            expect(container.querySelector('.scv-change-item-list')).not.toBeNull();
+            expect(container.querySelector('.scv-change-path')).toBeNull();
         });
     });
 
@@ -633,6 +706,29 @@ describe('SourceControlView', () => {
 
             expect(container.querySelector('.scv-filter-dropdown')).not.toBeNull();
             expect(container.querySelectorAll('.scv-filter-option')).toHaveLength(0);
+        });
+
+        it('starts the Sync Queue collapsed to a header bar on mobile, expanding on tap', () => {
+            Platform.isMobile = true;
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'local-only' },
+            ]);
+            selection.includeForPush(toChangeId('c-1'));
+            view.render(container);
+
+            // Collapsed by default: header present, but no rows / subtitle.
+            const header = container.querySelector('.scv-selected-section-header') as HTMLElement;
+            expect(header).not.toBeNull();
+            expect(header.getAttribute('aria-expanded')).toBe('false');
+            expect(container.querySelector('.scv-selected-section .scv-change-item')).toBeNull();
+            expect(container.querySelector('.scv-selected-section-subtitle')).toBeNull();
+
+            // Tapping the header expands the queue.
+            header.click();
+            expect(container.querySelector('.scv-selected-section-header')?.getAttribute('aria-expanded')).toBe('true');
+            expect(container.querySelector('.scv-selected-section .scv-change-item')).not.toBeNull();
+            expect(container.querySelector('.scv-selected-section-subtitle')?.textContent).toBe('1 files selected');
         });
 
         it('hides the header push button and shows a sticky bottom sync bar on mobile when there is a selection', () => {

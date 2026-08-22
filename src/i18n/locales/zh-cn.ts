@@ -261,15 +261,11 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.filter.conflicts': '冲突',
 	'sourceControl.filter.synced': '已同步',
 	'sourceControl.filter.showSynced': '显示已同步',
-	'sourceControl.section.all': '全部',
-	'sourceControl.section.readyToPush': '待推送',
-	'sourceControl.section.selectedForSync': '已勾选的更改',
+	'sourceControl.section.selectedForSync': '同步队列',
+	'sourceControl.section.queueSubtitle': '已选 {count} 个文件',
+	'sourceControl.section.repositoryChanges': '仓库更改',
 	'sourceControl.section.clearSelection': '清除',
 	'sourceControl.section.clearSelection.tooltip': '取消全部选择',
-	'sourceControl.section.changes': '更改',
-	'sourceControl.section.remoteChanges': '远程更改',
-	'sourceControl.section.conflicts': '冲突',
-	'sourceControl.section.synced': '已同步',
 	'sourceControl.push': ' 同步 ({count})',
 	'sourceControl.push.tooltip': '推送 {count} 个已就绪的文件',
 	'sourceControl.refresh.tooltip': '刷新',
@@ -299,6 +295,9 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.diff.switchToUnified': '切换为单栏式差异显示',
 	'sourceControl.diff.split': '两栏',
 	'sourceControl.diff.unified': '单栏',
+	'sourceControl.view.toggleLabel': '视图',
+	'sourceControl.view.tree': '树状',
+	'sourceControl.view.list': '列表',
 };
 
 export default zhCn;

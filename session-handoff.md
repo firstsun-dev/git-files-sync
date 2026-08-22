@@ -1,68 +1,41 @@
 # Session Handoff
 
 **Date:** 2026-08-23
-**Branch:** `feat/sync-status-workflow-ui` (4 commits ahead of `claude/source-control-foundation` @ `f449125`)
-**Active Feature:** sync-status-workflow-ui plan (`.kilo/plans/1787412338771-sync-status-workflow-ui.md`) — code complete; manual Obsidian verification remains.
-**Side task done this session:** CI parallel-validation DAG refactor (uncommitted working-tree change on this branch).
+**Branch:** `feat/sync-status-workflow-ui`
+**Active Feature:** sync-status-workflow-ui plan (`.kilo/plans/1787412338771-sync-status-workflow-ui.md`) — UX queue/repository separation + List view landed (uncommitted); manual Obsidian verification remains.
 
-## Done This Session — CI DAG refactor
+## Done This Session — Queue/Repository UX separation + List view
 
-Refactored `.github/workflows/ci.yml` (and `docs/testing/real-provider-e2e.md`) so all four
-validation jobs start in parallel after a push instead of lint/test/build waiting behind the
-real-provider E2E matrix (the user's 8-phase plan).
+Separated the two Source Control regions by role label per UX review (view-layer only, no `src/logic/**` changes):
 
-New DAG:
-```
-changes ──► provider-e2e ──┐
-lint ──────────────────────┤
-unit-test (Node 22|24) ─────┤──► required-checks ──► package
-build ──────────────────────┘                  └────► publish (main only)
-```
+1. **SYNC QUEUE** (upper, action region): renamed `CHECKED CHANGES (N)`→`SYNC QUEUE`, replaced the count badge with a `N files selected` subtitle (`sourceControl.section.queueSubtitle`). Always a flat list (no tree) — matches its "what I'm about to push" role.
+2. **Repository Changes** (lower, source region): renamed the per-filter header (`ALL`/`NEEDS SYNC`) to a single role label `Repository Changes (N)` — the active filter is conveyed by the chips above. Renamed `renderActiveFilterHeader`→`renderRepositoryHeader`, `scv-active-filter-*`→`scv-repository-*`.
+3. **Tree/List view toggle** on the repository region only (the queue needs none): new `viewMode` ('tree'|'list'), `renderViewToggle`/`setViewMode`, icons `folder-tree`/`list`; click stopPropagation so switching presentation doesn't collapse the region; mobile hides labels.
+4. **List view**: new `renderChangeList` in `ChangeTree.ts` (sorted by path); `ChangeItem` gains `folderPath`/`listMode` options rendering a dimmed right-aligned `.scv-change-path` suffix so flat rows stay disambiguated. `eagerLoadLocalStats` runs in both modes.
+5. **Mobile**: the Sync Queue starts collapsed to a header bar (`mobileQueueExpanded`) so it doesn't push the repository tree off-screen; tapping expands it; the bottom sync bar still carries the count.
 
-Removed: `preflight`, `e2e-gate`, the shared reusable `firstsun-dev/.github` `CI` workflow call
-(its internal release fired before any E2E gate, so it couldn't release-after-gate without
-inlining), and the standalone `build-artifact` job (raw-artifact upload folded into `CI / Build`).
-Added: `CI / Lint`, `CI / Unit Test (Node 22|24)`, `CI / Build`, `CI / Provider E2E / <provider>`,
-`CI / Required Checks` (aggregate gate), `Release / Package`, `Release / Publish`. The
-`provider-e2e` job's internals are unchanged (gitea-disabled notice, concurrency group
-`e2e-<branch>-<provider>`, run-scoped `E2E_WORKDIR`, retry, `if: always()` cleanup) — only `name`
-and `needs: [changes]` (dropped `preflight`) changed, so the cleanup workflows' shared concurrency
-naming still matches. All third-party actions pinned to commit SHAs.
+i18n: en/zh-cn/zh-tw updated; dropped the now-unused `sourceControl.section.{all,readyToPush,changes,remoteChanges,conflicts,synced}` keys + the `FILTER_HEADER_KEYS` map.
 
 Verification evidence:
 ```text
-actionlint v1.7.7 .github/workflows/ci.yml  -> 0 errors (only known 32gb-ram false positive)
-python3 -c yaml.safe_load(ci.yml)           -> parses
+npx eslint .            -> 0 errors
+npm run build           -> clean (tsc + Obsidian 1.11.0 compat + esbuild)
+npx vitest run          -> 61 files / 642 tests pass
 ```
-Source tree (eslint/build/vitest) is untouched by this change.
 
-## Prior Session — Sync Status Workflow UI (code complete, manual verify pending)
+## Deferred — architecture must-fixes (separate issue, per one-feature-at-a-time)
 
-Implemented the full four-commit "Sync Status Workflow UI" feature on this branch, each commit
-passing the husky pre-commit hook (`npm run lint && npm run build`):
-
-1. `8c69cc8` — `SourceControlViewModel` gains `selectedItems` + `refreshStatus` projections and a
-   `refresh()` delegate backed by a new `RefreshState` holder (idle/loading/failed).
-2. `625fad2` — Filter chips drop `ready-to-push` (now 4: All/Local/Remote/Conflict). New
-   `renderSelectedSection()` shows "SELECTED FOR SYNC (N)".
-3. `754b717` — Refresh button (idle/loading/failed); `OperationIndicator` icon+text labels.
-4. `dd8ddd5` — New `ChangePresentation` UI adapter (`remote-only` badged `D`). Diff-stat threaded
-   through rows (eager local-only + lazy two-sided); responsive mobile (filter dropdown, sticky
-   bottom sync bar, flatter tree).
-
-Domain-untouched invariant verified:
-`git diff claude/source-control-foundation -- src/logic/source-control/` shows ONLY
-`RefreshState.ts` (new) + `SourceControlViewModel.ts` (edited).
+From the PR #135 clean-code review. To be filed via firstsun-pm as a follow-up issue, NOT bundled here:
+- Rename `SourceControlViewModel.selectedItems`→`syncQueue` (aligns domain naming with the `SYNC QUEUE` UI label).
+- Extract `DiffStatProvider` (cache + load + invalidate) out of the ViewModel so the diff-stat cache stops being a ViewModel concern.
+- Extract `SelectionController` from the ViewModel so selection state isn't absorbed into the ViewModel long-term.
 
 ## Exact Next Steps
 
-1. **CI refactor follow-ups** (see `progress.md` 0b/0c):
-   - Real PR run of the new workflow + 3-5 PR-execution-time comparisons (rollout plan) before
-     deleting old assumptions. NOTE: the `ci.yml` change is currently an **uncommitted** working-
-     tree change mixed with the UI feature's in-progress edits — stage/select carefully before
-     committing (`git add .github/workflows/ci.yml docs/testing/real-provider-e2e.md`).
-   - Manual GitHub branch-protection switch to require `CI / Required Checks` (needs repo admin).
-2. **sync-status-workflow-ui manual Obsidian verification** (desktop + mobile): refresh button
-   states, "SELECTED FOR SYNC" section, per-row subtitles/badges (esp. `remote-only` → `D`),
-   diff-stat `+N -M` spans, mobile filter dropdown + bottom sync bar. Then open a PR against
-   `claude/source-control-foundation` (confirm base branch name with the user first).
+1. **Commit this UX pass** (user has not yet requested commit — wait for explicit ask). The change is view-layer only; stage `src/ui/source-control/`, `src/ui/components/icons.ts`, `src/i18n/locales/*`, `styles.css`, `tests/ui/source-control/SourceControlView.test.ts`, `progress.md`, `session-handoff.md`. NOTE: an unrelated uncommitted `ci.yml` change from a prior session is still in the working tree — stage selectively.
+2. **Manual Obsidian verification** (desktop + mobile): the new `SYNC QUEUE` + subtitle, `Repository Changes` header, Tree/List toggle (folder nesting vs flat list with path suffix), mobile queue collapse-by-default + bottom sync bar.
+3. **File the architecture follow-up issue** via the firstsun-pm skill (the three deferred must-fixes above) before starting that work.
+
+## Prior Session — Sync Status Workflow UI (code complete, manual verify pending)
+
+Implemented the four-commit "Sync Status Workflow UI" feature on this branch, each commit passing the husky pre-commit hook. See `progress.md` "Latest Evidence" for the full commit-by-commit detail. Domain-untouched invariant: `git diff claude/source-control-foundation -- src/logic/source-control/` shows ONLY `RefreshState.ts` (new) + `SourceControlViewModel.ts` (edited).

@@ -261,15 +261,11 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.filter.conflicts': '衝突',
 	'sourceControl.filter.synced': '已同步',
 	'sourceControl.filter.showSynced': '顯示已同步',
-	'sourceControl.section.all': '全部',
-	'sourceControl.section.readyToPush': '待推送',
-	'sourceControl.section.selectedForSync': '已勾選的變更',
+	'sourceControl.section.selectedForSync': '同步佇列',
+	'sourceControl.section.queueSubtitle': '已選 {count} 個檔案',
+	'sourceControl.section.repositoryChanges': '儲存庫變更',
 	'sourceControl.section.clearSelection': '清除',
 	'sourceControl.section.clearSelection.tooltip': '取消全部選取',
-	'sourceControl.section.changes': '變更',
-	'sourceControl.section.remoteChanges': '遠端變更',
-	'sourceControl.section.conflicts': '衝突',
-	'sourceControl.section.synced': '已同步',
 	'sourceControl.push': ' 同步 ({count})',
 	'sourceControl.push.tooltip': '推送 {count} 個已就緒的檔案',
 	'sourceControl.refresh.tooltip': '重新整理',
@@ -299,6 +295,9 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.diff.switchToUnified': '切換為單欄式差異顯示',
 	'sourceControl.diff.split': '兩欄',
 	'sourceControl.diff.unified': '單欄',
+	'sourceControl.view.toggleLabel': '檢視',
+	'sourceControl.view.tree': '樹狀',
+	'sourceControl.view.list': '列表',
 };
 
 export default zhTw;

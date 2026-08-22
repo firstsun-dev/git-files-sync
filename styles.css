@@ -205,12 +205,15 @@
     text-align: center;
 }
 
-.scv-active-filter-header {
+/* ── Repository Changes header (collapsible title + Tree/List toggle) ── */
+.scv-repository-header {
     display: flex;
     flex-shrink: 0;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px 4px 12px;
+    padding: 6px 12px 4px 8px;
+    cursor: pointer;
+    border-radius: var(--radius-s);
     color: var(--text-muted);
     font-size: 0.78em;
     font-weight: 600;
@@ -218,7 +221,11 @@
     letter-spacing: 0.02em;
 }
 
-.scv-active-filter-count {
+.scv-repository-header:hover { background: var(--background-modifier-hover); }
+
+.scv-repository-title { flex-shrink: 0; }
+
+.scv-repository-count {
     background: var(--background-modifier-border);
     border-radius: 10px;
     padding: 1px 6px;
@@ -226,6 +233,47 @@
     min-width: 18px;
     text-align: center;
 }
+
+/* ── Tree/List view toggle (Repository Changes only) ──────────── */
+.scv-view-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 1px;
+    border-radius: var(--radius-s);
+    background: var(--background-modifier-border);
+}
+
+.scv-view-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: calc(var(--radius-s) - 1px);
+    cursor: pointer;
+    font-size: 0.7em;
+    line-height: 1;
+}
+
+.scv-view-toggle-btn:hover { color: var(--text-normal); }
+
+.scv-view-toggle-btn.is-active {
+    background: var(--background-primary);
+    color: var(--text-normal);
+}
+
+.scv-view-toggle-icon { display: inline-flex; }
+.scv-view-toggle-icon .svg-icon { width: 13px; height: 13px; }
+
+.scv-view-toggle-label { white-space: nowrap; }
+
+/* Mobile: icon-only toggle (labels drop) to save horizontal space. */
+body.is-mobile .scv-view-toggle-label { display: none; }
 
 /* ── Selected-for-sync workspace ───────────────────────────── */
 .scv-selected-section {
@@ -268,14 +316,11 @@
     background: var(--background-modifier-hover);
 }
 
-.scv-selected-section-count {
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-    border-radius: var(--radius-s);
-    padding: 1px 6px;
-    font-size: 0.9em;
-    min-width: 18px;
-    text-align: center;
+.scv-selected-section-subtitle {
+    padding: 0 10px 4px 10px;
+    color: var(--text-faint);
+    font-size: 0.72em;
+    line-height: 1.2;
 }
 
 .scv-selected-section-list {
@@ -516,6 +561,28 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* List-view variant: the name shrinks to its content so the folder path
+   suffix can sit on the right, disambiguating flat rows without nesting. */
+.scv-change-item-list .scv-change-name { flex: 0 1 auto; }
+
+.scv-change-path {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: right;
+    color: var(--text-faint);
+    font-family: var(--font-monospace);
+    font-size: 0.74em;
+}
+
+.scv-change-list {
+    display: flex;
+    flex-direction: column;
 }
 
 .scv-diff-stat {

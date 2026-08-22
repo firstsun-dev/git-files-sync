@@ -116,7 +116,7 @@ describe('SourceControlViewModel', () => {
         expect(item?.previousPath).toBe('old.md');
     });
 
-    it('projects selectedItems as the actionable changes currently in PushSelectionStore', () => {
+    it('projects syncQueue as the actionable changes currently in PushSelectionStore', () => {
         const changes: SyncChange[] = [
             { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
             { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
@@ -128,15 +128,15 @@ describe('SourceControlViewModel', () => {
         selection.includeForPush(toChangeId('c-3'));
 
         const state = viewModel.getState('all');
-        expect(state.selectedItems.map(i => i.id)).toEqual([toChangeId('c-1'), toChangeId('c-2')]);
+        expect(state.syncQueue.map(i => i.id)).toEqual([toChangeId('c-1'), toChangeId('c-2')]);
         // Synced is never actionable, so it's excluded even when selected.
-        expect(state.selectedItems.every(i => i.kind !== 'synced')).toBe(true);
-        expect(state.selectedItems[0]?.isReadyToPush).toBe(true);
+        expect(state.syncQueue.every(i => i.kind !== 'synced')).toBe(true);
+        expect(state.syncQueue[0]?.isReadyToPush).toBe(true);
     });
 
-    it('reports an empty selectedItems projection when nothing is selected', () => {
+    it('reports an empty syncQueue projection when nothing is selected', () => {
         const { viewModel } = buildViewModel([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
-        expect(viewModel.getState('all').selectedItems).toEqual([]);
+        expect(viewModel.getState('all').syncQueue).toEqual([]);
     });
 
     it('surfaces the current refresh status on every view state', () => {

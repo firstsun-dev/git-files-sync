@@ -259,15 +259,11 @@ const en = {
 	'sourceControl.filter.conflicts': 'Conflicts',
 	'sourceControl.filter.synced': 'Synced',
 	'sourceControl.filter.showSynced': 'Show synced',
-	'sourceControl.section.all': 'ALL',
-	'sourceControl.section.readyToPush': 'READY TO PUSH',
-	'sourceControl.section.selectedForSync': 'Checked Changes',
+	'sourceControl.section.selectedForSync': 'Sync Queue',
+	'sourceControl.section.queueSubtitle': '{count} files selected',
+	'sourceControl.section.repositoryChanges': 'Repository Changes',
 	'sourceControl.section.clearSelection': 'Clear',
 	'sourceControl.section.clearSelection.tooltip': 'Deselect all changes',
-	'sourceControl.section.changes': 'CHANGES',
-	'sourceControl.section.remoteChanges': 'REMOTE CHANGES',
-	'sourceControl.section.conflicts': 'CONFLICTS',
-	'sourceControl.section.synced': 'SYNCED',
 	'sourceControl.push': ' Sync ({count})',
 	'sourceControl.push.tooltip': 'Push {count} ready file(s)',
 	'sourceControl.refresh.tooltip': 'Refresh',
@@ -297,6 +293,9 @@ const en = {
 	'sourceControl.diff.switchToUnified': 'Switch to single-column diff',
 	'sourceControl.diff.split': 'Split',
 	'sourceControl.diff.unified': 'Unified',
+	'sourceControl.view.toggleLabel': 'View',
+	'sourceControl.view.tree': 'Tree',
+	'sourceControl.view.list': 'List',
 };
 
 export default en;

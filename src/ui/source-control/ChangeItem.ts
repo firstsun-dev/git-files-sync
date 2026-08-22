@@ -12,6 +12,22 @@ export interface ChangeItemCallbacks {
     getDiffStat?: (id: ChangeId) => ChangeStat | undefined;
 }
 
+/** Presentation-only options for a change row. */
+export interface ChangeItemOptions {
+    /**
+     * Folder portion of the path (everything before the last `/`), shown as a
+     * dimmed right-aligned suffix in list mode so rows stay disambiguable
+     * without the tree's folder nesting. Omitted in tree mode where folders
+     * already convey the location.
+     */
+    folderPath?: string;
+    /**
+     * Renders the row in the flat-list variant: the name no longer stretches
+     * to fill the row, leaving room for {@link folderPath} on the right.
+     */
+    listMode?: boolean;
+}
+
 /**
  * Renders a single change row: selection checkbox, status badge, name (with
  * rename arrow for moves), optional diff-stat, and operation indicator. All
@@ -30,10 +46,13 @@ export function renderChangeItem(
     item: SourceControlItem,
     displayName: string,
     callbacks: ChangeItemCallbacks,
+    options: ChangeItemOptions = {},
 ): HTMLElement {
     const view = presentChange(item, displayName);
 
-    const row = container.createDiv({ cls: `scv-change-item scv-kind-${item.kind}${item.isReadyToPush ? ' is-selected' : ''}` });
+    const row = container.createDiv({
+        cls: `scv-change-item scv-kind-${item.kind}${item.isReadyToPush ? ' is-selected' : ''}${options.listMode ? ' scv-change-item-list' : ''}`,
+    });
     row.setAttr('data-change-id', item.id);
     if (view.tooltip) row.setAttr('title', view.tooltip);
 
@@ -50,6 +69,12 @@ export function renderChangeItem(
         setIcon(label.createSpan({ cls: 'scv-change-rename-arrow' }), ICONS.moved);
     }
     label.createSpan({ cls: 'scv-change-name-text', text: view.displayName });
+
+    // List mode surfaces the folder path as a dimmed suffix so a flat list
+    // stays disambiguable; tree mode omits it (folders already convey it).
+    if (options.listMode && options.folderPath) {
+        row.createSpan({ cls: 'scv-change-path', text: options.folderPath });
+    }
 
     renderDiffStat(row, callbacks.getDiffStat?.(item.id));
 

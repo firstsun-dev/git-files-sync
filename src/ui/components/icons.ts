@@ -31,4 +31,7 @@ export const ICONS = {
     // Diff layout toggle (mobile)
     diffSplit:   'columns-2',
     diffUnified: 'rows-2',
+    // Repository changes view toggle
+    viewTree: 'folder-tree',
+    viewList: 'list',
 } as const;

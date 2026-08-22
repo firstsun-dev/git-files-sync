@@ -64,4 +64,36 @@ describe('PushSelectionStore', () => {
 
         expect(store.isIncluded(toChangeId('change-1'))).toBe(true);
     });
+
+    describe('selectMany / deselectMany (batch ops)', () => {
+        it('selectMany includes a batch of changes in one call', () => {
+            const store = new PushSelectionStore();
+
+            store.selectMany([toChangeId('change-a'), toChangeId('change-b'), toChangeId('change-c')]);
+
+            expect(store.getSelectedChangeIds()).toEqual([
+                toChangeId('change-a'),
+                toChangeId('change-b'),
+                toChangeId('change-c'),
+            ]);
+        });
+
+        it('deselectMany removes only the given ids, leaving the rest selected', () => {
+            const store = new PushSelectionStore();
+            store.selectMany([toChangeId('change-a'), toChangeId('change-b'), toChangeId('change-c')]);
+
+            store.deselectMany([toChangeId('change-a'), toChangeId('change-c')]);
+
+            expect(store.getSelectedChangeIds()).toEqual([toChangeId('change-b')]);
+        });
+
+        it('selectMany with an empty list is a no-op', () => {
+            const store = new PushSelectionStore();
+            store.includeForPush(toChangeId('change-a'));
+
+            store.selectMany([]);
+
+            expect(store.getSelectedChangeIds()).toEqual([toChangeId('change-a')]);
+        });
+    });
 });
