@@ -207,12 +207,17 @@ export class SourceControlView {
         // `.scv-root { overflow: hidden }`.
         const body = container.createDiv({ cls: 'scv-body' });
         this.renderSelectedSection(body, state.selectedItems, treeCallbacks);
-        this.renderActiveFilterHeader(body, this.filter, this.showSynced, unchecked.length);
+        // The Changes region is its own flex/scroll area so a tall tree
+        // scrolls independently and never pushes the pinned Checked Changes
+        // region above it out of view.
+        const changesRegion = body.createDiv({ cls: 'scv-changes-region' });
+        this.renderActiveFilterHeader(changesRegion, this.filter, this.showSynced, unchecked.length);
         if (!this.collapsedSections.has('changes')) {
+            const treeWrap = changesRegion.createDiv({ cls: 'scv-changes-tree' });
             if (unchecked.length === 0) {
-                body.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
+                treeWrap.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
             } else {
-                renderChangeTree(body, unchecked, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
+                renderChangeTree(treeWrap, unchecked, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
                 this.eagerLoadLocalStats(unchecked);
             }
         }

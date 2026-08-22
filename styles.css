@@ -114,7 +114,6 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    overflow-y: auto;
 }
 
 /* ── Filter menu ───────────────────────────────────────────────── */
@@ -208,6 +207,7 @@
 
 .scv-active-filter-header {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     gap: 6px;
     padding: 6px 12px 4px 12px;
@@ -229,6 +229,7 @@
 
 /* ── Selected-for-sync workspace ───────────────────────────── */
 .scv-selected-section {
+    flex-shrink: 0;
     margin: 6px 8px 4px 8px;
     padding: 6px 0;
     border-radius: var(--radius-m);
@@ -280,6 +281,23 @@
 .scv-selected-section-list {
     display: flex;
     flex-direction: column;
+    max-height: 38vh;
+    overflow-y: auto;
+}
+
+/* ── Changes region (independent scroll so the tree never hides the queue) ── */
+.scv-changes-region {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.scv-changes-tree {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 /* ── Push button ───────────────────────────────────────────────── */
