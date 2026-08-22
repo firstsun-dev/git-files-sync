@@ -2,18 +2,29 @@ import { t, type TranslationKey } from '../../i18n';
 import type { SourceControlFilter } from '../../logic/source-control/SourceControlFilter';
 
 /**
- * Action filter chips, in spec order. `synced` is deliberately NOT a permanent
- * chip — it surfaces only when the user opts in via the "Show synced" toggle,
- * so a quiet workspace isn't dominated by a large synced count.
+ * Action filter chips, in spec order. The visible row is four chips —
+ * All / Local / Remote / Conflict — backed by the unchanged domain filters
+ * (`all` / `changes` / `remote-changes` / `conflicts`). "Ready to Push" is no
+ * longer a chip: it's surfaced as the inline "SELECTED FOR SYNC (N)" section
+ * instead. `synced` is deliberately NOT a permanent chip — it surfaces only
+ * when the user opts in via the "Show synced" toggle, so a quiet workspace
+ * isn't dominated by a large synced count.
  */
-const ACTION_FILTERS: SourceControlFilter[] = ['all', 'changes', 'ready-to-push', 'remote-changes', 'conflicts'];
+const ACTION_FILTERS: SourceControlFilter[] = ['all', 'changes', 'remote-changes', 'conflicts'];
 
+/**
+ * Displayed chip labels. Domain values stay as `data-filter` attributes; only
+ * the visible label changes (e.g. the `changes` domain filter reads "Local"
+ * because it surfaces local-side changes). `ready-to-push` and `synced` keep
+ * their existing keys even though `ready-to-push` is no longer a chip, so the
+ * record stays total over {@link SourceControlFilter}.
+ */
 const FILTER_LABEL_KEYS: Record<SourceControlFilter, TranslationKey> = {
     all:               'sourceControl.filter.all',
-    changes:           'sourceControl.filter.changes',
+    changes:           'sourceControl.filter.local',
     'ready-to-push':   'sourceControl.filter.readyToPush',
-    'remote-changes':  'sourceControl.filter.remoteChanges',
-    conflicts:         'sourceControl.filter.conflicts',
+    'remote-changes':  'sourceControl.filter.remote',
+    conflicts:         'sourceControl.filter.conflict',
     synced:            'sourceControl.filter.synced',
 };
 
@@ -25,10 +36,10 @@ export interface FilterMenuCallbacks {
 }
 
 /**
- * Renders the Source Control filter row: the five action chips (All, Changes,
- * Ready to Push, Remote Changes, Conflicts) followed by a "Show synced"
- * toggle. The `synced` chip is appended only when `showSynced` is on, so a
- * hidden synced bucket contributes no chip and no count to the row.
+ * Renders the Source Control filter row: the four action chips (All, Local,
+ * Remote, Conflict) followed by a "Show synced" toggle. The `synced` chip is
+ * appended only when `showSynced` is on, so a hidden synced bucket contributes
+ * no chip and no count to the row.
  *
  * Per-filter counts come straight from the ViewModel's single-source counts;
  * the menu never recomputes one.

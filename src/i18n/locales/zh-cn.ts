@@ -252,6 +252,9 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 
 	'sourceControl.filter.all': '全部',
 	'sourceControl.filter.changes': '更改',
+	'sourceControl.filter.local': '本地',
+	'sourceControl.filter.remote': '远程',
+	'sourceControl.filter.conflict': '冲突',
 	'sourceControl.filter.readyToPush': '待推送',
 	'sourceControl.filter.remoteChanges': '远程更改',
 	'sourceControl.filter.conflicts': '冲突',
@@ -259,6 +262,7 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.filter.showSynced': '显示已同步',
 	'sourceControl.section.all': '全部',
 	'sourceControl.section.readyToPush': '待推送',
+	'sourceControl.section.selectedForSync': '已选同步',
 	'sourceControl.section.changes': '更改',
 	'sourceControl.section.remoteChanges': '远程更改',
 	'sourceControl.section.conflicts': '冲突',

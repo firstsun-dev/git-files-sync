@@ -250,6 +250,9 @@ const en = {
 
 	'sourceControl.filter.all': 'All',
 	'sourceControl.filter.changes': 'Changes',
+	'sourceControl.filter.local': 'Local',
+	'sourceControl.filter.remote': 'Remote',
+	'sourceControl.filter.conflict': 'Conflict',
 	'sourceControl.filter.readyToPush': 'Ready to Push',
 	'sourceControl.filter.remoteChanges': 'Remote Changes',
 	'sourceControl.filter.conflicts': 'Conflicts',
@@ -257,6 +260,7 @@ const en = {
 	'sourceControl.filter.showSynced': 'Show synced',
 	'sourceControl.section.all': 'ALL',
 	'sourceControl.section.readyToPush': 'READY TO PUSH',
+	'sourceControl.section.selectedForSync': 'SELECTED FOR SYNC',
 	'sourceControl.section.changes': 'CHANGES',
 	'sourceControl.section.remoteChanges': 'REMOTE CHANGES',
 	'sourceControl.section.conflicts': 'CONFLICTS',

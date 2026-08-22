@@ -216,6 +216,32 @@
     text-align: center;
 }
 
+/* ── Selected-for-sync summary ──────────────────────────────── */
+.scv-selected-section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    margin: 4px 12px 0 12px;
+    border-radius: 6px;
+    background: var(--background-modifier-hover);
+    color: var(--text-muted);
+    font-size: 0.78em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.scv-selected-section-count {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-radius: 10px;
+    padding: 1px 6px;
+    font-size: 0.9em;
+    min-width: 18px;
+    text-align: center;
+}
+
 /* ── Push button ───────────────────────────────────────────────── */
 .scv-push-btn {
     display: flex;

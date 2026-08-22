@@ -168,6 +168,35 @@ describe('SourceControlView', () => {
 
             expect(selection.isIncluded(toChangeId('c-1'))).toBe(false);
         });
+
+        it('renders the "SELECTED FOR SYNC" section only when at least one actionable change is selected', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'synced' },
+            ]);
+
+            view.render(container);
+            expect(container.querySelector('.scv-selected-section')).toBeNull();
+
+            selection.includeForPush(toChangeId('c-1'));
+            view.render(container);
+            const section = container.querySelector('.scv-selected-section');
+            expect(section).not.toBeNull();
+            expect(section?.querySelector('.scv-selected-section-title')?.textContent).toBe('SELECTED FOR SYNC');
+            expect(section?.querySelector('.scv-selected-section-count')?.textContent).toBe('1');
+        });
+
+        it('excludes synced changes from the SELECTED FOR SYNC count even when selected', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'synced' },
+            ]);
+            selection.includeForPush(toChangeId('c-1'));
+            selection.includeForPush(toChangeId('c-2'));
+            view.render(container);
+
+            expect(container.querySelector('.scv-selected-section-count')?.textContent).toBe('1');
+        });
     });
 
     describe('push action', () => {

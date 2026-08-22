@@ -18,18 +18,26 @@ describe('renderFilterMenu', () => {
         callbacks = { onFilterChange: vi.fn(), onToggleShowSynced: vi.fn() };
     });
 
-    it('renders the five action chips (no synced chip) when showSynced is false', () => {
+    it('renders the four action chips (All/Local/Remote/Conflict, no synced chip) when showSynced is false', () => {
         renderFilterMenu(container, 'all', zeroCounts, false, callbacks);
 
         const filters = Array.from(container.querySelectorAll('.scv-filter-option')).map(el => el.getAttribute('data-filter'));
-        expect(filters).toEqual(['all', 'changes', 'ready-to-push', 'remote-changes', 'conflicts']);
+        expect(filters).toEqual(['all', 'changes', 'remote-changes', 'conflicts']);
+    });
+
+    it('labels the chips with the domain-relabeled display names (Local/Remote/Conflict)', () => {
+        renderFilterMenu(container, 'all', zeroCounts, false, callbacks);
+
+        const labels = Array.from(container.querySelectorAll('.scv-filter-option .scv-filter-label')).map(el => el.textContent);
+        // Domain values stay as data-filter; only the visible labels change.
+        expect(labels).toEqual(['All', 'Local', 'Remote', 'Conflict']);
     });
 
     it('appends the synced chip when showSynced is true', () => {
         renderFilterMenu(container, 'all', { ...zeroCounts, synced: 7 }, true, callbacks);
 
         const filters = Array.from(container.querySelectorAll('.scv-filter-option')).map(el => el.getAttribute('data-filter'));
-        expect(filters).toEqual(['all', 'changes', 'ready-to-push', 'remote-changes', 'conflicts', 'synced']);
+        expect(filters).toEqual(['all', 'changes', 'remote-changes', 'conflicts', 'synced']);
         const syncedOption = container.querySelector('.scv-filter-option[data-filter="synced"]');
         expect(syncedOption?.querySelector('.scv-filter-count')?.textContent).toBe('7');
     });

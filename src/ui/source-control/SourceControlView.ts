@@ -145,6 +145,8 @@ export class SourceControlView {
         const query = this.searchQuery.trim().toLowerCase();
         const items = query ? state.items.filter(item => item.path.toLowerCase().includes(query)) : state.items;
 
+        this.renderSelectedSection(container, state.selectedItems);
+
         const body = container.createDiv({ cls: 'scv-body' });
         this.renderActiveFilterHeader(body, state.filter, items.length);
         if (items.length === 0) {
@@ -218,6 +220,21 @@ export class SourceControlView {
         const header = container.createDiv({ cls: 'scv-active-filter-header' });
         header.createSpan({ cls: 'scv-active-filter-title', text: t(FILTER_HEADER_KEYS[filter]) });
         header.createSpan({ cls: 'scv-active-filter-count', text: String(count) });
+    }
+
+    /**
+     * Renders the "SELECTED FOR SYNC (N)" summary, only when the user has at
+     * least one actionable change selected for push. Sits above the tree so the
+     * current push batch is always visible regardless of the active filter.
+     * The count comes straight from the ViewModel's single-source
+     * `selectedItems` projection (same definition as the Sync button count),
+     * so the two can never drift.
+     */
+    private renderSelectedSection(container: HTMLElement, selectedItems: readonly SourceControlItem[]): void {
+        if (selectedItems.length === 0) return;
+        const section = container.createDiv({ cls: 'scv-selected-section' });
+        section.createSpan({ cls: 'scv-selected-section-title', text: t('sourceControl.section.selectedForSync') });
+        section.createSpan({ cls: 'scv-selected-section-count', text: String(selectedItems.length) });
     }
 
     private renderDetail(root: HTMLElement): void {
