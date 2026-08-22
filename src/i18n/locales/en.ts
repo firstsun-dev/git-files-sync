@@ -211,11 +211,6 @@ const en = {
 
 	'syncConflictModal.title': 'Conflict in {fileName}',
 	'syncConflictModal.description': 'The remote file has different content. Review the differences and choose which version to keep.',
-	'syncConflictModal.tab.diff': 'Diff',
-	'syncConflictModal.tab.local': 'Local',
-	'syncConflictModal.tab.remote': 'Remote',
-	'syncConflictModal.localVersion': 'Local version',
-	'syncConflictModal.remoteVersion': 'Remote version',
 	'syncConflictModal.differences': 'Differences',
 	'syncConflictModal.keepLocal': 'Keep local',
 	'syncConflictModal.keepLocal.tooltip': 'Overwrite remote with your local content',
@@ -253,7 +248,6 @@ const en = {
 	'batchConflictModal.cancel': 'Cancel',
 	'batchConflictModal.unresolvedWarning': 'Choose a resolution for every conflict before continuing.',
 
-	'sourceControl.viewTitle': 'Source Control',
 	'sourceControl.filter.all': 'All',
 	'sourceControl.filter.changes': 'Changes',
 	'sourceControl.filter.readyToPush': 'Ready to Push',
@@ -267,11 +261,19 @@ const en = {
 	'sourceControl.section.remoteChanges': 'REMOTE CHANGES',
 	'sourceControl.section.conflicts': 'CONFLICTS',
 	'sourceControl.section.synced': 'SYNCED',
-	'sourceControl.push': ' Push ({count})',
+	'sourceControl.push': ' Sync ({count})',
 	'sourceControl.push.tooltip': 'Push {count} ready file(s)',
 	'sourceControl.empty': 'No changes',
-	'sourceControl.diff.selectPrompt': 'Select a change to see its diff.',
-	'sourceControl.detail.back': ' Back',
+	'sourceControl.detail.back': 'Back',
+	'sourceControl.info.lastSync': 'Last sync: {time}',
+	'sourceControl.info.neverSynced': 'Never synced',
+	'sourceControl.search.placeholder': 'Filter by path…',
+	'sourceControl.search.clear': 'Clear filter',
+	'sourceControl.folder.selectAll': 'Select all in folder',
+	'sourceControl.diff.switchToSplit': 'Switch to side-by-side diff',
+	'sourceControl.diff.switchToUnified': 'Switch to single-column diff',
+	'sourceControl.diff.split': 'Split',
+	'sourceControl.diff.unified': 'Unified',
 };
 
 export default en;

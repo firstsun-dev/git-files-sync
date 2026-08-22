@@ -1,25 +1,27 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { WorkspaceLeaf } from 'obsidian';
+import { TFile, WorkspaceLeaf } from 'obsidian';
 import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from '../../../src/ui/source-control/SourceControlItemView';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
-import { toChangeId } from '../../../src/logic/source-control/types';
+import { toChangeId, type SyncChangeKind } from '../../../src/logic/source-control/types';
 import { SyncStatusService } from '../../../src/logic/sync-status-service';
 import type GitLabFilesPush from '../../../src/main';
 import { setupObsidianDOM } from '../setup-dom';
 
 beforeAll(() => { setupObsidianDOM(); });
 
-function buildPlugin() {
+function buildPlugin(kind: SyncChangeKind = 'local-only') {
     const repository = new ChangeRepository();
-    repository.replace([{ id: toChangeId('a.md'), path: 'a.md', kind: 'local-only' }]);
+    repository.replace([{ id: toChangeId('a.md'), path: 'a.md', kind }]);
     const selection = new PushSelectionStore();
     const operations = new OperationState();
     const viewModel = new SourceControlViewModel(repository, selection, operations);
     const push = vi.fn().mockResolvedValue(undefined);
-    const loadDiffContent = vi.fn().mockResolvedValue(null);
+    const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
+    const openDiffTab = vi.fn().mockResolvedValue(undefined);
+    const getRemoteFileUrl = vi.fn().mockReturnValue('https://github.com/owner/repo/blob/main/a.md');
     const status = new SyncStatusService();
 
     const plugin = {
@@ -29,9 +31,21 @@ function buildPlugin() {
         sourceControlViewModel: viewModel,
         sourceControlActions: { push, loadDiffContent },
         sync: { status },
+        syncWorkspace: { getInfo: () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '' }), getRemoteFileUrl },
+        settings: { syncMetadata: {} },
+        openDiffTab,
     } as unknown as GitLabFilesPush;
 
-    return { plugin, repository, selection, push, status };
+    return { plugin, repository, selection, push, loadDiffContent, openDiffTab, getRemoteFileUrl, status };
+}
+
+function buildLeaf() {
+    const openFile = vi.fn();
+    const app = {
+        vault: { getFileByPath: vi.fn().mockReturnValue(null) },
+        workspace: { getLeaf: vi.fn().mockReturnValue({ openFile }) },
+    };
+    return { leaf: { app } as unknown as WorkspaceLeaf, app, openFile };
 }
 
 describe('SourceControlItemView', () => {
@@ -86,6 +100,57 @@ describe('SourceControlItemView', () => {
             Array.from(container.querySelectorAll('.scv-change-item')).map(el => el.getAttribute('data-change-id')),
         );
         expect(ids).toEqual(new Set(['a.md', 'b.md']));
+    });
+
+    it('opens a change diff in the main-area tab via plugin.openDiffTab on desktop', async () => {
+        // local-modified (not local-only/remote-only) has a real diff to show.
+        const { plugin, loadDiffContent, openDiffTab } = buildPlugin('local-modified');
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+
+        const container = view.containerEl.children[1] as HTMLElement;
+        (container.querySelector('.scv-change-item') as HTMLElement).click();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(loadDiffContent).toHaveBeenCalledWith(expect.objectContaining({ id: toChangeId('a.md') }));
+        expect(openDiffTab).toHaveBeenCalledWith('a.md', { remote: 'remote text', local: 'local text' });
+    });
+
+    it('opens the local file directly for a local-only change (nothing to diff against)', async () => {
+        const { plugin, openDiffTab } = buildPlugin('local-only');
+        const { leaf, app, openFile } = buildLeaf();
+        const file = Object.assign(new TFile(), { path: 'a.md' });
+        (app.vault.getFileByPath as ReturnType<typeof vi.fn>).mockReturnValue(file);
+        const view = new SourceControlItemView(leaf, plugin);
+        await view.onOpen();
+
+        const container = view.containerEl.children[1] as HTMLElement;
+        (container.querySelector('.scv-change-item') as HTMLElement).click();
+
+        expect(app.vault.getFileByPath).toHaveBeenCalledWith('a.md');
+        expect(openFile).toHaveBeenCalledWith(file);
+        expect(openDiffTab).not.toHaveBeenCalled();
+    });
+
+    it('opens the remote file in the browser for a remote-only change (nothing local to diff against)', async () => {
+        const originalOpen = window.open;
+        const windowOpen = vi.fn();
+        window.open = windowOpen;
+        try {
+            const { plugin, getRemoteFileUrl, openDiffTab } = buildPlugin('remote-only');
+            const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+            await view.onOpen();
+
+            const container = view.containerEl.children[1] as HTMLElement;
+            (container.querySelector('.scv-change-item') as HTMLElement).click();
+
+            expect(getRemoteFileUrl).toHaveBeenCalledWith('a.md');
+            expect(windowOpen).toHaveBeenCalledWith('https://github.com/owner/repo/blob/main/a.md', '_blank');
+            expect(openDiffTab).not.toHaveBeenCalled();
+        } finally {
+            window.open = originalOpen;
+        }
     });
 
     it('stops re-rendering once closed', async () => {

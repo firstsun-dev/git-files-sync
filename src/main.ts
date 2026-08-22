@@ -7,6 +7,7 @@ import { GitServiceInterface, GitTreeEntry } from './services/git-service-interf
 import { ConnectionTestResult } from './services/git-service-base';
 import { SyncManager } from './logic/sync-manager';
 import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from './ui/source-control/SourceControlItemView';
+import { DiffTabView, SOURCE_CONTROL_DIFF_VIEW_TYPE, type DiffTabContent } from './ui/source-control/DiffTabView';
 import { GitignoreManager } from './logic/gitignore-manager';
 import { logger } from './utils/logger';
 import { ConfirmModal } from './ui/ConfirmModal';
@@ -59,6 +60,11 @@ export default class GitLabFilesPush extends Plugin {
 		this.registerView(
 			SOURCE_CONTROL_VIEW_TYPE,
 			(leaf) => new SourceControlItemView(leaf, this)
+		);
+
+		this.registerView(
+			SOURCE_CONTROL_DIFF_VIEW_TYPE,
+			(leaf) => new DiffTabView(leaf)
 		);
 
 		this.addRibbonIcon('git-compare', t('main.ribbon.openSyncStatus'), async () => {
@@ -412,6 +418,26 @@ export default class GitLabFilesPush extends Plugin {
 		if (leaf) {
 			await workspace.revealLeaf(leaf);
 		}
+	}
+
+	/**
+	 * Shows a change's diff in a main-area tab, which is where a wide
+	 * side-by-side view has room to exist -- the Source Control panel lives
+	 * in a narrow sidebar. Reuses the single existing diff tab (if any)
+	 * rather than opening a new one per file.
+	 */
+	async openDiffTab(path: string, content: DiffTabContent | null): Promise<void> {
+		const { workspace } = this.app;
+
+		let leaf = workspace.getLeavesOfType(SOURCE_CONTROL_DIFF_VIEW_TYPE)[0];
+		if (!leaf) {
+			leaf = workspace.getLeaf('tab');
+			await leaf.setViewState({ type: SOURCE_CONTROL_DIFF_VIEW_TYPE, active: true });
+		}
+
+		const view = leaf.view;
+		if (view instanceof DiffTabView) view.setDiff(path, content);
+		await workspace.revealLeaf(leaf);
 	}
 
 	async pushAllFiles(): Promise<void> {

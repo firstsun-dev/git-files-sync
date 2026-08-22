@@ -18,6 +18,7 @@ describe('renderChangeTree', () => {
         container = createContainer();
         callbacks = {
             onToggleFolder: vi.fn(),
+            onToggleFolderSelect: vi.fn(),
             onToggleSelect: vi.fn(),
             onOpenDiff: vi.fn(),
         };
@@ -124,5 +125,69 @@ describe('renderChangeTree', () => {
         (container.querySelector('.scv-tree-folder-toggle') as HTMLButtonElement).click();
 
         expect(callbacks.onToggleFolder).toHaveBeenCalledWith('notes');
+    });
+
+    describe('folder select-all checkbox', () => {
+        it('is unchecked, not indeterminate, when no file in the folder is ready to push', () => {
+            const items = [
+                item({ id: toChangeId('c-1'), path: 'notes/daily.md', kind: 'local-modified' }),
+                item({ id: toChangeId('c-2'), path: 'notes/idea.md', kind: 'local-only' }),
+            ];
+            renderChangeTree(container, items, new Set(), callbacks);
+
+            const checkbox = container.querySelector('.scv-tree-folder-select') as HTMLInputElement;
+            expect(checkbox.checked).toBe(false);
+            expect(checkbox.indeterminate).toBe(false);
+        });
+
+        it('is indeterminate when only some files in the folder are ready to push', () => {
+            const items = [
+                item({ id: toChangeId('c-1'), path: 'notes/daily.md', kind: 'local-modified', isReadyToPush: true }),
+                item({ id: toChangeId('c-2'), path: 'notes/idea.md', kind: 'local-only', isReadyToPush: false }),
+            ];
+            renderChangeTree(container, items, new Set(), callbacks);
+
+            const checkbox = container.querySelector('.scv-tree-folder-select') as HTMLInputElement;
+            expect(checkbox.checked).toBe(false);
+            expect(checkbox.indeterminate).toBe(true);
+        });
+
+        it('is checked when every file in the folder (including nested subfolders) is ready to push', () => {
+            const items = [
+                item({ id: toChangeId('c-1'), path: 'notes/daily.md', kind: 'local-modified', isReadyToPush: true }),
+                item({ id: toChangeId('c-2'), path: 'notes/sub/idea.md', kind: 'local-only', isReadyToPush: true }),
+            ];
+            renderChangeTree(container, items, new Set(), callbacks);
+
+            const checkbox = container.querySelector('.scv-tree-folder-select') as HTMLInputElement;
+            expect(checkbox.checked).toBe(true);
+            expect(checkbox.indeterminate).toBe(false);
+        });
+
+        it('calls onToggleFolderSelect with every descendant ChangeId when checked', () => {
+            const items = [
+                item({ id: toChangeId('c-1'), path: 'notes/daily.md', kind: 'local-modified' }),
+                item({ id: toChangeId('c-2'), path: 'notes/sub/idea.md', kind: 'local-only' }),
+            ];
+            renderChangeTree(container, items, new Set(), callbacks);
+
+            const checkbox = container.querySelector('.scv-tree-folder-select') as HTMLInputElement;
+            checkbox.checked = true;
+            checkbox.dispatchEvent(new Event('change'));
+
+            expect(callbacks.onToggleFolderSelect).toHaveBeenCalledWith(
+                [toChangeId('c-1'), toChangeId('c-2')],
+                true,
+            );
+        });
+
+        it('does not open a diff or toggle the folder disclosure when the checkbox is clicked', () => {
+            const items = [item({ id: toChangeId('c-1'), path: 'notes/daily.md', kind: 'local-modified' })];
+            renderChangeTree(container, items, new Set(), callbacks);
+
+            (container.querySelector('.scv-tree-folder-select') as HTMLElement).click();
+
+            expect(callbacks.onToggleFolder).not.toHaveBeenCalled();
+        });
     });
 });

@@ -28,4 +28,7 @@ export const ICONS = {
     // Info strip
     branch:   'git-branch',
     folder:   'folder',
+    // Diff layout toggle (mobile)
+    diffSplit:   'columns-2',
+    diffUnified: 'rows-2',
 } as const;

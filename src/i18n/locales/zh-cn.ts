@@ -213,11 +213,6 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 
 	'syncConflictModal.title': '{fileName} 发生冲突',
 	'syncConflictModal.description': '远程文件内容有所不同。请查看差异并选择要保留的版本。',
-	'syncConflictModal.tab.diff': '差异',
-	'syncConflictModal.tab.local': '本机',
-	'syncConflictModal.tab.remote': '远程',
-	'syncConflictModal.localVersion': '本机版本',
-	'syncConflictModal.remoteVersion': '远程版本',
 	'syncConflictModal.differences': '差异',
 	'syncConflictModal.keepLocal': '保留本机',
 	'syncConflictModal.keepLocal.tooltip': '以本机内容覆盖远程',
@@ -255,7 +250,6 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'batchConflictModal.cancel': '取消',
 	'batchConflictModal.unresolvedWarning': '请先为每个冲突选择解决方式，才能继续。',
 
-	'sourceControl.viewTitle': '源代码管理',
 	'sourceControl.filter.all': '全部',
 	'sourceControl.filter.changes': '更改',
 	'sourceControl.filter.readyToPush': '待推送',
@@ -269,11 +263,19 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.section.remoteChanges': '远程更改',
 	'sourceControl.section.conflicts': '冲突',
 	'sourceControl.section.synced': '已同步',
-	'sourceControl.push': ' 推送 ({count})',
+	'sourceControl.push': ' 同步 ({count})',
 	'sourceControl.push.tooltip': '推送 {count} 个已就绪的文件',
 	'sourceControl.empty': '没有更改',
-	'sourceControl.diff.selectPrompt': '选择一项更改以查看差异。',
-	'sourceControl.detail.back': ' 返回',
+	'sourceControl.detail.back': '返回',
+	'sourceControl.info.lastSync': '上次同步：{time}',
+	'sourceControl.info.neverSynced': '尚未同步',
+	'sourceControl.search.placeholder': '按路径过滤…',
+	'sourceControl.search.clear': '清除过滤',
+	'sourceControl.folder.selectAll': '选取文件夹内全部项目',
+	'sourceControl.diff.switchToSplit': '切换为两栏式差异显示',
+	'sourceControl.diff.switchToUnified': '切换为单栏式差异显示',
+	'sourceControl.diff.split': '两栏',
+	'sourceControl.diff.unified': '单栏',
 };
 
 export default zhCn;

@@ -1,13 +1,15 @@
-import { Platform } from 'obsidian';
+import { debounce, Platform, setIcon, setTooltip } from 'obsidian';
 import { t, type TranslationKey } from '../../i18n';
 import type { PushSelectionStore } from '../../logic/source-control/PushSelectionStore';
 import type { SourceControlFilter } from '../../logic/source-control/SourceControlFilter';
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
+import { ICONS } from '../components/icons';
+import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
 import { renderDiffPanel } from '../components/DiffPanel';
 import { renderChangeTree, type ChangeTreeCallbacks } from './ChangeTree';
 import { renderFilterMenu } from './FilterMenu';
-import { renderSourceControlHeader } from './SourceControlHeader';
+import { renderSourceControlHeader, type SourceControlWorkspaceInfo } from './SourceControlHeader';
 
 export interface SourceControlDiffContent {
     remote: string;
@@ -21,6 +23,16 @@ export interface SourceControlViewCallbacks {
     onOpenDiff?: (item: SourceControlItem) => void | Promise<void>;
     /** Supplies diff content for the selected change; omit to leave the diff pane empty. */
     loadDiffContent?: (item: SourceControlItem) => Promise<SourceControlDiffContent | null>;
+    /**
+     * A `local-only` change has nothing on the remote to diff against, so
+     * clicking it opens the file itself instead of an empty diff view.
+     */
+    onOpenLocalFile?: (item: SourceControlItem) => void | Promise<void>;
+    /**
+     * A `remote-only` change has nothing local to diff against, so clicking
+     * it opens the file on the remote (in the browser) instead.
+     */
+    onOpenRemoteFile?: (item: SourceControlItem) => void | Promise<void>;
 }
 
 /** Active-filter header title keys. Every filter renders one header + a flat tree (no section breakdown). */
@@ -58,14 +70,23 @@ const TREE_OPTIONS = { collapseSingleChild: true };
 export class SourceControlView {
     private filter: SourceControlFilter = 'all';
     private showSynced = false;
+    private searchQuery = '';
     private readonly collapsedFolders = new Set<string>();
     private selectedChangeId: ChangeId | null = null;
+    /** Mobile detail view only: which layout the diff renders in, toggled explicitly rather than by container width, so only one ever takes up space. */
+    private mobileDiffLayout: DiffLayout = 'unified';
     private container?: HTMLElement;
+    private readonly applySearchDebounced = debounce(
+        (value: string) => this.applySearch(value),
+        150,
+        false,
+    );
 
     constructor(
         private readonly viewModel: SourceControlViewModel,
         private readonly selection: PushSelectionStore,
         private readonly callbacks: SourceControlViewCallbacks,
+        private readonly getWorkspaceInfo: () => SourceControlWorkspaceInfo,
     ) {}
 
     render(container: HTMLElement): void {
@@ -84,11 +105,6 @@ export class SourceControlView {
 
         const main = container.createDiv({ cls: 'scv-main' });
         this.renderMain(main);
-
-        if (!isMobile) {
-            const diffPane = container.createDiv({ cls: 'scv-diff' });
-            this.renderDiffPane(diffPane);
-        }
     }
 
     getFilter(): SourceControlFilter { return this.filter; }
@@ -104,9 +120,11 @@ export class SourceControlView {
 
         renderSourceControlHeader(
             container,
-            { readyToPushCount: state.counts['ready-to-push'] },
+            { readyToPushCount: state.counts['ready-to-push'], workspaceInfo: this.getWorkspaceInfo() },
             { onPush: () => { void this.callbacks.onPush(this.selection.getSelectedChangeIds()); } },
         );
+
+        this.renderSearchBox(container);
 
         renderFilterMenu(
             container,
@@ -124,9 +142,12 @@ export class SourceControlView {
             },
         );
 
+        const query = this.searchQuery.trim().toLowerCase();
+        const items = query ? state.items.filter(item => item.path.toLowerCase().includes(query)) : state.items;
+
         const body = container.createDiv({ cls: 'scv-body' });
-        this.renderActiveFilterHeader(body, state.filter, state.items.length);
-        if (state.items.length === 0) {
+        this.renderActiveFilterHeader(body, state.filter, items.length);
+        if (items.length === 0) {
             body.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
             return;
         }
@@ -134,10 +155,62 @@ export class SourceControlView {
         const treeCallbacks: ChangeTreeCallbacks = {
             onToggleFolder: (path) => this.toggleFolder(path),
             onToggleSelect: (id, selected) => this.toggleSelect(id, selected),
+            onToggleFolderSelect: (ids, selected) => this.toggleFolderSelect(ids, selected),
             onOpenDiff: (item) => this.openDiff(item),
         };
 
-        renderChangeTree(body, state.items, this.collapsedFolders, treeCallbacks, TREE_OPTIONS);
+        renderChangeTree(body, items, this.collapsedFolders, treeCallbacks, TREE_OPTIONS);
+    }
+
+    /**
+     * Renders the path-filter search box. Kept as a normal part of the
+     * `rerender()`-driven tree (rather than persisted across renders like the
+     * legacy view did), so typing re-focuses the freshly rebuilt input and
+     * restores its caret position instead of losing focus on every keystroke.
+     */
+    private renderSearchBox(container: HTMLElement): void {
+        const row = container.createDiv({ cls: 'scv-search' });
+        row.toggleClass('has-query', this.searchQuery.length > 0);
+        setIcon(row.createSpan({ cls: 'scv-search-icon' }), ICONS.search);
+
+        const input = row.createEl('input', {
+            type: 'text',
+            cls: 'scv-search-input',
+            attr: { placeholder: t('sourceControl.search.placeholder'), spellcheck: 'false' },
+        });
+        input.value = this.searchQuery;
+
+        const clear = row.createEl('button', { cls: 'scv-search-clear' });
+        setIcon(clear, ICONS.clear);
+        setTooltip(clear, t('sourceControl.search.clear'));
+
+        input.addEventListener('input', () => this.applySearchDebounced(input.value));
+        input.addEventListener('keydown', (evt) => {
+            if (evt.key !== 'Escape' || input.value === '') return;
+            evt.preventDefault();
+            input.value = '';
+            this.applySearchDebounced.cancel();
+            this.applySearch('');
+        });
+        clear.addEventListener('click', () => {
+            input.value = '';
+            input.focus();
+            this.applySearchDebounced.cancel();
+            this.applySearch('');
+        });
+    }
+
+    private applySearch(value: string): void {
+        if (value === this.searchQuery) return;
+        const focused = document.activeElement === this.container?.querySelector('.scv-search-input');
+        const cursor = focused ? (this.container?.querySelector<HTMLInputElement>('.scv-search-input')?.selectionStart ?? null) : null;
+        this.searchQuery = value;
+        this.rerender();
+        if (!focused) return;
+        const newInput = this.container?.querySelector<HTMLInputElement>('.scv-search-input');
+        if (!newInput) return;
+        newInput.focus();
+        if (cursor !== null) newInput.setSelectionRange(cursor, cursor);
     }
 
     /** Renders the single active-filter header (e.g. "ALL (132)") above the flat tree. */
@@ -147,23 +220,24 @@ export class SourceControlView {
         header.createSpan({ cls: 'scv-active-filter-count', text: String(count) });
     }
 
-    private renderDiffPane(container: HTMLElement): void {
-        if (!this.selectedChangeId) {
-            container.createDiv({ cls: 'scv-diff-empty', text: t('sourceControl.diff.selectPrompt') });
-            return;
-        }
-        void this.loadAndRenderDiff(container, this.selectedChangeId);
-    }
-
     private renderDetail(root: HTMLElement): void {
         const detail = root.createDiv({ cls: 'scv-detail' });
-        const backBtn = detail.createEl('button', { cls: 'scv-detail-back', text: t('sourceControl.detail.back') });
+        const bar = detail.createDiv({ cls: 'scv-detail-bar' });
+
+        const backBtn = bar.createEl('button', { cls: 'scv-detail-back' });
+        setIcon(backBtn.createSpan({ cls: 'scv-detail-back-icon' }), ICONS.back);
+        backBtn.createSpan({ cls: 'scv-detail-back-label', text: t('sourceControl.detail.back') });
         backBtn.addEventListener('click', () => {
             this.selectedChangeId = null;
             this.rerender();
         });
 
-        const diffContainer = detail.createDiv({ cls: 'scv-detail-diff' });
+        renderDiffLayoutToggle(bar, this.mobileDiffLayout, (next) => {
+            this.mobileDiffLayout = next;
+            this.rerender();
+        });
+
+        const diffContainer = detail.createDiv({ cls: `scv-detail-diff scv-diff-layout-${this.mobileDiffLayout}` });
         if (this.selectedChangeId) void this.loadAndRenderDiff(diffContainer, this.selectedChangeId);
     }
 
@@ -191,7 +265,27 @@ export class SourceControlView {
         this.rerender();
     }
 
+    private toggleFolderSelect(ids: readonly ChangeId[], selected: boolean): void {
+        for (const id of ids) {
+            if (selected) this.selection.includeForPush(id);
+            else this.selection.excludeFromPush(id);
+        }
+        this.rerender();
+    }
+
     private openDiff(item: SourceControlItem): void {
+        // Neither kind has a counterpart to diff against, so clicking opens
+        // the file itself (local-only) or its remote page (remote-only)
+        // instead of navigating into an empty diff view.
+        if (item.kind === 'local-only' && this.callbacks.onOpenLocalFile) {
+            void this.callbacks.onOpenLocalFile(item);
+            return;
+        }
+        if (item.kind === 'remote-only' && this.callbacks.onOpenRemoteFile) {
+            void this.callbacks.onOpenRemoteFile(item);
+            return;
+        }
+
         this.selectedChangeId = item.id;
         if (this.callbacks.onOpenDiff) void this.callbacks.onOpenDiff(item);
         this.rerender();

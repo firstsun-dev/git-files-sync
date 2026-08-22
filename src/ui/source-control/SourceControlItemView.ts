@@ -1,8 +1,9 @@
-import { ItemView, WorkspaceLeaf, debounce } from 'obsidian';
+import { ItemView, Platform, TFile, WorkspaceLeaf, debounce } from 'obsidian';
 import GitLabFilesPush from '../../main';
 import { t } from '../../i18n';
 import type { SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import { SourceControlView, type SourceControlViewCallbacks } from './SourceControlView';
+import type { SourceControlWorkspaceInfo } from './SourceControlHeader';
 
 // Reuses the legacy sync-status view's registered type string so an already
 // open/pinned leaf from before this cutover resolves into the new view
@@ -25,22 +26,55 @@ export class SourceControlItemView extends ItemView {
         SourceControlItemView.RENDER_THROTTLE_MS,
         false,
     );
+    /** Guards against a slower diff load finishing after a later click and clobbering it in the main-area tab. */
+    private diffTabRequestSeq = 0;
 
     constructor(leaf: WorkspaceLeaf, private readonly plugin: GitLabFilesPush) {
         super(leaf);
         const callbacks: SourceControlViewCallbacks = {
             onPush: (changeIds) => this.runAction(this.plugin.sourceControlActions.push(changeIds)),
             loadDiffContent: (item: SourceControlItem) => this.plugin.sourceControlActions.loadDiffContent(item),
+            // Desktop: the panel is a narrow sidebar, so the diff opens in a
+            // full-width main-area tab instead of splitting that sidebar.
+            // Mobile keeps its own in-panel detail view (SourceControlView).
+            onOpenDiff: (item) => { if (!Platform.isMobile) void this.openDesktopDiffTab(item); },
+            onOpenLocalFile: (item) => this.openLocalFile(item.path),
+            onOpenRemoteFile: (item) => this.openRemoteFile(item.path),
         };
         this.view = new SourceControlView(
             this.plugin.sourceControlViewModel,
             this.plugin.pushSelectionStore,
             callbacks,
+            () => this.getWorkspaceInfo(),
         );
     }
 
+    private async openDesktopDiffTab(item: SourceControlItem): Promise<void> {
+        const requestId = ++this.diffTabRequestSeq;
+        const content = await this.plugin.sourceControlActions.loadDiffContent(item);
+        if (requestId !== this.diffTabRequestSeq) return;
+        await this.plugin.openDiffTab(item.path, content);
+    }
+
+    private openLocalFile(path: string): void {
+        const file = this.app.vault.getFileByPath(path);
+        if (file instanceof TFile) void this.app.workspace.getLeaf(false).openFile(file);
+    }
+
+    private openRemoteFile(path: string): void {
+        const url = this.plugin.syncWorkspace.getRemoteFileUrl(path);
+        if (url) window.open(url, '_blank');
+    }
+
+    private getWorkspaceInfo(): SourceControlWorkspaceInfo {
+        const info = this.plugin.syncWorkspace.getInfo();
+        const lastSyncTime = Object.values(this.plugin.settings.syncMetadata)
+            .reduce((latest, metadata) => Math.max(latest, metadata.lastSyncedAt), 0);
+        return { ...info, lastSyncTime };
+    }
+
     getViewType(): string { return SOURCE_CONTROL_VIEW_TYPE; }
-    getDisplayText(): string { return t('sourceControl.viewTitle'); }
+    getDisplayText(): string { return t('syncStatus.viewTitle'); }
     getIcon(): string { return 'git-compare'; }
 
     onOpen(): Promise<void> {

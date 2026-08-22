@@ -7,10 +7,13 @@ import {
 } from '../../logic/source-control/ChangeTreeBuilder';
 import type { SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
+import { t } from '../../i18n';
 import { renderChangeItem, type ChangeItemCallbacks } from './ChangeItem';
 
 export interface ChangeTreeCallbacks extends ChangeItemCallbacks {
     onToggleFolder: (path: string) => void;
+    /** Selects/deselects every file under a folder (recursively) for push in one action. */
+    onToggleFolderSelect: (ids: readonly ChangeId[], selected: boolean) => void;
 }
 
 const builder = new ChangeTreeBuilder();
@@ -64,6 +67,15 @@ function renderFolder(
     const folderEl = container.createDiv({ cls: 'scv-tree-folder' });
     const row = folderEl.createDiv({ cls: 'scv-tree-folder-row' });
 
+    const fileIds = collectFileIds(folder);
+    const selectedCount = fileIds.filter(id => byId.get(id)?.isReadyToPush).length;
+    const checkbox = row.createEl('input', { type: 'checkbox', cls: 'scv-tree-folder-select' });
+    checkbox.setAttr('title', t('sourceControl.folder.selectAll'));
+    checkbox.checked = fileIds.length > 0 && selectedCount === fileIds.length;
+    checkbox.indeterminate = selectedCount > 0 && selectedCount < fileIds.length;
+    checkbox.addEventListener('click', (evt) => evt.stopPropagation());
+    checkbox.addEventListener('change', () => callbacks.onToggleFolderSelect(fileIds, checkbox.checked));
+
     const toggle = row.createEl('button', { cls: 'scv-tree-folder-toggle' });
     toggle.setAttr('aria-expanded', String(!collapsed));
     toggle.setText(collapsed ? '▶' : '▼');
@@ -86,4 +98,14 @@ function renderFile(
     const item = byId.get(file.id);
     if (!item) return;
     renderChangeItem(container, item, file.name, callbacks);
+}
+
+/** Recursively collects the ids of every file under a folder node, for the folder's "select all" checkbox. */
+function collectFileIds(folder: ChangeTreeFolderNode): ChangeId[] {
+    const ids: ChangeId[] = [];
+    for (const child of folder.children) {
+        if (child.type === 'file') ids.push(child.id);
+        else ids.push(...collectFileIds(child));
+    }
+    return ids;
 }

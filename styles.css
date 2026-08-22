@@ -15,20 +15,98 @@
     border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.scv-header-title {
-    font-weight: 600;
-    font-size: 0.9em;
+.scv-header-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
 }
+
+/* ── Workspace info strip (provider · branch · vault folder · last sync) ── */
+.scv-info {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+    font-size: 0.75em;
+    color: var(--text-muted);
+}
+
+.scv-info-item {
+    display: inline-flex;
+    align-items: center;
+}
+
+.scv-info-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+.scv-info-icon .svg-icon { width: 11px; height: 11px; }
+
+.scv-info-sep { color: var(--text-faint); }
+
+.scv-info-time { white-space: nowrap; }
+
+/* ── Search / path filter ─────────────────────────────────────── */
+.scv-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    flex-shrink: 0;
+}
+
+.scv-search-icon {
+    display: flex;
+    align-items: center;
+    color: var(--text-faint);
+    flex-shrink: 0;
+}
+
+.scv-search-icon .svg-icon { width: 14px; height: 14px; }
+
+.scv-search-input {
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    padding: 0 6px;
+    font-size: 0.82em;
+    background: var(--background-modifier-form-field);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    color: var(--text-normal);
+}
+
+.scv-search-clear {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    height: 22px;
+    width: 22px;
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.scv-search.has-query .scv-search-clear { display: flex; }
+
+.scv-search-clear:hover { color: var(--text-normal); }
+
+.scv-search-clear .svg-icon { width: 14px; height: 14px; }
 
 .scv-main {
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
-}
-
-.scv-desktop .scv-main {
-    flex-direction: row;
+    min-width: 0;
 }
 
 .scv-body {
@@ -218,6 +296,13 @@
 
 .scv-tree-folder-row:hover { background: var(--background-modifier-hover); }
 
+.scv-tree-folder-select {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
 .scv-tree-folder-toggle {
     display: inline-flex;
     align-items: center;
@@ -352,15 +437,67 @@
     font-size: 0.88em;
 }
 
-/* ── Inline diff pane (desktop side-by-side) ──────────────────────── */
-.scv-diff {
-    flex: 1;
-    min-width: 0;
-    border-left: 1px solid var(--background-modifier-border);
-    overflow-y: auto;
-    padding: 10px 12px;
+/* ── Diff tab (desktop: full main-area workspace tab) ─────────────── */
+.scv-diff-tab {
+    padding: 10px 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
     container-type: inline-size;
 }
+
+.scv-diff-tab-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.scv-diff-tab-path {
+    font-family: var(--font-monospace);
+    font-size: 0.82em;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.scv-diff-tab-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* Let the diff fill all the space this full tab gives it, instead of the
+   compact scroll box used elsewhere -- there's a whole tab of room here.
+   Deliberately doesn't touch `display` (owned by the toggle-class rules
+   below), so split and unified never both end up visible at once. */
+.scv-diff-tab-body .ssv-diff-split {
+    flex: 1;
+    min-height: 0;
+}
+
+.scv-diff-tab-body .ssv-diff-grid {
+    height: 100%;
+    max-height: none;
+    min-height: 0;
+}
+
+.scv-diff-tab-body .ssv-diff-unified {
+    flex: 1;
+    max-height: none;
+    min-height: 0;
+}
+
+/* Explicit layout toggle (button-driven, not tab width) -- only one of
+   split/unified is ever shown, so they never both take up space. These
+   two-class selectors outrank the width-based @container rules below. */
+.scv-diff-tab-body.scv-diff-layout-split .ssv-diff-split     { display: block; }
+.scv-diff-tab-body.scv-diff-layout-split .ssv-diff-unified   { display: none; }
+.scv-diff-tab-body.scv-diff-layout-unified .ssv-diff-split   { display: none; }
+.scv-diff-tab-body.scv-diff-layout-unified .ssv-diff-unified { display: block; }
 
 .scv-diff-empty {
     padding: 36px 20px;
@@ -376,25 +513,92 @@
     height: 100%;
 }
 
-.scv-detail-back {
+.scv-detail-bar {
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     margin: 8px 10px;
-    padding: 6px 12px;
-    align-self: flex-start;
-    border-radius: 5px;
+}
+
+.scv-detail-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px 7px 10px;
+    border-radius: 6px;
     border: 1px solid var(--background-modifier-border);
-    background: var(--background-secondary);
+    background: var(--interactive-normal);
+    color: var(--text-normal);
+    cursor: pointer;
+    font-size: 0.88em;
+    font-weight: 600;
+}
+
+.scv-detail-back:hover { background: var(--interactive-hover); }
+
+.scv-detail-back-icon { display: inline-flex; align-items: center; }
+.scv-detail-back-icon .svg-icon { width: 15px; height: 15px; }
+
+.scv-diff-layout-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--interactive-normal);
     color: var(--text-normal);
     cursor: pointer;
     font-size: 0.85em;
+    font-weight: 600;
+    white-space: nowrap;
 }
+
+.scv-diff-layout-toggle:hover { background: var(--interactive-hover); }
+
+.scv-diff-layout-toggle-icon { display: inline-flex; align-items: center; }
+.scv-diff-layout-toggle-icon .svg-icon { width: 15px; height: 15px; }
 
 .scv-detail-diff {
     flex: 1;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     padding: 0 12px 12px;
     container-type: inline-size;
 }
+
+/* Same "fill the room this dedicated page has" fix as the desktop tab --
+   the mobile detail view is its own full-screen page, not a cramped
+   sidebar split, so the diff shouldn't be capped to a short scroll box.
+   Deliberately doesn't touch `display` (owned by the toggle-class rules
+   below), so split and unified never both end up visible at once. */
+.scv-detail-diff .ssv-diff-split {
+    flex: 1;
+    min-height: 0;
+}
+
+.scv-detail-diff .ssv-diff-grid {
+    height: 100%;
+    max-height: none;
+    min-height: 0;
+}
+
+.scv-detail-diff .ssv-diff-unified {
+    flex: 1;
+    max-height: none;
+    min-height: 0;
+}
+
+/* Explicit layout toggle (button-driven, not container width) -- only one
+   of split/unified is ever shown, so they never both take up space. These
+   two-class selectors outrank the width-based @container rules below. */
+.scv-detail-diff.scv-diff-layout-split .ssv-diff-split     { display: block; }
+.scv-detail-diff.scv-diff-layout-split .ssv-diff-unified   { display: none; }
+.scv-detail-diff.scv-diff-layout-unified .ssv-diff-split   { display: none; }
+.scv-detail-diff.scv-diff-layout-unified .ssv-diff-unified { display: block; }
 
 /* ── Side-by-side diff (default for wide panels) ──────────────────── */
 .ssv-diff-split {
@@ -610,74 +814,24 @@
     flex-shrink: 0;
 }
 
-.conflict-tabs {
-    display: none;
-    gap: 6px;
-    margin-bottom: 12px;
-    flex-shrink: 0;
-}
-
-.conflict-tab {
-    padding: 6px 12px;
-    border-radius: 5px;
-    border: 1px solid var(--background-modifier-border);
-    background: var(--background-secondary);
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 0.85em;
-}
-
-.conflict-tab.is-active {
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-    border-color: var(--interactive-accent);
-}
-
 .conflict-content-area {
     flex: 1;
     overflow-y: auto;
     min-height: 0;
 }
 
-.conflict-diff-container {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 14px;
-    margin-bottom: 18px;
+.conflict-diff-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
 }
 
-.conflict-panel {
-    min-width: 0;
-}
-
-/* Below this width two side-by-side panes are too narrow to read a real
-   Markdown file comfortably, so fall back to the tab/single-pane view. */
-@media (max-width: 900px) {
-    .conflict-diff-container { grid-template-columns: 1fr; }
-
-    .conflict-tabs { display: flex; }
-
-    .conflict-panel { display: none; }
-    .conflict-panel.is-active { display: block; }
-}
-
-.conflict-section h3,
-.conflict-diff-section h3 {
-    margin: 0 0 8px;
+.conflict-diff-header h3 {
+    margin: 0;
     font-size: 0.9em;
     font-weight: 600;
-}
-
-.conflict-content,
-.conflict-diff {
-    overflow: auto;
-    padding: 10px;
-    background: var(--background-secondary);
-    border-radius: 5px;
-    margin: 0;
-    font-family: var(--font-monospace);
-    font-size: 0.82em;
-    white-space: pre;
 }
 
 .conflict-binary-notice {

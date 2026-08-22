@@ -1,4 +1,5 @@
-import { describe, expect, it, vi, beforeAll, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { Platform } from 'obsidian';
 import { SourceControlView, type SourceControlViewCallbacks } from '../../../src/ui/source-control/SourceControlView';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
@@ -16,7 +17,12 @@ function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCa
     const operations = new OperationState();
     const viewModel = new SourceControlViewModel(repository, selection, operations);
     const onPush = callbacks.onPush ?? vi.fn();
-    const view = new SourceControlView(viewModel, selection, { onPush, ...callbacks });
+    const view = new SourceControlView(viewModel, selection, { onPush, ...callbacks }, () => ({
+        serviceName: 'GitHub',
+        branch: 'main',
+        vaultFolder: '',
+        lastSyncTime: 0,
+    }));
     return { view, selection, operations, onPush };
 }
 
@@ -209,7 +215,14 @@ describe('SourceControlView', () => {
     });
 
     describe('diff selection', () => {
-        it('loads and renders diff content for the clicked change', async () => {
+        // Desktop has no inline diff pane -- clicking a change only notifies
+        // onOpenDiff, and the host (SourceControlItemView) opens a main-area
+        // tab. Only the mobile full-screen detail view still loads/renders
+        // diff content inside SourceControlView itself.
+        afterEach(() => { Platform.isMobile = false; });
+
+        it('loads and renders diff content in the mobile detail view for the clicked change', async () => {
+            Platform.isMobile = true;
             const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
             const { view } = buildView(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
@@ -222,8 +235,19 @@ describe('SourceControlView', () => {
             await Promise.resolve();
 
             expect(loadDiffContent).toHaveBeenCalledWith(expect.objectContaining({ id: toChangeId('c-1') }));
+            expect(container.querySelector('.scv-detail-diff')).not.toBeNull();
             // Reuses the existing diff panel renderer (Phase 3 spec: don't rewrite diff UI), which uses its own 'ssv-' class prefix.
             expect(container.querySelector('.ssv-diff-split')).not.toBeNull();
+        });
+
+        it('does not render an inline diff pane on desktop -- only notifies onOpenDiff', () => {
+            const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }]);
+            view.render(container);
+
+            (container.querySelector('.scv-change-item') as HTMLElement).click();
+
+            expect(container.querySelector('.scv-diff')).toBeNull();
+            expect(container.querySelector('.scv-detail')).toBeNull();
         });
 
         it('notifies onOpenDiff with the selected item', () => {
@@ -237,6 +261,45 @@ describe('SourceControlView', () => {
             (container.querySelector('.scv-change-item') as HTMLElement).click();
 
             expect(onOpenDiff).toHaveBeenCalledWith(expect.objectContaining({ id: toChangeId('c-1'), path: 'a.md' }));
+        });
+
+        describe('mobile diff layout toggle', () => {
+            it('defaults to the unified (single-column) layout, with the split diff hidden', async () => {
+                Platform.isMobile = true;
+                const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
+                const { view } = buildView(
+                    [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                    { loadDiffContent },
+                );
+                view.render(container);
+                (container.querySelector('.scv-change-item') as HTMLElement).click();
+                await Promise.resolve();
+                await Promise.resolve();
+
+                const diffContainer = container.querySelector('.scv-detail-diff');
+                expect(diffContainer?.classList.contains('scv-diff-layout-unified')).toBe(true);
+            });
+
+            it('switches to the split layout when the toggle button is clicked, never showing both at once', async () => {
+                Platform.isMobile = true;
+                const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
+                const { view } = buildView(
+                    [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                    { loadDiffContent },
+                );
+                view.render(container);
+                (container.querySelector('.scv-change-item') as HTMLElement).click();
+                await Promise.resolve();
+                await Promise.resolve();
+
+                (container.querySelector('.scv-diff-layout-toggle') as HTMLButtonElement).click();
+                await Promise.resolve();
+                await Promise.resolve();
+
+                const diffContainer = container.querySelector('.scv-detail-diff');
+                expect(diffContainer?.classList.contains('scv-diff-layout-split')).toBe(true);
+                expect(diffContainer?.classList.contains('scv-diff-layout-unified')).toBe(false);
+            });
         });
     });
 

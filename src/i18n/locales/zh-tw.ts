@@ -213,11 +213,6 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 
 	'syncConflictModal.title': '{fileName} 發生衝突',
 	'syncConflictModal.description': '遠端檔案內容有所不同。請檢視差異並選擇要保留的版本。',
-	'syncConflictModal.tab.diff': '差異',
-	'syncConflictModal.tab.local': '本機',
-	'syncConflictModal.tab.remote': '遠端',
-	'syncConflictModal.localVersion': '本機版本',
-	'syncConflictModal.remoteVersion': '遠端版本',
 	'syncConflictModal.differences': '差異',
 	'syncConflictModal.keepLocal': '保留本機',
 	'syncConflictModal.keepLocal.tooltip': '以本機內容覆蓋遠端',
@@ -255,7 +250,6 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'batchConflictModal.cancel': '取消',
 	'batchConflictModal.unresolvedWarning': '請先為每個衝突選擇解決方式，才能繼續。',
 
-	'sourceControl.viewTitle': '原始碼控制',
 	'sourceControl.filter.all': '全部',
 	'sourceControl.filter.changes': '變更',
 	'sourceControl.filter.readyToPush': '待推送',
@@ -269,11 +263,19 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.section.remoteChanges': '遠端變更',
 	'sourceControl.section.conflicts': '衝突',
 	'sourceControl.section.synced': '已同步',
-	'sourceControl.push': ' 推送 ({count})',
+	'sourceControl.push': ' 同步 ({count})',
 	'sourceControl.push.tooltip': '推送 {count} 個已就緒的檔案',
 	'sourceControl.empty': '沒有變更',
-	'sourceControl.diff.selectPrompt': '選擇一項變更以檢視差異。',
-	'sourceControl.detail.back': ' 返回',
+	'sourceControl.detail.back': '返回',
+	'sourceControl.info.lastSync': '上次同步：{time}',
+	'sourceControl.info.neverSynced': '尚未同步',
+	'sourceControl.search.placeholder': '以路徑過濾…',
+	'sourceControl.search.clear': '清除過濾',
+	'sourceControl.folder.selectAll': '選取資料夾內全部項目',
+	'sourceControl.diff.switchToSplit': '切換為兩欄式差異顯示',
+	'sourceControl.diff.switchToUnified': '切換為單欄式差異顯示',
+	'sourceControl.diff.split': '兩欄',
+	'sourceControl.diff.unified': '單欄',
 };
 
 export default zhTw;
