@@ -161,7 +161,7 @@ describe('SourceControlView', () => {
             expect(section?.querySelector('.scv-selected-section-count')?.textContent).toBe('1');
         });
 
-        it('lists the selected change as a real row inside the Selected section, unselecting on checkbox clear', () => {
+        it('lists the selected change as a read-only queue row (badge + name, no checkbox) inside the Selected section', () => {
             const { view, selection } = buildView([
                 { id: toChangeId('c-1'), path: 'notes/a.md', kind: 'local-only' },
             ]);
@@ -169,15 +169,26 @@ describe('SourceControlView', () => {
             view.render(container);
 
             const section = container.querySelector('.scv-selected-section') as HTMLElement;
-            const row = section.querySelector('.scv-change-item') as HTMLElement;
+            const row = section.querySelector('.scv-queue-item') as HTMLElement;
             expect(row?.getAttribute('data-change-id')).toBe('c-1');
-            expect(row?.querySelector('.scv-change-name-text')?.textContent).toBe('a.md');
-            expect(row?.classList.contains('is-selected')).toBe(true);
+            expect(row?.querySelector('.scv-queue-name-text')?.textContent).toBe('a.md');
+            expect(row?.querySelector('.scv-badge')?.textContent).toBe('A');
+            // The queue is an action preview, not a second copy of the tree:
+            // no selection checkbox here — selection happens in the tree below.
+            expect(row?.querySelector('.scv-change-select')).toBeNull();
+        });
 
-            const checkbox = row.querySelector('.scv-change-select') as HTMLInputElement;
-            expect(checkbox.checked).toBe(true);
-            checkbox.checked = false;
-            checkbox.dispatchEvent(new Event('change'));
+        it('unselects via the tree row checkbox, removing the change from the Selected section', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'notes/a.md', kind: 'local-only' },
+            ]);
+            selection.includeForPush(toChangeId('c-1'));
+            view.render(container);
+
+            const treeCheckbox = container.querySelector('.scv-body .scv-change-item .scv-change-select') as HTMLInputElement;
+            expect(treeCheckbox.checked).toBe(true);
+            treeCheckbox.checked = false;
+            treeCheckbox.dispatchEvent(new Event('change'));
 
             expect(selection.isIncluded(toChangeId('c-1'))).toBe(false);
             expect(container.querySelector('.scv-selected-section')).toBeNull();
@@ -516,6 +527,21 @@ describe('SourceControlView', () => {
 
             expect(loadDiffStat).toHaveBeenCalledTimes(1);
             expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+1 -4');
+        });
+
+        it('eager-loads stats for selected changes of any kind so the Selected queue previews them', async () => {
+            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 2, deletions: 1 });
+            const { view, selection } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                { loadDiffStat },
+            );
+            selection.includeForPush(toChangeId('c-1'));
+            view.render(container);
+            await flush();
+
+            // A two-sided change in the queue is eager-loaded (unlike tree-only rows).
+            expect(loadDiffStat).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local-modified' }));
+            expect(container.querySelector('.scv-selected-section .scv-queue-item .scv-diff-stat')?.textContent).toBe('+2 -1');
         });
     });
 

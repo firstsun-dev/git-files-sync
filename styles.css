@@ -271,13 +271,34 @@
     flex-direction: column;
 }
 
-.scv-selected-section-list .scv-change-item {
-    border-left: none;
-    background: transparent;
+.scv-queue-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    font-family: var(--font-monospace);
+    font-size: 0.80em;
+    color: var(--text-normal);
+    cursor: pointer;
 }
 
-.scv-selected-section-list .scv-change-item:hover {
+.scv-queue-item:hover {
     background: var(--background-modifier-hover);
+}
+
+.scv-queue-name {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    overflow: hidden;
+}
+
+.scv-queue-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ── Push button ───────────────────────────────────────────────── */
@@ -496,14 +517,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.scv-change-item.is-selected {
-    opacity: 0.55;
-}
-
-.scv-change-item.is-selected .scv-change-name-text {
-    font-style: italic;
 }
 
 .scv-diff-stat {

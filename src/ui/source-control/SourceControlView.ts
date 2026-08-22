@@ -9,7 +9,7 @@ import { ICONS } from '../components/icons';
 import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
 import { renderDiffPanel } from '../components/DiffPanel';
 import { renderChangeTree, type ChangeTreeCallbacks } from './ChangeTree';
-import { renderChangeItem } from './ChangeItem';
+import { renderSelectedQueueItem } from './ChangeItem';
 import { renderFilterMenu } from './FilterMenu';
 import { renderSourceControlHeader, type SourceControlWorkspaceInfo } from './SourceControlHeader';
 
@@ -192,6 +192,7 @@ export class SourceControlView {
         renderChangeTree(body, items, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
 
         this.eagerLoadLocalStats(items);
+        this.eagerLoadSelectedStats(state.selectedItems);
 
         if (isMobile) this.renderMobileSyncBar(container, state.counts['ready-to-push']);
     }
@@ -255,15 +256,15 @@ export class SourceControlView {
     }
 
     /**
-     * Renders the "SELECTED FOR SYNC (N)" workspace — a first-class region
-     * (not just a count) that lists every actionable change the user has
-     * ticked for push, each as a full row whose checkbox unselects it. Sits
-     * between the filter and the tree so the working push batch stays
-     * visible regardless of the active filter, and the same items remain in
-     * the tree (visually muted via `is-selected`) so context isn't lost.
-     * The set comes straight from the ViewModel's single-source
-     * `selectedItems` projection (same definition as the Sync button count),
-     * so the section and the button can never drift.
+     * Renders the "SELECTED FOR SYNC (N)" workspace — a read-only action
+     * preview of the working push batch. Each queued change is a compact row
+     * (badge + name + diff-stat, NO checkbox): this is not a second copy of
+     * the tree but the queue the Sync button will act on. Selection itself
+     * happens in the tree below, which keeps the same rows visible but
+     * muted via `is-selected` so context isn't lost. The set comes straight
+     * from the ViewModel's single-source `selectedItems` projection (same
+     * definition as the Sync button count), so the section and the button
+     * can never drift.
      */
     private renderSelectedSection(
         container: HTMLElement,
@@ -286,7 +287,7 @@ export class SourceControlView {
 
         const list = section.createDiv({ cls: 'scv-selected-section-list' });
         for (const item of selectedItems) {
-            renderChangeItem(list, item, basename(item.path), callbacks);
+            renderSelectedQueueItem(list, item, basename(item.path), callbacks);
         }
     }
 
@@ -381,6 +382,24 @@ export class SourceControlView {
     private eagerLoadLocalStats(items: readonly SourceControlItem[]): void {
         if (!this.callbacks.loadDiffStat) return;
         const pending = items.filter(item => item.kind === 'local-only' && !this.diffStatCache.has(item.id));
+        if (pending.length === 0) return;
+        void Promise.all(pending.map(async item => {
+            const stat = await this.callbacks.loadDiffStat!(item);
+            this.diffStatCache.set(item.id, stat ?? null);
+        })).then(() => this.rerender());
+    }
+
+    /**
+     * Eagerly resolves +/- stats for every change in the Selected section so
+     * the action queue previews `+3 -1` next to each row. Unlike
+     * {@link eagerLoadLocalStats} this covers all kinds (two-sided changes may
+     * involve a remote fetch), but the selected set is the user's working
+     * push batch — small and worth the round-trip. Null results are cached so
+     * an unavailable stat isn't retried on every rerender.
+     */
+    private eagerLoadSelectedStats(selectedItems: readonly SourceControlItem[]): void {
+        if (!this.callbacks.loadDiffStat) return;
+        const pending = selectedItems.filter(item => !this.diffStatCache.has(item.id));
         if (pending.length === 0) return;
         void Promise.all(pending.map(async item => {
             const stat = await this.callbacks.loadDiffStat!(item);

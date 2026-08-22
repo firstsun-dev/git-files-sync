@@ -67,7 +67,7 @@ export function renderChangeItem(
  * deletions) so the magnitude and direction read at a glance. Nothing is
  * rendered when the stat is unavailable or zero on both sides.
  */
-function renderDiffStat(row: HTMLElement, stat: ChangeStat | undefined): void {
+export function renderDiffStat(row: HTMLElement, stat: ChangeStat | undefined): void {
     if (!stat) return;
     const hasAdd = stat.additions > 0;
     const hasDel = stat.deletions > 0;
@@ -76,4 +76,40 @@ function renderDiffStat(row: HTMLElement, stat: ChangeStat | undefined): void {
     if (hasAdd) wrap.createSpan({ cls: 'scv-diff-stat-add', text: `+${stat.additions}` });
     if (hasAdd && hasDel) wrap.createSpan({ cls: 'scv-diff-stat-sep', text: ' ' });
     if (hasDel) wrap.createSpan({ cls: 'scv-diff-stat-del', text: `-${stat.deletions}` });
+}
+
+/**
+ * Renders a compact queue row for the "SELECTED FOR SYNC" section: badge +
+ * name (with rename arrow for moves) + diff-stat, with NO selection checkbox
+ * and NO operation indicator. The Selected section is an action preview of
+ * the working push batch, not a second copy of the tree — selection happens
+ * in the tree below, so the queue stays read-only (clicking opens the diff).
+ */
+export function renderSelectedQueueItem(
+    container: HTMLElement,
+    item: SourceControlItem,
+    displayName: string,
+    callbacks: ChangeItemCallbacks,
+): HTMLElement {
+    const view = presentChange(item, displayName);
+
+    const row = container.createDiv({ cls: `scv-queue-item scv-kind-${item.kind}` });
+    row.setAttr('data-change-id', item.id);
+    if (view.tooltip) row.setAttr('title', view.tooltip);
+
+    const badgeEl = row.createSpan({ cls: `scv-badge scv-badge-${view.badge.cls}`, text: view.badge.letter });
+    setTooltip(badgeEl, view.subtitle);
+
+    const label = row.createDiv({ cls: 'scv-queue-name' });
+    if (view.renameFrom) {
+        label.createSpan({ cls: 'scv-change-rename-from', text: view.renameFrom });
+        setIcon(label.createSpan({ cls: 'scv-change-rename-arrow' }), ICONS.moved);
+    }
+    label.createSpan({ cls: 'scv-queue-name-text', text: view.displayName });
+
+    renderDiffStat(row, callbacks.getDiffStat?.(item.id));
+
+    row.addEventListener('click', () => callbacks.onOpenDiff(item));
+
+    return row;
 }
