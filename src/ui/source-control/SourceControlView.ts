@@ -19,6 +19,8 @@ export interface SourceControlDiffContent {
 export interface SourceControlViewCallbacks {
     /** Hands push intent off to whatever wires this view to the sync pipeline; never called by the UI directly against a Git provider. */
     onPush: (changeIds: ChangeId[]) => void | Promise<void>;
+    /** Triggers a view-wide refresh; the host wires this to the ViewModel's refresh delegate. */
+    onRefresh: () => void;
     /** Notified when a change is selected for diff viewing, in addition to this view's own diff pane rendering. */
     onOpenDiff?: (item: SourceControlItem) => void | Promise<void>;
     /** Supplies diff content for the selected change; omit to leave the diff pane empty. */
@@ -120,8 +122,15 @@ export class SourceControlView {
 
         renderSourceControlHeader(
             container,
-            { readyToPushCount: state.counts['ready-to-push'], workspaceInfo: this.getWorkspaceInfo() },
-            { onPush: () => { void this.callbacks.onPush(this.selection.getSelectedChangeIds()); } },
+            {
+                readyToPushCount: state.counts['ready-to-push'],
+                workspaceInfo: this.getWorkspaceInfo(),
+                refreshStatus: state.refreshStatus,
+            },
+            {
+                onPush: () => { void this.callbacks.onPush(this.selection.getSelectedChangeIds()); },
+                onRefresh: () => this.callbacks.onRefresh(),
+            },
         );
 
         this.renderSearchBox(container);

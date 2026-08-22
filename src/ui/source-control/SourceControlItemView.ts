@@ -33,6 +33,7 @@ export class SourceControlItemView extends ItemView {
         super(leaf);
         const callbacks: SourceControlViewCallbacks = {
             onPush: (changeIds) => this.runAction(this.plugin.sourceControlActions.push(changeIds)),
+            onRefresh: () => this.runRefresh(),
             loadDiffContent: (item: SourceControlItem) => this.plugin.sourceControlActions.loadDiffContent(item),
             // Desktop: the panel is a narrow sidebar, so the diff opens in a
             // full-width main-area tab instead of splitting that sidebar.
@@ -108,5 +109,20 @@ export class SourceControlItemView extends ItemView {
     private runAction(action: Promise<void>): void {
         this.renderView();
         void action.finally(() => this.renderView());
+    }
+
+    /**
+     * Refresh reuses the same render-then-settle pattern as {@link runAction},
+     * but the ViewModel's refresh() sets its `RefreshState` to 'loading'
+     * synchronously (before the first `await`), so the immediate render shows
+     * "Refreshing…". The settle render projects 'idle' on success or
+     * 'failed' on rejection. The rejection is swallowed here so a failed
+     * refresh surfaces as the button's failed state rather than an unhandled
+     * rejection — the state was already recorded on the `RefreshState` holder.
+     */
+    private runRefresh(): void {
+        const refresh = this.plugin.sourceControlViewModel.refresh();
+        this.renderView();
+        void refresh.then(() => this.renderView(), () => this.renderView());
     }
 }

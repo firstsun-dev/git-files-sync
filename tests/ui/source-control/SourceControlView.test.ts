@@ -20,13 +20,14 @@ function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCa
     const refreshSource = vi.fn().mockResolvedValue(undefined);
     const viewModel = new SourceControlViewModel(repository, selection, operations, refreshSource, refreshState);
     const onPush = callbacks.onPush ?? vi.fn();
-    const view = new SourceControlView(viewModel, selection, { onPush, ...callbacks }, () => ({
+    const onRefresh = callbacks.onRefresh ?? vi.fn();
+    const view = new SourceControlView(viewModel, selection, { onPush, onRefresh, ...callbacks }, () => ({
         serviceName: 'GitHub',
         branch: 'main',
         vaultFolder: '',
         lastSyncTime: 0,
     }));
-    return { view, selection, operations, refreshState, refreshSource, onPush };
+    return { view, selection, operations, refreshState, refreshSource, onPush, onRefresh };
 }
 
 describe('SourceControlView', () => {
@@ -236,6 +237,14 @@ describe('SourceControlView', () => {
             expect(indicator?.classList.contains('scv-op-running')).toBe(true);
         });
 
+        it('renders a text label alongside the operation indicator', () => {
+            const { view, operations } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            operations.start(toChangeId('c-1'));
+            view.render(container);
+
+            expect(container.querySelector('.scv-op-indicator .scv-op-label')?.textContent).toBe('Syncing');
+        });
+
         it('shows no indicator once the operation is idle again', () => {
             const { view, operations } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
             operations.start(toChangeId('c-1'));
@@ -243,6 +252,68 @@ describe('SourceControlView', () => {
             view.render(container);
 
             expect(container.querySelector('.scv-op-indicator')).toBeNull();
+        });
+    });
+
+    describe('refresh', () => {
+        it('renders the refresh button in the idle state by default', () => {
+            const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            view.render(container);
+
+            const btn = container.querySelector('.scv-refresh-btn');
+            expect(btn).not.toBeNull();
+            expect(btn?.classList.contains('is-idle')).toBe(true);
+        });
+
+        it('renders the "Refreshing…" label while loading', () => {
+            const { view, refreshState } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            view.render(container);
+            refreshState.start();
+            view.render(container);
+
+            const btn = container.querySelector('.scv-refresh-btn');
+            expect(btn?.classList.contains('is-loading')).toBe(true);
+            expect(btn?.querySelector('.scv-refresh-btn-label')?.textContent).toBe('Refreshing…');
+            expect((btn as HTMLButtonElement).disabled).toBe(true);
+        });
+
+        it('renders the "Refresh failed" label in the failed state', () => {
+            const { view, refreshState } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            view.render(container);
+            refreshState.fail();
+            view.render(container);
+
+            const btn = container.querySelector('.scv-refresh-btn');
+            expect(btn?.classList.contains('is-failed')).toBe(true);
+            expect(btn?.querySelector('.scv-refresh-btn-label')?.textContent).toBe('Refresh failed');
+        });
+
+        it('calls onRefresh when the refresh button is clicked', () => {
+            const onRefresh = vi.fn();
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { onRefresh },
+            );
+            view.render(container);
+
+            (container.querySelector('.scv-refresh-btn') as HTMLButtonElement).click();
+
+            expect(onRefresh).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not call onRefresh while a refresh is already loading', () => {
+            const onRefresh = vi.fn();
+            const { view, refreshState } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { onRefresh },
+            );
+            view.render(container);
+            refreshState.start();
+            view.render(container);
+
+            (container.querySelector('.scv-refresh-btn') as HTMLButtonElement).click();
+
+            expect(onRefresh).not.toHaveBeenCalled();
         });
     });
 

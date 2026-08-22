@@ -18,8 +18,8 @@
 .scv-header-title-row {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
     gap: 8px;
+    padding: 0 10px;
 }
 
 /* ── Workspace info strip (provider · branch · vault folder · last sync) ── */
@@ -248,8 +248,8 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    width: calc(100% - 20px);
-    margin: 8px 10px;
+    flex: 1 1 auto;
+    margin: 8px 0;
     padding: 7px 11px;
     border-radius: 5px;
     font-size: 0.85em;
@@ -269,6 +269,43 @@
 }
 
 .scv-push-btn:not(:disabled):hover { opacity: 0.85; }
+
+/* ── Refresh button ───────────────────────────────────────────── */
+.scv-refresh-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+    margin: 8px 0;
+    padding: 6px 9px;
+    border-radius: 5px;
+    font-size: 0.8em;
+    cursor: pointer;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-modifier-form-field);
+    color: var(--text-muted);
+    min-height: 32px;
+}
+
+.scv-refresh-btn:hover { color: var(--text-normal); }
+
+.scv-refresh-btn.is-loading { cursor: progress; }
+.scv-refresh-btn.is-loading .scv-refresh-btn-icon { animation: scv-refresh-spin 1s linear infinite; }
+
+.scv-refresh-btn.is-failed {
+    color: var(--text-error);
+    border-color: var(--background-modifier-error-border, var(--background-modifier-border));
+}
+
+.scv-refresh-btn:disabled { opacity: 0.7; cursor: progress; }
+
+.scv-refresh-btn-label { white-space: nowrap; }
+.scv-refresh-btn.is-idle .scv-refresh-btn-label { display: none; }
+
+@keyframes scv-refresh-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
 
 /* ── Change sections & tree ───────────────────────────────────────── */
 .scv-section-header {
@@ -446,10 +483,16 @@
 .scv-op-indicator {
     display: inline-flex;
     align-items: center;
+    gap: 3px;
     flex-shrink: 0;
 }
 
 .scv-op-indicator .svg-icon { width: 14px; height: 14px; }
+
+.scv-op-label {
+    font-size: 0.72em;
+    white-space: nowrap;
+}
 
 .scv-op-running { color: var(--text-muted); }
 .scv-op-success { color: var(--color-green); }

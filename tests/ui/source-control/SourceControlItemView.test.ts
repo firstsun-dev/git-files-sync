@@ -81,6 +81,19 @@ describe('SourceControlItemView', () => {
         expect(push).toHaveBeenCalledWith([toChangeId('a.md')]);
     });
 
+    it('forwards refresh clicks to the ViewModel refresh delegate', async () => {
+        const { plugin } = buildPlugin();
+        const refreshSpy = vi.spyOn(plugin.sourceControlViewModel, 'refresh').mockResolvedValue(undefined);
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+
+        const container = view.containerEl.children[1] as HTMLElement;
+        (container.querySelector('.scv-refresh-btn') as HTMLButtonElement).click();
+        await Promise.resolve();
+
+        expect(refreshSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('re-renders when the shared SyncStatusService publishes a change', async () => {
         const { plugin, repository, status } = buildPlugin();
         const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
