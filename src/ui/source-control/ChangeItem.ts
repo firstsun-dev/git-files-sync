@@ -1,4 +1,5 @@
 import { setIcon, setTooltip } from 'obsidian';
+import { t } from '../../i18n';
 import { ICONS } from '../components/icons';
 import { renderOperationIndicator } from './OperationIndicator';
 import { presentChange, type ChangeStat } from './ChangePresentation';
@@ -8,6 +9,12 @@ import type { ChangeId } from '../../logic/source-control/types';
 export interface ChangeItemCallbacks {
     onToggleSelect: (id: ChangeId, selected: boolean) => void;
     onOpenDiff: (item: SourceControlItem) => void;
+    /**
+     * Pulls a single remote-only change into the local vault. Only invoked
+     * for `remote-only` rows (the Download button renders only for that
+     * kind), so the callback never has to re-classify.
+     */
+    onDownload?: (item: SourceControlItem) => void;
     /** Looks up a cached diff stat for a row, if one has been computed. */
     getDiffStat?: (id: ChangeId) => ChangeStat | undefined;
 }
@@ -78,6 +85,14 @@ export function renderChangeItem(
 
     renderDiffStat(row, callbacks.getDiffStat?.(item.id));
 
+    // A remote-only change (exists on remote, missing locally) carries a
+    // direct Download action so the user can pull it without first adding it
+    // to the Sync Queue. The button stops propagation so clicking it doesn't
+    // also trigger the row's open-diff/open-remote behavior.
+    if (item.kind === 'remote-only' && callbacks.onDownload) {
+        renderDownloadAction(row, item, callbacks.onDownload);
+    }
+
     renderOperationIndicator(row, item.operationStatus);
 
     row.addEventListener('click', (evt) => {
@@ -86,6 +101,22 @@ export function renderChangeItem(
     });
 
     return row;
+}
+
+/**
+ * The inline Download button on a remote-only row. A small text button with
+ * a download glyph + label; clicking calls `onDownload` and stops the event
+ * so the row click handler doesn't also fire.
+ */
+function renderDownloadAction(row: HTMLElement, item: SourceControlItem, onDownload: (item: SourceControlItem) => void): void {
+    const btn = row.createEl('button', {
+        cls: 'scv-change-download',
+        attr: { type: 'button' },
+    });
+    setIcon(btn.createSpan({ cls: 'scv-change-download-icon' }), ICONS.download);
+    btn.createSpan({ cls: 'scv-change-download-label', text: t('sourceControl.action.download') });
+    setTooltip(btn, t('sourceControl.action.download.tooltip'));
+    btn.addEventListener('click', (evt) => { evt.stopPropagation(); onDownload(item); });
 }
 
 /**

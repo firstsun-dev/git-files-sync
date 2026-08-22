@@ -49,11 +49,30 @@ describe('renderChangeTree', () => {
         expect(badges).toEqual(['M', 'A', '!']);
     });
 
-    it('badges a remote-only (locally deleted) change as D', () => {
+    it('badges a remote-only change as a down-arrow', () => {
         const items = [item({ id: toChangeId('c-1'), path: 'gone.md', kind: 'remote-only' })];
         renderChangeTree(container, items, new Set(), callbacks);
 
-        expect(container.querySelector('.scv-badge')?.textContent).toBe('D');
+        expect(container.querySelector('.scv-badge')?.textContent).toBe('↓');
+    });
+
+    it('renders an inline Download button on a remote-only row when onDownload is wired', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'remote.md', kind: 'remote-only' })];
+        callbacks.onDownload = vi.fn();
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        const btn = container.querySelector('.scv-change-download') as HTMLButtonElement;
+        expect(btn).toBeTruthy();
+        btn.click();
+        expect(callbacks.onDownload).toHaveBeenCalledWith(items[0]);
+    });
+
+    it('does not render a Download button on a remote-modified row', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'both.md', kind: 'remote-modified' })];
+        callbacks.onDownload = vi.fn();
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        expect(container.querySelector('.scv-change-download')).toBeNull();
     });
 
     it('does not render an inline status subtitle (the kind label lives on the badge tooltip)', () => {

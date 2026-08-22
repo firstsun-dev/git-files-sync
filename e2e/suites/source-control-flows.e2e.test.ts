@@ -549,6 +549,55 @@ describe('Source Control Flows E2E', () => {
     });
 
     // ------------------------------------------------------------------
+    // Phase 6b — Download (remote-only) action
+    //
+    // The Download button / Sync-Queue download routing both resolve to
+    // SourceControlActionService.pull, which runs the real manager.pullAllFiles
+    // through BoundarySyncWorkspace. This locks the end-to-end primitive: a
+    // remote-only change (file exists on remote, absent locally) downloads
+    // into the vault and advances metadata to the remote sha.
+    // ------------------------------------------------------------------
+    describe('download (remote-only) action', () => {
+        it('downloads a remote-only change into the vault via actionService.pull, advancing metadata', async () => {
+            const s = scenario();
+            const p = path('download-remote-only/a.md');
+            await s.seedRemote(p, 'remote-content');
+
+            expect(s.localExists(p), 'no local file before download').toBe(false);
+
+            const remote = change(p, 'remote-only');
+            const { actionService, operations } = s.selectionStack([remote]);
+
+            await actionService.pull([remote.id]);
+
+            expect(operations.get(remote.id)).toBe('success');
+            expect(s.localExists(p), 'local file created by download').toBe(true);
+            expect(await s.readLocal(p)).toBe('remote-content');
+            const remoteMeta = await s.remoteContent(p);
+            expect(s.metadataSha(p), 'metadata advances to the remote sha').toBe(remoteMeta?.sha);
+        });
+
+        it.skipIf(!runExtended)('download leaves an unrelated local-only change untouched (no cross-contamination)', async () => {
+            const s = scenario();
+            const remote = path('download-isolation/remote.md');
+            const local = path('download-isolation/local.md');
+            await s.seedRemote(remote, 'remote-content');
+            s.writeLocal(local, 'local-only-content');
+
+            const remoteChange = change(remote, 'remote-only');
+            const localChange = change(local, 'local-only');
+            const { actionService, operations } = s.selectionStack([remoteChange, localChange]);
+
+            await actionService.pull([remoteChange.id]);
+
+            expect(operations.get(remoteChange.id)).toBe('success');
+            expect(operations.get(localChange.id), 'local-only change stays idle').toBe('idle');
+            expect(await s.readLocal(remote)).toBe('remote-content');
+            expect(await s.readLocal(local)).toBe('local-only-content');
+        });
+    });
+
+    // ------------------------------------------------------------------
     // Phase 7 — Remote divergence + idempotency
     // ------------------------------------------------------------------
     describe('divergence and idempotency flows', () => {

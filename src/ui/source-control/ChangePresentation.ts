@@ -29,7 +29,7 @@ export interface ChangeRowView {
 const SUBTITLE_KEYS: Record<SyncChangeKind, TranslationKey> = {
     'local-only':       'sourceControl.status.added',
     'local-modified':   'sourceControl.status.modified',
-    'remote-only':      'sourceControl.status.deletedLocally',
+    'remote-only':      'sourceControl.status.remoteAvailable',
     'remote-modified':  'sourceControl.status.modifiedRemotely',
     moved:              'sourceControl.status.renamed',
     conflict:           'sourceControl.status.conflict',
@@ -37,20 +37,51 @@ const SUBTITLE_KEYS: Record<SyncChangeKind, TranslationKey> = {
 };
 
 /**
- * Single-letter status badge per change kind. Note `remote-only` (locally
- * deleted) is badged `D`, not `A` — a local deletion is what the user sees,
- * per the resolved decision to keep the domain filter semantics (remote-only
- * stays in the Remote bucket) while the UI row reads "Deleted locally".
+ * Single-character status badge per change kind. The remote-side kinds carry
+ * directional glyphs so a row reads as an action the user can take rather
+ * than a Git status letter:
+ * - `remote-only` (exists on remote, missing locally) is badged `↓` — a
+ *   download the user can pull — NOT `D`, since `D` reads as "I'm about to
+ *   delete this" when the opposite is true.
+ * - `remote-modified` (both sides diverged) is badged `↕` to signal a
+ *   two-sided change, distinct from a one-sided local `M`.
  */
 const BADGE: Record<SyncChangeKind, { letter: string; cls: string }> = {
     'local-only':       { letter: 'A', cls: 'local-only' },
     'local-modified':   { letter: 'M', cls: 'local-modified' },
-    'remote-only':      { letter: 'D', cls: 'remote-only' },
-    'remote-modified':  { letter: 'M', cls: 'remote-modified' },
+    'remote-only':      { letter: '↓', cls: 'remote-only' },
+    'remote-modified':  { letter: '↕', cls: 'remote-modified' },
     moved:              { letter: 'R', cls: 'moved' },
     conflict:           { letter: '!', cls: 'conflict' },
     synced:             { letter: 'S', cls: 'synced' },
 };
+
+/**
+ * Which sync operation a change kind maps to in the Sync Queue, so the queue
+ * can be grouped (Upload / Download) and the Sync button can route each
+ * selected change to the right primitive — push for one-sided local changes
+ * and moves, pull for one-sided remote changes — instead of pushing every
+ * selection and no-op'ing remote-only rows. `conflict` routes to `upload`
+ * (push) as the default; it surfaces a conflict either way and never silent
+ * overwrites. `synced` never reaches the queue, so it's mapped to `upload`
+ * only to satisfy the exhaustive record.
+ */
+export type ChangeOperation = 'upload' | 'download';
+
+const OPERATION: Record<SyncChangeKind, ChangeOperation> = {
+    'local-only':       'upload',
+    'local-modified':   'upload',
+    'remote-only':      'download',
+    'remote-modified':  'download',
+    moved:              'upload',
+    conflict:           'upload',
+    synced:             'upload',
+};
+
+/** The sync operation a change kind belongs to (Upload vs Download) for queue grouping and Sync routing. */
+export function changeOperation(kind: SyncChangeKind): ChangeOperation {
+    return OPERATION[kind];
+}
 
 /**
  * Projects a {@link SourceControlItem} into a UI row view. `displayName` is
@@ -65,7 +96,7 @@ export function presentChange(item: SourceControlItem, displayName: string): Cha
         displayName,
     };
     if (item.previousPath) view.renameFrom = item.previousPath.split('/').pop() ?? item.previousPath;
-    if (item.kind === 'remote-only') view.tooltip = t('sourceControl.status.deletedLocally.tooltip');
+    if (item.kind === 'remote-only') view.tooltip = t('sourceControl.status.remoteAvailable.tooltip');
     return view;
 }
 

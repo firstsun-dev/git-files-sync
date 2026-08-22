@@ -4,6 +4,7 @@ import type { SourceControlFilter } from '../../logic/source-control/SourceContr
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
 import type { ChangeStat } from './ChangePresentation';
+import { changeOperation } from './ChangePresentation';
 import { ICONS } from '../components/icons';
 import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
 import { renderDiffPanel } from '../components/DiffPanel';
@@ -21,6 +22,13 @@ export interface SourceControlDiffContent {
 export interface SourceControlViewCallbacks {
     /** Hands push intent off to whatever wires this view to the sync pipeline; never called by the UI directly against a Git provider. */
     onPush: (changeIds: ChangeId[]) => void | Promise<void>;
+    /**
+     * Hands pull intent off to the sync pipeline for the download side of the
+     * Sync Queue (remote-only / remote-modified rows). The Sync button routes
+     * each selected change to {@link onPush} (upload kinds) or this (download
+     * kinds); a row's inline Download button calls this with a single id.
+     */
+    onPull?: (changeIds: ChangeId[]) => void | Promise<void>;
     /** Triggers a view-wide refresh; the host wires this to the ViewModel's refresh delegate. */
     onRefresh: () => void;
     /** Notified when a change is selected for diff viewing, in addition to this view's own diff pane rendering. */
@@ -37,6 +45,13 @@ export interface SourceControlViewCallbacks {
      * it opens the file on the remote (in the browser) instead.
      */
     onOpenRemoteFile?: (item: SourceControlItem) => void | Promise<void>;
+    /**
+     * Pulls a single remote-only change into the local vault — the inline
+     * Download button on a `remote-only` row. Wired to the same pull
+     * primitive as {@link onPull}; exposed separately so a one-off download
+     * doesn't need to go through the Sync Queue.
+     */
+    onDownload?: (item: SourceControlItem) => void | Promise<void>;
     /**
      * Supplies the +/- diff stat for a change row. For a `local-only` change
      * this is expected to be a cheap in-memory read (no provider call); for
@@ -154,7 +169,7 @@ export class SourceControlView {
                 refreshStatus: state.refreshStatus,
             },
             {
-                onPush: () => { void this.callbacks.onPush(this.viewModel.selection.getSelectedChangeIds()); },
+                onPush: () => this.runSync(state.syncQueue),
                 onRefresh: () => {
                     this.diffStat.clear();
                     this.callbacks.onRefresh();
@@ -170,6 +185,7 @@ export class SourceControlView {
             onToggleSelect: (id, selected) => this.toggleSelect(id, selected),
             onToggleFolderSelect: (ids, selected) => this.toggleFolderSelect(ids, selected),
             onOpenDiff: (item) => this.openDiff(item),
+            onDownload: (item) => this.download(item),
             getDiffStat: (id) => this.diffStat.get(id),
         };
 
@@ -223,7 +239,7 @@ export class SourceControlView {
         }
         this.diffStat.eagerSelected(state.syncQueue);
 
-        if (isMobile) this.renderMobileSyncBar(container, state.counts['ready-to-push']);
+        if (isMobile) this.renderMobileSyncBar(container, state.counts['ready-to-push'], state.syncQueue);
     }
 
     /**
@@ -379,15 +395,49 @@ export class SourceControlView {
             text: t('sourceControl.section.queueSubtitle', { count: syncQueue.length }),
         });
         const list = section.createDiv({ cls: 'scv-selected-section-list' });
-        for (const item of syncQueue) {
-            renderChangeItem(list, item, basename(item.path), callbacks);
-        }
+        // Group the queue by operation so a mixed batch reads as what the
+        // Sync button will actually do (Upload vs Download) rather than a
+        // flat list of ambiguous badges. Only surface the group labels when
+        // both operations are present — a single-operation queue stays flat
+        // (no label noise) and matches the pre-categorization layout.
+        const upload = syncQueue.filter(item => changeOperation(item.kind) === 'upload');
+        const download = syncQueue.filter(item => changeOperation(item.kind) === 'download');
+        const mixed = upload.length > 0 && download.length > 0;
+        if (mixed) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.upload') });
+        for (const item of upload) renderChangeItem(list, item, basename(item.path), callbacks);
+        if (mixed) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.download') });
+        for (const item of download) renderChangeItem(list, item, basename(item.path), callbacks);
     }
 
     /** Unselects every change currently in the Sync Queue in one shot. */
     private clearSelection(items: readonly SourceControlItem[]): void {
         this.viewModel.selection.deselectMany(items.map(item => item.id));
         this.rerender();
+    }
+
+    /**
+     * Routes the Sync Queue to its operations: upload kinds (local-only /
+     * local-modified / moved / conflict) go to {@link onPush}, download kinds
+     * (remote-only / remote-modified) go to {@link onPull}. Splitting here —
+     * rather than pushing every selection — means a queued remote-only row
+     * is actually pulled into the vault instead of being a silent no-op, and
+     * the Sync button does the right thing per row without the user having to
+     * know which primitive each kind needs.
+     */
+    private runSync(queue: readonly SourceControlItem[]): void {
+        const upload: ChangeId[] = [];
+        const download: ChangeId[] = [];
+        for (const item of queue) {
+            if (changeOperation(item.kind) === 'download') download.push(item.id);
+            else upload.push(item.id);
+        }
+        if (upload.length > 0) void this.callbacks.onPush(upload);
+        if (download.length > 0 && this.callbacks.onPull) void this.callbacks.onPull(download);
+    }
+
+    /** Pulls a single remote-only change into the vault — the inline Download button. */
+    private download(item: SourceControlItem): void {
+        if (this.callbacks.onPull) void this.callbacks.onPull([item.id]);
     }
 
     private renderDetail(root: HTMLElement): void {
@@ -467,13 +517,13 @@ export class SourceControlView {
      * button, shown only when at least one change is selected for push. The
      * header's push button is hidden on mobile to save vertical space.
      */
-    private renderMobileSyncBar(container: HTMLElement, readyCount: number): void {
+    private renderMobileSyncBar(container: HTMLElement, readyCount: number, queue: readonly SourceControlItem[]): void {
         if (readyCount === 0) return;
         const bar = container.createDiv({ cls: 'scv-mobile-sync-bar' });
         bar.createSpan({ cls: 'scv-mobile-sync-label', text: t('sourceControl.mobile.filesSelected', { count: readyCount }) });
         const btn = bar.createEl('button', { cls: 'scv-mobile-sync-btn' });
         btn.createSpan({ cls: 'scv-mobile-sync-btn-label', text: t('sourceControl.mobile.sync') });
-        btn.addEventListener('click', () => { void this.callbacks.onPush(this.viewModel.selection.getSelectedChangeIds()); });
+        btn.addEventListener('click', () => this.runSync(queue));
     }
 }
 

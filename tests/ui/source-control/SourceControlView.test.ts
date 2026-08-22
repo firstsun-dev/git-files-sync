@@ -403,6 +403,100 @@ describe('SourceControlView', () => {
         });
     });
 
+    describe('sync routing (upload vs download)', () => {
+        it('routes a mixed Sync Queue: upload kinds to onPush, download kinds to onPull', () => {
+            const onPush = vi.fn();
+            const onPull = vi.fn();
+            const { view, selection } = buildView(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
+                ],
+                { onPush, onPull },
+            );
+            selection.includeForPush(toChangeId('c-1'));
+            selection.includeForPush(toChangeId('c-2'));
+            view.render(container);
+
+            (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
+
+            expect(onPush).toHaveBeenCalledWith([toChangeId('c-1')]);
+            expect(onPull).toHaveBeenCalledWith([toChangeId('c-2')]);
+        });
+
+        it('routes a download-only Sync Queue to onPull and never calls onPush', () => {
+            const onPush = vi.fn();
+            const onPull = vi.fn();
+            const { view, selection } = buildView(
+                [{ id: toChangeId('c-1'), path: 'remote.md', kind: 'remote-only' }],
+                { onPush, onPull },
+            );
+            selection.includeForPush(toChangeId('c-1'));
+            view.render(container);
+
+            (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
+
+            expect(onPull).toHaveBeenCalledWith([toChangeId('c-1')]);
+            expect(onPush).not.toHaveBeenCalled();
+        });
+
+        it('shows Upload / Download group labels in the Sync Queue when the queue is mixed', () => {
+            const { view, selection } = buildView(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
+                ],
+            );
+            selection.includeForPush(toChangeId('c-1'));
+            selection.includeForPush(toChangeId('c-2'));
+            view.render(container);
+
+            const labels = Array.from(container.querySelectorAll('.scv-queue-group-label')).map(el => el.textContent);
+            expect(labels).toEqual(['Upload', 'Download']);
+        });
+
+        it('omits group labels when the Sync Queue is a single operation', () => {
+            const { view, selection } = buildView(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+                ],
+            );
+            selection.includeForPush(toChangeId('c-1'));
+            selection.includeForPush(toChangeId('c-2'));
+            view.render(container);
+
+            expect(container.querySelector('.scv-queue-group-label')).toBeNull();
+        });
+    });
+
+    describe('inline download action', () => {
+        it('renders a Download button on a remote-only tree row and routes it to onPull', () => {
+            const onPull = vi.fn();
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'remote.md', kind: 'remote-only' }],
+                { onPull },
+            );
+            view.render(container);
+
+            const btn = container.querySelector('.scv-changes-tree .scv-change-download') as HTMLButtonElement;
+            expect(btn).toBeTruthy();
+            btn.click();
+
+            expect(onPull).toHaveBeenCalledWith([toChangeId('c-1')]);
+        });
+
+        it('does not render a Download button on a local-only row', () => {
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'local.md', kind: 'local-only' }],
+                { onPull: vi.fn() },
+            );
+            view.render(container);
+
+            expect(container.querySelector('.scv-change-download')).toBeNull();
+        });
+    });
+
     describe('operation status', () => {
         it('renders the running indicator for a change with an in-flight operation', () => {
             const { view, operations } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);

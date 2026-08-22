@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { cheapLocalStat, computeDiffStat, presentChange } from '../../../src/ui/source-control/ChangePresentation';
+import { cheapLocalStat, computeDiffStat, changeOperation, presentChange } from '../../../src/ui/source-control/ChangePresentation';
 import type { SourceControlItem } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId } from '../../../src/logic/source-control/types';
 import { setupObsidianDOM } from '../setup-dom';
@@ -24,17 +24,17 @@ describe('presentChange', () => {
         expect(view.subtitle).toBe('Modified locally');
     });
 
-    it('badges a remote-only (locally deleted) change as D with a tooltip', () => {
+    it('badges a remote-only change as a down-arrow with a download tooltip', () => {
         const view = presentChange(item({ id: toChangeId('a'), path: 'a.md', kind: 'remote-only' }), 'a.md');
-        expect(view.badge.letter).toBe('D');
+        expect(view.badge.letter).toBe('↓');
         expect(view.badge.cls).toBe('remote-only');
-        expect(view.subtitle).toBe('Deleted locally');
-        expect(view.tooltip).toBe('Remote file will be removed during sync');
+        expect(view.subtitle).toBe('Remote available');
+        expect(view.tooltip).toBe('Exists on remote but not locally — download to add it');
     });
 
-    it('badges a remote-modified change as M', () => {
+    it('badges a remote-modified change as a sync-arrow', () => {
         const view = presentChange(item({ id: toChangeId('a'), path: 'a.md', kind: 'remote-modified' }), 'a.md');
-        expect(view.badge.letter).toBe('M');
+        expect(view.badge.letter).toBe('↕');
         expect(view.subtitle).toBe('Modified remotely');
     });
 
@@ -67,6 +67,24 @@ describe('presentChange', () => {
             'y.md',
         );
         expect(view.renameFrom).toBe('old.md');
+    });
+});
+
+describe('changeOperation', () => {
+    it.each([
+        ['local-only', 'upload'],
+        ['local-modified', 'upload'],
+        ['moved', 'upload'],
+        ['conflict', 'upload'],
+    ] as const)('routes %s to upload', (kind, op) => {
+        expect(changeOperation(kind)).toBe(op);
+    });
+
+    it.each([
+        ['remote-only', 'download'],
+        ['remote-modified', 'download'],
+    ] as const)('routes %s to download', (kind, op) => {
+        expect(changeOperation(kind)).toBe(op);
     });
 });
 

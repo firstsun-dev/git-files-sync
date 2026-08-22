@@ -11,6 +11,7 @@ export const ICONS = {
     addition: 'file-plus',
     push:     'arrow-up',
     pull:     'arrow-down',
+    download: 'download',
     checking: 'refresh-cw',
     refresh:  'refresh-cw',
     delete:   'trash-2',

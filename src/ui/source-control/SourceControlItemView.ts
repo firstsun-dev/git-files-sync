@@ -34,6 +34,8 @@ export class SourceControlItemView extends ItemView {
         super(leaf);
         const callbacks: SourceControlViewCallbacks = {
             onPush: (changeIds) => this.runAction(this.plugin.sourceControlActions.push(changeIds)),
+            onPull: (changeIds) => this.runAction(this.plugin.sourceControlActions.pull(changeIds)),
+            onDownload: (item) => this.runAction(this.plugin.sourceControlActions.pull([item.id])),
             onRefresh: () => this.runRefresh(),
             loadDiffContent: (item: SourceControlItem) => this.plugin.sourceControlActions.loadDiffContent(item),
             // Local-only stat is a cheap in-memory read (no provider call):
