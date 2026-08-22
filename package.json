@@ -14,7 +14,7 @@
 		"build": "tsc -noEmit -skipLibCheck && npm run typecheck:compat && node esbuild.config.mjs production",
 		"typecheck:compat": "node scripts/typecheck-compat.mjs",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
-		"lint": "eslint .",
+		"lint": "eslint . && node scripts/check-e2e-suite-registration.mjs",
 		"test": "vitest run",
 		"deploy": "npm run build && mkdir -p ~/Obsidian/MyPKM/.obsidian/plugins/git-file-sync && cp main.js manifest.json styles.css ~/Obsidian/MyPKM/.obsidian/plugins/git-file-sync/",
 		"test:ui": "vitest --ui",
