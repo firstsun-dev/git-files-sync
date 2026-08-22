@@ -9,10 +9,13 @@
 set -euo pipefail
 
 provider=""
+tier="auto"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --provider) provider="$2"; shift 2 ;;
         --provider=*) provider="${1#*=}"; shift ;;
+        --tier) tier="$2"; shift 2 ;;
+        --tier=*) tier="${1#*=}"; shift ;;
         *) shift ;;
     esac
 done
@@ -21,7 +24,22 @@ if [ -z "$provider" ]; then
     exit 1
 fi
 
+if [ "$tier" = "auto" ]; then
+    if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+        tier="full"
+    elif [ "$provider" = "github" ] && { [ "${GITHUB_REF_NAME:-}" = "main" ] || [ "${GITHUB_REF_NAME:-}" = "master" ] || [ "${GITHUB_EVENT_NAME:-}" = "schedule" ] || [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ]; }; then
+        tier="full"
+    else
+        tier="core"
+    fi
+fi
+if [ "$tier" != "core" ] && [ "$tier" != "full" ]; then
+    echo "Invalid E2E tier: $tier (expected core|full|auto)" >&2
+    exit 1
+fi
+
 export E2E_PROVIDER="$provider"
+export E2E_TIER="$tier"
 export E2E_WORKDIR="${E2E_WORKDIR:-${TMPDIR:-/tmp}/gfs-e2e-${provider}}"
 
 cleanup() {
@@ -100,6 +118,7 @@ if [ "${#unregistered[@]}" -gt 0 ]; then
     exit 1
 fi
 
+echo "[run-e2e] tier=$E2E_TIER provider=$E2E_PROVIDER" >&2
 echo "[run-e2e] running suites: ${SUITES[*]}" >&2
 
 # vitest.e2e.config.ts's `include` matches every e2e/suites/*.e2e.test.ts, so

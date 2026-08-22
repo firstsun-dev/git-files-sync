@@ -57,11 +57,33 @@ jobs:
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
 
+  # Fast local gate: run cheap deterministic checks in parallel before any
+  # real-provider E2E spends remote API time. The release-critical reusable CI
+  # still runs after E2E below; this is only an early failure gate.
+  preflight:
+    name: Preflight / ${{ matrix.check }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      max-parallel: 3
+      matrix:
+        check: [lint, test, build]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Run ${{ matrix.check }}
+        run: bash scripts/run-preflight.sh "${{ matrix.check }}"
+
   # Real-provider E2E: one matrix job covering GitHub, GitLab, and Gitea (see
-  # docs/testing/real-provider-e2e.md).
+  # docs/testing/real-provider-e2e.md). It starts only after the fast local
+  # preflight passes, then provider legs run in parallel.
   provider-e2e:
     name: E2E / ${{ matrix.provider }}
-    needs: changes
+    needs: [changes, preflight]
     runs-on: [self-hosted, linux, x64, 32gb-ram]
     # Runs when sync/provider-relevant paths changed, or unconditionally on
     # workflow_dispatch/schedule/a push to main (main always gets the full
