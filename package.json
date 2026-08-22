@@ -16,6 +16,7 @@
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
 		"test": "vitest run",
+		"deploy": "npm run build && mkdir -p ~/Obsidian/MyPKM/.obsidian/plugins/git-file-sync && cp main.js manifest.json styles.css ~/Obsidian/MyPKM/.obsidian/plugins/git-file-sync/",
 		"test:ui": "vitest --ui",
 		"test:e2e": "bash scripts/run-e2e.sh",
 		"prepare": "husky",
