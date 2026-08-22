@@ -115,6 +115,10 @@ const en = {
 	'settings.whatsNewBanner.title': "What's new in v{version}",
 	'settings.whatsNewBanner.dismiss': 'Dismiss',
 
+	'settings.releaseHistory.name': 'Release history',
+	'settings.releaseHistory.desc': 'View past release notes for this plugin.',
+	'settings.releaseHistory.button': 'View history',
+
 	'syncStatus.viewTitle': 'Sync status',
 	'syncStatus.emptyPrompt': 'Click "Refresh" to check sync status',
 	'syncStatus.progress.checkingWithCount': 'Checking files… {current}/{total} ({pct}%)',
