@@ -543,4 +543,126 @@ describe('Source Control Flows E2E', () => {
             await s.expectSingleCommitSince(headBefore);
         });
     });
+
+    // ------------------------------------------------------------------
+    // Phase 7 — Remote divergence + idempotency
+    // ------------------------------------------------------------------
+    describe('divergence and idempotency flows', () => {
+        it('pulls a remote-ahead update into a synced-baseline local, advancing metadata', async () => {
+            const s = scenario();
+            const p = path('remote-ahead/a.md');
+            await s.baseline(p, 'A');
+            await s.modifyRemote(p, 'B');
+
+            await s.pullFile(p);
+
+            expect(await s.readLocal(p)).toBe('B');
+            const remote = await s.remoteContent(p);
+            expect(s.metadataSha(p), 'metadata moves to the remote sha').toBe(remote?.sha);
+        });
+
+        it.skipIf(!isGitHub)('a remote-ahead change and an unrelated local change coexist', async () => {
+            const s = scenario();
+            const a = path('coexist/a.md');
+            const b = path('coexist/b.md');
+            await s.baseline(a, 'A');
+            await s.baseline(b, 'B');
+
+            await s.modifyRemote(a, 'A-remote');
+            s.writeLocal(b, 'B-local');
+
+            await s.pullFile(a);
+            expect(await s.readLocal(a)).toBe('A-remote');
+            // The local change on b survives the pull of a — no cross-contamination.
+            expect(await s.readLocal(b)).toBe('B-local');
+            await s.expectRemoteContent(b, 'B');
+        });
+
+        it.skipIf(!isGitHub)('a concurrent remote write surfaces as a conflict, then reconciles with no lost update', async () => {
+            const s = scenario();
+            const p = path('concurrent/a.md');
+            await s.baseline(p, 'v1');
+            s.writeLocal(p, 'local-v2');
+            await s.modifyRemote(p, 'concurrent-v2');
+
+            fixture.setConflictResolver(() => 'skip');
+            const skipped = await s.push([p]);
+            expect(skipped.skippedConflicts, describePushResult(skipped)).toBeGreaterThanOrEqual(1);
+            await s.expectRemoteContent(p, 'concurrent-v2');
+
+            // Reconcile: accept the concurrent remote, then push a fresh local edit.
+            fixture.setConflictResolver(() => 'keep-remote');
+            await s.push([p]);
+            expect(await s.readLocal(p)).toBe('concurrent-v2');
+
+            s.writeLocal(p, 'final');
+            const headBefore = await s.head();
+            const finalResult = await s.push([p]);
+            expect(finalResult.success, describePushResult(finalResult)).toBe(1);
+            await s.expectRemoteContent(p, 'final');
+            await s.expectSingleCommitSince(headBefore);
+        });
+
+        it('an all-unchanged batch reports no work and creates zero commits', async () => {
+            const s = scenario();
+            const a = path('noop-batch/a.md');
+            const b = path('noop-batch/b.md');
+            const c = path('noop-batch/c.md');
+            await s.baseline(a, 'a');
+            await s.baseline(b, 'b');
+            await s.baseline(c, 'c');
+
+            const headBefore = await s.head();
+            const result = await s.push([a, b, c]);
+            expect(result.success, describePushResult(result)).toBe(0);
+            expect(result.failed, describePushResult(result)).toBe(0);
+            expect(result.skippedConflicts, describePushResult(result)).toBe(0);
+            await s.expectNoCommitSince(headBefore);
+        });
+
+        it.skipIf(!isGitHub)('repeating the same push twice makes no second mutation and corrupts no metadata', async () => {
+            const s = scenario();
+            const p = path('repeat-push/a.md');
+            await s.baseline(p, 'v1');
+            s.writeLocal(p, 'v2');
+
+            const headAfterFirst = await s.head();
+            const first = await s.push([p]);
+            expect(first.success, describePushResult(first)).toBe(1);
+            await s.expectRemoteContent(p, 'v2');
+            const shaAfterFirst = s.metadataSha(p);
+            expect(shaAfterFirst).toBeTruthy();
+
+            const second = await s.push([p]);
+            expect(second.success, describePushResult(second)).toBe(0);
+            expect(second.failed, describePushResult(second)).toBe(0);
+            await s.expectNoCommitSince(headAfterFirst);
+            expect(s.metadataSha(p), 'metadata not corrupted by the no-op repeat').toBe(shaAfterFirst);
+        });
+
+        it.skipIf(!isGitHub)('re-syncs cleanly after a skipped conflict (no stale operation state)', async () => {
+            const s = scenario();
+            const p = path('retry-after-skip/a.md');
+            await s.baseline(p, 'v1');
+            s.writeLocal(p, 'local');
+            await s.modifyRemote(p, 'remote');
+
+            fixture.setConflictResolver(() => 'skip');
+            const skipped = await s.push([p]);
+            expect(skipped.skippedConflicts, describePushResult(skipped)).toBeGreaterThanOrEqual(1);
+
+            // Resolve the skipped conflict (keep-remote), then push a fresh edit.
+            fixture.setConflictResolver(() => 'keep-remote');
+            await s.push([p]);
+            expect(await s.readLocal(p)).toBe('remote');
+
+            s.writeLocal(p, 'reconciled');
+            const headBefore = await s.head();
+            const result = await s.push([p]);
+            expect(result.success, describePushResult(result)).toBe(1);
+            expect(result.failed, describePushResult(result)).toBe(0);
+            await s.expectRemoteContent(p, 'reconciled');
+            await s.expectSingleCommitSince(headBefore);
+        });
+    });
 });
