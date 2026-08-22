@@ -40,6 +40,11 @@ export class FakeVault {
         this.files.set(newPath, content);
     }
 
+    /** Removes a local file, mirroring Obsidian's vault delete. */
+    removeLocal(path: string): void {
+        this.files.delete(path);
+    }
+
     /** Constructs a real TFile handle for a path already in this vault. */
     fileAt(path: string): TFileLike {
         return new this.TFile(path);
