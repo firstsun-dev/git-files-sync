@@ -1,33 +1,38 @@
+import type { ChangeId } from './types';
+
 /**
  * Tracks which pending sync changes are "Ready to Push" — independent of the
  * underlying change/plan model and of any UI. Deliberately avoids VCS
  * stage/unstage terminology since this isn't a staging area.
+ *
+ * Keyed by ChangeId rather than path so a rename/move doesn't drop the
+ * selection.
  */
 export class PushSelectionStore {
-    private readonly selected = new Set<string>();
+    private readonly selected = new Set<ChangeId>();
 
-    includeForPush(path: string): void {
-        this.selected.add(path);
+    includeForPush(changeId: ChangeId): void {
+        this.selected.add(changeId);
     }
 
-    excludeFromPush(path: string): void {
-        this.selected.delete(path);
+    excludeFromPush(changeId: ChangeId): void {
+        this.selected.delete(changeId);
     }
 
-    isIncluded(path: string): boolean {
-        return this.selected.has(path);
+    isIncluded(changeId: ChangeId): boolean {
+        return this.selected.has(changeId);
     }
 
-    getSelectedPaths(): string[] {
+    getSelectedChangeIds(): ChangeId[] {
         return [...this.selected];
     }
 
-    /** Drops selections for paths that are no longer present, keeping the rest. */
-    refresh(currentPaths: readonly string[]): void {
-        const present = new Set(currentPaths);
-        for (const path of this.selected) {
-            if (!present.has(path)) {
-                this.selected.delete(path);
+    /** Drops selections for change ids that are no longer present, keeping the rest. */
+    refresh(currentChangeIds: readonly ChangeId[]): void {
+        const present = new Set(currentChangeIds);
+        for (const changeId of this.selected) {
+            if (!present.has(changeId)) {
+                this.selected.delete(changeId);
             }
         }
     }

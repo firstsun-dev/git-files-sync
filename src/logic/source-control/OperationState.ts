@@ -1,30 +1,36 @@
+import type { ChangeId } from './types';
+
 export type OperationStatus = 'idle' | 'running' | 'success' | 'failed';
 
 /**
  * Tracks in-flight per-change operation status, independent of both the
  * change model and push selection.
+ *
+ * Keyed by ChangeId rather than path so a rename/move doesn't lose in-flight
+ * status, and so two different changes that happen to share a path (e.g. a
+ * delete followed by a re-add) don't cross-contaminate each other's state.
  */
 export class OperationState {
-    private readonly status = new Map<string, OperationStatus>();
+    private readonly status = new Map<ChangeId, OperationStatus>();
 
-    start(path: string): void {
-        this.status.set(path, 'running');
+    start(changeId: ChangeId): void {
+        this.status.set(changeId, 'running');
     }
 
-    succeed(path: string): void {
-        this.status.set(path, 'success');
+    succeed(changeId: ChangeId): void {
+        this.status.set(changeId, 'success');
     }
 
-    fail(path: string): void {
-        this.status.set(path, 'failed');
+    fail(changeId: ChangeId): void {
+        this.status.set(changeId, 'failed');
     }
 
-    reset(path: string): void {
-        this.status.delete(path);
+    reset(changeId: ChangeId): void {
+        this.status.delete(changeId);
     }
 
-    get(path: string): OperationStatus {
-        return this.status.get(path) ?? 'idle';
+    get(changeId: ChangeId): OperationStatus {
+        return this.status.get(changeId) ?? 'idle';
     }
 
     clear(): void {
