@@ -266,4 +266,75 @@ describe('Source Control Flows E2E', () => {
             await s.expectSingleCommitSince(headBefore);
         });
     });
+
+    // ------------------------------------------------------------------
+    // Phase 4 — Conflict resolution workflows
+    // ------------------------------------------------------------------
+    describe('conflict resolution workflows', () => {
+        it('resolves a modify/modify conflict with keep-local: remote becomes local, metadata advances', async () => {
+            const s = scenario();
+            const p = path('resolve-keep-local/a.md');
+            await s.baseline(p, 'baseline');
+            s.writeLocal(p, 'local edit');
+            await s.modifyRemote(p, 'remote edit');
+
+            fixture.setConflictResolver(() => 'keep-local');
+            const headBefore = await s.head();
+            const result = await s.push([p]);
+            expect(result.success, describePushResult(result)).toBe(1);
+            expect(result.resolvedConflicts, describePushResult(result)).toBe(1);
+            expect(result.skippedConflicts, describePushResult(result)).toBe(0);
+            expect(result.failed, describePushResult(result)).toBe(0);
+
+            await s.expectRemoteContent(p, 'local edit');
+            expect(await s.readLocal(p)).toBe('local edit');
+            const remote = await s.remoteContent(p);
+            expect(s.metadataSha(p), 'metadata = new remote sha').toBe(remote?.sha);
+            await s.expectSingleCommitSince(headBefore);
+        });
+
+        it('resolves a modify/modify conflict with keep-remote: local becomes remote, no remote mutation', async () => {
+            const s = scenario();
+            const p = path('resolve-keep-remote/a.md');
+            await s.baseline(p, 'baseline');
+            s.writeLocal(p, 'local edit');
+            await s.modifyRemote(p, 'remote edit');
+
+            fixture.setConflictResolver(() => 'keep-remote');
+            const headBefore = await s.head();
+            const result = await s.push([p]);
+            expect(result.failed, describePushResult(result)).toBe(0);
+            expect(result.resolvedConflicts, describePushResult(result)).toBe(1);
+            expect(result.skippedConflicts, describePushResult(result)).toBe(0);
+
+            await s.expectRemoteContent(p, 'remote edit');
+            expect(await s.readLocal(p)).toBe('remote edit');
+            const remote = await s.remoteContent(p);
+            expect(s.metadataSha(p), 'metadata = remote sha').toBe(remote?.sha);
+            // keep-remote is a pull, not a push — no new commit on the branch.
+            await s.expectNoCommitSince(headBefore);
+        });
+
+        it('regression: skip leaves local, remote, baseline metadata, and HEAD all untouched', async () => {
+            const s = scenario();
+            const p = path('resolve-skip/a.md');
+            await s.baseline(p, 'baseline');
+            const baselineMeta = s.metadata(p);
+
+            s.writeLocal(p, 'local edit');
+            await s.modifyRemote(p, 'remote edit');
+
+            fixture.setConflictResolver(() => 'skip');
+            const headBefore = await s.head();
+            const result = await s.push([p]);
+
+            expect(result.skippedConflicts, describePushResult(result)).toBeGreaterThanOrEqual(1);
+            expect(result.success, describePushResult(result)).toBe(0);
+            expect(result.failed, describePushResult(result)).toBe(0);
+            await s.expectRemoteContent(p, 'remote edit');
+            expect(await s.readLocal(p)).toBe('local edit');
+            expect(s.metadata(p)).toEqual(baselineMeta);
+            await s.expectNoCommitSince(headBefore);
+        });
+    });
 });
