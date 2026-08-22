@@ -3,6 +3,7 @@ import { TFile, WorkspaceLeaf } from 'obsidian';
 import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from '../../../src/ui/source-control/SourceControlItemView';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
+import { RefreshState } from '../../../src/logic/source-control/RefreshState';
 import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId, type SyncChangeKind } from '../../../src/logic/source-control/types';
@@ -17,7 +18,8 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
     repository.replace([{ id: toChangeId('a.md'), path: 'a.md', kind }]);
     const selection = new PushSelectionStore();
     const operations = new OperationState();
-    const viewModel = new SourceControlViewModel(repository, selection, operations);
+    const refreshState = new RefreshState();
+    const viewModel = new SourceControlViewModel(repository, selection, operations, vi.fn().mockResolvedValue(undefined), refreshState);
     const push = vi.fn().mockResolvedValue(undefined);
     const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
     const openDiffTab = vi.fn().mockResolvedValue(undefined);

@@ -21,6 +21,7 @@ import { SyncDiffService } from './logic/sync/SyncDiffService';
 import { SyncManagerWorkspace, type SyncWorkspace } from './logic/sync/SyncWorkspace';
 import { ChangeRepository } from './logic/source-control/ChangeRepository';
 import { OperationState } from './logic/source-control/OperationState';
+import { RefreshState } from './logic/source-control/RefreshState';
 import { PushSelectionStore } from './logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
 import { SourceControlActionService } from './logic/source-control/SourceControlActionService';
@@ -43,6 +44,7 @@ export default class GitLabFilesPush extends Plugin {
 	changeRepository: ChangeRepository;
 	pushSelectionStore: PushSelectionStore;
 	operationState: OperationState;
+	refreshState: RefreshState;
 	sourceControlViewModel: SourceControlViewModel;
 	sourceControlActions: SourceControlActionService;
 	private unsubscribeChangeRepository?: () => void;
@@ -114,10 +116,13 @@ export default class GitLabFilesPush extends Plugin {
 		this.changeRepository = new ChangeRepository();
 		this.pushSelectionStore = new PushSelectionStore();
 		this.operationState = new OperationState();
+		this.refreshState = new RefreshState();
 		this.sourceControlViewModel = new SourceControlViewModel(
 			this.changeRepository,
 			this.pushSelectionStore,
 			this.operationState,
+			() => this.syncWorkspace.refresh(),
+			this.refreshState,
 		);
 		this.sourceControlActions = new SourceControlActionService(
 			this.changeRepository,

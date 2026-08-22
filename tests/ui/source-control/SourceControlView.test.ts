@@ -3,6 +3,7 @@ import { Platform } from 'obsidian';
 import { SourceControlView, type SourceControlViewCallbacks } from '../../../src/ui/source-control/SourceControlView';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
+import { RefreshState } from '../../../src/logic/source-control/RefreshState';
 import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
@@ -15,7 +16,9 @@ function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCa
     repository.replace(changes);
     const selection = new PushSelectionStore();
     const operations = new OperationState();
-    const viewModel = new SourceControlViewModel(repository, selection, operations);
+    const refreshState = new RefreshState();
+    const refreshSource = vi.fn().mockResolvedValue(undefined);
+    const viewModel = new SourceControlViewModel(repository, selection, operations, refreshSource, refreshState);
     const onPush = callbacks.onPush ?? vi.fn();
     const view = new SourceControlView(viewModel, selection, { onPush, ...callbacks }, () => ({
         serviceName: 'GitHub',
@@ -23,7 +26,7 @@ function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCa
         vaultFolder: '',
         lastSyncTime: 0,
     }));
-    return { view, selection, operations, onPush };
+    return { view, selection, operations, refreshState, refreshSource, onPush };
 }
 
 describe('SourceControlView', () => {
