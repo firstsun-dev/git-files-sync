@@ -116,6 +116,9 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 
 	'settings.whatsNewBanner.title': 'v{version} 更新重點',
 	'settings.whatsNewBanner.dismiss': '關閉提示',
+	'settings.releaseHistory.name': '版本更新紀錄',
+	'settings.releaseHistory.desc': '查看目前與過往版本的更新內容',
+	'settings.releaseHistory.button': '查看更新紀錄',
 
 	'settings.releaseHistory.name': '發布紀錄',
 	'settings.releaseHistory.desc': '查看此外掛過去的發布說明。',
