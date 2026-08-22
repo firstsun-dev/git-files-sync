@@ -2,6 +2,7 @@ import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
 import GitLabFilesPush, { type ConnectionStatus } from "./main";
 import {FolderSuggest} from "./ui/FolderSuggest";
 import {RemoteFolderSuggest} from "./ui/RemoteFolderSuggest";
+import {WhatsNewModal} from "./ui/WhatsNewModal";
 import { t, setLanguageOverride, type LanguageSetting } from "./i18n";
 import { CHANGELOG, entryText } from "./changelog";
 
@@ -172,10 +173,8 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	}
 
 	// Persistent (until dismissed) banner surfacing the current version's notable
-	// highlights right at the top of the settings tab, so users who dismissed or
-	// never saw the WhatsNewModal (see main.ts) can still find them. Separate
-	// from `lastSeenVersion` — that gate controls the once-per-upgrade modal,
-	// this one just tracks whether the banner itself was dismissed.
+	// highlights right at the top of the settings tab. Dismissing this only hides
+	// the attention banner; release history remains available from Settings.
 	private renderWhatsNewBanner(containerEl: HTMLElement): void {
 		const currentVersion = this.plugin.manifest.version;
 		if (this.plugin.settings.bannerDismissedVersion === currentVersion) return;
@@ -204,6 +203,17 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				this.refresh();
 			})();
 		});
+	}
+
+	private renderReleaseHistorySetting(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName(t('settings.releaseHistory.name'))
+			.setDesc(t('settings.releaseHistory.desc'))
+			.addButton(button => button
+				.setButtonText(t('settings.releaseHistory.button'))
+				.onClick(() => {
+					new WhatsNewModal(this.app, CHANGELOG).open();
+				}));
 	}
 
 	// Rebuilding the whole settings tab (renderSettings) to refresh the badge
@@ -249,6 +259,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		this.renderWhatsNewBanner(containerEl);
+		this.renderReleaseHistorySetting(containerEl);
 		this.renderConnectionStatus(containerEl);
 
 		new Setting(containerEl)
@@ -490,7 +501,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.setPlaceholder('https://gitea.example.com')
 				.setValue(this.plugin.settings.giteaBaseUrl)
 				.onChange((value) => {
-					this.plugin.settings.giteaBaseUrl = value;
+					this.plugin.settings.giteaBaseUrl = value || 'https://gitea.example.com';
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
 					this.scheduleConnectionTest();

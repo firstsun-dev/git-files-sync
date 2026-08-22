@@ -25,6 +25,11 @@ export default defineConfig({
         exclude: ['**/node_modules/**', '**/.claude/**'],
         testTimeout: 120_000,
         hookTimeout: 120_000,
+        // Real-provider suites run network round trips per test with nothing
+        // printed until a whole file finishes under the default reporter —
+        // in CI that reads as a hang. verbose prints each test as it
+        // completes, so progress is visible while it's still running.
+        reporters: ['verbose'],
         // Provisioning spins up one container per provider; running suites in
         // parallel workers would multiply that for no benefit at this scale.
         fileParallelism: false,

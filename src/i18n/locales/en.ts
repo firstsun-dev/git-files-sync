@@ -114,6 +114,9 @@ const en = {
 
 	'settings.whatsNewBanner.title': "What's new in v{version}",
 	'settings.whatsNewBanner.dismiss': 'Dismiss',
+	'settings.releaseHistory.name': 'Release history',
+	'settings.releaseHistory.desc': "Review what's new in current and previous versions",
+	'settings.releaseHistory.button': 'View release history',
 
 	'syncStatus.viewTitle': 'Sync status',
 	'syncStatus.emptyPrompt': 'Click "Refresh" to check sync status',

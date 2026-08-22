@@ -314,7 +314,24 @@ export class GitVerifier {
     constructor(private readonly repoDir: string = ${repo_dir@Q}) {}
 
     private git(args: string[]): string {
-        return execFileSync('git', ['-C', this.repoDir, ...args], { encoding: 'utf-8' });
+        try {
+            return execFileSync('git', ['-C', this.repoDir, ...args], {
+                encoding: 'utf-8',
+                // Pipe stderr so an *expected* missing path (getFile's
+                // try/catch -> null) stays silent instead of spamming the log
+                // with "fatal: path does not exist". A genuine, unexpected git
+                // failure still surfaces: callers without their own try/catch
+                // re-throw below with the captured stderr attached.
+                stdio: ['pipe', 'pipe', 'pipe'],
+            });
+        } catch (error) {
+            const stderr = error && typeof error === 'object' && 'stderr' in error
+                ? String((error as { stderr: unknown }).stderr).trim()
+                : '';
+            throw new Error(
+                \`git \${args.join(' ')} failed\` + (stderr ? \`:\\n\${stderr}\` : ''),
+            );
+        }
     }
 
     private fetch(ref: string): void {
