@@ -137,4 +137,133 @@ describe('Source Control Flows E2E', () => {
             expect(s.metadataSha(c), 'metadata landed at final path').toBeTruthy();
         });
     });
+
+    // ------------------------------------------------------------------
+    // Phase 3 — Conflict state transitions
+    //
+    // The current SyncPlanner only surfaces a conflict on a push when both
+    // sides diverged from a *stored* baseline (modify/modify with a base
+    // sha). No-baseline add/add, delete-side divergence, and a move whose
+    // *source* was remotely edited are NOT conflicts today — they resolve to
+    // local-wins / blind-recreate / move-drops-old-edit. These tests lock
+    // that current contract (per the agreed scope: no production behavior
+    // changed to satisfy tests) so a future change to surface those as
+    // conflicts is an intentional, test-updating decision. The one real
+    // conflict (modify/modify with baseline) is asserted as a conflict.
+    // ------------------------------------------------------------------
+    describe('conflict state transitions', () => {
+        it('detects a modify/modify conflict and leaves both sides + baseline untouched on skip', async () => {
+            const s = scenario();
+            const p = path('conflict-modify-modify/a.md');
+            await s.baseline(p, 'baseline');
+            const baselineMeta = s.metadata(p);
+
+            s.writeLocal(p, 'local edit');
+            await s.modifyRemote(p, 'remote edit');
+
+            fixture.setConflictResolver(() => 'skip');
+            const headBefore = await s.head();
+            const result = await s.push([p]);
+
+            expect(result.skippedConflicts, describePushResult(result)).toBeGreaterThanOrEqual(1);
+            expect(result.success, describePushResult(result)).toBe(0);
+            expect(result.failed, describePushResult(result)).toBe(0);
+            await s.expectRemoteContent(p, 'remote edit');
+            expect(await s.readLocal(p)).toBe('local edit');
+            expect(s.metadata(p)).toEqual(baselineMeta);
+            await s.expectNoCommitSince(headBefore);
+        });
+
+        it('does not auto-delete a remotely-modified file when its local copy is gone (current push contract)', async () => {
+            const s = scenario();
+            const gone = path('conflict-delete-modify/a.md');
+            const other = path('conflict-delete-modify/b.md');
+            await s.baseline(gone, 'baseline');
+            await s.baseline(other, 'other-baseline');
+            const baselineSha = s.metadataSha(gone);
+
+            s.deleteLocal(gone);
+            await s.modifyRemote(gone, 'remote edit');
+            s.writeLocal(other, 'other-modified');
+
+            const headBefore = await s.head();
+            const result = await s.push([other]);
+            expect(result.success, describePushResult(result)).toBe(1);
+            expect(result.failed, describePushResult(result)).toBe(0);
+
+            // pushFiles never propagates a local deletion, so the
+            // remotely-modified file survives and its baseline metadata is
+            // not advanced. No conflict is surfaced for delete/modify today.
+            await s.expectRemoteContent(gone, 'remote edit');
+            expect(s.metadataSha(gone), 'metadata not falsely advanced').toBe(baselineSha);
+            await s.expectRemoteContent(other, 'other-modified');
+            await s.expectSingleCommitSince(headBefore);
+        });
+
+        it('re-creates a remotely-deleted file from a modified local copy (current push contract)', async () => {
+            const s = scenario();
+            const p = path('conflict-modify-delete/a.md');
+            await s.baseline(p, 'baseline');
+            const baselineSha = s.metadataSha(p);
+
+            s.writeLocal(p, 'local edit');
+            await s.deleteRemoteFile(p);
+
+            const headBefore = await s.head();
+            const result = await s.push([p]);
+            expect(result.success, describePushResult(result)).toBe(1);
+            expect(result.failed, describePushResult(result)).toBe(0);
+
+            // A remote deletion + local modification classifies as
+            // 'local-only' (push-create): the remote is blindly re-created
+            // with local content and metadata advances. No conflict today.
+            await s.expectRemoteContent(p, 'local edit');
+            await s.expectSingleCommitSince(headBefore);
+            expect(s.metadataSha(p), 'metadata advanced to new sha').not.toBe(baselineSha);
+            expect(s.metadataSha(p)).toBeTruthy();
+        });
+
+        it.skipIf(!isGitHub)('a move whose source was remotely edited proceeds, dropping the old-path edit (current contract)', async () => {
+            const s = scenario();
+            const oldP = path('conflict-rename-modify/a.md');
+            const newP = path('conflict-rename-modify/archive/a.md');
+            await s.baseline(oldP, 'v1');
+
+            s.renameLocal(oldP, newP);
+            await s.manager.trackRename(newP, oldP);
+            await s.modifyRemote(oldP, 'remote edit on old path');
+
+            const headBefore = await s.head();
+            const result = await s.push([s.tfile(newP)]);
+            expect(result.success, describePushResult(result)).toBe(1);
+            expect(result.failed, describePushResult(result)).toBe(0);
+
+            // planMove only flags a conflict when the DESTINATION is occupied.
+            // A diverged source (old path remotely edited) is a plain move, so
+            // the old-path edit is dropped (old path deleted, new path created
+            // with local content). Locked here as the current contract.
+            await s.expectRemoteMissing(oldP);
+            await s.expectRemoteContent(newP, 'v1');
+            await s.expectSingleCommitSince(headBefore);
+        });
+
+        it.skipIf(!isGitHub)('overwrites a remotely-created file with local content on a no-baseline add/add (current contract)', async () => {
+            const s = scenario();
+            const p = path('conflict-add-add/a.md');
+            await s.seedRemote(p, 'remote');
+            s.writeLocal(p, 'local');
+
+            const headBefore = await s.head();
+            const result = await s.push([p]);
+            expect(result.success, describePushResult(result)).toBe(1);
+            expect(result.failed, describePushResult(result)).toBe(0);
+            expect(result.skippedConflicts, describePushResult(result)).toBe(0);
+
+            // A no-baseline two-sided diff downgrades to 'local-modified' on
+            // push (classifyForOperation), so local overwrites remote with no
+            // conflict surfaced. Locked here as the current contract.
+            await s.expectRemoteContent(p, 'local');
+            await s.expectSingleCommitSince(headBefore);
+        });
+    });
 });
