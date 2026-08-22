@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
-import { toChangeId } from '../../../src/logic/source-control/types';
+import { SelectionState } from '../../../../src/logic/source-control/state/SelectionState';
+import { toChangeId } from '../../../../src/logic/source-control/types';
 
-describe('PushSelectionStore', () => {
+describe('SelectionState', () => {
     it('includes a change for push', () => {
-        const store = new PushSelectionStore();
+        const store = new SelectionState();
 
         store.includeForPush(toChangeId('change-a'));
 
@@ -13,7 +13,7 @@ describe('PushSelectionStore', () => {
     });
 
     it('excludes a change from push', () => {
-        const store = new PushSelectionStore();
+        const store = new SelectionState();
         store.includeForPush(toChangeId('change-a'));
 
         store.excludeFromPush(toChangeId('change-a'));
@@ -23,7 +23,7 @@ describe('PushSelectionStore', () => {
     });
 
     it('tracks multiple changes independently', () => {
-        const store = new PushSelectionStore();
+        const store = new SelectionState();
 
         store.includeForPush(toChangeId('change-a'));
         store.includeForPush(toChangeId('change-b'));
@@ -35,7 +35,7 @@ describe('PushSelectionStore', () => {
     });
 
     it('keeps selection across a refresh when the change is still present', () => {
-        const store = new PushSelectionStore();
+        const store = new SelectionState();
         store.includeForPush(toChangeId('change-a'));
 
         store.refresh([toChangeId('change-a'), toChangeId('change-b')]);
@@ -44,7 +44,7 @@ describe('PushSelectionStore', () => {
     });
 
     it('clears selection for a change removed by refresh', () => {
-        const store = new PushSelectionStore();
+        const store = new SelectionState();
         store.includeForPush(toChangeId('change-a'));
         store.includeForPush(toChangeId('change-b'));
 
@@ -56,7 +56,7 @@ describe('PushSelectionStore', () => {
     });
 
     it('keeps selection when path changes but change id stays', () => {
-        const store = new PushSelectionStore();
+        const store = new SelectionState();
         store.includeForPush(toChangeId('change-1'));
 
         // old.md renamed to new.md, but the change id is stable

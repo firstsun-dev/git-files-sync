@@ -1,4 +1,4 @@
-import type { ChangeId } from './types';
+import type { ChangeId } from '../types';
 
 export type OperationStatus = 'idle' | 'running' | 'success' | 'failed' | 'conflict';
 

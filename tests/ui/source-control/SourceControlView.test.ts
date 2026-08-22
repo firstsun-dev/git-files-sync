@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, beforeAll, beforeEach } from 'vitest';
 import { SourceControlView, type SourceControlViewCallbacks } from '../../../src/ui/source-control/SourceControlView';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
-import { OperationState } from '../../../src/logic/source-control/OperationState';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
+import { SourceControlState } from '../../../src/logic/source-control/state/SourceControlState';
+import { OperationState } from '../../../src/logic/source-control/state/OperationState';
+import { SelectionState } from '../../../src/logic/source-control/state/SelectionState';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import { setupObsidianDOM, createContainer } from '../setup-dom';
 
@@ -12,12 +13,13 @@ beforeAll(() => { setupObsidianDOM(); });
 function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCallbacks> = {}) {
     const repository = new ChangeRepository();
     repository.replace(changes);
-    const selection = new PushSelectionStore();
+    const selection = new SelectionState();
     const operations = new OperationState();
-    const viewModel = new SourceControlViewModel(repository, selection, operations);
+    const state = new SourceControlState(repository, selection, operations);
+    const viewModel = new SourceControlViewModel(state);
     const onPush = callbacks.onPush ?? vi.fn();
-    const view = new SourceControlView(viewModel, selection, { onPush, ...callbacks });
-    return { view, selection, operations, onPush };
+    const view = new SourceControlView(viewModel, { onPush, ...callbacks });
+    return { view, selection, operations, viewModel, onPush };
 }
 
 describe('SourceControlView', () => {
@@ -42,7 +44,7 @@ describe('SourceControlView', () => {
         });
 
         it('shows a flat tree (no sections) once a specific filter is selected', () => {
-            const { view } = buildView([
+            const { view, viewModel } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'conflict' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'local-only' },
             ]);
@@ -52,7 +54,7 @@ describe('SourceControlView', () => {
 
             expect(container.querySelectorAll('.scv-section')).toHaveLength(0);
             expect(container.querySelectorAll('.scv-change-item')).toHaveLength(1);
-            expect(view.getFilter()).toBe('conflicts');
+            expect(viewModel.getFilter()).toBe('conflicts');
         });
 
         it('shows the empty state when the active filter has no items', () => {
@@ -173,21 +175,21 @@ describe('SourceControlView', () => {
 
     describe('rename stability', () => {
         it('keeps the selected ChangeId set after a rename changes the path', () => {
-            const { view } = buildView([
+            const { view, viewModel } = buildView([
                 { id: toChangeId('c-1'), path: 'old.md', kind: 'local-modified' },
             ]);
             view.render(container);
             (container.querySelector('.scv-change-item') as HTMLElement).click();
-            expect(view.getSelectedChangeId()).toBe(toChangeId('c-1'));
+            expect(viewModel.getSelectedChangeId()).toBe(toChangeId('c-1'));
 
             // Simulate a rename being reflected in a fresh ViewModel snapshot for the same ChangeId.
-            const { view: renamedView } = buildView([
+            const { view: renamedView, viewModel: renamedViewModel } = buildView([
                 { id: toChangeId('c-1'), path: 'new.md', previousPath: 'old.md', kind: 'moved' },
             ]);
             renamedView.render(container);
             (container.querySelector('.scv-change-item') as HTMLElement).click();
 
-            expect(renamedView.getSelectedChangeId()).toBe(toChangeId('c-1'));
+            expect(renamedViewModel.getSelectedChangeId()).toBe(toChangeId('c-1'));
             expect(container.querySelector('.scv-change-rename-from')?.textContent).toBe('old.md');
         });
     });

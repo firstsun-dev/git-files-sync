@@ -1,4 +1,4 @@
-import type { ChangeId } from './types';
+import type { ChangeId } from '../types';
 
 /**
  * Tracks which pending sync changes are "Ready to Push" — independent of the
@@ -8,7 +8,7 @@ import type { ChangeId } from './types';
  * Keyed by ChangeId rather than path so a rename/move doesn't drop the
  * selection.
  */
-export class PushSelectionStore {
+export class SelectionState {
     private readonly selected = new Set<ChangeId>();
 
     includeForPush(changeId: ChangeId): void {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { OperationState } from '../../../src/logic/source-control/OperationState';
-import { toChangeId } from '../../../src/logic/source-control/types';
+import { OperationState } from '../../../../src/logic/source-control/state/OperationState';
+import { toChangeId } from '../../../../src/logic/source-control/types';
 
 describe('OperationState', () => {
     it('defaults to idle for an untracked change', () => {

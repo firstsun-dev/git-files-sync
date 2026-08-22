@@ -1,8 +1,8 @@
-import type { ChangeRepository } from './ChangeRepository';
 import type { ExecutionResult } from './ExecutionResult';
-import type { OperationState, OperationStatus } from './OperationState';
-import type { PushSelectionStore } from './PushSelectionStore';
 import { matchesFilter, type SourceControlFilter } from './SourceControlFilter';
+import type { SourceControlState } from './state/SourceControlState';
+import type { SectionFilter } from './state/ExpandedNodesState';
+import type { OperationStatus } from './state/OperationState';
 import type { ChangeId, SyncChange, SyncChangeKind } from './types';
 
 /** One row of UI-ready state for a change: its own facts plus derived selection/operation status. */
@@ -27,35 +27,60 @@ export interface SourceControlViewState {
 const ALL_FILTERS: SourceControlFilter[] = ['all', 'changes', 'ready-to-push', 'remote-changes', 'conflicts', 'synced'];
 
 /**
- * Combines `SyncChange[]` (via `ChangeRepository`), `PushSelectionStore`, and
- * `OperationState` into a single UI-ready snapshot. Holds no sync behavior of
- * its own — it's a pure projection, so `SyncManager`/`SyncPlanner`/`SyncExecutor`
- * stay untouched and the UI never needs to reach past this layer.
+ * The single Source Control UI state facade. Reads from `SourceControlState`
+ * (change model + selection + operation + filter + expanded nodes + selected
+ * change) and exposes a UI-ready projection. The View is pure layout + event
+ * binding and mutates state **only** through this facade — never reaching the
+ * state slices directly — so there is one source of truth and no parallel
+ * View-local state that can drift.
+ *
+ * It holds no sync behavior of its own: it's a projection + a thin mutation
+ * facade, so `SyncManager`/`SyncPlanner`/`SyncExecutor` stay untouched and the
+ * UI never needs to reach past this layer.
  */
 export class SourceControlViewModel {
     private lastOperationResult: ExecutionResult | null = null;
 
-    constructor(
-        private readonly changes: ChangeRepository,
-        private readonly selection: PushSelectionStore,
-        private readonly operations: OperationState,
-    ) {}
+    constructor(private readonly state: SourceControlState) {}
 
-    getState(filter: SourceControlFilter = 'all'): SourceControlViewState {
-        const all = this.changes.getAll();
+    // --- Read-side projection ---
+
+    /** Projects the items + counts for `filter` (defaults to the active filter). */
+    getState(filter: SourceControlFilter = this.state.filter.get()): SourceControlViewState {
+        const all = this.state.changes.getAll();
         const items = all
-            .filter(change => matchesFilter(change, filter, this.selection))
+            .filter(change => matchesFilter(change, filter, this.state.selection))
             .map(change => this.toItem(change));
         const counts = this.countByFilter(all);
         return { filter, items, counts, lastOperationResult: this.lastOperationResult };
     }
 
-    /**
-     * Stores the most recent batch outcome so the UI can render a summary
-     * ("7 completed / 3 conflicts / 1 failed"). Set by the action flow after
-     * `SourceControlActionService` returns; cleared by `clearOperationResult`
-     * (e.g. when the user dismisses the summary or starts a new action).
-     */
+    // --- Active UI state (moved out of the View) ---
+
+    getFilter(): SourceControlFilter { return this.state.filter.get(); }
+    setFilter(filter: SourceControlFilter): void { this.state.filter.set(filter); }
+
+    getSelectedChangeId(): ChangeId | null { return this.state.selectedChange.get(); }
+    selectForDiff(changeId: ChangeId): void { this.state.selectedChange.set(changeId); }
+    clearSelection(): void { this.state.selectedChange.clear(); }
+
+    isSectionCollapsed(section: SectionFilter): boolean { return this.state.expanded.isSectionCollapsed(section); }
+    toggleSection(section: SectionFilter): void { this.state.expanded.toggleSection(section); }
+    isFolderCollapsed(path: string): boolean { return this.state.expanded.isFolderCollapsed(path); }
+    toggleFolder(path: string): void { this.state.expanded.toggleFolder(path); }
+    /** Snapshot of collapsed folder paths for the tree/section renderers (read-only during one render). */
+    getCollapsedFolders(): Set<string> { return this.state.expanded.getCollapsedFolders(); }
+
+    // --- Selection mutation (routed through the facade, not direct to the store) ---
+
+    selectForPush(changeId: ChangeId): void { this.state.selection.includeForPush(changeId); }
+    deselectFromPush(changeId: ChangeId): void { this.state.selection.excludeFromPush(changeId); }
+
+    /** ChangeIds currently marked ready to push — feeds the toolbar Push action. */
+    getSelectedChangeIds(): ChangeId[] { return this.state.selection.getSelectedChangeIds(); }
+
+    // --- Operation-result projection (batch summary) ---
+
     setOperationResult(result: ExecutionResult): void {
         this.lastOperationResult = result;
     }
@@ -70,15 +95,15 @@ export class SourceControlViewModel {
             path: change.path,
             previousPath: change.previousPath,
             kind: change.kind,
-            isReadyToPush: this.selection.isIncluded(change.id),
-            operationStatus: this.operations.get(change.id),
+            isReadyToPush: this.state.selection.isIncluded(change.id),
+            operationStatus: this.state.operations.get(change.id),
         };
     }
 
     private countByFilter(changes: readonly SyncChange[]): Record<SourceControlFilter, number> {
         const counts = {} as Record<SourceControlFilter, number>;
         for (const filter of ALL_FILTERS) {
-            counts[filter] = changes.filter(change => matchesFilter(change, filter, this.selection)).length;
+            counts[filter] = changes.filter(change => matchesFilter(change, filter, this.state.selection)).length;
         }
         return counts;
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
-import { OperationState } from '../../../src/logic/source-control/OperationState';
+import { OperationState } from '../../../src/logic/source-control/state/OperationState';
 import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import type { SyncWorkspace } from '../../../src/logic/sync/SyncWorkspace';

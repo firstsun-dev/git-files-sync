@@ -1,6 +1,6 @@
 import { setIcon } from 'obsidian';
 import { ICONS } from '../components/icons';
-import type { OperationStatus } from '../../logic/source-control/OperationState';
+import type { OperationStatus } from '../../logic/source-control/state/OperationState';
 
 /**
  * Renders a small per-change status indicator for an in-flight operation.

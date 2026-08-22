@@ -34,7 +34,6 @@ export class SourceControlItemView extends ItemView {
         };
         this.view = new SourceControlView(
             this.plugin.sourceControlViewModel,
-            this.plugin.pushSelectionStore,
             callbacks,
         );
     }
