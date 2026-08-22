@@ -36,8 +36,13 @@ scripts/e2e-harness.sh provision
 set -a; source "$E2E_WORKDIR/e2e.env"; [ -f "$E2E_WORKDIR/e2e.secrets.env" ] && source "$E2E_WORKDIR/e2e.secrets.env"; set +a
 
 scripts/e2e-harness.sh seed
-# Only this provider's contract suite + the shared SyncManager suite --
-# vitest.e2e.config.ts's `include` matches every e2e/suites/*.e2e.test.ts
-# file, and the other two providers' suites would otherwise also try to run
-# (and fail on missing credentials) regardless of --provider.
-npx vitest run -c vitest.e2e.config.ts "e2e/suites/${provider}.e2e.test.ts" e2e/suites/sync-manager.e2e.test.ts
+# Only this provider's contract suite + the shared SyncManager/source-control
+# workflow suites -- vitest.e2e.config.ts's `include` matches every
+# e2e/suites/*.e2e.test.ts file, and the other two providers' suites would
+# otherwise also try to run (and fail on missing credentials) regardless of
+# --provider. source-control-flows gates its Extended scenarios to GitHub only
+# (and 1000-file stress to E2E_STRESS=1) in-file.
+npx vitest run -c vitest.e2e.config.ts \
+    "e2e/suites/${provider}.e2e.test.ts" \
+    e2e/suites/sync-manager.e2e.test.ts \
+    e2e/suites/source-control-flows.e2e.test.ts
