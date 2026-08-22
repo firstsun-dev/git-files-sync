@@ -176,9 +176,13 @@ export class SourceControlView {
         const query = this.searchQuery.trim().toLowerCase();
         const items = query ? state.items.filter(item => item.path.toLowerCase().includes(query)) : state.items;
 
-        this.renderSelectedSection(container, state.selectedItems, treeCallbacks);
-
+        // The scroll container: selected section + active-filter header + tree
+        // all live here so the whole lower region scrolls as one. Pinned
+        // controls (header, search, filter) stay outside so they don't scroll
+        // away; a tall Selected section therefore scrolls with the tree
+        // instead of blowing out the layout under `.scv-root { overflow: hidden }`.
         const body = container.createDiv({ cls: 'scv-body' });
+        this.renderSelectedSection(body, state.selectedItems, treeCallbacks);
         this.renderActiveFilterHeader(body, state.filter, items.length);
         if (items.length === 0) {
             body.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
@@ -272,10 +276,24 @@ export class SourceControlView {
         header.createSpan({ cls: 'scv-selected-section-title', text: t('sourceControl.section.selectedForSync') });
         header.createSpan({ cls: 'scv-selected-section-count', text: String(selectedItems.length) });
 
+        const clearBtn = header.createEl('button', {
+            cls: 'scv-selected-section-clear',
+            attr: { type: 'button' },
+        });
+        clearBtn.createSpan({ cls: 'scv-selected-section-clear-label', text: t('sourceControl.section.clearSelection') });
+        setTooltip(clearBtn, t('sourceControl.section.clearSelection.tooltip'));
+        clearBtn.addEventListener('click', () => this.clearSelection(selectedItems));
+
         const list = section.createDiv({ cls: 'scv-selected-section-list' });
         for (const item of selectedItems) {
             renderChangeItem(list, item, basename(item.path), callbacks);
         }
+    }
+
+    /** Unselects every change currently in the Selected section in one shot. */
+    private clearSelection(items: readonly SourceControlItem[]): void {
+        for (const item of items) this.selection.excludeFromPush(item.id);
+        this.rerender();
     }
 
     private renderDetail(root: HTMLElement): void {

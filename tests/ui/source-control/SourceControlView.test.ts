@@ -183,6 +183,27 @@ describe('SourceControlView', () => {
             expect(container.querySelector('.scv-selected-section')).toBeNull();
         });
 
+        it('clears all selected changes at once via the Clear button in the section header', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+                { id: toChangeId('c-3'), path: 'c.md', kind: 'remote-only' },
+            ]);
+            selection.includeForPush(toChangeId('c-1'));
+            selection.includeForPush(toChangeId('c-2'));
+            selection.includeForPush(toChangeId('c-3'));
+            view.render(container);
+
+            const clearBtn = container.querySelector('.scv-selected-section-clear') as HTMLButtonElement;
+            expect(clearBtn).not.toBeNull();
+            clearBtn.click();
+
+            expect(selection.isIncluded(toChangeId('c-1'))).toBe(false);
+            expect(selection.isIncluded(toChangeId('c-2'))).toBe(false);
+            expect(selection.isIncluded(toChangeId('c-3'))).toBe(false);
+            expect(container.querySelector('.scv-selected-section')).toBeNull();
+        });
+
         it('excludes synced changes from the SELECTED FOR SYNC count even when selected', () => {
             const { view, selection } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },

@@ -66,6 +66,8 @@ function renderFolder(
     const collapsed = collapsedFolders.has(folder.path);
     const folderEl = container.createDiv({ cls: 'scv-tree-folder' });
     const row = folderEl.createDiv({ cls: 'scv-tree-folder-row' });
+    row.setAttr('role', 'button');
+    row.setAttr('aria-expanded', String(!collapsed));
 
     const fileIds = collectFileIds(folder);
     const selectedCount = fileIds.filter(id => byId.get(id)?.isReadyToPush).length;
@@ -77,11 +79,20 @@ function renderFolder(
     checkbox.addEventListener('change', () => callbacks.onToggleFolderSelect(fileIds, checkbox.checked));
 
     const toggle = row.createEl('button', { cls: 'scv-tree-folder-toggle' });
-    toggle.setAttr('aria-expanded', String(!collapsed));
+    toggle.setAttr('aria-hidden', 'true');
     toggle.setText(collapsed ? '▶' : '▼');
-    toggle.addEventListener('click', () => callbacks.onToggleFolder(folder.path));
+    // The whole row toggles; the chevron is just a visual affordance, so
+    // stop its click from double-firing the row handler.
+    toggle.addEventListener('click', (evt) => { evt.stopPropagation(); callbacks.onToggleFolder(folder.path); });
 
     row.createSpan({ cls: 'scv-tree-folder-name', text: folder.name });
+
+    // Clicking anywhere on the row (name, padding) toggles collapse — except
+    // the select-all checkbox, which keeps its own action.
+    row.addEventListener('click', (evt) => {
+        if (evt.target === checkbox) return;
+        callbacks.onToggleFolder(folder.path);
+    });
 
     if (!collapsed) {
         const childrenEl = folderEl.createDiv({ cls: 'scv-tree-children' });

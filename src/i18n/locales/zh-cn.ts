@@ -263,6 +263,8 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.section.all': '全部',
 	'sourceControl.section.readyToPush': '待推送',
 	'sourceControl.section.selectedForSync': '已选同步',
+	'sourceControl.section.clearSelection': '清除',
+	'sourceControl.section.clearSelection.tooltip': '取消全部选择',
 	'sourceControl.section.changes': '更改',
 	'sourceControl.section.remoteChanges': '远程更改',
 	'sourceControl.section.conflicts': '冲突',

@@ -261,6 +261,8 @@ const en = {
 	'sourceControl.section.all': 'ALL',
 	'sourceControl.section.readyToPush': 'READY TO PUSH',
 	'sourceControl.section.selectedForSync': 'SELECTED FOR SYNC',
+	'sourceControl.section.clearSelection': 'Clear',
+	'sourceControl.section.clearSelection.tooltip': 'Deselect all changes',
 	'sourceControl.section.changes': 'CHANGES',
 	'sourceControl.section.remoteChanges': 'REMOTE CHANGES',
 	'sourceControl.section.conflicts': 'CONFLICTS',
