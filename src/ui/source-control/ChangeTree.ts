@@ -3,6 +3,7 @@ import {
     type ChangeTreeFileNode,
     type ChangeTreeFolderNode,
     type ChangeTreeNode,
+    type TreeDisplayOptions,
 } from '../../logic/source-control/ChangeTreeBuilder';
 import type { SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
@@ -20,16 +21,21 @@ const builder = new ChangeTreeBuilder();
  * `SyncChange`, so the builder's output only carries `id`/`path`/`kind`; a
  * by-id lookup restores `isReadyToPush`/`operationStatus` at render time
  * instead of duplicating the tree-building logic.
+ *
+ * `options` controls presentation-only tree shaping (single-child folder
+ * collapse, depth limit) so the Source Control tree stays a compact change
+ * view rather than reproducing the full file Explorer.
  */
 export function renderChangeTree(
     container: HTMLElement,
     items: readonly SourceControlItem[],
     collapsedFolders: ReadonlySet<string>,
     callbacks: ChangeTreeCallbacks,
+    options: TreeDisplayOptions = {},
 ): void {
     const byId = new Map<ChangeId, SourceControlItem>(items.map(item => [item.id, item]));
-    const nodes = builder.build(items);
-    renderNodes(container, nodes, byId, collapsedFolders, callbacks);
+    const nodes = builder.build(items, options);
+    renderNodes(container, nodes, byId, collapsedFolders, callbacks, options);
 }
 
 function renderNodes(
@@ -38,9 +44,10 @@ function renderNodes(
     byId: ReadonlyMap<ChangeId, SourceControlItem>,
     collapsedFolders: ReadonlySet<string>,
     callbacks: ChangeTreeCallbacks,
+    options: TreeDisplayOptions,
 ): void {
     for (const node of nodes) {
-        if (node.type === 'folder') renderFolder(container, node, byId, collapsedFolders, callbacks);
+        if (node.type === 'folder') renderFolder(container, node, byId, collapsedFolders, callbacks, options);
         else renderFile(container, node, byId, callbacks);
     }
 }
@@ -51,6 +58,7 @@ function renderFolder(
     byId: ReadonlyMap<ChangeId, SourceControlItem>,
     collapsedFolders: ReadonlySet<string>,
     callbacks: ChangeTreeCallbacks,
+    options: TreeDisplayOptions,
 ): void {
     const collapsed = collapsedFolders.has(folder.path);
     const folderEl = container.createDiv({ cls: 'scv-tree-folder' });
@@ -65,7 +73,7 @@ function renderFolder(
 
     if (!collapsed) {
         const childrenEl = folderEl.createDiv({ cls: 'scv-tree-children' });
-        renderNodes(childrenEl, folder.children, byId, collapsedFolders, callbacks);
+        renderNodes(childrenEl, folder.children, byId, collapsedFolders, callbacks, options);
     }
 }
 

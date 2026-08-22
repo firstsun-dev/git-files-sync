@@ -91,4 +91,50 @@ describe('ChangeTreeBuilder', () => {
             { type: 'file', id: toChangeId('c-1'), name: 'd.md', path: 'a/b/c/d.md', previousPath: undefined, kind: 'local-only' },
         ]);
     });
+
+    describe('TreeDisplayOptions', () => {
+        it('collapses single-child folder chains into one combined path node', () => {
+            const builder = new ChangeTreeBuilder();
+            const changes: SyncChange[] = [
+                { id: toChangeId('c-1'), path: '02_Areas/blog/_pixnet/zh-tw/tech/pixnet-xxx.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: '02_Areas/blog/_pixnet/zh-tw/tech/pixnet-yyy.md', kind: 'local-only' },
+            ];
+
+            const tree = builder.build(changes, { collapseSingleChild: true });
+            const folder = tree[0] as ChangeTreeFolderNode;
+
+            // The single-child chain 02_Areas/.../tech collapses to one folder node
+            // holding both files, instead of five nested expandable rows.
+            expect(tree).toHaveLength(1);
+            expect(folder.name).toBe('02_Areas/blog/_pixnet/zh-tw/tech');
+            expect(folder.children.map(child => child.name)).toEqual(['pixnet-xxx.md', 'pixnet-yyy.md']);
+        });
+
+        it('keeps sibling files from breaking out of their shared folder under collapseSingleChild', () => {
+            const builder = new ChangeTreeBuilder();
+            const changes: SyncChange[] = [
+                { id: toChangeId('c-1'), path: 'notes/a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'notes/inner/b.md', kind: 'local-only' },
+            ];
+
+            const tree = builder.build(changes, { collapseSingleChild: true });
+            const notes = tree[0] as ChangeTreeFolderNode;
+
+            // `notes` has a file sibling (a.md) alongside the inner folder, so it is
+            // not merged away; only the single-child `inner` run would collapse if
+            // it had no file siblings of its own.
+            expect(notes.name).toBe('notes');
+            expect(notes.children.some(c => c.type === 'file')).toBe(true);
+        });
+
+        it('leaves full nesting intact by default (no options)', () => {
+            const builder = new ChangeTreeBuilder();
+            const changes: SyncChange[] = [
+                { id: toChangeId('c-1'), path: 'a/b/c/d.md', kind: 'local-only' },
+            ];
+
+            const tree = builder.build(changes);
+            expect((tree[0] as ChangeTreeFolderNode).name).toBe('a');
+        });
+    });
 });

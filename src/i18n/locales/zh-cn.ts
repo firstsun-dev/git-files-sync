@@ -259,6 +259,8 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.filter.remoteChanges': '远程更改',
 	'sourceControl.filter.conflicts': '冲突',
 	'sourceControl.filter.synced': '已同步',
+	'sourceControl.filter.showSynced': '显示已同步',
+	'sourceControl.section.all': '全部',
 	'sourceControl.section.readyToPush': '待推送',
 	'sourceControl.section.changes': '更改',
 	'sourceControl.section.remoteChanges': '远程更改',

@@ -257,6 +257,8 @@ const en = {
 	'sourceControl.filter.remoteChanges': 'Remote Changes',
 	'sourceControl.filter.conflicts': 'Conflicts',
 	'sourceControl.filter.synced': 'Synced',
+	'sourceControl.filter.showSynced': 'Show synced',
+	'sourceControl.section.all': 'ALL',
 	'sourceControl.section.readyToPush': 'READY TO PUSH',
 	'sourceControl.section.changes': 'CHANGES',
 	'sourceControl.section.remoteChanges': 'REMOTE CHANGES',

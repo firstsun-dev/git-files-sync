@@ -93,6 +93,51 @@
     background: rgba(255, 255, 255, 0.22);
 }
 
+/* ── Show synced toggle ───────────────────────────────────────── */
+.scv-filter-show-synced {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    font-size: 0.78em;
+    color: var(--text-muted);
+    cursor: pointer;
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+.scv-filter-show-synced-checkbox {
+    margin: 0;
+    cursor: pointer;
+}
+
+.scv-filter-show-synced-label {
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+/* ── Active filter header ─────────────────────────────────────── */
+.scv-active-filter-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px 4px 12px;
+    color: var(--text-muted);
+    font-size: 0.78em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.scv-active-filter-count {
+    background: var(--background-modifier-border);
+    border-radius: 10px;
+    padding: 1px 6px;
+    font-size: 0.9em;
+    min-width: 18px;
+    text-align: center;
+}
+
 /* ── Push button ───────────────────────────────────────────────── */
 .scv-push-btn {
     display: flex;

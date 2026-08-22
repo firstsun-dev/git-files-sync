@@ -28,7 +28,7 @@ describe('SourceControlView', () => {
     });
 
     describe('filter switching', () => {
-        it('groups changes into their sections under the "all" filter', () => {
+        it('renders "All" as a single flat tree (no section breakdown) and excludes synced', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
@@ -37,8 +37,27 @@ describe('SourceControlView', () => {
             ]);
             view.render(container);
 
+            // No section grouping under All — every filter renders one flat tree.
+            expect(container.querySelectorAll('.scv-section')).toHaveLength(0);
+            // Active-filter header reads "ALL".
+            expect(container.querySelector('.scv-active-filter-title')?.textContent).toBe('ALL');
+            expect(container.querySelector('.scv-active-filter-count')?.textContent).toBe('3');
+            // Actionable items only: synced is absent from All.
+            const kinds = Array.from(container.querySelectorAll('.scv-change-item')).map(el => el.getAttribute('class'));
+            expect(kinds.some(c => c?.includes('scv-kind-synced'))).toBe(false);
+            expect(container.querySelectorAll('.scv-change-item')).toHaveLength(3);
+        });
+
+        it('does not render a SYNCED section under the All filter (status-grouping fix)', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
+            ]);
+            view.render(container);
+
             const sectionTitles = Array.from(container.querySelectorAll('.scv-section-title')).map(el => el.textContent);
-            expect(sectionTitles).toEqual(['CHANGES', 'REMOTE CHANGES', 'CONFLICTS', 'SYNCED']);
+            expect(sectionTitles).not.toContain('SYNCED');
+            expect(container.querySelectorAll('.scv-section')).toHaveLength(0);
         });
 
         it('shows a flat tree (no sections) once a specific filter is selected', () => {
@@ -62,6 +81,56 @@ describe('SourceControlView', () => {
             (container.querySelector('.scv-filter-option[data-filter="conflicts"]') as HTMLButtonElement).click();
 
             expect(container.querySelector('.scv-empty')).not.toBeNull();
+        });
+    });
+
+    describe('show synced toggle', () => {
+        it('hides the synced chip and synced rows by default', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
+            ]);
+            view.render(container);
+
+            expect(container.querySelector('.scv-filter-option[data-filter="synced"]')).toBeNull();
+            expect(view.getShowSynced()).toBe(false);
+        });
+
+        it('reveals the synced chip and renders synced rows when toggled on', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
+            ]);
+            view.render(container);
+
+            const checkbox = container.querySelector('.scv-filter-show-synced-checkbox') as HTMLInputElement;
+            checkbox.checked = true;
+            checkbox.dispatchEvent(new Event('change'));
+
+            expect(view.getShowSynced()).toBe(true);
+            const syncedChip = container.querySelector('.scv-filter-option[data-filter="synced"]');
+            expect(syncedChip).not.toBeNull();
+            expect(syncedChip?.querySelector('.scv-filter-count')?.textContent).toBe('1');
+        });
+
+        it('falls back to All when synced is hidden while viewing the synced filter', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
+            ]);
+            view.render(container);
+
+            // Opt in and switch to the synced filter.
+            const toggle = container.querySelector('.scv-filter-show-synced-checkbox') as HTMLInputElement;
+            toggle.checked = true;
+            toggle.dispatchEvent(new Event('change'));
+            (container.querySelector('.scv-filter-option[data-filter="synced"]') as HTMLButtonElement).click();
+            expect(view.getFilter()).toBe('synced');
+
+            // Opt back out: filter snaps back to All.
+            toggle.checked = false;
+            toggle.dispatchEvent(new Event('change'));
+            expect(view.getFilter()).toBe('all');
         });
     });
 
