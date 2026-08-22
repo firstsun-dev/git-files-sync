@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Thin local-dev orchestration around scripts/e2e-harness.sh: provision the
 # isolated branch/container, seed a baseline fixture, run the provider's
-# vitest suite + the SyncManager suite, then clean up (even on failure). CI
-# drives the same four steps directly from .github/workflows/ci.yml instead,
-# so each shows up as its own job step.
+# vitest suites, then clean up (even on failure). CI calls this same script
+# (see .github/workflows/ci.yml), so the suite list lives in exactly one
+# place: scripts/e2e-suites.txt. Add a new shared suite there and both local
+# and CI pick it up; scripts/check-e2e-suite-registration.mjs fails CI if a
+# suite file isn't registered.
 set -euo pipefail
 
 provider=""
@@ -36,13 +38,19 @@ scripts/e2e-harness.sh provision
 set -a; source "$E2E_WORKDIR/e2e.env"; [ -f "$E2E_WORKDIR/e2e.secrets.env" ] && source "$E2E_WORKDIR/e2e.secrets.env"; set +a
 
 scripts/e2e-harness.sh seed
-# Only this provider's contract suite + the shared SyncManager/source-control
-# workflow suites -- vitest.e2e.config.ts's `include` matches every
-# e2e/suites/*.e2e.test.ts file, and the other two providers' suites would
-# otherwise also try to run (and fail on missing credentials) regardless of
-# --provider. source-control-flows gates its Extended scenarios to GitHub only
-# (and 1000-file stress to E2E_STRESS=1) in-file.
-npx vitest run -c vitest.e2e.config.ts \
-    "e2e/suites/${provider}.e2e.test.ts" \
-    e2e/suites/sync-manager.e2e.test.ts \
-    e2e/suites/source-control-flows.e2e.test.ts
+
+# Suite manifest: scripts/e2e-suites.txt (single source of truth). ${provider}
+# expands to the active provider's contract suite; the rest are shared suites.
+# `|| [ -n "$line" ]` keeps the last line even without a trailing newline.
+SUITES=()
+while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|\#*) continue;; esac
+    SUITES+=("$(printf '%s' "$line" | sed "s/\${provider}/$provider/g")")
+done < scripts/e2e-suites.txt
+
+# vitest.e2e.config.ts's `include` matches every e2e/suites/*.e2e.test.ts, so
+# the other two providers' suites would also try to run (and fail on missing
+# credentials) if not explicitly limited to this list. source-control-flows
+# gates its Extended scenarios to GitHub only (and 1000-file stress to
+# E2E_STRESS=1) in-file.
+npx vitest run -c vitest.e2e.config.ts "${SUITES[@]}"
