@@ -94,8 +94,8 @@ describe('SourceControlView', () => {
         });
     });
 
-    describe('show synced toggle', () => {
-        it('hides the synced chip and synced rows by default', () => {
+    describe('synced surfacing removed', () => {
+        it('never renders a synced chip or a Show synced toggle', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
@@ -103,44 +103,18 @@ describe('SourceControlView', () => {
             view.render(container);
 
             expect(container.querySelector('.scv-filter-option[data-filter="synced"]')).toBeNull();
-            expect(view.getShowSynced()).toBe(false);
+            expect(container.querySelector('.scv-filter-show-synced-checkbox')).toBeNull();
         });
 
-        it('reveals the synced chip and renders synced rows when toggled on', () => {
+        it('excludes synced rows from every filter view', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
             ]);
             view.render(container);
 
-            const checkbox = container.querySelector('.scv-filter-show-synced-checkbox') as HTMLInputElement;
-            checkbox.checked = true;
-            checkbox.dispatchEvent(new Event('change'));
-
-            expect(view.getShowSynced()).toBe(true);
-            const syncedChip = container.querySelector('.scv-filter-option[data-filter="synced"]');
-            expect(syncedChip).not.toBeNull();
-            expect(syncedChip?.querySelector('.scv-filter-count')?.textContent).toBe('1');
-        });
-
-        it('falls back to All when synced is hidden while viewing the synced filter', () => {
-            const { view } = buildView([
-                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
-                { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
-            ]);
-            view.render(container);
-
-            // Opt in and switch to the synced filter.
-            const toggle = container.querySelector('.scv-filter-show-synced-checkbox') as HTMLInputElement;
-            toggle.checked = true;
-            toggle.dispatchEvent(new Event('change'));
-            (container.querySelector('.scv-filter-option[data-filter="synced"]') as HTMLButtonElement).click();
-            expect(view.getFilter()).toBe('synced');
-
-            // Opt back out: filter snaps back to All.
-            toggle.checked = false;
-            toggle.dispatchEvent(new Event('change'));
-            expect(view.getFilter()).toBe('all');
+            expect(container.querySelectorAll('.scv-change-item')).toHaveLength(1);
+            expect(container.querySelector('.scv-kind-synced')).toBeNull();
         });
     });
 
@@ -185,6 +159,28 @@ describe('SourceControlView', () => {
             expect(section).not.toBeNull();
             expect(section?.querySelector('.scv-selected-section-title')?.textContent).toBe('SELECTED FOR SYNC');
             expect(section?.querySelector('.scv-selected-section-count')?.textContent).toBe('1');
+        });
+
+        it('lists the selected change as a real row inside the Selected section, unselecting on checkbox clear', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'notes/a.md', kind: 'local-only' },
+            ]);
+            selection.includeForPush(toChangeId('c-1'));
+            view.render(container);
+
+            const section = container.querySelector('.scv-selected-section') as HTMLElement;
+            const row = section.querySelector('.scv-change-item') as HTMLElement;
+            expect(row?.getAttribute('data-change-id')).toBe('c-1');
+            expect(row?.querySelector('.scv-change-name-text')?.textContent).toBe('a.md');
+            expect(row?.classList.contains('is-selected')).toBe(true);
+
+            const checkbox = row.querySelector('.scv-change-select') as HTMLInputElement;
+            expect(checkbox.checked).toBe(true);
+            checkbox.checked = false;
+            checkbox.dispatchEvent(new Event('change'));
+
+            expect(selection.isIncluded(toChangeId('c-1'))).toBe(false);
+            expect(container.querySelector('.scv-selected-section')).toBeNull();
         });
 
         it('excludes synced changes from the SELECTED FOR SYNC count even when selected', () => {

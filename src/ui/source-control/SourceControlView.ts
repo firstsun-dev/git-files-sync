@@ -9,6 +9,7 @@ import { ICONS } from '../components/icons';
 import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
 import { renderDiffPanel } from '../components/DiffPanel';
 import { renderChangeTree, type ChangeTreeCallbacks } from './ChangeTree';
+import { renderChangeItem } from './ChangeItem';
 import { renderFilterMenu } from './FilterMenu';
 import { renderSourceControlHeader, type SourceControlWorkspaceInfo } from './SourceControlHeader';
 
@@ -76,12 +77,16 @@ const MOBILE_TREE_OPTIONS = { collapseSingleChild: true, maxDepth: 2 };
  * - Every filter — including "All" — renders a single flat tree. "All" no
  *   longer breaks the view into CHANGES / REMOTE CHANGES / SYNCED sections, so
  *   a change never appears twice and SYNCED never leaks into All.
- * - Synced is hidden by default (`showSynced = false`): the `synced` chip is
- *   absent and synced rows render nowhere. The "Show synced" toggle opts in.
+ * - Synced is not surfaced in the UI: there is no `synced` chip and no
+ *   "Show synced" toggle, so a quiet workspace stays quiet. The domain
+ *   `synced` filter/summary are still computed by the ViewModel but simply
+ *   have no entry point here.
+ * - Selected changes get a first-class "SELECTED FOR SYNC (N)" region
+ *   (between the filter and the tree) listing the working push batch; the
+ *   same rows remain in the tree, visually muted via `is-selected`.
  */
 export class SourceControlView {
     private filter: SourceControlFilter = 'all';
-    private showSynced = false;
     private searchQuery = '';
     private readonly collapsedFolders = new Set<string>();
     private selectedChangeId: ChangeId | null = null;
@@ -122,7 +127,6 @@ export class SourceControlView {
     }
 
     getFilter(): SourceControlFilter { return this.filter; }
-    getShowSynced(): boolean { return this.showSynced; }
     getSelectedChangeId(): ChangeId | null { return this.selectedChangeId; }
 
     private rerender(): void {
@@ -130,7 +134,7 @@ export class SourceControlView {
     }
 
     private renderMain(container: HTMLElement): void {
-        const state = this.viewModel.getState(this.filter, this.showSynced);
+        const state = this.viewModel.getState(this.filter);
 
         const isMobile = Platform.isMobile;
 
@@ -153,35 +157,6 @@ export class SourceControlView {
 
         this.renderSearchBox(container);
 
-        renderFilterMenu(
-            container,
-            this.filter,
-            state.counts,
-            this.showSynced,
-            {
-                onFilterChange: (filter) => { this.filter = filter; this.rerender(); },
-                onToggleShowSynced: (show) => {
-                    this.showSynced = show;
-                    // If the user hid synced while viewing it, fall back to All.
-                    if (!show && this.filter === 'synced') this.filter = 'all';
-                    this.rerender();
-                },
-            },
-            { isMobile },
-        );
-
-        const query = this.searchQuery.trim().toLowerCase();
-        const items = query ? state.items.filter(item => item.path.toLowerCase().includes(query)) : state.items;
-
-        this.renderSelectedSection(container, state.selectedItems);
-
-        const body = container.createDiv({ cls: 'scv-body' });
-        this.renderActiveFilterHeader(body, state.filter, items.length);
-        if (items.length === 0) {
-            body.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
-            return;
-        }
-
         const treeCallbacks: ChangeTreeCallbacks = {
             onToggleFolder: (path) => this.toggleFolder(path),
             onToggleSelect: (id, selected) => this.toggleSelect(id, selected),
@@ -189,6 +164,26 @@ export class SourceControlView {
             onOpenDiff: (item) => this.openDiff(item),
             getDiffStat: (id) => this.diffStatCache.get(id) ?? undefined,
         };
+
+        renderFilterMenu(
+            container,
+            this.filter,
+            state.counts,
+            { onFilterChange: (filter) => { this.filter = filter; this.rerender(); } },
+            { isMobile },
+        );
+
+        const query = this.searchQuery.trim().toLowerCase();
+        const items = query ? state.items.filter(item => item.path.toLowerCase().includes(query)) : state.items;
+
+        this.renderSelectedSection(container, state.selectedItems, treeCallbacks);
+
+        const body = container.createDiv({ cls: 'scv-body' });
+        this.renderActiveFilterHeader(body, state.filter, items.length);
+        if (items.length === 0) {
+            body.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
+            return;
+        }
 
         renderChangeTree(body, items, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
 
@@ -256,18 +251,31 @@ export class SourceControlView {
     }
 
     /**
-     * Renders the "SELECTED FOR SYNC (N)" summary, only when the user has at
-     * least one actionable change selected for push. Sits above the tree so the
-     * current push batch is always visible regardless of the active filter.
-     * The count comes straight from the ViewModel's single-source
+     * Renders the "SELECTED FOR SYNC (N)" workspace — a first-class region
+     * (not just a count) that lists every actionable change the user has
+     * ticked for push, each as a full row whose checkbox unselects it. Sits
+     * between the filter and the tree so the working push batch stays
+     * visible regardless of the active filter, and the same items remain in
+     * the tree (visually muted via `is-selected`) so context isn't lost.
+     * The set comes straight from the ViewModel's single-source
      * `selectedItems` projection (same definition as the Sync button count),
-     * so the two can never drift.
+     * so the section and the button can never drift.
      */
-    private renderSelectedSection(container: HTMLElement, selectedItems: readonly SourceControlItem[]): void {
+    private renderSelectedSection(
+        container: HTMLElement,
+        selectedItems: readonly SourceControlItem[],
+        callbacks: ChangeTreeCallbacks,
+    ): void {
         if (selectedItems.length === 0) return;
         const section = container.createDiv({ cls: 'scv-selected-section' });
-        section.createSpan({ cls: 'scv-selected-section-title', text: t('sourceControl.section.selectedForSync') });
-        section.createSpan({ cls: 'scv-selected-section-count', text: String(selectedItems.length) });
+        const header = section.createDiv({ cls: 'scv-selected-section-header' });
+        header.createSpan({ cls: 'scv-selected-section-title', text: t('sourceControl.section.selectedForSync') });
+        header.createSpan({ cls: 'scv-selected-section-count', text: String(selectedItems.length) });
+
+        const list = section.createDiv({ cls: 'scv-selected-section-list' });
+        for (const item of selectedItems) {
+            renderChangeItem(list, item, basename(item.path), callbacks);
+        }
     }
 
     private renderDetail(root: HTMLElement): void {
@@ -293,8 +301,8 @@ export class SourceControlView {
 
     private async loadAndRenderDiff(container: HTMLElement, changeId: ChangeId): Promise<void> {
         if (!this.callbacks.loadDiffContent) return;
-        const item = this.viewModel.getState('all', this.showSynced).items.find(i => i.id === changeId)
-            ?? this.viewModel.getState('synced', this.showSynced).items.find(i => i.id === changeId);
+        const item = this.viewModel.getState('all').items.find(i => i.id === changeId)
+            ?? this.viewModel.getState('synced', true).items.find(i => i.id === changeId);
         if (!item) return;
 
         const content = await this.callbacks.loadDiffContent(item);
@@ -386,4 +394,10 @@ export class SourceControlView {
         btn.createSpan({ cls: 'scv-mobile-sync-count', text: String(readyCount) });
         btn.addEventListener('click', () => { void this.callbacks.onPush(this.selection.getSelectedChangeIds()); });
     }
+}
+
+/** Last path segment of a change path, for the Selected section's flat row labels. */
+function basename(path: string): string {
+    const slash = path.lastIndexOf('/');
+    return slash === -1 ? path : path.slice(slash + 1);
 }

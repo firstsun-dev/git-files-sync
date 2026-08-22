@@ -22,13 +22,14 @@ export function setupObsidianDOM(): void {
     const proto = window.HTMLElement.prototype;
     if ('createEl' in proto) return;
 
-    type DomOpts = { cls?: string; text?: string; type?: string };
+    type DomOpts = { cls?: string; text?: string; type?: string; value?: string };
     const toOpts = (o?: DomOpts | string): DomOpts => (typeof o === 'string' ? { cls: o } : o ?? {});
 
     function applyOpts(el: Element, o: DomOpts): void {
         if (o.cls) el.className = o.cls;
         if (o.text) el.textContent = o.text;
         if (o.type) (el as HTMLInputElement).type = o.type;
+        if (o.value !== undefined) (el as HTMLInputElement).value = o.value;
     }
 
     Object.assign(proto, {

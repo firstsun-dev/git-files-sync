@@ -135,7 +135,7 @@
     align-items: center;
     gap: 5px;
     padding: 4px 10px;
-    border-radius: 20px;
+    border-radius: var(--radius-s);
     border: 1px solid transparent;
     font-size: 0.80em;
     font-weight: 500;
@@ -160,7 +160,7 @@
 
 .scv-filter-count {
     background: rgba(0, 0, 0, 0.12);
-    border-radius: 10px;
+    border-radius: var(--radius-s);
     padding: 1px 6px;
     font-size: 0.85em;
     min-width: 18px;
@@ -216,30 +216,52 @@
     text-align: center;
 }
 
-/* ── Selected-for-sync summary ──────────────────────────────── */
+/* ── Selected-for-sync workspace ───────────────────────────── */
 .scv-selected-section {
+    margin: 6px 8px 4px 8px;
+    padding: 6px 0;
+    border-radius: var(--radius-m);
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    overflow: hidden;
+}
+
+.scv-selected-section-header {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px;
-    margin: 4px 12px 0 12px;
-    border-radius: 6px;
-    background: var(--background-modifier-hover);
+    padding: 2px 10px 6px 10px;
     color: var(--text-muted);
-    font-size: 0.78em;
+    font-size: 0.74em;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.02em;
 }
 
+.scv-selected-section-title { flex-shrink: 0; }
+
 .scv-selected-section-count {
     background: var(--interactive-accent);
     color: var(--text-on-accent);
-    border-radius: 10px;
+    border-radius: var(--radius-s);
     padding: 1px 6px;
     font-size: 0.9em;
     min-width: 18px;
     text-align: center;
+}
+
+.scv-selected-section-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.scv-selected-section-list .scv-change-item {
+    border-left: none;
+    background: transparent;
+}
+
+.scv-selected-section-list .scv-change-item:hover {
+    background: var(--background-modifier-hover);
 }
 
 /* ── Push button ───────────────────────────────────────────────── */
@@ -460,22 +482,27 @@
     white-space: nowrap;
 }
 
-.scv-change-subtitle {
-    color: var(--text-faint);
-    font-family: var(--font-interface);
-    font-size: 0.92em;
-    font-weight: normal;
-    white-space: nowrap;
-    flex-shrink: 0;
+.scv-change-item.is-selected {
+    opacity: 0.55;
+}
+
+.scv-change-item.is-selected .scv-change-name-text {
+    font-style: italic;
 }
 
 .scv-diff-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 1px;
     font-family: var(--font-monospace);
     font-size: 0.72em;
-    color: var(--text-muted);
     flex-shrink: 0;
     white-space: nowrap;
 }
+
+.scv-diff-stat-add { color: var(--color-green); }
+.scv-diff-stat-del { color: var(--color-red); }
+.scv-diff-stat-sep { width: 2px; }
 
 .scv-change-rename-from {
     color: var(--text-faint);

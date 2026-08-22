@@ -56,18 +56,20 @@ describe('renderChangeTree', () => {
         expect(container.querySelector('.scv-badge')?.textContent).toBe('D');
     });
 
-    it('renders a status subtitle next to the change name', () => {
+    it('does not render an inline status subtitle (the kind label lives on the badge tooltip)', () => {
         const items = [item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' })];
         renderChangeTree(container, items, new Set(), callbacks);
 
-        expect(container.querySelector('.scv-change-subtitle')?.textContent).toBe('Modified');
+        expect(container.querySelector('.scv-change-subtitle')).toBeNull();
     });
 
-    it('renders the diff stat from the getDiffStat callback when available', () => {
+    it('renders the diff stat as colored add/del spans from the getDiffStat callback', () => {
         const items = [item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' })];
         callbacks.getDiffStat = () => ({ additions: 3, deletions: 1 });
         renderChangeTree(container, items, new Set(), callbacks);
 
+        expect(container.querySelector('.scv-diff-stat-add')?.textContent).toBe('+3');
+        expect(container.querySelector('.scv-diff-stat-del')?.textContent).toBe('-1');
         expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+3 -1');
     });
 
@@ -96,6 +98,18 @@ describe('renderChangeTree', () => {
 
         const checkbox = container.querySelector('.scv-change-select') as HTMLInputElement;
         expect(checkbox.checked).toBe(true);
+    });
+
+    it('marks a ready-to-push row with the is-selected class', () => {
+        const items = [
+            item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only', isReadyToPush: true }),
+            item({ id: toChangeId('c-2'), path: 'b.md', kind: 'local-only', isReadyToPush: false }),
+        ];
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        const rows = container.querySelectorAll('.scv-change-item');
+        expect(rows[0]?.classList.contains('is-selected')).toBe(true);
+        expect(rows[1]?.classList.contains('is-selected')).toBe(false);
     });
 
     it('calls onToggleSelect with the ChangeId when the checkbox changes', () => {
