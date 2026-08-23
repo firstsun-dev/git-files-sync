@@ -511,6 +511,7 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 
 .scv-change-item.scv-kind-local-only      { border-left-color: var(--color-green); }
 .scv-change-item.scv-kind-local-modified  { border-left-color: var(--text-warning); }
+.scv-change-item.scv-kind-local-deleted   { border-left-color: var(--color-red); }
 .scv-change-item.scv-kind-remote-only     { border-left-color: var(--color-blue); }
 .scv-change-item.scv-kind-remote-modified { border-left-color: var(--color-blue); }
 .scv-change-item.scv-kind-moved           { border-left-color: var(--color-purple); }
@@ -541,6 +542,7 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 .scv-badge-local-only       { color: var(--color-green); }
 .scv-badge-local-modified,
 .scv-badge-remote-modified { color: var(--text-warning); }
+.scv-badge-local-deleted    { color: var(--color-red); }
 .scv-badge-remote-only      { color: var(--text-warning); }
 .scv-badge-moved           { color: var(--color-purple); }
 .scv-badge-conflict       { color: var(--color-red); }

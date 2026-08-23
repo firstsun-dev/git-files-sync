@@ -35,6 +35,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
         sync: { status },
         syncWorkspace: { getInfo: () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '' }), getRemoteFileUrl },
         settings: { syncMetadata: {} },
+        refreshState,
         openDiffTab,
     } as unknown as GitLabFilesPush;
 

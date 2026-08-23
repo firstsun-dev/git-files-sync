@@ -10,6 +10,14 @@ export interface SourceControlWorkspaceInfo {
     vaultFolder: string;
     /** Epoch ms of the most recent successful push/pull, or 0 if nothing has synced yet. */
     lastSyncTime: number;
+    /**
+     * Epoch ms the Source Control view last completed a status refresh
+     * (any reason — manual, startup, local-change), or 0 if it hasn't
+     * refreshed yet this session. Surfaced as "Last checked: …" so the
+     * user can tell a stale panel from a fresh one independent of the
+     * last push/pull time.
+     */
+    lastCheckedAt: number;
 }
 
 export interface SourceControlHeaderProps {
@@ -103,4 +111,15 @@ function renderInfoStrip(container: HTMLElement, info: SourceControlWorkspaceInf
             ? t('sourceControl.info.lastSync', { time: new Date(info.lastSyncTime).toLocaleTimeString() })
             : t('sourceControl.info.neverSynced'),
     });
+
+    if (info.lastCheckedAt > 0) {
+        strip.createSpan({ cls: 'scv-info-sep', text: '·' });
+        const elapsed = Date.now() - info.lastCheckedAt;
+        strip.createSpan({
+            cls: 'scv-info-time',
+            text: elapsed < 60_000
+                ? t('sourceControl.info.justChecked')
+                : t('sourceControl.info.lastChecked', { time: new Date(info.lastCheckedAt).toLocaleTimeString() }),
+        });
+    }
 }

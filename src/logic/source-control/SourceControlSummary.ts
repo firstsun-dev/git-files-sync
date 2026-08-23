@@ -21,7 +21,7 @@ export type SourceControlCounts = Record<SourceControlFilter, number>;
  * count label reads from.
  *
  * Buckets are disjoint and exhaustive over {@link SyncChangeKind}:
- * - {@link localChanges}: local-only, local-modified, moved
+ * - {@link localChanges}: local-only, local-modified, local-deleted, moved
  * - {@link remoteChanges}: remote-only, remote-modified
  * - {@link conflicts}: conflict
  * - {@link synced}: synced
@@ -43,7 +43,7 @@ export interface SourceControlSummary {
     counts: SourceControlCounts;
 }
 
-const LOCAL_KINDS: ReadonlySet<SyncChangeKind> = new Set(['local-only', 'local-modified', 'moved']);
+const LOCAL_KINDS: ReadonlySet<SyncChangeKind> = new Set(['local-only', 'local-modified', 'local-deleted', 'moved']);
 const REMOTE_KINDS: ReadonlySet<SyncChangeKind> = new Set(['remote-only', 'remote-modified']);
 
 function isLocal(change: SyncChange): boolean { return LOCAL_KINDS.has(change.kind); }

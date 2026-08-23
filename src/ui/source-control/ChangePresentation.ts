@@ -29,6 +29,7 @@ export interface ChangeRowView {
 const SUBTITLE_KEYS: Record<SyncChangeKind, TranslationKey> = {
     'local-only':       'sourceControl.status.added',
     'local-modified':   'sourceControl.status.modified',
+    'local-deleted':    'sourceControl.status.deletedLocally',
     'remote-only':      'sourceControl.status.remoteAvailable',
     'remote-modified':  'sourceControl.status.modifiedRemotely',
     moved:              'sourceControl.status.renamed',
@@ -49,6 +50,7 @@ const SUBTITLE_KEYS: Record<SyncChangeKind, TranslationKey> = {
 const BADGE: Record<SyncChangeKind, { letter: string; cls: string }> = {
     'local-only':       { letter: 'A', cls: 'local-only' },
     'local-modified':   { letter: 'M', cls: 'local-modified' },
+    'local-deleted':    { letter: 'D', cls: 'local-deleted' },
     'remote-only':      { letter: '↓', cls: 'remote-only' },
     'remote-modified':  { letter: '↕', cls: 'remote-modified' },
     moved:              { letter: 'R', cls: 'moved' },
@@ -61,16 +63,23 @@ const BADGE: Record<SyncChangeKind, { letter: string; cls: string }> = {
  * can be grouped (Upload / Download) and the Sync button can route each
  * selected change to the right primitive — push for one-sided local changes
  * and moves, pull for one-sided remote changes — instead of pushing every
- * selection and no-op'ing remote-only rows. `conflict` routes to `upload`
- * (push) as the default; it surfaces a conflict either way and never silent
- * overwrites. `synced` never reaches the queue, so it's mapped to `upload`
- * only to satisfy the exhaustive record.
+ * selection and no-op'ing remote-only rows.
+ *
+ * `local-deleted` (a tracked file the user removed locally) routes to
+ * `download` rather than `upload`: pushing a path whose local file no longer
+ * exists has no content to send, so until a dedicated "delete remote" action
+ * lands the available, non-destructive Sync action for it is pull-to-restore
+ * (the tooltip offers both options). `conflict` routes to `upload` (push) as
+ * the default; it surfaces a conflict either way and never silent overwrites.
+ * `synced` never reaches the queue, so it's mapped to `upload` only to satisfy
+ * the exhaustive record.
  */
 export type ChangeOperation = 'upload' | 'download';
 
 const OPERATION: Record<SyncChangeKind, ChangeOperation> = {
     'local-only':       'upload',
     'local-modified':   'upload',
+    'local-deleted':    'download',
     'remote-only':      'download',
     'remote-modified':  'download',
     moved:              'upload',
@@ -97,6 +106,7 @@ export function presentChange(item: SourceControlItem, displayName: string): Cha
     };
     if (item.previousPath) view.renameFrom = item.previousPath.split('/').pop() ?? item.previousPath;
     if (item.kind === 'remote-only') view.tooltip = t('sourceControl.status.remoteAvailable.tooltip');
+    if (item.kind === 'local-deleted') view.tooltip = t('sourceControl.status.deletedLocally.tooltip');
     return view;
 }
 

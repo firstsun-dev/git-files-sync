@@ -20,6 +20,7 @@ describe('SourceControlFilter', () => {
     it.each([
         ['local-only', ['all', 'changes']],
         ['local-modified', ['all', 'changes']],
+        ['local-deleted', ['all', 'changes']],
         ['moved', ['all', 'changes']],
         ['remote-only', ['all', 'remote-changes']],
         ['remote-modified', ['all', 'remote-changes']],

@@ -26,6 +26,7 @@ function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCa
         branch: 'main',
         vaultFolder: '',
         lastSyncTime: 0,
+        lastCheckedAt: 0,
     }));
     return { view, selection, operations, refreshState, refreshSource, onPush, onRefresh };
 }
@@ -859,6 +860,56 @@ describe('SourceControlView', () => {
             (container.querySelector('.scv-mobile-sync-btn') as HTMLButtonElement).click();
 
             expect(onPush).toHaveBeenCalledWith([toChangeId('c-1')]);
+        });
+    });
+
+    describe('header info strip', () => {
+        function buildViewWithInfo(lastCheckedAt: number) {
+            const repository = new ChangeRepository();
+            repository.replace([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            const refreshState = new RefreshState();
+            const viewModel = new SourceControlViewModel(
+                repository,
+                new PushSelectionStore(),
+                new OperationState(),
+                vi.fn().mockResolvedValue(undefined),
+                refreshState,
+            );
+            const view = new SourceControlView(
+                viewModel,
+                { onPush: vi.fn(), onRefresh: vi.fn() },
+                () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '', lastSyncTime: 0, lastCheckedAt }),
+            );
+            return { view, refreshState };
+        }
+
+        it('omits the "Last checked" line before the first refresh (lastCheckedAt = 0)', () => {
+            const { view } = buildViewWithInfo(0);
+            view.render(container);
+
+            const infoTimes = container.querySelectorAll('.scv-info-time');
+            // Only the "Never synced" line is present; no "Last checked" line.
+            expect(infoTimes).toHaveLength(1);
+            expect(infoTimes[0]?.textContent).toBe('Never synced');
+        });
+
+        it('shows "Last checked: just now" when the last refresh was within a minute', () => {
+            const { view } = buildViewWithInfo(Date.now());
+            view.render(container);
+
+            const infoTimes = container.querySelectorAll('.scv-info-time');
+            expect(infoTimes).toHaveLength(2);
+            expect(infoTimes[1]?.textContent).toBe('Last checked: just now');
+        });
+
+        it('shows "Last checked: <time>" when the last refresh was over a minute ago', () => {
+            const { view } = buildViewWithInfo(Date.now() - 120_000);
+            view.render(container);
+
+            const infoTimes = container.querySelectorAll('.scv-info-time');
+            expect(infoTimes).toHaveLength(2);
+            expect(infoTimes[1]?.textContent).toContain('Last checked:');
+            expect(infoTimes[1]?.textContent).not.toBe('Last checked: just now');
         });
     });
 });

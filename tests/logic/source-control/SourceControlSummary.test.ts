@@ -79,18 +79,19 @@ describe('SourceControlSummary', () => {
             const input: SyncChange[] = [
                 local('l1'), { id: toChangeId('l2'), path: 'l2.md', kind: 'local-modified' },
                 { id: toChangeId('l3'), path: 'l3.md', kind: 'moved' },
+                { id: toChangeId('l4'), path: 'l4.md', kind: 'local-deleted' },
                 remote('r1'), { id: toChangeId('r2'), path: 'r2.md', kind: 'remote-modified' },
                 { id: toChangeId('cf'), path: 'cf.md', kind: 'conflict' },
                 synced('s1'),
             ];
             const summary = buildSummary(input, new PushSelectionStore(), true);
 
-            expect(summary.localChanges.map(c => c.id)).toEqual([toChangeId('l1'), toChangeId('l2'), toChangeId('l3')]);
+            expect(summary.localChanges.map(c => c.id)).toEqual([toChangeId('l1'), toChangeId('l2'), toChangeId('l3'), toChangeId('l4')]);
             expect(summary.remoteChanges.map(c => c.id)).toEqual([toChangeId('r1'), toChangeId('r2')]);
             expect(summary.conflicts.map(c => c.id)).toEqual([toChangeId('cf')]);
             expect(summary.synced.map(c => c.id)).toEqual([toChangeId('s1')]);
             expect(summary.all.map(c => c.id)).toEqual([
-                toChangeId('l1'), toChangeId('l2'), toChangeId('l3'),
+                toChangeId('l1'), toChangeId('l2'), toChangeId('l3'), toChangeId('l4'),
                 toChangeId('r1'), toChangeId('r2'), toChangeId('cf'),
             ]);
         });

@@ -177,13 +177,34 @@ export class SyncStatusRefreshService {
             if (localFile) extra.push(localFile);
             else if (await this.isLocalFile(vaultPath)) extra.push(vaultPath);
             else {
+                // No local file at all. A tracked file that's since been
+                // removed locally (sync metadata still present for the path,
+                // and not a pending move source) is a *local deletion* — a
+                // potential remote deletion — distinct from a never-tracked
+                // remote-only file, which is simply available to download.
                 this.statuses.set(vaultPath, {
                     path: vaultPath,
-                    status: this.statuses.classify({ localExists: false, remoteExists: true }),
+                    status: this.statuses.classify({
+                        localExists: false,
+                        remoteExists: true,
+                        wasTracked: this.wasTrackedBeforeDelete(vaultPath),
+                    }),
                 });
             }
         }
         return extra;
+    }
+
+    /**
+     * Whether `vaultPath` was previously tracked locally and has since been
+     * removed (sync metadata present for the path, and not a pending move
+     * source). Used to distinguish a `local-deleted` row from a
+     * never-tracked `remote-only` download candidate.
+     */
+    private wasTrackedBeforeDelete(vaultPath: string): boolean {
+        const metadata = this.dependencies.settings().syncMetadata;
+        const pathMetadata = metadata ? metadata[vaultPath] : undefined;
+        return isSyncMetadataAtPath(pathMetadata, vaultPath) && !pathMetadata.renamedFrom;
     }
 
     async reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void> {
@@ -229,6 +250,27 @@ export class SyncStatusRefreshService {
         await Promise.all(Array.from({ length: workerCount }, () => worker()));
     }
 
+    /**
+     * Handles an out-of-band local create so a brand-new file appears in the
+     * Source Control view immediately rather than waiting for the next full
+     * refresh. The file is classified `unsynced` (local-only) optimistically:
+     * a full refresh later reconciles it against the remote tree, promoting
+     * it to `synced`/`modified` if a matching remote entry exists.
+     *
+     * No-op when the path is already tracked (a `modify`/`rename` event will
+     * have handled it) or falls outside the configured vault folder. Returns
+     * whether the status map changed, so a caller can skip a republish.
+     */
+    handleFileCreated(file: TFile): boolean {
+        if (this.statuses.has(file.path) || !this.dependencies.filterPathByVaultFolder(file.path)) return false;
+        this.statuses.set(file.path, {
+            file,
+            path: file.path,
+            status: this.statuses.classify({ localExists: true, remoteExists: false }),
+        });
+        return true;
+    }
+
     async handleFileModified(file: TFile): Promise<boolean> {
         const existing = this.statuses.get(file.path);
         if (!existing || !['synced', 'modified', 'unsynced', 'moved'].includes(existing.status)) return false;
@@ -267,6 +309,42 @@ export class SyncStatusRefreshService {
         } else {
             this.statuses.set(file.path, { ...existing, file, path: file.path });
         }
+        return true;
+    }
+
+    /**
+     * Handles an out-of-band local delete of a previously known file so the
+     * Source Control view reflects it immediately rather than waiting for the
+     * next full refresh.
+     *
+     * - A *tracked* file removed locally (`synced`/`modified`) is marked
+     *   `local-deleted`: the remote still holds it, so this is a potential
+     *   remote deletion, distinct from a never-tracked `remote-only` file.
+     * - A *local-only* (`unsynced`) file simply drops out of the status map —
+     *   nothing on the remote to delete or restore, so there's no change to
+     *   surface.
+     * - A tracked *move* (`moved`) abandons its move: the row is dropped and a
+     *   later refresh reconciles the old remote path (still on the remote,
+     *   metadata relocated by `trackRename`) as `remote-only`/`local-deleted`.
+     * - A `remote-only`/`local-deleted`/`checking` row is left untouched
+     *   (nothing local existed to delete, or it's still resolving).
+     *
+     * Returns whether the status map changed, so a caller can skip a
+     * republish when nothing moved.
+     */
+    handleFileDeleted(path: string): boolean {
+        const existing = this.statuses.get(path);
+        if (!existing || existing.status === 'checking' || existing.status === 'remote-only' || existing.status === 'local-deleted') return false;
+        if (existing.status === 'moved') {
+            this.statuses.delete(path);
+            return true;
+        }
+        if (existing.status === 'unsynced') {
+            this.statuses.delete(path);
+            return true;
+        }
+        // synced / modified: tracked, remote still holds this path -> local-deleted.
+        this.statuses.set(path, { ...existing, status: 'local-deleted', localContent: undefined });
         return true;
     }
 
@@ -377,7 +455,11 @@ export class SyncStatusRefreshService {
         const metadata = this.dependencies.settings().syncMetadata ?? {};
         const orphansBySha = new Map<string, string[]>();
         for (const [path, status] of this.statuses) {
-            if (status.status !== 'remote-only') continue;
+            // A tracked-then-deleted file is now classified `local-deleted`
+            // (not `remote-only`), so both qualify as an orphaned move
+            // source: the remote entry still exists, sync metadata is
+            // present for the path, and it isn't itself a pending move.
+            if (status.status !== 'remote-only' && status.status !== 'local-deleted') continue;
             const pathMetadata = metadata[path];
             if (!isSyncMetadataAtPath(pathMetadata, path) || pathMetadata.renamedFrom) continue;
             const entry = remoteMap.get(path);

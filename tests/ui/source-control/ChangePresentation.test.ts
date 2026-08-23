@@ -24,6 +24,14 @@ describe('presentChange', () => {
         expect(view.subtitle).toBe('Modified locally');
     });
 
+    it('badges a local-deleted change as D with a restore tooltip', () => {
+        const view = presentChange(item({ id: toChangeId('a'), path: 'a.md', kind: 'local-deleted' }), 'a.md');
+        expect(view.badge.letter).toBe('D');
+        expect(view.badge.cls).toBe('local-deleted');
+        expect(view.subtitle).toBe('Deleted locally');
+        expect(view.tooltip).toBe('Tracked file removed locally — push to delete on remote, or pull to restore');
+    });
+
     it('badges a remote-only change as a down-arrow with a download tooltip', () => {
         const view = presentChange(item({ id: toChangeId('a'), path: 'a.md', kind: 'remote-only' }), 'a.md');
         expect(view.badge.letter).toBe('↓');
@@ -83,6 +91,7 @@ describe('changeOperation', () => {
     it.each([
         ['remote-only', 'download'],
         ['remote-modified', 'download'],
+        ['local-deleted', 'download'],
     ] as const)('routes %s to download', (kind, op) => {
         expect(changeOperation(kind)).toBe(op);
     });

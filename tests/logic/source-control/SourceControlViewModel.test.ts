@@ -159,6 +159,29 @@ describe('SourceControlViewModel', () => {
         expect(refreshState.get()).toBe('idle');
     });
 
+    it('refresh() defaults to the manual reason and records lastCheckedAt on success', async () => {
+        const { viewModel, refreshState } = buildViewModel([
+            { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+        ]);
+        expect(refreshState.getReason()).toBeUndefined();
+        expect(refreshState.getLastCheckedAt()).toBe(0);
+
+        await viewModel.refresh();
+
+        expect(refreshState.getReason()).toBe('manual');
+        expect(refreshState.getLastCheckedAt()).toBeGreaterThan(0);
+    });
+
+    it('refresh(reason) threads the reason onto the RefreshState holder', async () => {
+        const { viewModel, refreshState } = buildViewModel([
+            { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+        ]);
+
+        await viewModel.refresh('startup');
+
+        expect(refreshState.getReason()).toBe('startup');
+    });
+
     it('refresh() marks the RefreshState failed and rethrows when the refresh source rejects', async () => {
         const refreshSource = vi.fn().mockRejectedValue(new Error('boom'));
         const repository = new ChangeRepository();

@@ -1,6 +1,7 @@
 import type { ChangeRepository } from './ChangeRepository';
 import { buildSummary, type SourceControlCounts } from './SourceControlSummary';
 import type { OperationState, OperationStatus } from './OperationState';
+import type { RefreshReason } from './RefreshReason';
 import type { RefreshState, RefreshStatus } from './RefreshState';
 import type { PushSelectionStore } from './PushSelectionStore';
 import { matchesFilter, type SourceControlFilter } from './SourceControlFilter';
@@ -92,9 +93,15 @@ export class SourceControlViewModel {
      * / a failed state. Refresh republishes `sync.status`, so the existing
      * subscription repopulates `ChangeRepository` — this never becomes a
      * second population path.
+     *
+     * The {@link RefreshReason} is recorded on the {@link RefreshState}
+     * holder purely for observability ("Last checked" + why); it does not
+     * change what the refresh does. Defaults to `'manual'` (the Refresh
+     * button); callers pass `'startup'`/`'local-change'`/`'sync-complete'` to
+     * surface a non-manual trigger.
      */
-    async refresh(): Promise<void> {
-        this.refreshState.start();
+    async refresh(reason: RefreshReason = 'manual'): Promise<void> {
+        this.refreshState.start(reason);
         try {
             await this.refreshSource();
             this.refreshState.succeed();
