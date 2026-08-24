@@ -111,7 +111,25 @@ describe('SyncManager Batch Operations', () => {
             const results = await manager.pushFiles(files);
 
             expect(results.success).toBe(2);
+            expect(results.added).toBe(2);
+            expect(results.updated).toBe(0);
             expect(vi.mocked(mockGitService.pushFile)).toHaveBeenCalledTimes(2);
+        });
+
+        it('classifies a file already present in the remote tree as an update, not an addition', async () => {
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('new content');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: 'file1.md', symlink: false, sha: await gitBlobSha('old content') },
+            ]);
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: 'file1.md', sha: 'new-sha' });
+
+            const results = await manager.pushFiles(['file1.md']);
+
+            expect(results.success).toBe(1);
+            expect(results.added).toBe(0);
+            expect(results.updated).toBe(1);
         });
 
         it('should handle failures during batch push', async () => {
@@ -377,7 +395,7 @@ describe('SyncManager Batch Operations', () => {
 
             const results = await manager.pullAllFiles([path]);
 
-            expect(results).toMatchObject({ success: 1, conflicts: 0 });
+            expect(results).toMatchObject({ success: 1, added: 0, updated: 1, conflicts: 0 });
             expect(adapter.write).toHaveBeenCalledWith(path, 'remote edit');
         });
 
@@ -434,6 +452,20 @@ describe('SyncManager Batch Operations', () => {
 
             expect(results.success).toBe(1);
             expect(mockGitService.getFile).toHaveBeenCalledWith(path, 'main');
+        });
+
+        it('classifies a remote file with no local copy as an addition', async () => {
+            const path = 'new-remote.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'remote-sha' }
+            ]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+
+            const results = await manager.pullAllFiles([path]);
+
+            expect(results).toMatchObject({ success: 1, added: 1, updated: 0, conflicts: 0 });
         });
 
         it('should handle missing remote files during batch pull', async () => {

@@ -3,6 +3,7 @@ import { GitServiceInterface, GitTreeEntry } from '../../services/git-service-in
 import { GitLabFilesPushSettings, getServiceName } from '../../settings';
 import {
     type PushResults,
+    type SyncResult,
     SyncPlan,
     SyncPlanEntry,
     isSyncPlanEmpty,
@@ -271,7 +272,7 @@ export class SyncManager {
         files: (TFile | string)[],
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
-    ): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
+    ): Promise<SyncResult> {
         return this.pullCoordinator.pullAllFiles(files, onProgress, remoteTree);
     }
 

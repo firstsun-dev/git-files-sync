@@ -306,6 +306,14 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.view.toggleLabel': '视图',
 	'sourceControl.view.tree': '树状',
 	'sourceControl.view.list': '列表',
+
+	'sync.notice.pushSummary': '已推送至 {service}：新增 {added} 个、更新 {updated} 个{commitNote}。',
+	'sync.notice.pushAddedOnly': '已推送至 {service}：新增 {added} 个{commitNote}。',
+	'sync.notice.pushUpdatedOnly': '已推送至 {service}：更新 {updated} 个{commitNote}。',
+	'sync.notice.pushCommitNote': '（合并为一次提交）',
+	'sync.notice.pullSummary': '已从 {service} 拉取：新增 {added} 个、更新 {updated} 个。',
+	'sync.notice.pullAddedOnly': '已从 {service} 拉取：新增 {added} 个。',
+	'sync.notice.pullUpdatedOnly': '已从 {service} 拉取：更新 {updated} 个。',
 };
 
 export default zhCn;

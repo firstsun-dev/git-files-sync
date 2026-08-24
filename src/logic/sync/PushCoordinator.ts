@@ -5,6 +5,7 @@ import { gitBlobSha } from '../../utils/git-blob-sha';
 import { logger } from '../../utils/logger';
 import { contentsEqual, isBinaryPath } from '../../utils/path';
 import { readLocalSymlinkTarget } from '../../utils/symlink';
+import { t } from '../../i18n';
 import type { ConflictResolver } from './ConflictResolver';
 import type { PushExecutor } from './PushExecutor';
 import type { SyncScanner } from './SyncScanner';
@@ -64,6 +65,7 @@ export class PushCoordinator {
         const results: PushResults = {
             ...this.emptyResults(),
             success: immediate.success,
+            updated: immediate.updated,
             failed: immediate.failed,
             conflicts: plan.conflicts.length + plan.autoSkipped.length,
             errors: immediate.errors,
@@ -94,7 +96,7 @@ export class PushCoordinator {
     }
 
     private emptyResults(): PushResults {
-        return { success: 0, failed: 0, conflicts: 0, resolvedConflicts: 0, skippedConflicts: 0, errors: [], syncedPaths: [] };
+        return { success: 0, added: 0, updated: 0, failed: 0, conflicts: 0, resolvedConflicts: 0, skippedConflicts: 0, errors: [], syncedPaths: [] };
     }
 
     private async resolvePlanConflicts(
@@ -201,10 +203,10 @@ export class PushCoordinator {
         remoteTree: GitTreeEntry[],
     ): Promise<{
         plan: BatchPushPlan;
-        immediate: { success: number; failed: number; errors: Array<{ file: string; error: string }>; syncedPaths: Array<{ path: string; sha?: string }> };
+        immediate: { success: number; updated: number; failed: number; errors: Array<{ file: string; error: string }>; syncedPaths: Array<{ path: string; sha?: string }> };
     }> {
         const plan: BatchPushPlan = { pushes: [], moves: [], conflicts: [], autoSkipped: [] };
-        const immediate = { success: 0, failed: 0, errors: [] as Array<{ file: string; error: string }>, syncedPaths: [] as Array<{ path: string; sha?: string }> };
+        const immediate = { success: 0, updated: 0, failed: 0, errors: [] as Array<{ file: string; error: string }>, syncedPaths: [] as Array<{ path: string; sha?: string }> };
         const tree = new Map(remoteTree.map(entry => [entry.path, entry]));
         const hasOrphans = this.hasOrphanedRenameMetadata();
 
@@ -217,6 +219,7 @@ export class PushCoordinator {
                 const outcome = await this.classifyCandidate(file, info, tree, plan, hasOrphans);
                 if (outcome === 'done') {
                     immediate.success += 1;
+                    immediate.updated += 1;
                     immediate.syncedPaths.push({ path: info.path });
                 }
             } catch (error) {
@@ -417,12 +420,19 @@ export class PushCoordinator {
 
     private notifyResult(results: PushResults): void {
         if (results.success > 0) {
-            const commitNote = results.resolvedConflicts > 0 ? ' in one commit' : '';
-            this.dependencies.notify(`Pushed ${results.success} file(s) to ${this.dependencies.serviceName()}${commitNote}.`);
+            const commitNote = results.resolvedConflicts > 0 ? t('sync.notice.pushCommitNote') : '';
+            const service = this.dependencies.serviceName();
+            const key = this.pushSummaryKey(results.added, results.updated);
+            this.dependencies.notify(t(key, { service, added: results.added, updated: results.updated, commitNote }));
         }
         if (results.resolvedConflicts > 0) this.dependencies.notify(`Resolved ${results.resolvedConflicts} conflict(s).`);
         if (results.skippedConflicts > 0) this.dependencies.notify(`Skipped ${results.skippedConflicts} conflict(s).`, 8000);
         if (results.failed > 0) this.dependencies.notify(`Failed to push ${results.failed} file(s). Check console for details.`);
+    }
+
+    private pushSummaryKey(added: number, updated: number): 'sync.notice.pushSummary' | 'sync.notice.pushAddedOnly' | 'sync.notice.pushUpdatedOnly' {
+        if (added > 0 && updated > 0) return 'sync.notice.pushSummary';
+        return added > 0 ? 'sync.notice.pushAddedOnly' : 'sync.notice.pushUpdatedOnly';
     }
 
     private fileInfo(file: TFile | string): ReturnType<SyncScanner['fileInfo']> {
