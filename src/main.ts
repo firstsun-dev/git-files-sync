@@ -21,6 +21,7 @@ import { SyncDiffService } from './logic/sync/SyncDiffService';
 import { SyncManagerWorkspace, type SyncWorkspace } from './logic/sync/SyncWorkspace';
 import { ChangeRepository } from './logic/source-control/ChangeRepository';
 import { OperationState } from './logic/source-control/OperationState';
+import { RefreshState } from './logic/source-control/RefreshState';
 import { PushSelectionStore } from './logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
 import { SourceControlActionService } from './logic/source-control/SourceControlActionService';
@@ -43,6 +44,7 @@ export default class GitLabFilesPush extends Plugin {
 	changeRepository: ChangeRepository;
 	pushSelectionStore: PushSelectionStore;
 	operationState: OperationState;
+	refreshState: RefreshState;
 	sourceControlViewModel: SourceControlViewModel;
 	sourceControlActions: SourceControlActionService;
 	private unsubscribeChangeRepository?: () => void;
@@ -114,10 +116,13 @@ export default class GitLabFilesPush extends Plugin {
 		this.changeRepository = new ChangeRepository();
 		this.pushSelectionStore = new PushSelectionStore();
 		this.operationState = new OperationState();
+		this.refreshState = new RefreshState();
 		this.sourceControlViewModel = new SourceControlViewModel(
 			this.changeRepository,
 			this.pushSelectionStore,
 			this.operationState,
+			() => this.syncWorkspace.refresh(),
+			this.refreshState,
 		);
 		this.sourceControlActions = new SourceControlActionService(
 			this.changeRepository,
@@ -261,6 +266,38 @@ export default class GitLabFilesPush extends Plugin {
 			})
 		);
 
+		// A newly created file inside the configured vault folder should
+		// appear as a local-only (`unsynced`) row immediately rather than only
+		// after the next manual refresh. Same shared-SyncStatusService path as
+		// `modify` above; a later full refresh reconciles it against the remote
+		// tree (promoting to `synced`/`modified` if a matching entry exists).
+		this.registerEvent(
+			this.app.vault.on('create', (file) => {
+				if (file instanceof TFile && this.filterPathByVaultFolder(file.path)) {
+					this.syncStatusRefresh.handleFileCreated(file);
+				}
+			})
+		);
+
+		// A local delete inside the configured vault folder reclassifies the
+		// row immediately: a previously tracked (`synced`/`modified`) file
+		// becomes `local-deleted` (remote still holds it), while a
+		// local-only (`unsynced`) or pending-`moved` row simply drops out.
+		// This deliberately does NOT clear `syncMetadata` for the path — that
+		// evidence is still needed by `reconcileOutOfBandMoves` on the next
+		// refresh to recognize an out-of-band move (external tool, cloud sync,
+		// mobile) as a rename rather than a permanent `remote-only` ghost (the
+		// #66 bug). Only the in-memory status map is updated here; the
+		// persisted metadata is untouched, matching the long-standing
+		// no-clear-on-delete decision documented above.
+		this.registerEvent(
+			this.app.vault.on('delete', (file) => {
+				if (file instanceof TFile && this.filterPathByVaultFolder(file.path)) {
+					this.syncStatusRefresh.handleFileDeleted(file.path);
+				}
+			})
+		);
+
 		this.app.workspace.onLayoutReady(() => {
 			if (this.settings.autoRefreshOnStartup) void this.refreshSyncStatusOnStartup();
 		});
@@ -270,7 +307,7 @@ export default class GitLabFilesPush extends Plugin {
 
 	private async refreshSyncStatusOnStartup(): Promise<void> {
 		await this.activateSourceControlView();
-		await this.syncWorkspace.refresh();
+		await this.sourceControlViewModel.refresh('startup');
 	}
 
 	/**

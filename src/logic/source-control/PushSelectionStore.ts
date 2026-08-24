@@ -19,6 +19,16 @@ export class PushSelectionStore {
         this.selected.delete(changeId);
     }
 
+    /** Includes a batch of changes for push in one call (folder "select all"). */
+    selectMany(changeIds: readonly ChangeId[]): void {
+        for (const id of changeIds) this.selected.add(id);
+    }
+
+    /** Excludes a batch of changes from push in one call ("clear queue" / folder deselect). */
+    deselectMany(changeIds: readonly ChangeId[]): void {
+        for (const id of changeIds) this.selected.delete(id);
+    }
+
     isIncluded(changeId: ChangeId): boolean {
         return this.selected.has(changeId);
     }

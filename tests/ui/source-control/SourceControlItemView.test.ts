@@ -3,6 +3,7 @@ import { TFile, WorkspaceLeaf } from 'obsidian';
 import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from '../../../src/ui/source-control/SourceControlItemView';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
+import { RefreshState } from '../../../src/logic/source-control/RefreshState';
 import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId, type SyncChangeKind } from '../../../src/logic/source-control/types';
@@ -17,7 +18,8 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
     repository.replace([{ id: toChangeId('a.md'), path: 'a.md', kind }]);
     const selection = new PushSelectionStore();
     const operations = new OperationState();
-    const viewModel = new SourceControlViewModel(repository, selection, operations);
+    const refreshState = new RefreshState();
+    const viewModel = new SourceControlViewModel(repository, selection, operations, vi.fn().mockResolvedValue(undefined), refreshState);
     const push = vi.fn().mockResolvedValue(undefined);
     const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
     const openDiffTab = vi.fn().mockResolvedValue(undefined);
@@ -33,6 +35,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
         sync: { status },
         syncWorkspace: { getInfo: () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '' }), getRemoteFileUrl },
         settings: { syncMetadata: {} },
+        refreshState,
         openDiffTab,
     } as unknown as GitLabFilesPush;
 
@@ -77,6 +80,19 @@ describe('SourceControlItemView', () => {
         (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
         expect(push).toHaveBeenCalledWith([toChangeId('a.md')]);
+    });
+
+    it('forwards refresh clicks to the ViewModel refresh delegate', async () => {
+        const { plugin } = buildPlugin();
+        const refreshSpy = vi.spyOn(plugin.sourceControlViewModel, 'refresh').mockResolvedValue(undefined);
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+
+        const container = view.containerEl.children[1] as HTMLElement;
+        (container.querySelector('.scv-refresh-btn') as HTMLButtonElement).click();
+        await Promise.resolve();
+
+        expect(refreshSpy).toHaveBeenCalledTimes(1);
     });
 
     it('re-renders when the shared SyncStatusService publishes a change', async () => {

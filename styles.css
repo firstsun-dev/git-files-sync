@@ -18,8 +18,8 @@
 .scv-header-title-row {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
     gap: 8px;
+    padding: 0 10px;
 }
 
 /* ── Workspace info strip (provider · branch · vault folder · last sync) ── */
@@ -114,7 +114,6 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    overflow-y: auto;
 }
 
 /* ── Filter menu ───────────────────────────────────────────────── */
@@ -135,7 +134,7 @@
     align-items: center;
     gap: 5px;
     padding: 4px 10px;
-    border-radius: 20px;
+    border-radius: var(--radius-s);
     border: 1px solid transparent;
     font-size: 0.80em;
     font-weight: 500;
@@ -160,7 +159,7 @@
 
 .scv-filter-count {
     background: rgba(0, 0, 0, 0.12);
-    border-radius: 10px;
+    border-radius: var(--radius-s);
     padding: 1px 6px;
     font-size: 0.85em;
     min-width: 18px;
@@ -195,11 +194,26 @@
 }
 
 /* ── Active filter header ─────────────────────────────────────── */
-.scv-active-filter-header {
+.scv-collapsible-header { cursor: pointer; user-select: none; }
+
+.scv-section-toggle {
+    flex-shrink: 0;
+    color: var(--text-faint);
+    font-size: 0.7em;
+    line-height: 1;
+    width: 1.2em;
+    text-align: center;
+}
+
+/* ── Repository Changes header (collapsible title + Tree/List toggle) ── */
+.scv-repository-header {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px 4px 12px;
+    padding: 6px 12px 4px 8px;
+    cursor: pointer;
+    border-radius: var(--radius-s);
     color: var(--text-muted);
     font-size: 0.78em;
     font-weight: 600;
@@ -207,7 +221,11 @@
     letter-spacing: 0.02em;
 }
 
-.scv-active-filter-count {
+.scv-repository-header:hover { background: var(--background-modifier-hover); }
+
+.scv-repository-title { flex-shrink: 0; }
+
+.scv-repository-count {
     background: var(--background-modifier-border);
     border-radius: 10px;
     padding: 1px 6px;
@@ -216,14 +234,125 @@
     text-align: center;
 }
 
+/* ── Tree/List view toggle (Repository Changes only) ──────────── */
+.scv-view-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 1px;
+    border-radius: var(--radius-s);
+    background: var(--background-modifier-border);
+}
+
+.scv-view-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: calc(var(--radius-s) - 1px);
+    cursor: pointer;
+    font-size: 0.7em;
+    line-height: 1;
+}
+
+.scv-view-toggle-btn:hover { color: var(--text-normal); }
+
+.scv-view-toggle-btn.is-active {
+    background: var(--background-primary);
+    color: var(--text-normal);
+}
+
+.scv-view-toggle-icon { display: inline-flex; }
+.scv-view-toggle-icon .svg-icon { width: 13px; height: 13px; }
+
+.scv-view-toggle-label { white-space: nowrap; }
+
+/* Mobile: icon-only toggle (labels drop) to save horizontal space. */
+body.is-mobile .scv-view-toggle-label { display: none; }
+
+/* ── Selected-for-sync workspace ───────────────────────────── */
+.scv-selected-section {
+    flex-shrink: 0;
+    margin: 6px 8px 4px 8px;
+    padding: 6px 0;
+    border-radius: var(--radius-m);
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    overflow: hidden;
+}
+
+.scv-selected-section-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px 6px 10px;
+    color: var(--text-muted);
+    font-size: 0.74em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.scv-selected-section-title { flex-shrink: 0; }
+
+.scv-selected-section-clear {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.9em;
+    padding: 2px 6px;
+    border-radius: var(--radius-s);
+    cursor: pointer;
+}
+
+.scv-selected-section-clear:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+}
+
+.scv-selected-section-subtitle {
+    padding: 0 10px 4px 10px;
+    color: var(--text-faint);
+    font-size: 0.72em;
+    line-height: 1.2;
+}
+
+.scv-selected-section-list {
+    display: flex;
+    flex-direction: column;
+    max-height: 38vh;
+    overflow-y: auto;
+}
+
+/* ── Changes region (independent scroll so the tree never hides the queue) ── */
+.scv-changes-region {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.scv-changes-tree {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
 /* ── Push button ───────────────────────────────────────────────── */
 .scv-push-btn {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    width: calc(100% - 20px);
-    margin: 8px 10px;
+    flex: 1 1 auto;
+    margin: 8px 0;
     padding: 7px 11px;
     border-radius: 5px;
     font-size: 0.85em;
@@ -243,6 +372,43 @@
 }
 
 .scv-push-btn:not(:disabled):hover { opacity: 0.85; }
+
+/* ── Refresh button ───────────────────────────────────────────── */
+.scv-refresh-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+    margin: 8px 0;
+    padding: 6px 9px;
+    border-radius: 5px;
+    font-size: 0.8em;
+    cursor: pointer;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-modifier-form-field);
+    color: var(--text-muted);
+    min-height: 32px;
+}
+
+.scv-refresh-btn:hover { color: var(--text-normal); }
+
+.scv-refresh-btn.is-loading { cursor: progress; }
+.scv-refresh-btn.is-loading .scv-refresh-btn-icon { animation: scv-refresh-spin 1s linear infinite; }
+
+.scv-refresh-btn.is-failed {
+    color: var(--text-error);
+    border-color: var(--background-modifier-error-border, var(--background-modifier-border));
+}
+
+.scv-refresh-btn:disabled { opacity: 0.7; cursor: progress; }
+
+.scv-refresh-btn-label { white-space: nowrap; }
+.scv-refresh-btn.is-idle .scv-refresh-btn-label { display: none; }
+
+@keyframes scv-refresh-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
 
 /* ── Change sections & tree ───────────────────────────────────────── */
 .scv-section-header {
@@ -345,6 +511,7 @@
 
 .scv-change-item.scv-kind-local-only      { border-left-color: var(--color-green); }
 .scv-change-item.scv-kind-local-modified  { border-left-color: var(--text-warning); }
+.scv-change-item.scv-kind-local-deleted   { border-left-color: var(--color-red); }
 .scv-change-item.scv-kind-remote-only     { border-left-color: var(--color-blue); }
 .scv-change-item.scv-kind-remote-modified { border-left-color: var(--color-blue); }
 .scv-change-item.scv-kind-moved           { border-left-color: var(--color-purple); }
@@ -372,11 +539,12 @@
     opacity: 0.85;
 }
 
-.scv-badge-local-only,
-.scv-badge-remote-only    { color: var(--color-green); }
+.scv-badge-local-only       { color: var(--color-green); }
 .scv-badge-local-modified,
 .scv-badge-remote-modified { color: var(--text-warning); }
-.scv-badge-moved          { color: var(--color-purple); }
+.scv-badge-local-deleted    { color: var(--color-red); }
+.scv-badge-remote-only      { color: var(--text-warning); }
+.scv-badge-moved           { color: var(--color-purple); }
 .scv-badge-conflict       { color: var(--color-red); }
 .scv-badge-synced         { color: var(--text-muted); }
 
@@ -396,6 +564,79 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* List-view variant: the name shrinks to its content so the folder path
+   suffix can sit on the right, disambiguating flat rows without nesting. */
+.scv-change-item-list .scv-change-name { flex: 0 1 auto; }
+
+.scv-change-path {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: right;
+    color: var(--text-faint);
+    font-family: var(--font-monospace);
+    font-size: 0.74em;
+}
+
+.scv-change-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.scv-diff-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 1px;
+    font-family: var(--font-monospace);
+    font-size: 0.72em;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.scv-diff-stat-add { color: var(--color-green); }
+.scv-diff-stat-del { color: var(--color-red); }
+.scv-diff-stat-sep { width: 2px; }
+
+/* ── Sync Queue operation groups (Upload / Download) ───────────────── */
+.scv-queue-group-label {
+    padding: 6px 10px 2px 10px;
+    color: var(--text-faint);
+    font-size: 0.68em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* ── Inline Download action (remote-only rows) ─────────────────────── */
+.scv-change-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: auto;
+    padding: 1px 6px;
+    background: transparent;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    color: var(--text-muted);
+    font-size: 0.72em;
+    line-height: 1.4;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.scv-change-download:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+    border-color: var(--interactive-accent);
+}
+
+.scv-change-download .svg-icon,
+.scv-change-download-icon .svg-icon { width: 12px; height: 12px; }
+
+.scv-change-download-label { white-space: nowrap; }
 
 .scv-change-rename-from {
     color: var(--text-faint);
@@ -420,10 +661,16 @@
 .scv-op-indicator {
     display: inline-flex;
     align-items: center;
+    gap: 3px;
     flex-shrink: 0;
 }
 
 .scv-op-indicator .svg-icon { width: 14px; height: 14px; }
+
+.scv-op-label {
+    font-size: 0.72em;
+    white-space: nowrap;
+}
 
 .scv-op-running { color: var(--text-muted); }
 .scv-op-success { color: var(--color-green); }
@@ -718,6 +965,55 @@
     .scv-change-item { padding: 6px 10px; }
     .scv-change-name { font-size: 0.76em; }
 }
+
+/* ── Mobile (Platform.isMobile) layout: filter dropdown + bottom sync bar ── */
+.scv-mobile .scv-filter-dropdown {
+    width: 100%;
+    padding: 6px 8px;
+    font-size: 0.85em;
+    margin-bottom: 6px;
+}
+
+.scv-mobile .scv-filter-show-synced {
+    margin-top: 4px;
+}
+
+.scv-mobile-sync-bar {
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: var(--background-primary);
+    border-top: 1px solid var(--background-modifier-border);
+    z-index: 1;
+}
+
+.scv-mobile-sync-label {
+    flex: 0 1 auto;
+    color: var(--text-muted);
+    font-size: 0.85em;
+}
+
+.scv-mobile-sync-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: var(--radius-m);
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    font-size: 0.9em;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.scv-mobile-sync-btn:hover { background: var(--interactive-accent-hover); }
 
 /* ── Settings connection status badge ──────────────────────────── */
 .gfs-connection-status {

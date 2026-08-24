@@ -49,6 +49,56 @@ describe('renderChangeTree', () => {
         expect(badges).toEqual(['M', 'A', '!']);
     });
 
+    it('badges a remote-only change as a down-arrow', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'gone.md', kind: 'remote-only' })];
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        expect(container.querySelector('.scv-badge')?.textContent).toBe('↓');
+    });
+
+    it('renders an inline Download button on a remote-only row when onDownload is wired', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'remote.md', kind: 'remote-only' })];
+        callbacks.onDownload = vi.fn();
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        const btn = container.querySelector('.scv-change-download') as HTMLButtonElement;
+        expect(btn).toBeTruthy();
+        btn.click();
+        expect(callbacks.onDownload).toHaveBeenCalledWith(items[0]);
+    });
+
+    it('does not render a Download button on a remote-modified row', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'both.md', kind: 'remote-modified' })];
+        callbacks.onDownload = vi.fn();
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        expect(container.querySelector('.scv-change-download')).toBeNull();
+    });
+
+    it('does not render an inline status subtitle (the kind label lives on the badge tooltip)', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' })];
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        expect(container.querySelector('.scv-change-subtitle')).toBeNull();
+    });
+
+    it('renders the diff stat as colored add/del spans from the getDiffStat callback', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' })];
+        callbacks.getDiffStat = () => ({ additions: 3, deletions: 1 });
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        expect(container.querySelector('.scv-diff-stat-add')?.textContent).toBe('+3');
+        expect(container.querySelector('.scv-diff-stat-del')?.textContent).toBe('-1');
+        expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+3 -1');
+    });
+
+    it('omits the diff stat span when no stat is cached', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' })];
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        expect(container.querySelector('.scv-diff-stat')).toBeNull();
+    });
+
     it('shows the previous path for a rename, keyed by the stable ChangeId', () => {
         const items = [
             item({ id: toChangeId('c-1'), path: 'new-name.md', previousPath: 'old-name.md', kind: 'moved' }),
@@ -67,6 +117,18 @@ describe('renderChangeTree', () => {
 
         const checkbox = container.querySelector('.scv-change-select') as HTMLInputElement;
         expect(checkbox.checked).toBe(true);
+    });
+
+    it('marks a ready-to-push row with the is-selected class', () => {
+        const items = [
+            item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only', isReadyToPush: true }),
+            item({ id: toChangeId('c-2'), path: 'b.md', kind: 'local-only', isReadyToPush: false }),
+        ];
+        renderChangeTree(container, items, new Set(), callbacks);
+
+        const rows = container.querySelectorAll('.scv-change-item');
+        expect(rows[0]?.classList.contains('is-selected')).toBe(true);
+        expect(rows[1]?.classList.contains('is-selected')).toBe(false);
     });
 
     it('calls onToggleSelect with the ChangeId when the checkbox changes', () => {

@@ -4,6 +4,7 @@ import { t } from '../../i18n';
 import type { SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import { SourceControlView, type SourceControlViewCallbacks } from './SourceControlView';
 import type { SourceControlWorkspaceInfo } from './SourceControlHeader';
+import { cheapLocalStat, computeDiffStat, type ChangeStat } from './ChangePresentation';
 
 // Reuses the legacy sync-status view's registered type string so an already
 // open/pinned leaf from before this cutover resolves into the new view
@@ -33,7 +34,15 @@ export class SourceControlItemView extends ItemView {
         super(leaf);
         const callbacks: SourceControlViewCallbacks = {
             onPush: (changeIds) => this.runAction(this.plugin.sourceControlActions.push(changeIds)),
+            onPull: (changeIds) => this.runAction(this.plugin.sourceControlActions.pull(changeIds)),
+            onDownload: (item) => this.runAction(this.plugin.sourceControlActions.pull([item.id])),
+            onRefresh: () => this.runRefresh(),
             loadDiffContent: (item: SourceControlItem) => this.plugin.sourceControlActions.loadDiffContent(item),
+            // Local-only stat is a cheap in-memory read (no provider call):
+            // additions = local line count, no deletions. Two-sided changes
+            // reuse the diff content already fetched for the diff pane and
+            // derive the stat from the LCS ops, so no extra round-trip.
+            loadDiffStat: (item: SourceControlItem) => this.loadDiffStat(item),
             // Desktop: the panel is a narrow sidebar, so the diff opens in a
             // full-width main-area tab instead of splitting that sidebar.
             // Mobile keeps its own in-panel detail view (SourceControlView).
@@ -43,7 +52,6 @@ export class SourceControlItemView extends ItemView {
         };
         this.view = new SourceControlView(
             this.plugin.sourceControlViewModel,
-            this.plugin.pushSelectionStore,
             callbacks,
             () => this.getWorkspaceInfo(),
         );
@@ -66,11 +74,30 @@ export class SourceControlItemView extends ItemView {
         if (url) window.open(url, '_blank');
     }
 
+    /**
+     * Resolves the +/- diff stat for a change row. `local-only` reads the
+     * already-in-memory local content from `sync.status` (no I/O, no provider
+     * call) and counts its lines. All other kinds reuse the diff content the
+     * diff pane would fetch and derive additions/deletions from the LCS ops.
+     */
+    private async loadDiffStat(item: SourceControlItem): Promise<ChangeStat | null> {
+        if (item.kind === 'local-only') {
+            const raw = this.plugin.sync.status.get(item.path)?.localContent;
+            // Binary files (ArrayBuffer) have no meaningful line count; skip them.
+            if (typeof raw !== 'string') return null;
+            return cheapLocalStat(raw);
+        }
+        const content = await this.plugin.sourceControlActions.loadDiffContent(item);
+        if (!content) return null;
+        return computeDiffStat(content.remote, content.local);
+    }
+
     private getWorkspaceInfo(): SourceControlWorkspaceInfo {
         const info = this.plugin.syncWorkspace.getInfo();
         const lastSyncTime = Object.values(this.plugin.settings.syncMetadata)
             .reduce((latest, metadata) => Math.max(latest, metadata.lastSyncedAt), 0);
-        return { ...info, lastSyncTime };
+        const lastCheckedAt = this.plugin.refreshState.getLastCheckedAt();
+        return { ...info, lastSyncTime, lastCheckedAt };
     }
 
     getViewType(): string { return SOURCE_CONTROL_VIEW_TYPE; }
@@ -108,5 +135,20 @@ export class SourceControlItemView extends ItemView {
     private runAction(action: Promise<void>): void {
         this.renderView();
         void action.finally(() => this.renderView());
+    }
+
+    /**
+     * Refresh reuses the same render-then-settle pattern as {@link runAction},
+     * but the ViewModel's refresh() sets its `RefreshState` to 'loading'
+     * synchronously (before the first `await`), so the immediate render shows
+     * "Refreshing…". The settle render projects 'idle' on success or
+     * 'failed' on rejection. The rejection is swallowed here so a failed
+     * refresh surfaces as the button's failed state rather than an unhandled
+     * rejection — the state was already recorded on the `RefreshState` holder.
+     */
+    private runRefresh(): void {
+        const refresh = this.plugin.sourceControlViewModel.refresh();
+        this.renderView();
+        void refresh.then(() => this.renderView(), () => this.renderView());
     }
 }

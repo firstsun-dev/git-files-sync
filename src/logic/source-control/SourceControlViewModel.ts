@@ -1,6 +1,8 @@
 import type { ChangeRepository } from './ChangeRepository';
 import { buildSummary, type SourceControlCounts } from './SourceControlSummary';
 import type { OperationState, OperationStatus } from './OperationState';
+import type { RefreshReason } from './RefreshReason';
+import type { RefreshState, RefreshStatus } from './RefreshState';
 import type { PushSelectionStore } from './PushSelectionStore';
 import { matchesFilter, type SourceControlFilter } from './SourceControlFilter';
 import type { ChangeId, SyncChange, SyncChangeKind } from './types';
@@ -19,6 +21,16 @@ export interface SourceControlItem {
 export interface SourceControlViewState {
     filter: SourceControlFilter;
     items: SourceControlItem[];
+    /**
+     * The actionable changes the user has currently selected for push, as
+     * full row items — the working sync queue. Empty when nothing is
+     * selected. Reuses the same `selected + non-synced` definition as
+     * `buildSummary.readyToPush` so the "SYNC QUEUE (N)" section and the Sync
+     * button count can't drift.
+     */
+    syncQueue: SourceControlItem[];
+    /** Current view-wide refresh status, surfaced so the header can render its states. */
+    refreshStatus: RefreshStatus;
     /** Single-source counts from {@link buildSummary} — the view never recomputes these. */
     counts: SourceControlCounts;
 }
@@ -37,22 +49,66 @@ export interface SourceControlViewState {
  * `showSynced` governs whether the synced bucket is surfaced: when false the
  * synced count is reported as `0` and the `synced` filter yields no items,
  * matching the "Show synced" toggle (default off).
+ *
+ * The one non-projection responsibility is {@link refresh}: it delegates to an
+ * injected refresh callback (wired to `SyncWorkspace.refresh()` in `main.ts`)
+ * and drives the injected {@link RefreshState} holder so the UI can surface
+ * loading/failed states. It holds no provider or refresh logic of its own,
+ * keeping the event-driven pipeline (`sync.status` → `ChangeRepository` →
+ * ViewModel → UI) intact — refresh never becomes a second population path.
  */
 export class SourceControlViewModel {
     constructor(
         private readonly changes: ChangeRepository,
-        private readonly selection: PushSelectionStore,
+        private readonly selectionStore: PushSelectionStore,
         private readonly operations: OperationState,
+        private readonly refreshSource: () => Promise<unknown>,
+        private readonly refreshState: RefreshState,
     ) {}
+
+    /**
+     * The push-selection store, exposed so the view can toggle/clear
+     * selection without holding its own reference and reaching past the
+     * ViewModel. The view never touches a `PushSelectionStore` directly — it
+     * goes through `viewModel.selection` (`includeForPush`/`excludeFromPush`/
+     * `selectMany`/`deselectMany`/`getSelectedChangeIds`).
+     */
+    get selection(): PushSelectionStore { return this.selectionStore; }
 
     getState(filter: SourceControlFilter = 'all', showSynced = false): SourceControlViewState {
         const all = this.changes.getAll();
-        const summary = buildSummary(all, this.selection, showSynced);
+        const summary = buildSummary(all, this.selectionStore, showSynced);
         const items = all
-            .filter(change => matchesFilter(change, filter, this.selection))
+            .filter(change => matchesFilter(change, filter, this.selectionStore))
             .filter(() => this.isRenderable(filter, showSynced))
             .map(change => this.toItem(change));
-        return { filter, items, counts: summary.counts };
+        const syncQueue = summary.readyToPush.map(change => this.toItem(change));
+        return { filter, items, syncQueue, refreshStatus: this.refreshState.get(), counts: summary.counts };
+    }
+
+    /**
+     * Triggers a view-wide refresh by delegating to the injected refresh
+     * source (the Sync Status service boundary) and tracking its lifecycle on
+     * the {@link RefreshState} holder so the header can render "Refreshing…"
+     * / a failed state. Refresh republishes `sync.status`, so the existing
+     * subscription repopulates `ChangeRepository` — this never becomes a
+     * second population path.
+     *
+     * The {@link RefreshReason} is recorded on the {@link RefreshState}
+     * holder purely for observability ("Last checked" + why); it does not
+     * change what the refresh does. Defaults to `'manual'` (the Refresh
+     * button); callers pass `'startup'`/`'local-change'`/`'sync-complete'` to
+     * surface a non-manual trigger.
+     */
+    async refresh(reason: RefreshReason = 'manual'): Promise<void> {
+        this.refreshState.start(reason);
+        try {
+            await this.refreshSource();
+            this.refreshState.succeed();
+        } catch (error) {
+            this.refreshState.fail();
+            throw error;
+        }
     }
 
     private isRenderable(filter: SourceControlFilter, showSynced: boolean): boolean {
@@ -68,7 +124,7 @@ export class SourceControlViewModel {
             path: change.path,
             previousPath: change.previousPath,
             kind: change.kind,
-            isReadyToPush: this.selection.isIncluded(change.id),
+            isReadyToPush: this.selectionStore.isIncluded(change.id),
             operationStatus: this.operations.get(change.id),
         };
     }

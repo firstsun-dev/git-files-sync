@@ -1,13 +1,16 @@
 import { debounce, Platform, setIcon, setTooltip } from 'obsidian';
-import { t, type TranslationKey } from '../../i18n';
-import type { PushSelectionStore } from '../../logic/source-control/PushSelectionStore';
+import { t } from '../../i18n';
 import type { SourceControlFilter } from '../../logic/source-control/SourceControlFilter';
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
+import type { ChangeStat } from './ChangePresentation';
+import { changeOperation } from './ChangePresentation';
 import { ICONS } from '../components/icons';
 import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
 import { renderDiffPanel } from '../components/DiffPanel';
-import { renderChangeTree, type ChangeTreeCallbacks } from './ChangeTree';
+import { renderChangeTree, renderChangeList, type ChangeTreeCallbacks } from './ChangeTree';
+import { renderChangeItem } from './ChangeItem';
+import { DiffStatProvider } from './DiffStatProvider';
 import { renderFilterMenu } from './FilterMenu';
 import { renderSourceControlHeader, type SourceControlWorkspaceInfo } from './SourceControlHeader';
 
@@ -19,6 +22,15 @@ export interface SourceControlDiffContent {
 export interface SourceControlViewCallbacks {
     /** Hands push intent off to whatever wires this view to the sync pipeline; never called by the UI directly against a Git provider. */
     onPush: (changeIds: ChangeId[]) => void | Promise<void>;
+    /**
+     * Hands pull intent off to the sync pipeline for the download side of the
+     * Sync Queue (remote-only / remote-modified rows). The Sync button routes
+     * each selected change to {@link onPush} (upload kinds) or this (download
+     * kinds); a row's inline Download button calls this with a single id.
+     */
+    onPull?: (changeIds: ChangeId[]) => void | Promise<void>;
+    /** Triggers a view-wide refresh; the host wires this to the ViewModel's refresh delegate. */
+    onRefresh: () => void;
     /** Notified when a change is selected for diff viewing, in addition to this view's own diff pane rendering. */
     onOpenDiff?: (item: SourceControlItem) => void | Promise<void>;
     /** Supplies diff content for the selected change; omit to leave the diff pane empty. */
@@ -33,20 +45,26 @@ export interface SourceControlViewCallbacks {
      * it opens the file on the remote (in the browser) instead.
      */
     onOpenRemoteFile?: (item: SourceControlItem) => void | Promise<void>;
+    /**
+     * Pulls a single remote-only change into the local vault — the inline
+     * Download button on a `remote-only` row. Wired to the same pull
+     * primitive as {@link onPull}; exposed separately so a one-off download
+     * doesn't need to go through the Sync Queue.
+     */
+    onDownload?: (item: SourceControlItem) => void | Promise<void>;
+    /**
+     * Supplies the +/- diff stat for a change row. For a `local-only` change
+     * this is expected to be a cheap in-memory read (no provider call); for
+     * others it may involve a remote fetch. The view caches results and
+     * clears the cache on refresh. Omit to leave rows without a stat.
+     */
+    loadDiffStat?: (item: SourceControlItem) => Promise<ChangeStat | null>;
 }
-
-/** Active-filter header title keys. Every filter renders one header + a flat tree (no section breakdown). */
-const FILTER_HEADER_KEYS: Record<SourceControlFilter, TranslationKey> = {
-    all:               'sourceControl.section.all',
-    changes:           'sourceControl.section.changes',
-    'ready-to-push':   'sourceControl.section.readyToPush',
-    'remote-changes':  'sourceControl.section.remoteChanges',
-    conflicts:         'sourceControl.section.conflicts',
-    synced:            'sourceControl.section.synced',
-};
 
 /** Tree shaping so the change tree stays a compact change view, not a full Explorer. */
 const TREE_OPTIONS = { collapseSingleChild: true };
+/** Mobile tree: collapse single-child folders and cap depth so the tree stays flat on a phone. */
+const MOBILE_TREE_OPTIONS = { collapseSingleChild: true, maxDepth: 2 };
 
 /**
  * Composes the Source Control UI (Header, Filter, change tree, Diff panel)
@@ -55,24 +73,42 @@ const TREE_OPTIONS = { collapseSingleChild: true };
  *
  * Pure presentation + wiring: push/diff intent is handed to injected
  * callbacks rather than acted on directly here, so this layer never reaches
- * past the ViewModel to `SyncManager`/a Git provider. Selection toggling is
- * the one exception — it goes straight to `PushSelectionStore` (Phase 1
- * state), since "ready to push" is just a set membership change, not a sync
- * action.
+ * past the ViewModel to `SyncManager`/a Git provider. Selection toggling goes
+ * through `viewModel.selection` (the `PushSelectionStore`, exposed by the
+ * ViewModel) so the view holds no selection reference of its own and the
+ * batch ops (`toggle`/`toggleMany`) live on the store, not inline here.
  *
  * Rendering semantics (status-grouping fix):
- * - Every filter — including "All" — renders a single flat tree. "All" no
- *   longer breaks the view into CHANGES / REMOTE CHANGES / SYNCED sections, so
- *   a change never appears twice and SYNCED never leaks into All.
- * - Synced is hidden by default (`showSynced = false`): the `synced` chip is
- *   absent and synced rows render nowhere. The "Show synced" toggle opts in.
+ * - Every filter chip renders a single flat tree (or list). "All" composes
+ *   the actionable set with the synced bucket (a view-layer composition; the
+ *   domain `all` filter still returns actionable rows only), so a change
+ *   never appears twice.
+ * - Synced is surfaced via its own "Synced" chip and included under "All"
+ *   (both opt-in); the default "Needs Sync" chip keeps a quiet workspace
+ *   quiet by showing actionable rows only.
+ * - The two regions carry distinct role labels instead of just stacking:
+ *   a "SYNC QUEUE" region (the working push batch, always a flat list)
+ *   above a "Repository Changes" region (the source to pick from, with a
+ *   Tree/List view toggle). Checking a repository row moves it up into the
+ *   queue and out of the repository view; unchecking it there moves it back
+ *   down — mirroring VS Code's Staged/Changes split so a change never
+ *   appears in both places at once.
  */
 export class SourceControlView {
+    /** Active chip, as (domain filter, showSynced). Defaults to "Needs Sync" — the actionable set — so a quiet workspace stays quiet. */
     private filter: SourceControlFilter = 'all';
     private showSynced = false;
     private searchQuery = '';
+    /** Repository Changes view: folder tree (default) or flat list. List view trades nesting for a path suffix per row. */
+    private viewMode: 'tree' | 'list' = 'tree';
     private readonly collapsedFolders = new Set<string>();
+    /** Collapsed section regions ("Sync Queue" / "Repository Changes"), persisted across rerenders like collapsed folders. */
+    private readonly collapsedSections = new Set<'checkedChanges' | 'changes'>();
+    /** Mobile-only: the Sync Queue starts collapsed (header bar only) so it doesn't push the repository tree off-screen; tapping the header expands it. */
+    private mobileQueueExpanded = false;
     private selectedChangeId: ChangeId | null = null;
+    /** Owns the +/- diff-stat cache + eager/lazy load + clear-on-refresh, isolating that data concern from rendering. */
+    private readonly diffStat: DiffStatProvider;
     /** Mobile detail view only: which layout the diff renders in, toggled explicitly rather than by container width, so only one ever takes up space. */
     private mobileDiffLayout: DiffLayout = 'unified';
     private container?: HTMLElement;
@@ -84,10 +120,11 @@ export class SourceControlView {
 
     constructor(
         private readonly viewModel: SourceControlViewModel,
-        private readonly selection: PushSelectionStore,
         private readonly callbacks: SourceControlViewCallbacks,
         private readonly getWorkspaceInfo: () => SourceControlWorkspaceInfo,
-    ) {}
+    ) {
+        this.diffStat = new DiffStatProvider(callbacks.loadDiffStat, () => this.rerender());
+    }
 
     render(container: HTMLElement): void {
         this.container = container;
@@ -108,7 +145,6 @@ export class SourceControlView {
     }
 
     getFilter(): SourceControlFilter { return this.filter; }
-    getShowSynced(): boolean { return this.showSynced; }
     getSelectedChangeId(): ChangeId | null { return this.selectedChangeId; }
 
     private rerender(): void {
@@ -116,50 +152,94 @@ export class SourceControlView {
     }
 
     private renderMain(container: HTMLElement): void {
+        const isMobile = Platform.isMobile;
+
+        // Counts for the filter menu always carry the synced count (the menu
+        // needs it for the All/Synced chips), so fetch them with showSynced
+        // regardless of the active chip. The active chip's own tree items use
+        // the per-chip getState call below.
+        const counts = this.viewModel.getState('all', true).counts;
         const state = this.viewModel.getState(this.filter, this.showSynced);
 
         renderSourceControlHeader(
             container,
-            { readyToPushCount: state.counts['ready-to-push'], workspaceInfo: this.getWorkspaceInfo() },
-            { onPush: () => { void this.callbacks.onPush(this.selection.getSelectedChangeIds()); } },
+            {
+                readyToPushCount: state.counts['ready-to-push'],
+                workspaceInfo: this.getWorkspaceInfo(),
+                refreshStatus: state.refreshStatus,
+            },
+            {
+                onPush: () => this.runSync(state.syncQueue),
+                onRefresh: () => {
+                    this.diffStat.clear();
+                    this.callbacks.onRefresh();
+                },
+            },
+            { isMobile, showPush: !isMobile },
         );
 
         this.renderSearchBox(container);
-
-        renderFilterMenu(
-            container,
-            this.filter,
-            state.counts,
-            this.showSynced,
-            {
-                onFilterChange: (filter) => { this.filter = filter; this.rerender(); },
-                onToggleShowSynced: (show) => {
-                    this.showSynced = show;
-                    // If the user hid synced while viewing it, fall back to All.
-                    if (!show && this.filter === 'synced') this.filter = 'all';
-                    this.rerender();
-                },
-            },
-        );
-
-        const query = this.searchQuery.trim().toLowerCase();
-        const items = query ? state.items.filter(item => item.path.toLowerCase().includes(query)) : state.items;
-
-        const body = container.createDiv({ cls: 'scv-body' });
-        this.renderActiveFilterHeader(body, state.filter, items.length);
-        if (items.length === 0) {
-            body.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
-            return;
-        }
 
         const treeCallbacks: ChangeTreeCallbacks = {
             onToggleFolder: (path) => this.toggleFolder(path),
             onToggleSelect: (id, selected) => this.toggleSelect(id, selected),
             onToggleFolderSelect: (ids, selected) => this.toggleFolderSelect(ids, selected),
             onOpenDiff: (item) => this.openDiff(item),
+            onDownload: (item) => this.download(item),
+            getDiffStat: (id) => this.diffStat.get(id),
         };
 
-        renderChangeTree(body, items, this.collapsedFolders, treeCallbacks, TREE_OPTIONS);
+        renderFilterMenu(
+            container,
+            { filter: this.filter, showSynced: this.showSynced },
+            counts,
+            { onFilterChange: (filter, showSynced) => { this.filter = filter; this.showSynced = showSynced; this.rerender(); } },
+            { isMobile },
+        );
+
+        const query = this.searchQuery.trim().toLowerCase();
+        // "All" chip composes the actionable set with the synced bucket — the
+        // domain `all` filter only returns actionable rows, so the synced rows
+        // are appended here in the view rather than via a domain change.
+        let items = state.items;
+        if (this.filter === 'all' && this.showSynced) {
+            items = items.concat(this.viewModel.getState('synced', true).items);
+        }
+        const filtered = query ? items.filter(item => item.path.toLowerCase().includes(query)) : items;
+        // Selected changes live in the "SYNC QUEUE" region above, so the
+        // repository view below only carries the remaining (unchecked) rows:
+        // a checked row disappears from here and reappears in the queue,
+        // mirroring VS Code's Staged/Changes split instead of duplicating it.
+        const unchecked = filtered.filter(item => !item.isReadyToPush);
+
+        // The scroll container: Sync Queue + Repository Changes header + tree
+        // all live here so the whole lower region scrolls as one. Pinned
+        // controls (header, search, filter) stay outside so they don't scroll
+        // away; a tall Sync Queue section therefore scrolls with the
+        // tree instead of blowing out the layout under
+        // `.scv-root { overflow: hidden }`.
+        const body = container.createDiv({ cls: 'scv-body' });
+        this.renderSelectedSection(body, state.syncQueue, treeCallbacks);
+        // The Changes region is its own flex/scroll area so a tall tree
+        // scrolls independently and never pushes the pinned Sync Queue
+        // region above it out of view.
+        const changesRegion = body.createDiv({ cls: 'scv-changes-region' });
+        this.renderRepositoryHeader(changesRegion, unchecked.length);
+        if (!this.collapsedSections.has('changes')) {
+            const treeWrap = changesRegion.createDiv({ cls: 'scv-changes-tree' });
+            if (unchecked.length === 0) {
+                treeWrap.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
+            } else if (this.viewMode === 'list') {
+                renderChangeList(treeWrap, unchecked, treeCallbacks);
+                this.diffStat.eagerLocal(unchecked);
+            } else {
+                renderChangeTree(treeWrap, unchecked, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
+                this.diffStat.eagerLocal(unchecked);
+            }
+        }
+        this.diffStat.eagerSelected(state.syncQueue);
+
+        if (isMobile) this.renderMobileSyncBar(container, state.counts['ready-to-push'], state.syncQueue);
     }
 
     /**
@@ -213,11 +293,151 @@ export class SourceControlView {
         if (cursor !== null) newInput.setSelectionRange(cursor, cursor);
     }
 
-    /** Renders the single active-filter header (e.g. "ALL (132)") above the flat tree. */
-    private renderActiveFilterHeader(container: HTMLElement, filter: SourceControlFilter, count: number): void {
-        const header = container.createDiv({ cls: 'scv-active-filter-header' });
-        header.createSpan({ cls: 'scv-active-filter-title', text: t(FILTER_HEADER_KEYS[filter]) });
-        header.createSpan({ cls: 'scv-active-filter-count', text: String(count) });
+    /**
+     * Renders the "Repository Changes (N)" header above the change tree/list.
+     * A single role label (not the active filter name — the filter chips above
+     * already carry that) makes the section's job — "navigate the source I can
+     * pick from" — distinct from the Sync Queue's "what I'm about to push".
+     * The whole header collapses/expands the region; the Tree/List view toggle
+     * on the right stops propagation so switching presentation doesn't also
+     * collapse the section.
+     */
+    private renderRepositoryHeader(container: HTMLElement, count: number): void {
+        const collapsed = this.collapsedSections.has('changes');
+        const header = container.createDiv({ cls: 'scv-repository-header scv-collapsible-header' });
+        header.setAttr('role', 'button');
+        header.setAttr('aria-expanded', String(!collapsed));
+        header.createSpan({ cls: 'scv-section-toggle', text: collapsed ? '▶' : '▼' });
+        header.createSpan({ cls: 'scv-repository-title', text: t('sourceControl.section.repositoryChanges') });
+        header.createSpan({ cls: 'scv-repository-count', text: String(count) });
+        header.addEventListener('click', () => this.toggleSection('changes'));
+        this.renderViewToggle(header);
+    }
+
+    /**
+     * Tree/List segmented toggle, scoped to the Repository Changes region only
+     * (the Sync Queue is always a flat list, so it gets no such toggle). The
+     * active mode is highlighted; clicks stop propagation so they don't also
+     * collapse the section via the title area.
+     */
+    private renderViewToggle(container: HTMLElement): void {
+        const toggle = container.createDiv({ cls: 'scv-view-toggle' });
+        toggle.setAttr('role', 'group');
+        toggle.setAttr('aria-label', t('sourceControl.view.toggleLabel'));
+        for (const mode of ['tree', 'list'] as const) {
+            const active = this.viewMode === mode;
+            const btn = toggle.createEl('button', { cls: `scv-view-toggle-btn${active ? ' is-active' : ''}` });
+            btn.setAttr('data-view', mode);
+            btn.setAttr('aria-pressed', String(active));
+            btn.setAttr('title', mode === 'tree' ? t('sourceControl.view.tree') : t('sourceControl.view.list'));
+            setIcon(btn.createSpan({ cls: 'scv-view-toggle-icon' }), mode === 'tree' ? ICONS.viewTree : ICONS.viewList);
+            btn.createSpan({ cls: 'scv-view-toggle-label', text: mode === 'tree' ? t('sourceControl.view.tree') : t('sourceControl.view.list') });
+            btn.addEventListener('click', (evt) => { evt.stopPropagation(); this.setViewMode(mode); });
+        }
+    }
+
+    private setViewMode(mode: 'tree' | 'list'): void {
+        if (this.viewMode === mode) return;
+        this.viewMode = mode;
+        this.rerender();
+    }
+
+    private toggleSection(key: 'checkedChanges' | 'changes'): void {
+        if (this.collapsedSections.has(key)) this.collapsedSections.delete(key);
+        else this.collapsedSections.add(key);
+        this.rerender();
+    }
+
+    /**
+     * Renders the "SYNC QUEUE" region — the working push batch, a flat list
+     * of the changes selected for sync. Each queued change is a normal change
+     * row (badge + name + diff-stat) with its selection checkbox checked:
+     * unchecking it here moves the row back down into the repository tree,
+     * and checking a repository row moves it up here, so the queue and the
+     * tree stay disjoint. The set comes straight from the ViewModel's
+     * single-source `syncQueue` projection (same definition as the Sync
+     * button count), so the section and the button can never drift.
+     *
+     * On mobile the queue starts collapsed to a header bar (the bottom sync
+     * bar still carries the count) so a tall queue doesn't push the
+     * repository tree off-screen; tapping the header expands it.
+     */
+    private renderSelectedSection(
+        container: HTMLElement,
+        syncQueue: readonly SourceControlItem[],
+        callbacks: ChangeTreeCallbacks,
+    ): void {
+        if (syncQueue.length === 0) return;
+        const isMobile = Platform.isMobile;
+        const collapsed = isMobile ? !this.mobileQueueExpanded : this.collapsedSections.has('checkedChanges');
+        const section = container.createDiv({ cls: 'scv-selected-section' });
+        const header = section.createDiv({ cls: 'scv-selected-section-header scv-collapsible-header' });
+        header.setAttr('role', 'button');
+        header.setAttr('aria-expanded', String(!collapsed));
+        header.createSpan({ cls: 'scv-section-toggle', text: collapsed ? '▶' : '▼' });
+        header.createSpan({ cls: 'scv-selected-section-title', text: t('sourceControl.section.selectedForSync') });
+
+        const clearBtn = header.createEl('button', {
+            cls: 'scv-selected-section-clear',
+            attr: { type: 'button' },
+        });
+        clearBtn.createSpan({ cls: 'scv-selected-section-clear-label', text: t('sourceControl.section.clearSelection') });
+        setTooltip(clearBtn, t('sourceControl.section.clearSelection.tooltip'));
+        clearBtn.addEventListener('click', (evt) => { evt.stopPropagation(); this.clearSelection(syncQueue); });
+        header.addEventListener('click', () => {
+            if (isMobile) { this.mobileQueueExpanded = !this.mobileQueueExpanded; this.rerender(); }
+            else this.toggleSection('checkedChanges');
+        });
+
+        if (collapsed) return;
+        section.createDiv({
+            cls: 'scv-selected-section-subtitle',
+            text: t('sourceControl.section.queueSubtitle', { count: syncQueue.length }),
+        });
+        const list = section.createDiv({ cls: 'scv-selected-section-list' });
+        // Group the queue by operation so a mixed batch reads as what the
+        // Sync button will actually do (Upload vs Download) rather than a
+        // flat list of ambiguous badges. Only surface the group labels when
+        // both operations are present — a single-operation queue stays flat
+        // (no label noise) and matches the pre-categorization layout.
+        const upload = syncQueue.filter(item => changeOperation(item.kind) === 'upload');
+        const download = syncQueue.filter(item => changeOperation(item.kind) === 'download');
+        const mixed = upload.length > 0 && download.length > 0;
+        if (mixed) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.upload') });
+        for (const item of upload) renderChangeItem(list, item, basename(item.path), callbacks);
+        if (mixed) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.download') });
+        for (const item of download) renderChangeItem(list, item, basename(item.path), callbacks);
+    }
+
+    /** Unselects every change currently in the Sync Queue in one shot. */
+    private clearSelection(items: readonly SourceControlItem[]): void {
+        this.viewModel.selection.deselectMany(items.map(item => item.id));
+        this.rerender();
+    }
+
+    /**
+     * Routes the Sync Queue to its operations: upload kinds (local-only /
+     * local-modified / moved / conflict) go to {@link onPush}, download kinds
+     * (remote-only / remote-modified) go to {@link onPull}. Splitting here —
+     * rather than pushing every selection — means a queued remote-only row
+     * is actually pulled into the vault instead of being a silent no-op, and
+     * the Sync button does the right thing per row without the user having to
+     * know which primitive each kind needs.
+     */
+    private runSync(queue: readonly SourceControlItem[]): void {
+        const upload: ChangeId[] = [];
+        const download: ChangeId[] = [];
+        for (const item of queue) {
+            if (changeOperation(item.kind) === 'download') download.push(item.id);
+            else upload.push(item.id);
+        }
+        if (upload.length > 0) void this.callbacks.onPush(upload);
+        if (download.length > 0 && this.callbacks.onPull) void this.callbacks.onPull(download);
+    }
+
+    /** Pulls a single remote-only change into the vault — the inline Download button. */
+    private download(item: SourceControlItem): void {
+        if (this.callbacks.onPull) void this.callbacks.onPull([item.id]);
     }
 
     private renderDetail(root: HTMLElement): void {
@@ -243,8 +463,8 @@ export class SourceControlView {
 
     private async loadAndRenderDiff(container: HTMLElement, changeId: ChangeId): Promise<void> {
         if (!this.callbacks.loadDiffContent) return;
-        const item = this.viewModel.getState('all', this.showSynced).items.find(i => i.id === changeId)
-            ?? this.viewModel.getState('synced', this.showSynced).items.find(i => i.id === changeId);
+        const item = this.viewModel.getState('all').items.find(i => i.id === changeId)
+            ?? this.viewModel.getState('synced', true).items.find(i => i.id === changeId);
         if (!item) return;
 
         const content = await this.callbacks.loadDiffContent(item);
@@ -260,16 +480,14 @@ export class SourceControlView {
     }
 
     private toggleSelect(id: ChangeId, selected: boolean): void {
-        if (selected) this.selection.includeForPush(id);
-        else this.selection.excludeFromPush(id);
+        if (selected) this.viewModel.selection.includeForPush(id);
+        else this.viewModel.selection.excludeFromPush(id);
         this.rerender();
     }
 
     private toggleFolderSelect(ids: readonly ChangeId[], selected: boolean): void {
-        for (const id of ids) {
-            if (selected) this.selection.includeForPush(id);
-            else this.selection.excludeFromPush(id);
-        }
+        if (selected) this.viewModel.selection.selectMany(ids);
+        else this.viewModel.selection.deselectMany(ids);
         this.rerender();
     }
 
@@ -288,6 +506,29 @@ export class SourceControlView {
 
         this.selectedChangeId = item.id;
         if (this.callbacks.onOpenDiff) void this.callbacks.onOpenDiff(item);
+        // Lazy-load the diff stat for two-sided changes (local-only is eager);
+        // re-render once it lands so the row shows its +/- without blocking.
+        void this.diffStat.lazyLoad(item);
         this.rerender();
     }
+
+    /**
+     * Mobile-only sticky bottom bar: a "N files selected" label plus a Sync
+     * button, shown only when at least one change is selected for push. The
+     * header's push button is hidden on mobile to save vertical space.
+     */
+    private renderMobileSyncBar(container: HTMLElement, readyCount: number, queue: readonly SourceControlItem[]): void {
+        if (readyCount === 0) return;
+        const bar = container.createDiv({ cls: 'scv-mobile-sync-bar' });
+        bar.createSpan({ cls: 'scv-mobile-sync-label', text: t('sourceControl.mobile.filesSelected', { count: readyCount }) });
+        const btn = bar.createEl('button', { cls: 'scv-mobile-sync-btn' });
+        btn.createSpan({ cls: 'scv-mobile-sync-btn-label', text: t('sourceControl.mobile.sync') });
+        btn.addEventListener('click', () => this.runSync(queue));
+    }
+}
+
+/** Last path segment of a change path, for the Selected section's flat row labels. */
+function basename(path: string): string {
+    const slash = path.lastIndexOf('/');
+    return slash === -1 ? path : path.slice(slash + 1);
 }

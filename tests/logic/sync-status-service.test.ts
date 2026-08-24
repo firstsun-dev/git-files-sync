@@ -8,6 +8,8 @@ describe('SyncStatusService', () => {
         ['a tracked rename', { movedFrom: 'old.md' }, 'moved'],
         ['a local-only file', { localExists: true, remoteExists: false }, 'unsynced'],
         ['a remote-only file', { localExists: false, remoteExists: true }, 'remote-only'],
+        ['a previously-tracked file removed locally', { localExists: false, remoteExists: true, wasTracked: true }, 'local-deleted'],
+        ['a never-tracked remote file with wasTracked false', { localExists: false, remoteExists: true, wasTracked: false }, 'remote-only'],
         ['matching local and remote content', { localExists: true, remoteExists: true, contentsEqual: true }, 'synced'],
         ['different local and remote content', { localExists: true, remoteExists: true, contentsEqual: false }, 'modified'],
     ])('classifies %s as %s', (_description, facts, expected) => {

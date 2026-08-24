@@ -6,6 +6,7 @@ const KIND_BY_STATUS: Record<SyncStatus, SyncChangeKind> = {
     modified: 'local-modified',
     unsynced: 'local-only',
     'remote-only': 'remote-only',
+    'local-deleted': 'local-deleted',
     moved: 'moved',
 };
 
@@ -31,6 +32,10 @@ const KIND_BY_STATUS: Record<SyncStatus, SyncChangeKind> = {
  *   had the same limitation. Widening this is out of scope for a UI/wiring
  *   cutover -- it would mean adding new sync classification behavior, not
  *   just rewiring existing behavior.
+ *
+ * `'local-deleted'` (a tracked file removed locally, remote still holds it)
+ * IS produced and maps to `'local-deleted'`, keeping a user deletion distinct
+ * from a never-tracked `'remote-only'` download candidate.
  *
  * `'checking'` rows (status still being resolved) are omitted rather than
  * mapped to a placeholder kind, so they don't flash into a section and back

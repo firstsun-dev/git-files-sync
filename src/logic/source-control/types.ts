@@ -24,6 +24,7 @@ export function toChangeId(id: string): ChangeId {
 export type SyncChangeKind =
     | 'local-only'
     | 'local-modified'
+    | 'local-deleted'
     | 'remote-only'
     | 'remote-modified'
     | 'moved'

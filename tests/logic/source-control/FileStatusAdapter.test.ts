@@ -10,6 +10,7 @@ describe('toSyncChanges', () => {
             { path: 'modified.md', status: 'modified' },
             { path: 'unsynced.md', status: 'unsynced' },
             { path: 'remote.md', status: 'remote-only' },
+            { path: 'gone.md', status: 'local-deleted' },
             { path: 'new.md', status: 'moved', movedFrom: 'old.md' },
         ];
 
@@ -18,6 +19,7 @@ describe('toSyncChanges', () => {
             { id: toChangeId('modified.md'), path: 'modified.md', previousPath: undefined, kind: 'local-modified' },
             { id: toChangeId('unsynced.md'), path: 'unsynced.md', previousPath: undefined, kind: 'local-only' },
             { id: toChangeId('remote.md'), path: 'remote.md', previousPath: undefined, kind: 'remote-only' },
+            { id: toChangeId('gone.md'), path: 'gone.md', previousPath: undefined, kind: 'local-deleted' },
             { id: toChangeId('new.md'), path: 'new.md', previousPath: 'old.md', kind: 'moved' },
         ]);
     });
