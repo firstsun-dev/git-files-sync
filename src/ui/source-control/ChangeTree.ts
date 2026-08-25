@@ -22,7 +22,7 @@ const builder = new ChangeTreeBuilder();
  * Renders `items` as a folder/file tree, reusing `ChangeTreeBuilder` (Phase 1)
  * for the grouping algorithm. `SourceControlItem` is a structural superset of
  * `SyncChange`, so the builder's output only carries `id`/`path`/`kind`; a
- * by-id lookup restores `isReadyToPush`/`operationStatus` at render time
+ * by-id lookup restores `isSelectedForSync`/`operationStatus` at render time
  * instead of duplicating the tree-building logic.
  *
  * `options` controls presentation-only tree shaping (single-child folder
@@ -93,7 +93,7 @@ function renderFolder(
     row.setAttr('aria-expanded', String(!collapsed));
 
     const fileIds = collectFileIds(folder);
-    const selectedCount = fileIds.filter(id => byId.get(id)?.isReadyToPush).length;
+    const selectedCount = fileIds.filter(id => byId.get(id)?.isSelectedForSync).length;
     const checkbox = row.createEl('input', { type: 'checkbox', cls: 'scv-tree-folder-select' });
     checkbox.setAttr('title', t('sourceControl.folder.selectAll'));
     checkbox.checked = fileIds.length > 0 && selectedCount === fileIds.length;

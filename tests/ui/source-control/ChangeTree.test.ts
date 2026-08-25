@@ -7,7 +7,7 @@ import { setupObsidianDOM, createContainer } from '../setup-dom';
 beforeAll(() => { setupObsidianDOM(); });
 
 function item(overrides: Partial<SourceControlItem> & Pick<SourceControlItem, 'id' | 'path' | 'kind'>): SourceControlItem {
-    return { isReadyToPush: false, operationStatus: 'idle', ...overrides };
+    return { isSelectedForSync: false, operationStatus: 'idle', ...overrides };
 }
 
 describe('renderChangeTree', () => {
@@ -111,8 +111,8 @@ describe('renderChangeTree', () => {
         expect(row.querySelector('.scv-change-name-text')?.textContent).toBe('new-name.md');
     });
 
-    it('reflects isReadyToPush on the selection checkbox', () => {
-        const items = [item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only', isReadyToPush: true })];
+    it('reflects isSelectedForSync on the selection checkbox', () => {
+        const items = [item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only', isSelectedForSync: true })];
         renderChangeTree(container, items, new Set(), callbacks);
 
         const checkbox = container.querySelector('.scv-change-select') as HTMLInputElement;
@@ -121,8 +121,8 @@ describe('renderChangeTree', () => {
 
     it('marks a ready-to-push row with the is-selected class', () => {
         const items = [
-            item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only', isReadyToPush: true }),
-            item({ id: toChangeId('c-2'), path: 'b.md', kind: 'local-only', isReadyToPush: false }),
+            item({ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only', isSelectedForSync: true }),
+            item({ id: toChangeId('c-2'), path: 'b.md', kind: 'local-only', isSelectedForSync: false }),
         ];
         renderChangeTree(container, items, new Set(), callbacks);
 
@@ -204,8 +204,8 @@ describe('renderChangeTree', () => {
 
         it('is indeterminate when only some files in the folder are ready to push', () => {
             const items = [
-                item({ id: toChangeId('c-1'), path: 'notes/daily.md', kind: 'local-modified', isReadyToPush: true }),
-                item({ id: toChangeId('c-2'), path: 'notes/idea.md', kind: 'local-only', isReadyToPush: false }),
+                item({ id: toChangeId('c-1'), path: 'notes/daily.md', kind: 'local-modified', isSelectedForSync: true }),
+                item({ id: toChangeId('c-2'), path: 'notes/idea.md', kind: 'local-only', isSelectedForSync: false }),
             ];
             renderChangeTree(container, items, new Set(), callbacks);
 
@@ -216,8 +216,8 @@ describe('renderChangeTree', () => {
 
         it('is checked when every file in the folder (including nested subfolders) is ready to push', () => {
             const items = [
-                item({ id: toChangeId('c-1'), path: 'notes/daily.md', kind: 'local-modified', isReadyToPush: true }),
-                item({ id: toChangeId('c-2'), path: 'notes/sub/idea.md', kind: 'local-only', isReadyToPush: true }),
+                item({ id: toChangeId('c-1'), path: 'notes/daily.md', kind: 'local-modified', isSelectedForSync: true }),
+                item({ id: toChangeId('c-2'), path: 'notes/sub/idea.md', kind: 'local-only', isSelectedForSync: true }),
             ];
             renderChangeTree(container, items, new Set(), callbacks);
 

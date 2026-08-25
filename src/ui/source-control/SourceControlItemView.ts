@@ -5,6 +5,8 @@ import type { SourceControlItem } from '../../logic/source-control/SourceControl
 import { SourceControlView, type SourceControlViewCallbacks } from './SourceControlView';
 import type { SourceControlWorkspaceInfo } from './SourceControlHeader';
 import { cheapLocalStat, computeDiffStat, type ChangeStat } from './ChangePresentation';
+import { SyncPlanModal } from '../SyncPlanModal';
+import type { SyncPlan } from '../../logic/sync/types';
 
 // Reuses the legacy sync-status view's registered type string so an already
 // open/pinned leaf from before this cutover resolves into the new view
@@ -36,6 +38,7 @@ export class SourceControlItemView extends ItemView {
             onPush: (changeIds) => this.runAction(this.plugin.sourceControlActions.push(changeIds)),
             onPull: (changeIds) => this.runAction(this.plugin.sourceControlActions.pull(changeIds)),
             onDownload: (item) => this.runAction(this.plugin.sourceControlActions.pull([item.id])),
+            onDeleteRemote: (items) => this.confirmAndDeleteRemote(items),
             onRefresh: () => this.runRefresh(),
             loadDiffContent: (item: SourceControlItem) => this.plugin.sourceControlActions.loadDiffContent(item),
             // Local-only stat is a cheap in-memory read (no provider call):
@@ -72,6 +75,36 @@ export class SourceControlItemView extends ItemView {
     private openRemoteFile(path: string): void {
         const url = this.plugin.syncWorkspace.getRemoteFileUrl(path);
         if (url) window.open(url, '_blank');
+    }
+
+    /**
+     * Shows the Terraform-style {@link SyncPlanModal} (direction `'delete'`)
+     * before actually deleting `items` from the remote — a `local-deleted`
+     * row's default Sync action, and destructive enough (unlike push/pull)
+     * to warrant an explicit confirm step rather than firing immediately.
+     * Cancelling resolves without calling `deleteRemote`, leaving the queue
+     * untouched.
+     */
+    private confirmAndDeleteRemote(items: SourceControlItem[]): Promise<void> {
+        if (items.length === 0) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+            const plan: SyncPlan = {
+                additions: [],
+                modifications: [],
+                deletions: items.map(item => ({ path: item.path, name: basename(item.path) })),
+                moves: [],
+            };
+            new SyncPlanModal(
+                this.app,
+                plan,
+                'delete',
+                () => {
+                    this.runAction(this.plugin.sourceControlActions.deleteRemote(items.map(item => item.id)));
+                    resolve();
+                },
+                () => resolve(),
+            ).open();
+        });
     }
 
     /**
@@ -151,4 +184,10 @@ export class SourceControlItemView extends ItemView {
         this.renderView();
         void refresh.then(() => this.renderView(), () => this.renderView());
     }
+}
+
+/** Last path segment of a change path, for the deletion-plan file list. */
+function basename(path: string): string {
+    const slash = path.lastIndexOf('/');
+    return slash === -1 ? path : path.slice(slash + 1);
 }

@@ -4,7 +4,7 @@ import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from '../../../src/ui
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { RefreshState } from '../../../src/logic/source-control/RefreshState';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId, type SyncChangeKind } from '../../../src/logic/source-control/types';
 import { SyncStatusService } from '../../../src/logic/sync-status-service';
@@ -16,7 +16,7 @@ beforeAll(() => { setupObsidianDOM(); });
 function buildPlugin(kind: SyncChangeKind = 'local-only') {
     const repository = new ChangeRepository();
     repository.replace([{ id: toChangeId('a.md'), path: 'a.md', kind }]);
-    const selection = new PushSelectionStore();
+    const selection = new SyncSelectionStore();
     const operations = new OperationState();
     const refreshState = new RefreshState();
     const viewModel = new SourceControlViewModel(repository, selection, operations, vi.fn().mockResolvedValue(undefined), refreshState);
@@ -72,7 +72,7 @@ describe('SourceControlItemView', () => {
 
     it('forwards push clicks to SourceControlActionService.push, never touching a Git provider directly', async () => {
         const { plugin, selection, push } = buildPlugin();
-        selection.includeForPush(toChangeId('a.md'));
+        selection.selectForSync(toChangeId('a.md'));
         const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
         await view.onOpen();
 

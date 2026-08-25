@@ -22,7 +22,7 @@ import { SyncManagerWorkspace, type SyncWorkspace } from './logic/sync/SyncWorks
 import { ChangeRepository } from './logic/source-control/ChangeRepository';
 import { OperationState } from './logic/source-control/OperationState';
 import { RefreshState } from './logic/source-control/RefreshState';
-import { PushSelectionStore } from './logic/source-control/PushSelectionStore';
+import { SyncSelectionStore } from './logic/source-control/SyncSelectionStore';
 import { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
 import { SourceControlActionService } from './logic/source-control/SourceControlActionService';
 import { toSyncChanges } from './logic/source-control/FileStatusAdapter';
@@ -42,7 +42,7 @@ export default class GitLabFilesPush extends Plugin {
 	syncStatusRefresh: SyncStatusRefreshService;
 	gitignoreManager: GitignoreManager;
 	changeRepository: ChangeRepository;
-	pushSelectionStore: PushSelectionStore;
+	syncSelectionStore: SyncSelectionStore;
 	operationState: OperationState;
 	refreshState: RefreshState;
 	sourceControlViewModel: SourceControlViewModel;
@@ -114,12 +114,12 @@ export default class GitLabFilesPush extends Plugin {
 		});
 
 		this.changeRepository = new ChangeRepository();
-		this.pushSelectionStore = new PushSelectionStore();
+		this.syncSelectionStore = new SyncSelectionStore();
 		this.operationState = new OperationState();
 		this.refreshState = new RefreshState();
 		this.sourceControlViewModel = new SourceControlViewModel(
 			this.changeRepository,
-			this.pushSelectionStore,
+			this.syncSelectionStore,
 			this.operationState,
 			() => this.syncWorkspace.refresh(),
 			this.refreshState,
@@ -135,7 +135,7 @@ export default class GitLabFilesPush extends Plugin {
 		this.unsubscribeChangeRepository = this.sync.status.subscribe((statuses) => {
 			const changes = toSyncChanges([...statuses.values()]);
 			this.changeRepository.replace(changes);
-			this.pushSelectionStore.refresh(changes.map(change => change.id));
+			this.syncSelectionStore.refresh(changes.map(change => change.id));
 		});
 
 		this.statusBarEl = this.addStatusBarItem();

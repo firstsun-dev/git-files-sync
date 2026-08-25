@@ -1,33 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { toChangeId } from '../../../src/logic/source-control/types';
 
-describe('PushSelectionStore', () => {
-    it('includes a change for push', () => {
-        const store = new PushSelectionStore();
+describe('SyncSelectionStore', () => {
+    it('selects a change for sync', () => {
+        const store = new SyncSelectionStore();
 
-        store.includeForPush(toChangeId('change-a'));
+        store.selectForSync(toChangeId('change-a'));
 
         expect(store.isIncluded(toChangeId('change-a'))).toBe(true);
         expect(store.getSelectedChangeIds()).toEqual([toChangeId('change-a')]);
     });
 
-    it('excludes a change from push', () => {
-        const store = new PushSelectionStore();
-        store.includeForPush(toChangeId('change-a'));
+    it('deselects a change from sync', () => {
+        const store = new SyncSelectionStore();
+        store.selectForSync(toChangeId('change-a'));
 
-        store.excludeFromPush(toChangeId('change-a'));
+        store.deselectFromSync(toChangeId('change-a'));
 
         expect(store.isIncluded(toChangeId('change-a'))).toBe(false);
         expect(store.getSelectedChangeIds()).toEqual([]);
     });
 
     it('tracks multiple changes independently', () => {
-        const store = new PushSelectionStore();
+        const store = new SyncSelectionStore();
 
-        store.includeForPush(toChangeId('change-a'));
-        store.includeForPush(toChangeId('change-b'));
-        store.excludeFromPush(toChangeId('change-a'));
+        store.selectForSync(toChangeId('change-a'));
+        store.selectForSync(toChangeId('change-b'));
+        store.deselectFromSync(toChangeId('change-a'));
 
         expect(store.isIncluded(toChangeId('change-a'))).toBe(false);
         expect(store.isIncluded(toChangeId('change-b'))).toBe(true);
@@ -35,8 +35,8 @@ describe('PushSelectionStore', () => {
     });
 
     it('keeps selection across a refresh when the change is still present', () => {
-        const store = new PushSelectionStore();
-        store.includeForPush(toChangeId('change-a'));
+        const store = new SyncSelectionStore();
+        store.selectForSync(toChangeId('change-a'));
 
         store.refresh([toChangeId('change-a'), toChangeId('change-b')]);
 
@@ -44,9 +44,9 @@ describe('PushSelectionStore', () => {
     });
 
     it('clears selection for a change removed by refresh', () => {
-        const store = new PushSelectionStore();
-        store.includeForPush(toChangeId('change-a'));
-        store.includeForPush(toChangeId('change-b'));
+        const store = new SyncSelectionStore();
+        store.selectForSync(toChangeId('change-a'));
+        store.selectForSync(toChangeId('change-b'));
 
         store.refresh([toChangeId('change-b')]);
 
@@ -56,8 +56,8 @@ describe('PushSelectionStore', () => {
     });
 
     it('keeps selection when path changes but change id stays', () => {
-        const store = new PushSelectionStore();
-        store.includeForPush(toChangeId('change-1'));
+        const store = new SyncSelectionStore();
+        store.selectForSync(toChangeId('change-1'));
 
         // old.md renamed to new.md, but the change id is stable
         store.refresh([toChangeId('change-1')]);
@@ -67,7 +67,7 @@ describe('PushSelectionStore', () => {
 
     describe('selectMany / deselectMany (batch ops)', () => {
         it('selectMany includes a batch of changes in one call', () => {
-            const store = new PushSelectionStore();
+            const store = new SyncSelectionStore();
 
             store.selectMany([toChangeId('change-a'), toChangeId('change-b'), toChangeId('change-c')]);
 
@@ -79,7 +79,7 @@ describe('PushSelectionStore', () => {
         });
 
         it('deselectMany removes only the given ids, leaving the rest selected', () => {
-            const store = new PushSelectionStore();
+            const store = new SyncSelectionStore();
             store.selectMany([toChangeId('change-a'), toChangeId('change-b'), toChangeId('change-c')]);
 
             store.deselectMany([toChangeId('change-a'), toChangeId('change-c')]);
@@ -88,8 +88,8 @@ describe('PushSelectionStore', () => {
         });
 
         it('selectMany with an empty list is a no-op', () => {
-            const store = new PushSelectionStore();
-            store.includeForPush(toChangeId('change-a'));
+            const store = new SyncSelectionStore();
+            store.selectForSync(toChangeId('change-a'));
 
             store.selectMany([]);
 

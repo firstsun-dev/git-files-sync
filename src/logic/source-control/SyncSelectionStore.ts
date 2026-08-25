@@ -1,30 +1,34 @@
 import type { ChangeId } from './types';
 
 /**
- * Tracks which pending sync changes are "Ready to Push" — independent of the
- * underlying change/plan model and of any UI. Deliberately avoids VCS
- * stage/unstage terminology since this isn't a staging area.
+ * Tracks which pending sync changes are selected for the Sync Queue —
+ * independent of the underlying change/plan model and of any UI. Named for
+ * "selected for sync" rather than "push" since the Sync Queue it backs holds
+ * push, pull, and delete-remote candidates alike (a queued `remote-only` row
+ * pulls, a queued `local-deleted` row deletes remotely by default). Also
+ * deliberately avoids VCS stage/unstage terminology since this isn't a
+ * staging area.
  *
  * Keyed by ChangeId rather than path so a rename/move doesn't drop the
  * selection.
  */
-export class PushSelectionStore {
+export class SyncSelectionStore {
     private readonly selected = new Set<ChangeId>();
 
-    includeForPush(changeId: ChangeId): void {
+    selectForSync(changeId: ChangeId): void {
         this.selected.add(changeId);
     }
 
-    excludeFromPush(changeId: ChangeId): void {
+    deselectFromSync(changeId: ChangeId): void {
         this.selected.delete(changeId);
     }
 
-    /** Includes a batch of changes for push in one call (folder "select all"). */
+    /** Selects a batch of changes for sync in one call (folder "select all"). */
     selectMany(changeIds: readonly ChangeId[]): void {
         for (const id of changeIds) this.selected.add(id);
     }
 
-    /** Excludes a batch of changes from push in one call ("clear queue" / folder deselect). */
+    /** Deselects a batch of changes from sync in one call ("clear queue" / folder deselect). */
     deselectMany(changeIds: readonly ChangeId[]): void {
         for (const id of changeIds) this.selected.delete(id);
     }

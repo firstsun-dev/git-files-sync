@@ -4,7 +4,7 @@ import { SourceControlView, type SourceControlViewCallbacks } from '../../../src
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { RefreshState } from '../../../src/logic/source-control/RefreshState';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import { setupObsidianDOM, createContainer } from '../setup-dom';
@@ -14,7 +14,7 @@ beforeAll(() => { setupObsidianDOM(); });
 function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCallbacks> = {}) {
     const repository = new ChangeRepository();
     repository.replace(changes);
-    const selection = new PushSelectionStore();
+    const selection = new SyncSelectionStore();
     const operations = new OperationState();
     const refreshState = new RefreshState();
     const refreshSource = vi.fn().mockResolvedValue(undefined);
@@ -181,9 +181,9 @@ describe('SourceControlView', () => {
             expect(rerenderedTree.scrollTop).toBe(120);
         });
 
-        it('deselecting removes the change from PushSelectionStore', () => {
+        it('deselecting removes the change from SyncSelectionStore', () => {
             const { view, selection } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
 
             const checkbox = container.querySelector('.scv-change-select') as HTMLInputElement;
@@ -202,7 +202,7 @@ describe('SourceControlView', () => {
             view.render(container);
             expect(container.querySelector('.scv-selected-section')).toBeNull();
 
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
             const section = container.querySelector('.scv-selected-section');
             expect(section).not.toBeNull();
@@ -215,7 +215,7 @@ describe('SourceControlView', () => {
                 { id: toChangeId('c-1'), path: 'notes/a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'notes/b.md', kind: 'local-only' },
             ]);
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
 
             // The checked row lives in the Checked Changes section...
@@ -239,7 +239,7 @@ describe('SourceControlView', () => {
             const { view, selection } = buildView([
                 { id: toChangeId('c-1'), path: 'notes/a.md', kind: 'local-only' },
             ]);
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
 
             const queueCheckbox = container.querySelector('.scv-selected-section .scv-change-select') as HTMLInputElement;
@@ -259,9 +259,9 @@ describe('SourceControlView', () => {
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
                 { id: toChangeId('c-3'), path: 'c.md', kind: 'remote-only' },
             ]);
-            selection.includeForPush(toChangeId('c-1'));
-            selection.includeForPush(toChangeId('c-2'));
-            selection.includeForPush(toChangeId('c-3'));
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
+            selection.selectForSync(toChangeId('c-3'));
             view.render(container);
 
             const clearBtn = container.querySelector('.scv-selected-section-clear') as HTMLButtonElement;
@@ -279,8 +279,8 @@ describe('SourceControlView', () => {
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'synced' },
             ]);
-            selection.includeForPush(toChangeId('c-1'));
-            selection.includeForPush(toChangeId('c-2'));
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
             view.render(container);
 
             // Only the actionable local-only change makes it into the queue;
@@ -295,7 +295,7 @@ describe('SourceControlView', () => {
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
             ]);
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
 
             const header = container.querySelector('.scv-selected-section-header') as HTMLElement;
@@ -407,8 +407,8 @@ describe('SourceControlView', () => {
                 ],
                 { onPush },
             );
-            selection.includeForPush(toChangeId('c-1'));
-            selection.includeForPush(toChangeId('c-2'));
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
             view.render(container);
 
             (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
@@ -424,8 +424,8 @@ describe('SourceControlView', () => {
         });
     });
 
-    describe('sync routing (upload vs download)', () => {
-        it('routes a mixed Sync Queue: upload kinds to onPush, download kinds to onPull', () => {
+    describe('sync routing (upload vs download vs delete-remote)', () => {
+        it('routes a mixed Sync Queue: upload kinds to onPush, download kinds to onPull', async () => {
             const onPush = vi.fn();
             const onPull = vi.fn();
             const { view, selection } = buildView(
@@ -435,11 +435,13 @@ describe('SourceControlView', () => {
                 ],
                 { onPush, onPull },
             );
-            selection.includeForPush(toChangeId('c-1'));
-            selection.includeForPush(toChangeId('c-2'));
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
             view.render(container);
 
             (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
+            await Promise.resolve();
+            await Promise.resolve();
 
             expect(onPush).toHaveBeenCalledWith([toChangeId('c-1')]);
             expect(onPull).toHaveBeenCalledWith([toChangeId('c-2')]);
@@ -452,13 +454,63 @@ describe('SourceControlView', () => {
                 [{ id: toChangeId('c-1'), path: 'remote.md', kind: 'remote-only' }],
                 { onPush, onPull },
             );
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
 
             (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
             expect(onPull).toHaveBeenCalledWith([toChangeId('c-1')]);
             expect(onPush).not.toHaveBeenCalled();
+        });
+
+        it('routes a local-deleted change in the Sync Queue to onDeleteRemote, not onPull', async () => {
+            const onPush = vi.fn();
+            const onPull = vi.fn();
+            const onDeleteRemote = vi.fn();
+            const { view, selection } = buildView(
+                [{ id: toChangeId('c-1'), path: 'gone.md', kind: 'local-deleted' }],
+                { onPush, onPull, onDeleteRemote },
+            );
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(onDeleteRemote).toHaveBeenCalledWith([
+                expect.objectContaining({ id: toChangeId('c-1'), path: 'gone.md' }),
+            ]);
+            expect(onPush).not.toHaveBeenCalled();
+            expect(onPull).not.toHaveBeenCalled();
+        });
+
+        it('runs push, pull, and delete-remote sequentially — pull waits for push to settle', async () => {
+            const order: string[] = [];
+            let resolvePush!: () => void;
+            const onPush = vi.fn(() => new Promise<void>(resolve => { resolvePush = resolve; }).then(() => { order.push('push'); }));
+            const onPull = vi.fn(() => { order.push('pull'); });
+            const { view, selection } = buildView(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
+                ],
+                { onPush, onPull },
+            );
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
+            view.render(container);
+
+            (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
+            await Promise.resolve();
+            expect(order).toEqual([]);
+
+            resolvePush();
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(order).toEqual(['push', 'pull']);
         });
 
         it('shows Upload / Download group labels in the Sync Queue when the queue is mixed', () => {
@@ -468,8 +520,8 @@ describe('SourceControlView', () => {
                     { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
                 ],
             );
-            selection.includeForPush(toChangeId('c-1'));
-            selection.includeForPush(toChangeId('c-2'));
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
             view.render(container);
 
             const labels = Array.from(container.querySelectorAll('.scv-queue-group-label')).map(el => el.textContent);
@@ -483,8 +535,8 @@ describe('SourceControlView', () => {
                     { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
                 ],
             );
-            selection.includeForPush(toChangeId('c-1'));
-            selection.includeForPush(toChangeId('c-2'));
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
             view.render(container);
 
             expect(container.querySelector('.scv-queue-group-label')).toBeNull();
@@ -798,7 +850,7 @@ describe('SourceControlView', () => {
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
                 { loadDiffStat },
             );
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
             await flush();
 
@@ -829,7 +881,7 @@ describe('SourceControlView', () => {
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'local-only' },
             ]);
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
 
             // Collapsed by default: header present, but no rows / subtitle.
@@ -851,7 +903,7 @@ describe('SourceControlView', () => {
             const { view, selection } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
             ]);
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
 
             expect(container.querySelector('.scv-push-btn')).toBeNull();
@@ -874,7 +926,7 @@ describe('SourceControlView', () => {
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
                 { onPush },
             );
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
 
             (container.querySelector('.scv-mobile-sync-btn') as HTMLButtonElement).click();
@@ -890,7 +942,7 @@ describe('SourceControlView', () => {
             const refreshState = new RefreshState();
             const viewModel = new SourceControlViewModel(
                 repository,
-                new PushSelectionStore(),
+                new SyncSelectionStore(),
                 new OperationState(),
                 vi.fn().mockResolvedValue(undefined),
                 refreshState,

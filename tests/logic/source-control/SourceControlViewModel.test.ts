@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { RefreshState } from '../../../src/logic/source-control/RefreshState';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 
 function buildViewModel(changes: SyncChange[]) {
     const repository = new ChangeRepository();
     repository.replace(changes);
-    const selection = new PushSelectionStore();
+    const selection = new SyncSelectionStore();
     const operations = new OperationState();
     const refreshState = new RefreshState();
     const refreshSource = vi.fn().mockResolvedValue(undefined);
@@ -43,17 +43,17 @@ describe('SourceControlViewModel', () => {
         expect(viewModel.getState('remote-changes').items).toEqual([]);
     });
 
-    it('maps a change to "ready-to-push" only once selected in PushSelectionStore', () => {
+    it('maps a change to "ready-to-push" only once selected in SyncSelectionStore', () => {
         const localOnly: SyncChange = { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' };
         const { viewModel, selection } = buildViewModel([localOnly]);
 
         expect(viewModel.getState('ready-to-push').items).toEqual([]);
 
-        selection.includeForPush(toChangeId('c-1'));
+        selection.selectForSync(toChangeId('c-1'));
 
         const state = viewModel.getState('ready-to-push');
         expect(state.items.map(i => i.id)).toEqual([toChangeId('c-1')]);
-        expect(state.items[0]?.isReadyToPush).toBe(true);
+        expect(state.items[0]?.isSelectedForSync).toBe(true);
     });
 
     it('reflects OperationState on the item', () => {
@@ -116,22 +116,22 @@ describe('SourceControlViewModel', () => {
         expect(item?.previousPath).toBe('old.md');
     });
 
-    it('projects syncQueue as the actionable changes currently in PushSelectionStore', () => {
+    it('projects syncQueue as the actionable changes currently in SyncSelectionStore', () => {
         const changes: SyncChange[] = [
             { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
             { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
             { id: toChangeId('c-3'), path: 'c.md', kind: 'synced' },
         ];
         const { viewModel, selection } = buildViewModel(changes);
-        selection.includeForPush(toChangeId('c-1'));
-        selection.includeForPush(toChangeId('c-2'));
-        selection.includeForPush(toChangeId('c-3'));
+        selection.selectForSync(toChangeId('c-1'));
+        selection.selectForSync(toChangeId('c-2'));
+        selection.selectForSync(toChangeId('c-3'));
 
         const state = viewModel.getState('all');
         expect(state.syncQueue.map(i => i.id)).toEqual([toChangeId('c-1'), toChangeId('c-2')]);
         // Synced is never actionable, so it's excluded even when selected.
         expect(state.syncQueue.every(i => i.kind !== 'synced')).toBe(true);
-        expect(state.syncQueue[0]?.isReadyToPush).toBe(true);
+        expect(state.syncQueue[0]?.isSelectedForSync).toBe(true);
     });
 
     it('reports an empty syncQueue projection when nothing is selected', () => {
@@ -189,7 +189,7 @@ describe('SourceControlViewModel', () => {
         const refreshState = new RefreshState();
         const viewModel = new SourceControlViewModel(
             repository,
-            new PushSelectionStore(),
+            new SyncSelectionStore(),
             new OperationState(),
             refreshSource,
             refreshState,

@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { cheapLocalStat, computeDiffStat, changeOperation, presentChange } from '../../../src/ui/source-control/ChangePresentation';
+import { cheapLocalStat, computeDiffStat, presentChange } from '../../../src/ui/source-control/ChangePresentation';
 import type { SourceControlItem } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId } from '../../../src/logic/source-control/types';
 import { setupObsidianDOM } from '../setup-dom';
@@ -7,7 +7,7 @@ import { setupObsidianDOM } from '../setup-dom';
 beforeAll(() => { setupObsidianDOM(); });
 
 function item(overrides: Partial<SourceControlItem> & Pick<SourceControlItem, 'id' | 'path' | 'kind'>): SourceControlItem {
-    return { isReadyToPush: false, operationStatus: 'idle', ...overrides };
+    return { isSelectedForSync: false, operationStatus: 'idle', ...overrides };
 }
 
 describe('presentChange', () => {
@@ -29,7 +29,7 @@ describe('presentChange', () => {
         expect(view.badge.letter).toBe('D');
         expect(view.badge.cls).toBe('local-deleted');
         expect(view.subtitle).toBe('Deleted locally');
-        expect(view.tooltip).toBe('Tracked file removed locally — push to delete on remote, or pull to restore');
+        expect(view.tooltip).toBe('Tracked file removed locally — Sync deletes it from the remote by default; use Download to restore it locally instead');
     });
 
     it('badges a remote-only change as a down-arrow with a download tooltip', () => {
@@ -75,25 +75,6 @@ describe('presentChange', () => {
             'y.md',
         );
         expect(view.renameFrom).toBe('old.md');
-    });
-});
-
-describe('changeOperation', () => {
-    it.each([
-        ['local-only', 'upload'],
-        ['local-modified', 'upload'],
-        ['moved', 'upload'],
-        ['conflict', 'upload'],
-    ] as const)('routes %s to upload', (kind, op) => {
-        expect(changeOperation(kind)).toBe(op);
-    });
-
-    it.each([
-        ['remote-only', 'download'],
-        ['remote-modified', 'download'],
-        ['local-deleted', 'download'],
-    ] as const)('routes %s to download', (kind, op) => {
-        expect(changeOperation(kind)).toBe(op);
     });
 });
 

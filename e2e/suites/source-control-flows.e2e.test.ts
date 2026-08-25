@@ -439,7 +439,7 @@ describe('Source Control Flows E2E', () => {
     // ------------------------------------------------------------------
     // Phase 6 — Source Control selection workflows
     //
-    // Drives the real SourceControlActionService + PushSelectionStore +
+    // Drives the real SourceControlActionService + SyncSelectionStore +
     // ChangeRepository on top of the real SyncManager (via the thin
     // BoundarySyncWorkspace), so the ChangeId -> path -> workspace.push
     // selection filter is the real production code, not a mock.
@@ -461,8 +461,8 @@ describe('Source Control Flows E2E', () => {
             const cb = change(b, 'local-modified');
             const cc = change(c, 'local-modified');
             const { selection, actionService, operations } = s.selectionStack([ca, cb, cc]);
-            selection.includeForPush(ca.id);
-            selection.includeForPush(cc.id);
+            selection.selectForSync(ca.id);
+            selection.selectForSync(cc.id);
 
             const headBefore = await s.head();
             await actionService.push([ca.id, cc.id]);
@@ -499,13 +499,13 @@ describe('Source Control Flows E2E', () => {
             const { selection, actionService, operations } = s.selectionStack([ca, cb, cc]);
 
             const head0 = await s.head();
-            selection.includeForPush(ca.id);
-            selection.includeForPush(cc.id);
+            selection.selectForSync(ca.id);
+            selection.selectForSync(cc.id);
             await actionService.push([ca.id, cc.id]);
             const head1 = await s.head();
             await s.expectSingleCommitSince(head0);
 
-            selection.includeForPush(cb.id);
+            selection.selectForSync(cb.id);
             await actionService.push([cb.id]);
             const head2 = await s.head();
             expect(head2, 'second push is a separate commit').not.toBe(head1);
@@ -536,7 +536,7 @@ describe('Source Control Flows E2E', () => {
             const moved = change(newP, 'moved', oldP);
             const { selection, actionService, operations } = s.selectionStack([moved]);
             selection.refresh([moved.id]);
-            selection.includeForPush(moved.id);
+            selection.selectForSync(moved.id);
 
             const headBefore = await s.head();
             await actionService.push([moved.id]);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { matchesFilter, type SourceControlFilter } from '../../../src/logic/source-control/SourceControlFilter';
 import { toChangeId, type SyncChange, type SyncChangeKind } from '../../../src/logic/source-control/types';
 
@@ -27,7 +27,7 @@ describe('SourceControlFilter', () => {
         ['conflict', ['all', 'conflicts']],
         ['synced', ['synced']],
     ] as const)('maps %s into the expected non-selection filters', (kind, expectedFilters) => {
-        const selection = new PushSelectionStore();
+        const selection = new SyncSelectionStore();
         const item = change(`change-${kind}`, kind);
 
         const matched = FILTERS.filter(filter => matchesFilter(item, filter, selection));
@@ -36,9 +36,9 @@ describe('SourceControlFilter', () => {
     });
 
     it('puts a selected actionable change into ready-to-push without changing its status bucket', () => {
-        const selection = new PushSelectionStore();
+        const selection = new SyncSelectionStore();
         const item = change('local', 'local-modified');
-        selection.includeForPush(item.id);
+        selection.selectForSync(item.id);
 
         expect(matchesFilter(item, 'ready-to-push', selection)).toBe(true);
         expect(matchesFilter(item, 'changes', selection)).toBe(true);
@@ -46,7 +46,7 @@ describe('SourceControlFilter', () => {
     });
 
     it('does not put an unselected actionable change into ready-to-push', () => {
-        const selection = new PushSelectionStore();
+        const selection = new SyncSelectionStore();
         const item = change('remote', 'remote-modified');
 
         expect(matchesFilter(item, 'ready-to-push', selection)).toBe(false);
@@ -54,9 +54,9 @@ describe('SourceControlFilter', () => {
     });
 
     it('never treats a selected synced change as ready-to-push or actionable', () => {
-        const selection = new PushSelectionStore();
+        const selection = new SyncSelectionStore();
         const item = change('synced', 'synced');
-        selection.includeForPush(item.id);
+        selection.selectForSync(item.id);
 
         expect(matchesFilter(item, 'ready-to-push', selection)).toBe(false);
         expect(matchesFilter(item, 'all', selection)).toBe(false);
@@ -64,7 +64,7 @@ describe('SourceControlFilter', () => {
     });
 
     it('keeps conflicts distinct from local and remote status filters', () => {
-        const selection = new PushSelectionStore();
+        const selection = new SyncSelectionStore();
         const item = change('conflict', 'conflict');
 
         expect(matchesFilter(item, 'conflicts', selection)).toBe(true);
@@ -73,9 +73,9 @@ describe('SourceControlFilter', () => {
     });
 
     it('preserves ready-to-push membership across a move because selection is keyed by ChangeId', () => {
-        const selection = new PushSelectionStore();
+        const selection = new SyncSelectionStore();
         const id = toChangeId('move-1');
-        selection.includeForPush(id);
+        selection.selectForSync(id);
 
         const moved: SyncChange = {
             id,

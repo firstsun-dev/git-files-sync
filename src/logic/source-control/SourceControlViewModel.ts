@@ -3,7 +3,7 @@ import { buildSummary, type SourceControlCounts } from './SourceControlSummary';
 import type { OperationState, OperationStatus } from './OperationState';
 import type { RefreshReason } from './RefreshReason';
 import type { RefreshState, RefreshStatus } from './RefreshState';
-import type { PushSelectionStore } from './PushSelectionStore';
+import type { SyncSelectionStore } from './SyncSelectionStore';
 import { matchesFilter, type SourceControlFilter } from './SourceControlFilter';
 import type { ChangeId, SyncChange, SyncChangeKind } from './types';
 
@@ -13,7 +13,7 @@ export interface SourceControlItem {
     path: string;
     previousPath?: string;
     kind: SyncChangeKind;
-    isReadyToPush: boolean;
+    isSelectedForSync: boolean;
     operationStatus: OperationStatus;
 }
 
@@ -36,7 +36,7 @@ export interface SourceControlViewState {
 }
 
 /**
- * Combines `SyncChange[]` (via `ChangeRepository`), `PushSelectionStore`, and
+ * Combines `SyncChange[]` (via `ChangeRepository`), `SyncSelectionStore`, and
  * `OperationState` into a single UI-ready snapshot. Holds no sync behavior of
  * its own — it's a pure projection, so `SyncManager`/`SyncPlanner`/`SyncExecutor`
  * stay untouched and the UI never needs to reach past this layer.
@@ -60,20 +60,20 @@ export interface SourceControlViewState {
 export class SourceControlViewModel {
     constructor(
         private readonly changes: ChangeRepository,
-        private readonly selectionStore: PushSelectionStore,
+        private readonly selectionStore: SyncSelectionStore,
         private readonly operations: OperationState,
         private readonly refreshSource: () => Promise<unknown>,
         private readonly refreshState: RefreshState,
     ) {}
 
     /**
-     * The push-selection store, exposed so the view can toggle/clear
+     * The sync-selection store, exposed so the view can toggle/clear
      * selection without holding its own reference and reaching past the
-     * ViewModel. The view never touches a `PushSelectionStore` directly — it
-     * goes through `viewModel.selection` (`includeForPush`/`excludeFromPush`/
-     * `selectMany`/`deselectMany`/`getSelectedChangeIds`).
+     * ViewModel. Reached via `viewModel.selection`
+     * (`selectForSync`/`deselectFromSync`/`selectMany`/`deselectMany`/
+     * `getSelectedChangeIds`).
      */
-    get selection(): PushSelectionStore { return this.selectionStore; }
+    get selection(): SyncSelectionStore { return this.selectionStore; }
 
     getState(filter: SourceControlFilter = 'all', showSynced = false): SourceControlViewState {
         const all = this.changes.getAll();
@@ -124,7 +124,7 @@ export class SourceControlViewModel {
             path: change.path,
             previousPath: change.previousPath,
             kind: change.kind,
-            isReadyToPush: this.selectionStore.isIncluded(change.id),
+            isSelectedForSync: this.selectionStore.isIncluded(change.id),
             operationStatus: this.operations.get(change.id),
         };
     }

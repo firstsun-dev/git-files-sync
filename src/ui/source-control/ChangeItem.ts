@@ -3,6 +3,7 @@ import { t } from '../../i18n';
 import { ICONS } from '../components/icons';
 import { renderOperationIndicator } from './OperationIndicator';
 import { presentChange, type ChangeStat } from './ChangePresentation';
+import { canDownload } from '../../logic/source-control/ChangeActionPolicy';
 import type { SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
 
@@ -10,9 +11,10 @@ export interface ChangeItemCallbacks {
     onToggleSelect: (id: ChangeId, selected: boolean) => void;
     onOpenDiff: (item: SourceControlItem) => void;
     /**
-     * Pulls a single remote-only change into the local vault. Only invoked
-     * for `remote-only` rows (the Download button renders only for that
-     * kind), so the callback never has to re-classify.
+     * Pulls a single change into the local vault. Invoked for rows where
+     * {@link canDownload} is true — `remote-only` (add it locally) and
+     * `local-deleted` (restore it locally) — the Download button renders
+     * only for those kinds, so the callback never has to re-classify.
      */
     onDownload?: (item: SourceControlItem) => void;
     /** Looks up a cached diff stat for a row, if one has been computed. */
@@ -58,13 +60,13 @@ export function renderChangeItem(
     const view = presentChange(item, displayName);
 
     const row = container.createDiv({
-        cls: `scv-change-item scv-kind-${item.kind}${item.isReadyToPush ? ' is-selected' : ''}${options.listMode ? ' scv-change-item-list' : ''}`,
+        cls: `scv-change-item scv-kind-${item.kind}${item.isSelectedForSync ? ' is-selected' : ''}${options.listMode ? ' scv-change-item-list' : ''}`,
     });
     row.setAttr('data-change-id', item.id);
     if (view.tooltip) row.setAttr('title', view.tooltip);
 
     const checkbox = row.createEl('input', { type: 'checkbox', cls: 'scv-change-select' });
-    checkbox.checked = item.isReadyToPush;
+    checkbox.checked = item.isSelectedForSync;
     checkbox.addEventListener('change', () => callbacks.onToggleSelect(item.id, checkbox.checked));
 
     const badgeEl = row.createSpan({ cls: `scv-badge scv-badge-${view.badge.cls}`, text: view.badge.letter });
@@ -85,11 +87,12 @@ export function renderChangeItem(
 
     renderDiffStat(row, callbacks.getDiffStat?.(item.id));
 
-    // A remote-only change (exists on remote, missing locally) carries a
-    // direct Download action so the user can pull it without first adding it
-    // to the Sync Queue. The button stops propagation so clicking it doesn't
-    // also trigger the row's open-diff/open-remote behavior.
-    if (item.kind === 'remote-only' && callbacks.onDownload) {
+    // A change with something to pull from remote (remote-only: add it
+    // locally; local-deleted: restore it locally) carries a direct Download
+    // action so the user can pull it without first adding it to the Sync
+    // Queue. The button stops propagation so clicking it doesn't also
+    // trigger the row's open-diff/open-remote behavior.
+    if (canDownload(item.kind) && callbacks.onDownload) {
         renderDownloadAction(row, item, callbacks.onDownload);
     }
 

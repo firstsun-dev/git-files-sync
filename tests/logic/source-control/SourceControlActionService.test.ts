@@ -274,7 +274,7 @@ describe('SourceControlActionService', () => {
                 id: toChangeId('c-1'),
                 path: 'a.md',
                 kind: 'local-modified',
-                isReadyToPush: false,
+                isSelectedForSync: false,
                 operationStatus: 'idle',
             });
 
@@ -298,7 +298,7 @@ describe('SourceControlActionService', () => {
                 id: toChangeId('c-1'),
                 path: 'a.png',
                 kind: 'local-modified',
-                isReadyToPush: false,
+                isSelectedForSync: false,
                 operationStatus: 'idle',
             });
 

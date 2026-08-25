@@ -1,9 +1,12 @@
 declare const changeIdBrand: unique symbol;
 
 /**
- * Stable identity for a pending sync change, independent of its current file
- * path. Using this instead of a path lets selection and operation state
- * survive rename/move without losing the user's intent.
+ * Identity for a pending sync change, used as the key for selection and
+ * operation state instead of a bare path string. Currently minted from the
+ * file path itself (see `FileStatusAdapter.toChangeId`), so it does NOT yet
+ * survive a rename/move — a renamed file gets a new id like any other path
+ * change. The type exists to give callers a single seam to make identity
+ * genuinely path-independent later without touching every call site.
  *
  * Branded (rather than a plain `string` alias) so callers can't pass a raw
  * file path where a ChangeId is expected.

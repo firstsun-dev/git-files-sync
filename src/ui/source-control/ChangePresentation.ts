@@ -59,40 +59,6 @@ const BADGE: Record<SyncChangeKind, { letter: string; cls: string }> = {
 };
 
 /**
- * Which sync operation a change kind maps to in the Sync Queue, so the queue
- * can be grouped (Upload / Download) and the Sync button can route each
- * selected change to the right primitive — push for one-sided local changes
- * and moves, pull for one-sided remote changes — instead of pushing every
- * selection and no-op'ing remote-only rows.
- *
- * `local-deleted` (a tracked file the user removed locally) routes to
- * `download` rather than `upload`: pushing a path whose local file no longer
- * exists has no content to send, so until a dedicated "delete remote" action
- * lands the available, non-destructive Sync action for it is pull-to-restore
- * (the tooltip offers both options). `conflict` routes to `upload` (push) as
- * the default; it surfaces a conflict either way and never silent overwrites.
- * `synced` never reaches the queue, so it's mapped to `upload` only to satisfy
- * the exhaustive record.
- */
-export type ChangeOperation = 'upload' | 'download';
-
-const OPERATION: Record<SyncChangeKind, ChangeOperation> = {
-    'local-only':       'upload',
-    'local-modified':   'upload',
-    'local-deleted':    'download',
-    'remote-only':      'download',
-    'remote-modified':  'download',
-    moved:              'upload',
-    conflict:           'upload',
-    synced:             'upload',
-};
-
-/** The sync operation a change kind belongs to (Upload vs Download) for queue grouping and Sync routing. */
-export function changeOperation(kind: SyncChangeKind): ChangeOperation {
-    return OPERATION[kind];
-}
-
-/**
  * Projects a {@link SourceControlItem} into a UI row view. `displayName` is
  * the tree node's file name (passed in from `ChangeTree`); the rename "from"
  * name is derived here from `item.previousPath` so the rename-arrow rendering

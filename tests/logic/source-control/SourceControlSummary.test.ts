@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildSummary } from '../../../src/logic/source-control/SourceControlSummary';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 
 function local(id: string, path = `${id}.md`): SyncChange {
@@ -27,7 +27,7 @@ function changes(nLocal: number, nRemote: number, nSynced: number): SyncChange[]
 describe('SourceControlSummary', () => {
     describe('Case 1: actionable All excludes synced', () => {
         it('reports all = local + remote (132) and synced = 36 for 115/17/36', () => {
-            const selection = new PushSelectionStore();
+            const selection = new SyncSelectionStore();
             const summary = buildSummary(changes(115, 17, 36), selection, true);
 
             expect(summary.counts.all).toBe(132);
@@ -38,7 +38,7 @@ describe('SourceControlSummary', () => {
         });
 
         it('keeps synced changes out of the actionable all bucket', () => {
-            const selection = new PushSelectionStore();
+            const selection = new SyncSelectionStore();
             const summary = buildSummary(changes(115, 17, 36), selection, true);
 
             expect(summary.all.every(change => change.kind !== 'synced')).toBe(true);
@@ -48,7 +48,7 @@ describe('SourceControlSummary', () => {
 
     describe('Case 2: synced hidden (showSynced = false)', () => {
         it('renders a synced count of 0 while the raw synced bucket still holds 36', () => {
-            const selection = new PushSelectionStore();
+            const selection = new SyncSelectionStore();
             const summary = buildSummary(changes(115, 17, 36), selection, false);
 
             expect(summary.counts.synced).toBe(0);
@@ -58,7 +58,7 @@ describe('SourceControlSummary', () => {
         });
 
         it('does not affect the actionable All count when synced is hidden', () => {
-            const selection = new PushSelectionStore();
+            const selection = new SyncSelectionStore();
             const hidden = buildSummary(changes(115, 17, 36), selection, false);
             const shown = buildSummary(changes(115, 17, 36), selection, true);
 
@@ -69,7 +69,7 @@ describe('SourceControlSummary', () => {
 
     describe('Case 3: All filter never surfaces a synced bucket', () => {
         it('contains no synced change in the actionable all bucket', () => {
-            const selection = new PushSelectionStore();
+            const selection = new SyncSelectionStore();
             const summary = buildSummary(changes(10, 5, 20), selection, false);
 
             expect(summary.all.filter(change => change.kind === 'synced')).toEqual([]);
@@ -84,7 +84,7 @@ describe('SourceControlSummary', () => {
                 { id: toChangeId('cf'), path: 'cf.md', kind: 'conflict' },
                 synced('s1'),
             ];
-            const summary = buildSummary(input, new PushSelectionStore(), true);
+            const summary = buildSummary(input, new SyncSelectionStore(), true);
 
             expect(summary.localChanges.map(c => c.id)).toEqual([toChangeId('l1'), toChangeId('l2'), toChangeId('l3'), toChangeId('l4')]);
             expect(summary.remoteChanges.map(c => c.id)).toEqual([toChangeId('r1'), toChangeId('r2')]);
@@ -99,9 +99,9 @@ describe('SourceControlSummary', () => {
 
     describe('ready-to-push selection', () => {
         it('counts only selected actionable changes, ignoring synced selections', () => {
-            const selection = new PushSelectionStore();
-            selection.includeForPush(toChangeId('local-0'));
-            selection.includeForPush(toChangeId('synced-0'));
+            const selection = new SyncSelectionStore();
+            selection.selectForSync(toChangeId('local-0'));
+            selection.selectForSync(toChangeId('synced-0'));
             const summary = buildSummary(changes(2, 1, 2), selection, true);
 
             // synced-0 was selected but is not actionable, so it is excluded.

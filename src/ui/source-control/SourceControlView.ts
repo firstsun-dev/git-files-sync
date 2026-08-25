@@ -4,7 +4,7 @@ import type { SourceControlFilter } from '../../logic/source-control/SourceContr
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
 import type { ChangeStat } from './ChangePresentation';
-import { changeOperation } from './ChangePresentation';
+import { defaultSyncAction } from '../../logic/source-control/ChangeActionPolicy';
 import { ICONS } from '../components/icons';
 import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
 import { renderDiffPanel } from '../components/DiffPanel';
@@ -46,12 +46,21 @@ export interface SourceControlViewCallbacks {
      */
     onOpenRemoteFile?: (item: SourceControlItem) => void | Promise<void>;
     /**
-     * Pulls a single remote-only change into the local vault — the inline
-     * Download button on a `remote-only` row. Wired to the same pull
-     * primitive as {@link onPull}; exposed separately so a one-off download
-     * doesn't need to go through the Sync Queue.
+     * Pulls a single change into the local vault — the inline Download
+     * button on a `remote-only` (add it locally) or `local-deleted` (restore
+     * it locally) row. Wired to the same pull primitive as {@link onPull};
+     * exposed separately so a one-off download doesn't need to go through
+     * the Sync Queue.
      */
     onDownload?: (item: SourceControlItem) => void | Promise<void>;
+    /**
+     * Deletes one or more changes from the remote only — the default Sync
+     * action for `local-deleted` rows (a tracked file removed locally, still
+     * present on remote). Receives full {@link SourceControlItem}s rather
+     * than bare ids because the confirmation step needs each item's `path`
+     * (and derived name) to show what's about to be deleted.
+     */
+    onDeleteRemote?: (items: SourceControlItem[]) => void | Promise<void>;
     /**
      * Supplies the +/- diff stat for a change row. For a `local-only` change
      * this is expected to be a cheap in-memory read (no provider call); for
@@ -74,7 +83,7 @@ const MOBILE_TREE_OPTIONS = { collapseSingleChild: true, maxDepth: 2 };
  * Pure presentation + wiring: push/diff intent is handed to injected
  * callbacks rather than acted on directly here, so this layer never reaches
  * past the ViewModel to `SyncManager`/a Git provider. Selection toggling goes
- * through `viewModel.selection` (the `PushSelectionStore`, exposed by the
+ * through `viewModel.selection` (the `SyncSelectionStore`, exposed by the
  * ViewModel) so the view holds no selection reference of its own and the
  * batch ops (`toggle`/`toggleMany`) live on the store, not inline here.
  *
@@ -195,7 +204,7 @@ export class SourceControlView {
                 refreshStatus: state.refreshStatus,
             },
             {
-                onPush: () => this.runSync(state.syncQueue),
+                onPush: () => void this.runSync(state.syncQueue),
                 onRefresh: () => {
                     this.diffStat.clear();
                     this.callbacks.onRefresh();
@@ -236,7 +245,7 @@ export class SourceControlView {
         // repository view below only carries the remaining (unchecked) rows:
         // a checked row disappears from here and reappears in the queue,
         // mirroring VS Code's Staged/Changes split instead of duplicating it.
-        const unchecked = filtered.filter(item => !item.isReadyToPush);
+        const unchecked = filtered.filter(item => !item.isSelectedForSync);
 
         // The scroll container: Sync Queue + Repository Changes header + tree
         // all live here so the whole lower region scrolls as one. Pinned
@@ -421,18 +430,23 @@ export class SourceControlView {
             text: t('sourceControl.section.queueSubtitle', { count: syncQueue.length }),
         });
         const list = section.createDiv({ cls: 'scv-selected-section-list' });
-        // Group the queue by operation so a mixed batch reads as what the
-        // Sync button will actually do (Upload vs Download) rather than a
-        // flat list of ambiguous badges. Only surface the group labels when
-        // both operations are present — a single-operation queue stays flat
-        // (no label noise) and matches the pre-categorization layout.
-        const upload = syncQueue.filter(item => changeOperation(item.kind) === 'upload');
-        const download = syncQueue.filter(item => changeOperation(item.kind) === 'download');
-        const mixed = upload.length > 0 && download.length > 0;
-        if (mixed) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.upload') });
+        // Group the queue by its default sync action so a mixed batch reads
+        // as what the Sync button will actually do (Upload / Download /
+        // Delete) rather than a flat list of ambiguous badges. Only surface
+        // group labels when more than one action is present in the batch —
+        // a single-action queue stays flat (no label noise) and matches the
+        // pre-categorization layout.
+        const upload = syncQueue.filter(item => defaultSyncAction(item.kind) === 'push');
+        const download = syncQueue.filter(item => defaultSyncAction(item.kind) === 'pull');
+        const deleteRemote = syncQueue.filter(item => defaultSyncAction(item.kind) === 'delete-remote');
+        const groupCount = [upload, download, deleteRemote].filter(group => group.length > 0).length;
+        const mixed = groupCount > 1;
+        if (mixed && upload.length > 0) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.upload') });
         for (const item of upload) renderChangeItem(list, item, basename(item.path), callbacks);
-        if (mixed) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.download') });
+        if (mixed && download.length > 0) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.download') });
         for (const item of download) renderChangeItem(list, item, basename(item.path), callbacks);
+        if (mixed && deleteRemote.length > 0) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.delete') });
+        for (const item of deleteRemote) renderChangeItem(list, item, basename(item.path), callbacks);
     }
 
     /** Unselects every change currently in the Sync Queue in one shot. */
@@ -442,23 +456,34 @@ export class SourceControlView {
     }
 
     /**
-     * Routes the Sync Queue to its operations: upload kinds (local-only /
-     * local-modified / moved / conflict) go to {@link onPush}, download kinds
-     * (remote-only / remote-modified) go to {@link onPull}. Splitting here —
-     * rather than pushing every selection — means a queued remote-only row
-     * is actually pulled into the vault instead of being a silent no-op, and
-     * the Sync button does the right thing per row without the user having to
-     * know which primitive each kind needs.
+     * Routes the Sync Queue to its operations by {@link defaultSyncAction}:
+     * `push` kinds (local-only / local-modified / moved / conflict) go to
+     * {@link onPush}, `pull` kinds (remote-only / remote-modified) go to
+     * {@link onPull}, and `delete-remote` kinds (local-deleted) go to
+     * {@link onDeleteRemote}. Splitting here — rather than pushing every
+     * selection — means a queued remote-only row is actually pulled into the
+     * vault and a queued local-deleted row is actually deleted on the remote,
+     * instead of either being a silent no-op.
+     *
+     * Runs push, then pull, then delete-remote sequentially (awaiting each
+     * before starting the next) rather than firing all three in parallel, so
+     * a mixed batch doesn't race the same underlying `SyncWorkspace`/Git
+     * provider calls and the Sync button's busy state reflects one operation
+     * finishing before the next begins.
      */
-    private runSync(queue: readonly SourceControlItem[]): void {
-        const upload: ChangeId[] = [];
-        const download: ChangeId[] = [];
+    private async runSync(queue: readonly SourceControlItem[]): Promise<void> {
+        const push: ChangeId[] = [];
+        const pull: ChangeId[] = [];
+        const deleteRemote: SourceControlItem[] = [];
         for (const item of queue) {
-            if (changeOperation(item.kind) === 'download') download.push(item.id);
-            else upload.push(item.id);
+            const action = defaultSyncAction(item.kind);
+            if (action === 'pull') pull.push(item.id);
+            else if (action === 'delete-remote') deleteRemote.push(item);
+            else push.push(item.id);
         }
-        if (upload.length > 0) void this.callbacks.onPush(upload);
-        if (download.length > 0 && this.callbacks.onPull) void this.callbacks.onPull(download);
+        if (push.length > 0) await this.callbacks.onPush(push);
+        if (pull.length > 0 && this.callbacks.onPull) await this.callbacks.onPull(pull);
+        if (deleteRemote.length > 0 && this.callbacks.onDeleteRemote) await this.callbacks.onDeleteRemote(deleteRemote);
     }
 
     /** Pulls a single remote-only change into the vault — the inline Download button. */
@@ -506,8 +531,8 @@ export class SourceControlView {
     }
 
     private toggleSelect(id: ChangeId, selected: boolean): void {
-        if (selected) this.viewModel.selection.includeForPush(id);
-        else this.viewModel.selection.excludeFromPush(id);
+        if (selected) this.viewModel.selection.selectForSync(id);
+        else this.viewModel.selection.deselectFromSync(id);
         this.rerender();
     }
 
@@ -549,7 +574,7 @@ export class SourceControlView {
         bar.createSpan({ cls: 'scv-mobile-sync-label', text: t('sourceControl.mobile.filesSelected', { count: readyCount }) });
         const btn = bar.createEl('button', { cls: 'scv-mobile-sync-btn' });
         btn.createSpan({ cls: 'scv-mobile-sync-btn-label', text: t('sourceControl.mobile.sync') });
-        btn.addEventListener('click', () => this.runSync(queue));
+        btn.addEventListener('click', () => void this.runSync(queue));
     }
 }
 

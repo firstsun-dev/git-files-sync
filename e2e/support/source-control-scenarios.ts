@@ -9,7 +9,7 @@ import type { SyncManagerFixture } from './sync-manager-fixture';
 import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
 import { ChangeRepository } from '../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../src/logic/source-control/OperationState';
-import { PushSelectionStore } from '../../src/logic/source-control/PushSelectionStore';
+import { SyncSelectionStore } from '../../src/logic/source-control/SyncSelectionStore';
 import { SourceControlActionService } from '../../src/logic/source-control/SourceControlActionService';
 import { BoundarySyncWorkspace } from '../../src/logic/sync/SyncWorkspace';
 import { toChangeId, type SyncChange } from '../../src/logic/source-control/types';
@@ -195,7 +195,7 @@ export class SourceControlScenario {
 
     /**
      * Wires the real Source Control selection layer (ChangeRepository +
-     * PushSelectionStore + OperationState + SourceControlActionService) on top
+     * SyncSelectionStore + OperationState + SourceControlActionService) on top
      * of this scenario's real SyncManager, via the thin BoundarySyncWorkspace.
      * `push`/`pull`/`deleteRemote` go through the real manager/provider; the
      * selection filter (ChangeId -> path -> workspace call) is the real
@@ -204,7 +204,7 @@ export class SourceControlScenario {
     selectionStack(changes: SyncChange[]): SelectionStack {
         const repository = new ChangeRepository();
         repository.replace(changes);
-        const selection = new PushSelectionStore();
+        const selection = new SyncSelectionStore();
         const operations = new OperationState();
         const workspace = new BoundarySyncWorkspace(
             () => this.manager,
@@ -223,7 +223,7 @@ export class SourceControlScenario {
 
 export interface SelectionStack {
     readonly repository: ChangeRepository;
-    readonly selection: PushSelectionStore;
+    readonly selection: SyncSelectionStore;
     readonly operations: OperationState;
     readonly actionService: SourceControlActionService;
     readonly workspace: BoundarySyncWorkspace;

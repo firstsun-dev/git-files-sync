@@ -1,4 +1,4 @@
-import type { PushSelectionStore } from './PushSelectionStore';
+import type { SyncSelectionStore } from './SyncSelectionStore';
 import type { SourceControlFilter } from './SourceControlFilter';
 import type { ChangeId, SyncChange, SyncChangeKind } from './types';
 
@@ -29,7 +29,7 @@ export type SourceControlCounts = Record<SourceControlFilter, number>;
  *   synced) — "All" means *actionable*, not "every row", so a synced file never
  *   appears under All.
  * - {@link readyToPush}: the subset of actionable changes the user has selected
- *   for push (membership in {@link PushSelectionStore}); it overlaps the other
+ *   for push (membership in {@link SyncSelectionStore}); it overlaps the other
  *   actionable buckets by design, since "ready to push" is a selection, not a
  *   change kind.
  */
@@ -64,7 +64,7 @@ function isActionable(change: SyncChange): boolean { return change.kind !== 'syn
  */
 export function buildSummary(
     changes: readonly SyncChange[],
-    selection: PushSelectionStore,
+    selection: SyncSelectionStore,
     showSynced: boolean,
 ): SourceControlSummary {
     const localChanges = changes.filter(isLocal);
