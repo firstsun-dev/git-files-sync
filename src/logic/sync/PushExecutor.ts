@@ -100,7 +100,7 @@ export class PushExecutor {
         for (const entry of entries) {
             try {
                 const sha = await this.push(entry, entry.content, entry.existingSha, entry.existingRevision, true);
-                this.recordSuccess(entry.path, sha, results);
+                this.recordSuccess(entry.path, sha, results, !!entry.existingSha);
             } catch (error) {
                 this.recordFailure(entry.path, error, results);
             }
@@ -120,7 +120,7 @@ export class PushExecutor {
                 );
                 await this.updateMetadata(entry.path, sha);
                 this.clearMovedSource(entry.oldPath);
-                this.recordSuccess(entry.path, sha, results);
+                this.recordSuccess(entry.path, sha, results, true);
             } catch (error) {
                 this.recordFailure(entry.path, error, results);
             }
@@ -143,7 +143,7 @@ export class PushExecutor {
             for (const entry of entries) {
                 const sha = shaByPath.get(entry.repoPath) ?? await gitBlobSha(entry.content);
                 await this.updateMetadata(entry.path, sha);
-                this.recordSuccess(entry.path, sha, results);
+                this.recordSuccess(entry.path, sha, results, !!entry.existingSha);
             }
         } catch (error) {
             for (const entry of entries) this.recordFailure(entry.path, error, results);
@@ -164,9 +164,9 @@ export class PushExecutor {
                 this.combinedCommitMessage(pushes.length, moves.length),
             );
             const shaByPath = new Map(batchResults.map(result => [result.path, result.sha]));
-            for (const entry of pushes) await this.recordCommittedEntry(entry, shaByPath, results);
+            for (const entry of pushes) await this.recordCommittedEntry(entry, shaByPath, results, !!entry.existingSha);
             for (const entry of moves) {
-                await this.recordCommittedEntry(entry, shaByPath, results);
+                await this.recordCommittedEntry(entry, shaByPath, results, true);
                 this.clearMovedSource(entry.oldPath);
             }
         } catch (error) {
@@ -178,10 +178,11 @@ export class PushExecutor {
         entry: PushQueueEntry | MoveQueueEntry,
         shaByPath: ReadonlyMap<string, string | undefined>,
         results: PushResults,
+        isUpdate: boolean,
     ): Promise<void> {
         const sha = shaByPath.get(entry.repoPath) ?? await gitBlobSha(entry.content);
         await this.updateMetadata(entry.path, sha);
-        this.recordSuccess(entry.path, sha, results);
+        this.recordSuccess(entry.path, sha, results, isUpdate);
     }
 
     private combinedCommitMessage(pushCount: number, moveCount: number): string {
@@ -190,8 +191,10 @@ export class PushExecutor {
         return `Push ${pushCount} file(s) and move ${moveCount} file(s) from Obsidian`;
     }
 
-    private recordSuccess(path: string, sha: string, results: PushResults): void {
+    private recordSuccess(path: string, sha: string, results: PushResults, isUpdate: boolean): void {
         results.success += 1;
+        if (isUpdate) results.updated += 1;
+        else results.added += 1;
         results.syncedPaths.push({ path, sha });
     }
 

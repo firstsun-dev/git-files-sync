@@ -85,6 +85,8 @@ export interface SyncFailure {
 
 export interface SyncResult {
     success: number;
+    added: number;
+    updated: number;
     failed: number;
     conflicts: number;
     errors: SyncFailure[];
@@ -111,6 +113,8 @@ export interface BatchPushConflict {
 
 export interface PushResults {
     success: number;
+    added: number;
+    updated: number;
     failed: number;
     conflicts: number;
     resolvedConflicts: number;

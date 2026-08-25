@@ -126,7 +126,15 @@ export class SourceControlView {
         this.diffStat = new DiffStatProvider(callbacks.loadDiffStat, () => this.rerender());
     }
 
+    /**
+     * Independently-scrolling regions whose position must survive a
+     * rerender (e.g. toggling a checkbox) instead of resetting to top, since
+     * `render()` tears down and rebuilds the whole DOM every time.
+     */
+    private static readonly SCROLL_REGIONS = ['scv-changes-tree', 'scv-selected-section-list'];
+
     render(container: HTMLElement): void {
+        const scrollState = this.captureScrollState(container);
         this.container = container;
         container.empty();
         container.addClass('scv-root');
@@ -137,11 +145,13 @@ export class SourceControlView {
 
         if (isMobile && this.selectedChangeId !== null) {
             this.renderDetail(container);
+            this.restoreScrollState(container, scrollState);
             return;
         }
 
         const main = container.createDiv({ cls: 'scv-main' });
         this.renderMain(main);
+        this.restoreScrollState(container, scrollState);
     }
 
     getFilter(): SourceControlFilter { return this.filter; }
@@ -149,6 +159,22 @@ export class SourceControlView {
 
     private rerender(): void {
         if (this.container) this.render(this.container);
+    }
+
+    private captureScrollState(container: HTMLElement): Map<string, number> {
+        const state = new Map<string, number>();
+        for (const cls of SourceControlView.SCROLL_REGIONS) {
+            const el = container.querySelector<HTMLElement>(`.${cls}`);
+            if (el) state.set(cls, el.scrollTop);
+        }
+        return state;
+    }
+
+    private restoreScrollState(container: HTMLElement, state: Map<string, number>): void {
+        for (const [cls, top] of state) {
+            const el = container.querySelector<HTMLElement>(`.${cls}`);
+            if (el) el.scrollTop = top;
+        }
     }
 
     private renderMain(container: HTMLElement): void {

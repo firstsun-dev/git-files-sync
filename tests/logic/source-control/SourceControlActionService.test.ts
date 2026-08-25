@@ -10,6 +10,8 @@ import type { RemoteDeleteResult } from '../../../src/logic/sync/RemoteDeleteExe
 function emptyPushResults(overrides: Partial<PushResults> = {}): PushResults {
     return {
         success: 0,
+        added: 0,
+        updated: 0,
         failed: 0,
         conflicts: 0,
         resolvedConflicts: 0,
@@ -21,7 +23,7 @@ function emptyPushResults(overrides: Partial<PushResults> = {}): PushResults {
 }
 
 function emptySyncResult(overrides: Partial<SyncResult> = {}): SyncResult {
-    return { success: 0, failed: 0, conflicts: 0, errors: [], ...overrides };
+    return { success: 0, added: 0, updated: 0, failed: 0, conflicts: 0, errors: [], ...overrides };
 }
 
 function fakeWorkspace(overrides: Partial<SyncWorkspace> = {}): SyncWorkspace {

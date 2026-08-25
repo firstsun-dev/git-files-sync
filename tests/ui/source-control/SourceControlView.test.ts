@@ -161,6 +161,26 @@ describe('SourceControlView', () => {
             expect(pushLabel).toContain('1');
         });
 
+        it('keeps the Changes tree scroll position after toggling a checkbox triggers a rerender', () => {
+            const changes: SyncChange[] = Array.from({ length: 30 }, (_, index) => ({
+                id: toChangeId(`c-${index}`),
+                path: `note-${index}.md`,
+                kind: 'local-only' as const,
+            }));
+            const { view } = buildView(changes);
+            view.render(container);
+
+            const tree = container.querySelector('.scv-changes-tree') as HTMLElement;
+            tree.scrollTop = 120;
+
+            const checkbox = container.querySelector('.scv-change-select') as HTMLInputElement;
+            checkbox.checked = true;
+            checkbox.dispatchEvent(new Event('change'));
+
+            const rerenderedTree = container.querySelector('.scv-changes-tree') as HTMLElement;
+            expect(rerenderedTree.scrollTop).toBe(120);
+        });
+
         it('deselecting removes the change from PushSelectionStore', () => {
             const { view, selection } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
             selection.includeForPush(toChangeId('c-1'));

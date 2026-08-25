@@ -304,6 +304,14 @@ const en = {
 	'sourceControl.view.toggleLabel': 'View',
 	'sourceControl.view.tree': 'Tree',
 	'sourceControl.view.list': 'List',
+
+	'sync.notice.pushSummary': 'Pushed to {service}: {added} added, {updated} updated{commitNote}.',
+	'sync.notice.pushAddedOnly': 'Pushed to {service}: {added} added{commitNote}.',
+	'sync.notice.pushUpdatedOnly': 'Pushed to {service}: {updated} updated{commitNote}.',
+	'sync.notice.pushCommitNote': ' in one commit',
+	'sync.notice.pullSummary': 'Pulled from {service}: {added} added, {updated} updated.',
+	'sync.notice.pullAddedOnly': 'Pulled from {service}: {added} added.',
+	'sync.notice.pullUpdatedOnly': 'Pulled from {service}: {updated} updated.',
 };
 
 export default en;

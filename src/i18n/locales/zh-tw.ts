@@ -306,6 +306,14 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.view.toggleLabel': '檢視',
 	'sourceControl.view.tree': '樹狀',
 	'sourceControl.view.list': '列表',
+
+	'sync.notice.pushSummary': '已推送至 {service}：新增 {added} 個、更新 {updated} 個{commitNote}。',
+	'sync.notice.pushAddedOnly': '已推送至 {service}：新增 {added} 個{commitNote}。',
+	'sync.notice.pushUpdatedOnly': '已推送至 {service}：更新 {updated} 個{commitNote}。',
+	'sync.notice.pushCommitNote': '（合併為一次提交）',
+	'sync.notice.pullSummary': '已從 {service} 拉取：新增 {added} 個、更新 {updated} 個。',
+	'sync.notice.pullAddedOnly': '已從 {service} 拉取：新增 {added} 個。',
+	'sync.notice.pullUpdatedOnly': '已從 {service} 拉取：更新 {updated} 個。',
 };
 
 export default zhTw;
