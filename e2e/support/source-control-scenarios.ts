@@ -40,13 +40,15 @@ export class SourceControlScenario {
     /**
      * Memoizes remote reads (each of which is a real `git fetch` round trip)
      * between remote mutations. Invalidated by `invalidatingProxy` below
-     * whenever `manager.pushFiles`/`pullFile` or `service.pushFile`/
-     * `deleteFile` is called on the wrapped instances this scenario hands
-     * out — including indirectly, e.g. via the selection stack's
-     * `actionService.push`, which calls `manager.pushFiles` through
-     * `BoundarySyncWorkspace` rather than through this class's own `push()`.
-     * Wrapping the instances themselves (instead of only this class's
-     * wrapper methods) is what makes that indirect path safe to cache too.
+     * whenever `manager.pushFiles`/`pullFile`/`commitResolvedBatch` or
+     * `service.pushFile`/`deleteFile` is called on the wrapped instances this
+     * scenario hands out — including indirectly, e.g. via the selection
+     * stack's `actionService.push`, which calls `manager.pushFiles` through
+     * `BoundarySyncWorkspace` rather than through this class's own `push()`,
+     * and `actionService.sync`, which commits pushes/moves/deletions through
+     * `manager.commitResolvedBatch` instead of `pushFiles`. Wrapping the
+     * instances themselves (instead of only this class's wrapper methods) is
+     * what makes those indirect paths safe to cache too.
      */
     private readonly remoteCache = new Map<string, unknown>();
 
@@ -54,7 +56,7 @@ export class SourceControlScenario {
         this.vault = fixture.createVault();
         this.settings = fixture.makeSettings();
         const invalidate = (): void => this.remoteCache.clear();
-        this.manager = invalidatingProxy(fixture.newManager(this.vault, this.settings), ['pushFiles', 'pullFile'], invalidate);
+        this.manager = invalidatingProxy(fixture.newManager(this.vault, this.settings), ['pushFiles', 'pullFile', 'commitResolvedBatch'], invalidate);
         this.service = invalidatingProxy(fixture.service, ['pushFile', 'deleteFile'], invalidate);
         this.verifier = fixture.verifier;
         this.branch = fixture.branch;
