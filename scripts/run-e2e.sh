@@ -40,10 +40,22 @@ fi
 
 export E2E_PROVIDER="$provider"
 export E2E_TIER="$tier"
-export E2E_WORKDIR="${E2E_WORKDIR:-${TMPDIR:-/tmp}/gfs-e2e-${provider}}"
+created_workdir=0
+if [ -z "${E2E_WORKDIR:-}" ]; then
+    E2E_WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/gfs-e2e-${provider}.XXXXXX")
+    created_workdir=1
+fi
+export E2E_WORKDIR
 
 cleanup() {
     scripts/e2e-harness.sh cleanup || true
+    if [ "$created_workdir" -eq 1 ] \
+        && [[ ! "${E2E_KEEP_BRANCH:-}" =~ ^(1|true)$ ]]; then
+        # Only remove the exact mktemp directory this invocation created.
+        case "$E2E_WORKDIR" in
+            "${TMPDIR:-/tmp}/gfs-e2e-${provider}."*) rm -rf -- "$E2E_WORKDIR" ;;
+        esac
+    fi
 }
 trap cleanup EXIT
 

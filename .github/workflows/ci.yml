@@ -28,14 +28,14 @@ on:
 # ─────────────────────────────────────────────────────────────────────────────
 # CI DAG overview
 #
-#   changes ──► provider-e2e ──┐
-#                              │
-#   lint ──────────────────────┤
-#   unit-test ─────────────────┤──► required-checks ──► package
-#   build ─────────────────────┤                  └────► publish (main only)
+#   changes ──► gitea-e2e ─────┐
+#           └─► provider-e2e ───┤
+#   lint ───────────────────────┤
+#   unit-test ──────────────────┤──► required-checks ──► package
+#   build ──────────────────────┤                  └────► publish (main only)
 #
-# All four validation jobs (lint, unit-test, build, provider-e2e) start in
-# parallel right after the push; only `provider-e2e` waits on `changes` for its
+# All five validation jobs start in parallel right after the push; only the E2E
+# jobs wait on `changes` for their
 # path gate. No validation waits on E2E any more -- a lint/unit/build error now
 # surfaces in <1-2 min instead of after the real-provider matrix. The single
 # `required-checks` job is the only status branch protection needs to watch.
@@ -77,6 +77,43 @@ jobs:
               - '.github/workflows/ci.yml'
 
   # ── Fast checks (parallel, no E2E dependency) ──────────────────────────────
+
+  # Gitea is secretless and disposable, so it runs on a fresh GitHub-hosted
+  # VM. This is the only E2E job allowed to execute fork PR code; untrusted
+  # code must never reach the privileged self-hosted fleet below.
+  gitea-e2e:
+    name: CI / Provider E2E / gitea
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    if: >-
+      (needs.changes.outputs.e2e-relevant == 'true' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      github.ref == 'refs/heads/main') &&
+      (github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.provider == 'all' ||
+      github.event.inputs.provider == 'gitea')
+    concurrency:
+      group: e2e-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && (github.head_ref || github.ref_name) || format('{0}-{1}', github.event_name, github.run_id) }}-gitea
+      cancel-in-progress: true
+    env:
+      E2E_KEEP_BRANCH: ${{ github.event.inputs.keep_branch }}
+      E2E_PR_NUMBER: ${{ github.event.pull_request.number }}
+      E2E_SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
+    steps:
+      - name: Compute run-scoped workdir
+        run: echo "E2E_WORKDIR=$RUNNER_TEMP/git-files-sync-e2e/${{ github.run_id }}/${{ github.run_attempt }}/gitea" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Run disposable Gitea E2E
+        run: scripts/run-e2e.sh --provider gitea
 
   lint:
     name: CI / Lint
@@ -151,7 +188,8 @@ jobs:
 
   # ── Integration check: real-provider E2E ────────────────────────────────────
 
-  # Real-provider E2E: one matrix job covering GitHub, GitLab, and Gitea (see
+  # Credentialed provider E2E: GitHub and GitLab remain on the self-hosted
+  # fleet. Fork PRs are rejected at job level before one can claim a runner.
   # docs/testing/real-provider-e2e.md). It starts as soon as `changes` resolves
   # (no preflight/E2E-gate dependency any more), then provider legs run in
   # parallel. `fail-fast: false` so one provider failure doesn't cancel the
@@ -170,15 +208,21 @@ jobs:
     # `if:` can see it. That part is done by the "Determine whether this
     # provider leg should run" step below instead, gating every later step.
     if: >-
-      needs.changes.outputs.e2e-relevant == 'true' ||
+      (needs.changes.outputs.e2e-relevant == 'true' ||
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'schedule' ||
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main') &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.provider == 'all' ||
+      github.event.inputs.provider == 'github' ||
+      github.event.inputs.provider == 'gitlab')
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 2
       matrix:
-        provider: [github, gitlab, gitea]
+        provider: [github, gitlab]
     # One group per source branch/provider -- keyed by branch name alone
     # (github.head_ref || github.ref_name, same expression E2E_SOURCE_BRANCH
     # below uses), deliberately NOT split by event type. A `push` to a branch
@@ -197,7 +241,7 @@ jobs:
     # support the `matrix` context (unlike job-level `if:`, see the comment
     # below), so each matrix leg still gets its own group.
     concurrency:
-      group: e2e-${{ github.head_ref || github.ref_name }}-${{ matrix.provider }}
+      group: e2e-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && (github.head_ref || github.ref_name) || format('{0}-{1}', github.event_name, github.run_id) }}-${{ matrix.provider }}
       cancel-in-progress: true
     env:
       E2E_GITHUB_OWNER: ${{ vars.E2E_GITHUB_OWNER }}
@@ -242,33 +286,6 @@ jobs:
         id: gate
         run: |
           run=true
-          # TODO(e2e): gitea temporarily disabled in CI -- container
-          # provisioning against this runner fleet's Docker topology needs
-          # more investigation (bridge-IP reachability, health-check timing)
-          # than is safe to iterate on inside the shared matrix. Suite/harness
-          # code is untouched and passes locally (`npm run test:e2e --
-          # --provider gitea`); re-enable by deleting this block once the CI
-          # runner behavior is confirmed. NOTE: gitea is also what normally
-          # covers fork PRs (no secrets needed) -- while this is disabled,
-          # fork PRs get no E2E coverage at all.
-          if [ "${{ matrix.provider }}" = "gitea" ]; then
-            run=false
-            # Make the disabled state explicit in the run log + summary so a
-            # green "CI / Provider E2E / gitea" job is never mistaken for
-            # "Gitea E2E passed".
-            echo "::notice::Gitea E2E is disabled in CI (runner Docker networking — see TODO below). Suite/harness code passes locally; re-enable by removing this block."
-            {
-              echo "### Gitea E2E: disabled"
-              echo "Reason: runner Docker networking — container provisioning against this runner fleet needs investigation (bridge-IP reachability, health-check timing)."
-              echo "Suite/harness code is untouched and passes locally (\`npm run test:e2e -- --provider gitea\`). The Gitea infrastructure fix is tracked separately; do not infer three-provider coverage from a green gitea leg."
-              echo "Re-enable by removing the gitea block in the \"Determine whether this provider leg should run\" step."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [ "${{ github.event_name }}" = "pull_request" ] \
-            && [ "${{ matrix.provider }}" != "gitea" ] \
-            && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
-            run=false
-          fi
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
             && [ "${{ github.event.inputs.provider }}" != "all" ] \
             && [ "${{ github.event.inputs.provider }}" != "${{ matrix.provider }}" ]; then
@@ -346,14 +363,14 @@ jobs:
   # cancelled duplicate's gate is correct, not a wedged red.
   required-checks:
     name: CI / Required Checks
-    needs: [lint, unit-test, build, provider-e2e]
+    needs: [lint, unit-test, build, gitea-e2e, provider-e2e]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate validation results
         run: |
           fail=0
-          for r in "${{ needs.lint.result }}" "${{ needs.unit-test.result }}" "${{ needs.build.result }}" "${{ needs.provider-e2e.result }}"; do
+          for r in "${{ needs.lint.result }}" "${{ needs.unit-test.result }}" "${{ needs.build.result }}" "${{ needs.gitea-e2e.result }}" "${{ needs.provider-e2e.result }}"; do
             echo "result: $r"
             case "$r" in
               success|skipped) ;;
