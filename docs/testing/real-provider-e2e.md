@@ -274,7 +274,9 @@ changes -> provider-e2e [github | gitlab] -----/
 
 `e2e-gate` runs with `if: always()` and evaluates both dependencies. `success` and `skipped` pass;
 `cancelled` means a newer run replaced this one and suppresses duplicate downstream CI; any other
-result blocks CI/release.
+result blocks CI/release. The downstream reusable `CI` job also uses `always()` plus explicit gate
+result/output checks; without it, GitHub propagates a deliberately skipped provider job through the
+successful gate and silently skips CI on Gitea-only dispatches and fork PRs.
 
 **Branch protection** (not something this repo checkout can change — a GitHub repo-settings
 change, left for whoever has admin access): add `E2E / gitea` as a required status check.

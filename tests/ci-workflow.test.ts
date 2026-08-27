@@ -34,7 +34,9 @@ describe('CI workflow contracts', () => {
     it('does not fail or continue downstream CI when a provider run is replaced', () => {
         expect(workflow).toContain('if [ "$result" = "cancelled" ]; then');
         expect(workflow).toContain('echo "run-ci=false" >> "$GITHUB_OUTPUT"');
-        expect(workflow).toContain("if: needs.e2e-gate.outputs.run-ci == 'true'");
+        expect(workflow).toContain(
+            "if: always() && needs.e2e-gate.result == 'success' && needs.e2e-gate.outputs.run-ci == 'true'",
+        );
     });
 });
 

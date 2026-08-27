@@ -282,7 +282,10 @@ jobs:
 
   CI:
     needs: e2e-gate
-    if: needs.e2e-gate.outputs.run-ci == 'true'
+    # `always()` prevents a skipped provider matrix (for example a targeted
+    # Gitea-only dispatch or fork PR) from propagating past the successful
+    # aggregate gate and silently skipping downstream CI.
+    if: always() && needs.e2e-gate.result == 'success' && needs.e2e-gate.outputs.run-ci == 'true'
     uses: firstsun-dev/.github/.github/workflows/obsidian-plugin-ci.yml@v1
     with:
       plugin-id: "git-file-sync"
