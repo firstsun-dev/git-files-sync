@@ -21,6 +21,8 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
     const refreshState = new RefreshState();
     const viewModel = new SourceControlViewModel(repository, selection, operations, vi.fn().mockResolvedValue(undefined), refreshState);
     const push = vi.fn().mockResolvedValue(undefined);
+    const pull = vi.fn().mockResolvedValue(undefined);
+    const deleteRemote = vi.fn().mockResolvedValue(undefined);
     const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
     const openDiffTab = vi.fn().mockResolvedValue(undefined);
     const getRemoteFileUrl = vi.fn().mockReturnValue('https://github.com/owner/repo/blob/main/a.md');
@@ -31,7 +33,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
         pushSelectionStore: selection,
         operationState: operations,
         sourceControlViewModel: viewModel,
-        sourceControlActions: { push, loadDiffContent },
+        sourceControlActions: { push, pull, deleteRemote, loadDiffContent },
         sync: { status },
         syncWorkspace: { getInfo: () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '' }), getRemoteFileUrl },
         settings: { syncMetadata: {} },
@@ -39,7 +41,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
         openDiffTab,
     } as unknown as GitLabFilesPush;
 
-    return { plugin, repository, selection, push, loadDiffContent, openDiffTab, getRemoteFileUrl, status };
+    return { plugin, repository, selection, push, pull, deleteRemote, loadDiffContent, openDiffTab, getRemoteFileUrl, status };
 }
 
 function buildLeaf() {
@@ -80,6 +82,35 @@ describe('SourceControlItemView', () => {
         (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
         expect(push).toHaveBeenCalledWith([toChangeId('a.md')]);
+    });
+
+    it('does not start pull until push actually settles through the production runAction wiring (regression: runAction used to discard the action promise)', async () => {
+        const { plugin, repository, selection, push, pull } = buildPlugin('local-only');
+        repository.replace([
+            { id: toChangeId('a.md'), path: 'a.md', kind: 'local-only' },
+            { id: toChangeId('b.md'), path: 'b.md', kind: 'remote-only' },
+        ]);
+        selection.selectForSync(toChangeId('a.md'));
+        selection.selectForSync(toChangeId('b.md'));
+
+        let resolvePush!: () => void;
+        push.mockReturnValue(new Promise<void>(resolve => { resolvePush = resolve; }));
+
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+        const container = view.containerEl.children[1] as HTMLElement;
+        (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
+
+        // Push is in flight; pull must not have started yet even after a
+        // microtask flush -- if `runAction` swallows the push promise
+        // (returns `void` instead of forwarding it), `onPull` fires here.
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(pull).not.toHaveBeenCalled();
+
+        resolvePush();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(pull).toHaveBeenCalledWith([toChangeId('b.md')]);
     });
 
     it('forwards refresh clicks to the ViewModel refresh delegate', async () => {

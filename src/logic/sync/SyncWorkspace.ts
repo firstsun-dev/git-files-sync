@@ -107,10 +107,20 @@ export class SyncManagerWorkspace implements SyncWorkspace {
             this.dependencies.gitService(),
             this.dependencies.settings().branch,
         );
-        return executor.execute(
+        const result = await executor.execute(
             paths.map(path => ({ path, repoPath: this.dependencies.normalizePath(path) })),
             (current, target) => onProgress?.(current, target.path),
         );
+        // Both sides are now gone for these paths: drop tracked metadata so a
+        // future remote file at the same path isn't mistaken for a rename
+        // source / misclassified as `local-deleted`, and drop the row from
+        // the live status map instead of leaving a stale `local-deleted`
+        // entry until the next full refresh.
+        for (const path of result.deletedPaths) {
+            await this.clearMetadata(path);
+            this.dependencies.manager().status.delete(path);
+        }
+        return result;
     }
 
     async deleteLocal(path: string): Promise<void> {

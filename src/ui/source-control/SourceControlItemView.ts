@@ -99,8 +99,8 @@ export class SourceControlItemView extends ItemView {
                 plan,
                 'delete',
                 () => {
-                    this.runAction(this.plugin.sourceControlActions.deleteRemote(items.map(item => item.id)));
-                    resolve();
+                    this.runAction(this.plugin.sourceControlActions.deleteRemote(items.map(item => item.id)))
+                        .then(resolve, resolve);
                 },
                 () => resolve(),
             ).open();
@@ -165,9 +165,9 @@ export class SourceControlItemView extends ItemView {
      * through the subscription above; the explicit re-render here is what
      * covers the failure path, where nothing else republishes status.
      */
-    private runAction(action: Promise<void>): void {
+    private runAction(action: Promise<void>): Promise<void> {
         this.renderView();
-        void action.finally(() => this.renderView());
+        return action.finally(() => this.renderView());
     }
 
     /**
