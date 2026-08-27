@@ -31,6 +31,11 @@ describe('CI workflow contracts', () => {
         expect(workflow).toContain('provider_result="${{ needs.provider-e2e.result }}"');
     });
 
+    it('deduplicates push and PR runs without cancelling manual or scheduled checks', () => {
+        const independentRunIdentity = "format('{0}-{1}', github.event_name, github.run_id)";
+        expect(workflow.split(independentRunIdentity)).toHaveLength(3);
+    });
+
     it('does not fail or continue downstream CI when a provider run is replaced', () => {
         expect(workflow).toContain('if [ "$result" = "cancelled" ]; then');
         expect(workflow).toContain('echo "run-ci=false" >> "$GITHUB_OUTPUT"');

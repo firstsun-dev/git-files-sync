@@ -111,17 +111,12 @@ killed run's branch is simply never touched by the next one.
 
 ### Concurrency and cancellation
 
-`.github/workflows/ci.yml`'s `provider-e2e` job carries a per-source-branch/per-provider
-concurrency group (`e2e-<branch>-<provider>`, using `github.head_ref || github.ref_name` — the
-same expression as `E2E_SOURCE_BRANCH`) with `cancel-in-progress: true`, so a superseding
-push/rerun cancels its own predecessor instead of the two competing for runner/provider capacity.
-The group is keyed by branch name alone, deliberately *not* split by trigger event: a `push` to a
-branch with an open PR fires both a `push` and a `pull_request` run for the same commit, and an
-earlier version of this group keyed PR runs by number instead of branch name, putting those two
-runs in different groups — so they ran fully concurrently against the same shared provider
-sandbox and starved each other (observed as real GitLab API timeouts under that double load).
-Keying by branch name alone means the later of the two cancels the earlier instead. The two
-cleanup workflows below share this same group naming for the same branch, with
+`.github/workflows/ci.yml`'s E2E jobs carry per-source/per-provider concurrency groups with
+`cancel-in-progress: true`. Push and pull-request runs use the same branch identity, so a push to a
+branch with an open PR cancels its duplicate instead of both competing for runner/provider
+capacity. Manual dispatches and schedules use `<event>-<run-id>` instead: they must not cancel a
+normal PR's required Gitea check or a push's credentialed provider run. The two cleanup workflows
+share the branch-based group naming used by push/PR runs, with
 `cancel-in-progress: false`, so cleanup queues behind rather than races an active run.
 The cancelled duplicate's `e2e-gate` reports the replacement as neutral and sets `run-ci=false`,
 so it neither leaves a misleading aggregate failure nor starts a second copy of downstream CI.

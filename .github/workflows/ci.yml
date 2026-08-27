@@ -76,7 +76,7 @@ jobs:
       github.event.inputs.provider == 'all' ||
       github.event.inputs.provider == 'gitea')
     concurrency:
-      group: e2e-${{ github.head_ref || github.ref_name }}-gitea
+      group: e2e-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && (github.head_ref || github.ref_name) || format('{0}-{1}', github.event_name, github.run_id) }}-gitea
       cancel-in-progress: true
     env:
       E2E_KEEP_BRANCH: ${{ github.event.inputs.keep_branch }}
@@ -139,7 +139,7 @@ jobs:
     # support the `matrix` context (unlike job-level `if:`, see the comment
     # below), so each matrix leg still gets its own group.
     concurrency:
-      group: e2e-${{ github.head_ref || github.ref_name }}-${{ matrix.provider }}
+      group: e2e-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && (github.head_ref || github.ref_name) || format('{0}-{1}', github.event_name, github.run_id) }}-${{ matrix.provider }}
       cancel-in-progress: true
     env:
       E2E_GITHUB_OWNER: ${{ vars.E2E_GITHUB_OWNER }}
