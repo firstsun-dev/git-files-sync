@@ -394,41 +394,33 @@ EOF
 
 provision_gitea_container() {
     local image="${E2E_GITEA_IMAGE:-gitea/gitea:1.22}"
-    local name="gfs-e2e-gitea-$$"
+    local run_id="${GITHUB_RUN_ID:-local-$(date +%s)}"
+    local run_attempt="${GITHUB_RUN_ATTEMPT:-1}"
+    local name="gfs-e2e-gitea-${run_id}-${run_attempt}-$$"
     log "Starting gitea container ($image)"
-    # No -p host-port mapping: on a self-hosted runner that is *itself* a
-    # sibling container of the Docker daemon (confirmed to be this fleet's
-    # topology -- a published host port + `127.0.0.1` is only reachable from
-    # the Docker host's own network namespace, not from a sibling container's),
-    # a host-port + 127.0.0.1 URL is unreachable. The container's own bridge
-    # IP is reachable from any container on the same (default) Docker
-    # network, including the runner itself, whether the runner is bare-metal
-    # or a sibling container -- so use that instead.
+    # Gitea runs beside this script on a developer machine or fresh
+    # GitHub-hosted VM. Publishing to loopback avoids Docker bridge-IP routing
+    # assumptions and asks Docker for a collision-free host port.
     docker run -d --name "$name" \
+        -p 127.0.0.1::3000 \
         -e GITEA__security__INSTALL_LOCK=true \
         "$image" >/dev/null
     echo "$name" >"$workdir/gitea-container-name"
 
-    # Retry: docker run -d returns before the network attachment always has
-    # an IP assigned yet on every runner/docker version observed.
-    local container_ip=""
+    local host_port=""
     for _ in 1 2 3 4 5 6 7 8 9 10; do
-        container_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name")
-        [ -n "$container_ip" ] && break
+        host_port=$(docker port "$name" 3000/tcp | sed -n 's/^127\.0\.0\.1://p' | head -n 1)
+        [ -n "$host_port" ] && break
         sleep 1
     done
-    if [ -z "$container_ip" ]; then
-        echo "gitea container never got a network IP (docker inspect empty)" >&2
+    if [ -z "$host_port" ]; then
+        echo "gitea container never published a localhost port" >&2
         docker logs "$name" >&2 || true
         exit 1
     fi
     # NOSONAR-justified plain HTTP (shell:S5332, x5 below): base_url never
-    # leaves the Docker bridge network this run created -- container_ip is a
-    # per-run internal address, admin_pass/token are freshly random and
-    # discarded when the container is torn down at cleanup, and there is no
-    # TLS-terminating endpoint to speak to on an ephemeral local sandbox
-    # container. Not a real clear-text-credential exposure.
-    local base_url="http://${container_ip}:3000" # NOSONAR
+    # leaves loopback; credentials are per-run and discarded at cleanup.
+    local base_url="http://127.0.0.1:${host_port}" # NOSONAR
 
     local ready_ms="${E2E_CONTAINER_READY_MS:-60000}"
     local poll_ms="${E2E_POLL_INTERVAL_MS:-500}"

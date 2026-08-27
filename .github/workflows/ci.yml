@@ -57,31 +57,70 @@ jobs:
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
 
-  # Real-provider E2E: one matrix job covering GitHub, GitLab, and Gitea (see
-  # docs/testing/real-provider-e2e.md).
+  # Gitea is secretless and disposable, so it runs on a fresh GitHub-hosted
+  # VM. This is the only E2E job allowed to execute fork PR code; untrusted
+  # code must never reach the privileged self-hosted fleet below.
+  gitea-e2e:
+    name: E2E / gitea
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    if: >-
+      (needs.changes.outputs.e2e-relevant == 'true' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      github.ref == 'refs/heads/main') &&
+      (github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.provider == 'all' ||
+      github.event.inputs.provider == 'gitea')
+    concurrency:
+      group: e2e-${{ github.head_ref || github.ref_name }}-gitea
+      cancel-in-progress: true
+    env:
+      E2E_KEEP_BRANCH: ${{ github.event.inputs.keep_branch }}
+      E2E_PR_NUMBER: ${{ github.event.pull_request.number }}
+      E2E_SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
+    steps:
+      - name: Compute run-scoped workdir
+        run: echo "E2E_WORKDIR=$RUNNER_TEMP/git-files-sync-e2e/${{ github.run_id }}/${{ github.run_attempt }}/gitea" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - name: Run disposable Gitea E2E
+        run: scripts/run-e2e.sh --provider gitea
+
+  # Credentialed GitHub/GitLab sandboxes remain on the self-hosted fleet, but
+  # only trusted pushes, schedules, dispatches, and same-repository PRs may
+  # reach it. GitHub recommends against running fork code on self-hosted hosts.
   provider-e2e:
     name: E2E / ${{ matrix.provider }}
     needs: changes
     runs-on: [self-hosted, linux, x64, 32gb-ram]
-    # Runs when sync/provider-relevant paths changed, or unconditionally on
-    # workflow_dispatch/schedule/a push to main (main always gets the full
-    # tier regardless of path, per the issue's CI wiring). The per-provider
-    # part of the gating (internal PRs/main/dispatch/schedule get every
-    # provider; a fork PR only gets Gitea) can't live here: job-level `if:`
-    # has no access to the `matrix` context (GitHub Actions error
-    # "Unrecognized named-value: 'matrix'" if you try) -- only step-level
-    # `if:` can see it. That part is done by the "Determine whether this
-    # provider leg should run" step below instead, gating every later step.
     if: >-
-      needs.changes.outputs.e2e-relevant == 'true' ||
+      (needs.changes.outputs.e2e-relevant == 'true' ||
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'schedule' ||
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main') &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.provider == 'all' ||
+      github.event.inputs.provider == 'github' ||
+      github.event.inputs.provider == 'gitlab')
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 2
       matrix:
-        provider: [github, gitlab, gitea]
+        provider: [github, gitlab]
     # One group per source branch/provider -- keyed by branch name alone
     # (github.head_ref || github.ref_name, same expression E2E_SOURCE_BRANCH
     # below uses), deliberately NOT split by event type. A `push` to a branch
@@ -135,42 +174,12 @@ jobs:
       - name: Compute run-scoped workdir
         run: echo "E2E_WORKDIR=$RUNNER_TEMP/git-files-sync-e2e/${{ github.run_id }}/${{ github.run_attempt }}/${{ matrix.provider }}" >> "$GITHUB_ENV"
 
-      # Per-provider gate (needs `matrix`, so it runs as a step, not the job-level
-      # `if:` above -- see the comment on that `if:` for why). A fork PR (head repo
-      # != base repo) only gets Gitea, which needs no repository secrets and can
-      # safely run against an untrusted fork's code; GitHub/GitLab need real sandbox
-      # credentials that must never be exposed to a fork PR's workflow run. All
-      # other events/providers run.
+      # Matrix context is unavailable in the job-level `if`, so a targeted
+      # manual dispatch is selected here. Every non-dispatch event runs both.
       - name: Determine whether this provider leg should run
         id: gate
         run: |
           run=true
-          # TODO(e2e): gitea temporarily disabled in CI -- container
-          # provisioning against this runner fleet's Docker topology needs
-          # more investigation (bridge-IP reachability, health-check timing)
-          # than is safe to iterate on inside the shared matrix. Suite/harness
-          # code is untouched and passes locally (`npm run test:e2e --
-          # --provider gitea`); re-enable by deleting this block once the CI
-          # runner behavior is confirmed. NOTE: gitea is also what normally
-          # covers fork PRs (no secrets needed) -- while this is disabled,
-          # fork PRs get no E2E coverage at all.
-          if [ "${{ matrix.provider }}" = "gitea" ]; then
-            run=false
-            # Make the disabled state explicit in the run log + summary so a
-            # green "E2E / gitea" job is never mistaken for "Gitea E2E passed".
-            echo "::notice::Gitea E2E is disabled in CI (runner Docker networking — see TODO below). Suite/harness code passes locally; re-enable by removing this block."
-            {
-              echo "### Gitea E2E: disabled"
-              echo "Reason: runner Docker networking — container provisioning against this runner fleet needs investigation (bridge-IP reachability, health-check timing)."
-              echo "Suite/harness code is untouched and passes locally (\`npm run test:e2e -- --provider gitea\`). The Gitea infrastructure fix is tracked separately; do not infer three-provider coverage from a green gitea leg."
-              echo "Re-enable by removing the gitea block in the \"Determine whether this provider leg should run\" step."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [ "${{ github.event_name }}" = "pull_request" ] \
-            && [ "${{ matrix.provider }}" != "gitea" ] \
-            && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
-            run=false
-          fi
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
             && [ "${{ github.event.inputs.provider }}" != "all" ] \
             && [ "${{ github.event.inputs.provider }}" != "${{ matrix.provider }}" ]; then
@@ -236,39 +245,39 @@ jobs:
           E2E_PROVIDER: ${{ matrix.provider }}
         run: scripts/e2e-harness.sh cleanup
 
-  # Aggregates the matrix into a single required status so branch protection
-  # only has to reference one check name (see docs/testing/real-provider-e2e.md
-  # for the "Gitea required, GitHub/GitLab not required at branch-protection
-  # level" split -- required-vs-optional per *provider* still comes from the
-  # "Determine whether this provider leg should run" step above; this gate
-  # only asks "did whatever ran, pass?"). A gated-off leg's steps are all
-  # skipped without failing the job, so it still reports "success" here.
-  # `if: always()` so a real provider-e2e failure is caught here and blocks
-  # CI/release. A cancelled matrix means a newer run in the same branch/provider
-  # concurrency group replaced this duplicate run; report that as neutral and
-  # do not start another copy of downstream CI.
+  # Aggregate both trust domains before downstream CI/release. A path- or
+  # dispatch-filtered job may be skipped; a superseded job may be cancelled.
   e2e-gate:
     name: E2E gate
-    needs: provider-e2e
+    needs: [gitea-e2e, provider-e2e]
     if: always()
     runs-on: ubuntu-latest
     outputs:
       run-ci: ${{ steps.check.outputs.run-ci }}
     steps:
-      - name: Check provider-e2e result
+      - name: Check E2E results
         id: check
         run: |
-          result="${{ needs.provider-e2e.result }}"
-          echo "provider-e2e result: $result"
+          gitea_result="${{ needs.gitea-e2e.result }}"
+          provider_result="${{ needs.provider-e2e.result }}"
+          echo "gitea-e2e result: $gitea_result"
+          echo "provider-e2e result: $provider_result"
           echo "run-ci=true" >> "$GITHUB_OUTPUT"
-          if [ "$result" = "cancelled" ]; then
+          replaced=false
+          for result in "$gitea_result" "$provider_result"; do
+            if [ "$result" = "cancelled" ]; then
+              replaced=true
+              continue
+            fi
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "::error::E2E dependency failed ($result) -- blocking CI/release."
+              exit 1
+            fi
+          done
+          if [ "$replaced" = "true" ]; then
             echo "run-ci=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::provider-e2e was replaced by a newer run in the same concurrency group."
+            echo "::notice::E2E was replaced by a newer run in the same concurrency group."
             exit 0
-          fi
-          if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
-            echo "::error::provider-e2e failed ($result) -- blocking CI/release."
-            exit 1
           fi
 
   CI:
