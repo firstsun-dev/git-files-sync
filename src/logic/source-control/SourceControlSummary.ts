@@ -1,4 +1,4 @@
-import type { PushSelectionStore } from './PushSelectionStore';
+import type { SyncSelectionStore } from './SyncSelectionStore';
 import type { SourceControlFilter } from './SourceControlFilter';
 import type { ChangeId, SyncChange, SyncChangeKind } from './types';
 
@@ -21,7 +21,7 @@ export type SourceControlCounts = Record<SourceControlFilter, number>;
  * count label reads from.
  *
  * Buckets are disjoint and exhaustive over {@link SyncChangeKind}:
- * - {@link localChanges}: local-only, local-modified, moved
+ * - {@link localChanges}: local-only, local-modified, local-deleted, moved
  * - {@link remoteChanges}: remote-only, remote-modified
  * - {@link conflicts}: conflict
  * - {@link synced}: synced
@@ -29,7 +29,7 @@ export type SourceControlCounts = Record<SourceControlFilter, number>;
  *   synced) — "All" means *actionable*, not "every row", so a synced file never
  *   appears under All.
  * - {@link readyToPush}: the subset of actionable changes the user has selected
- *   for push (membership in {@link PushSelectionStore}); it overlaps the other
+ *   for push (membership in {@link SyncSelectionStore}); it overlaps the other
  *   actionable buckets by design, since "ready to push" is a selection, not a
  *   change kind.
  */
@@ -43,7 +43,7 @@ export interface SourceControlSummary {
     counts: SourceControlCounts;
 }
 
-const LOCAL_KINDS: ReadonlySet<SyncChangeKind> = new Set(['local-only', 'local-modified', 'moved']);
+const LOCAL_KINDS: ReadonlySet<SyncChangeKind> = new Set(['local-only', 'local-modified', 'local-deleted', 'moved']);
 const REMOTE_KINDS: ReadonlySet<SyncChangeKind> = new Set(['remote-only', 'remote-modified']);
 
 function isLocal(change: SyncChange): boolean { return LOCAL_KINDS.has(change.kind); }
@@ -64,7 +64,7 @@ function isActionable(change: SyncChange): boolean { return change.kind !== 'syn
  */
 export function buildSummary(
     changes: readonly SyncChange[],
-    selection: PushSelectionStore,
+    selection: SyncSelectionStore,
     showSynced: boolean,
 ): SourceControlSummary {
     const localChanges = changes.filter(isLocal);

@@ -1,75 +1,71 @@
 import { describe, expect, it, vi, beforeAll, beforeEach } from 'vitest';
 import { renderFilterMenu } from '../../../src/ui/source-control/FilterMenu';
 import type { SourceControlFilter } from '../../../src/logic/source-control/SourceControlFilter';
+import type { SourceControlCounts } from '../../../src/logic/source-control/SourceControlSummary';
 import { setupObsidianDOM, createContainer } from '../setup-dom';
 
 beforeAll(() => { setupObsidianDOM(); });
 
-const zeroCounts: Record<SourceControlFilter, number> = {
+const zeroCounts: SourceControlCounts = {
     all: 0, changes: 0, 'ready-to-push': 0, 'remote-changes': 0, conflicts: 0, synced: 0,
 };
 
 describe('renderFilterMenu', () => {
     let container: HTMLElement;
-    let callbacks: { onFilterChange: (f: SourceControlFilter) => void; onToggleShowSynced: (s: boolean) => void };
+    let callbacks: { onFilterChange: (f: SourceControlFilter, showSynced: boolean) => void };
 
     beforeEach(() => {
         container = createContainer();
-        callbacks = { onFilterChange: vi.fn(), onToggleShowSynced: vi.fn() };
+        callbacks = { onFilterChange: vi.fn() };
     });
 
-    it('renders the five action chips (no synced chip) when showSynced is false', () => {
-        renderFilterMenu(container, 'all', zeroCounts, false, callbacks);
+    it('renders the five chips (All/Needs Sync/Remote/Conflict/Synced)', () => {
+        renderFilterMenu(container, { filter: 'all', showSynced: false }, zeroCounts, callbacks);
 
-        const filters = Array.from(container.querySelectorAll('.scv-filter-option')).map(el => el.getAttribute('data-filter'));
-        expect(filters).toEqual(['all', 'changes', 'ready-to-push', 'remote-changes', 'conflicts']);
+        const chips = Array.from(container.querySelectorAll('.scv-filter-option')).map(el => el.getAttribute('data-filter'));
+        expect(chips).toEqual(['all', 'needsSync', 'remote', 'conflict', 'synced']);
     });
 
-    it('appends the synced chip when showSynced is true', () => {
-        renderFilterMenu(container, 'all', { ...zeroCounts, synced: 7 }, true, callbacks);
+    it('labels the chips with their display names', () => {
+        renderFilterMenu(container, { filter: 'all', showSynced: false }, zeroCounts, callbacks);
 
-        const filters = Array.from(container.querySelectorAll('.scv-filter-option')).map(el => el.getAttribute('data-filter'));
-        expect(filters).toEqual(['all', 'changes', 'ready-to-push', 'remote-changes', 'conflicts', 'synced']);
-        const syncedOption = container.querySelector('.scv-filter-option[data-filter="synced"]');
-        expect(syncedOption?.querySelector('.scv-filter-count')?.textContent).toBe('7');
+        const labels = Array.from(container.querySelectorAll('.scv-filter-option .scv-filter-label')).map(el => el.textContent);
+        expect(labels).toEqual(['All', 'Needs Sync', 'Remote', 'Conflict', 'Synced']);
     });
 
-    it('marks the current filter chip as active', () => {
-        renderFilterMenu(container, 'conflicts', zeroCounts, false, callbacks);
+    it('marks the current (filter, showSynced) chip as active', () => {
+        // Needs Sync = ('all', false)
+        renderFilterMenu(container, { filter: 'all', showSynced: false }, zeroCounts, callbacks);
+        expect(container.querySelector('.scv-filter-option.is-active')?.getAttribute('data-filter')).toBe('needsSync');
 
-        const active = container.querySelector('.scv-filter-option.is-active');
-        expect(active?.getAttribute('data-filter')).toBe('conflicts');
+        container = createContainer();
+        // All = ('all', true)
+        renderFilterMenu(container, { filter: 'all', showSynced: true }, zeroCounts, callbacks);
+        expect(container.querySelector('.scv-filter-option.is-active')?.getAttribute('data-filter')).toBe('all');
     });
 
-    it('shows the per-filter count from the ViewModel', () => {
-        renderFilterMenu(container, 'all', { ...zeroCounts, conflicts: 3 }, false, callbacks);
+    it('shows the per-chip count (All = actionable + synced)', () => {
+        renderFilterMenu(container, { filter: 'all', showSynced: false }, { ...zeroCounts, all: 5, synced: 2 }, callbacks);
 
-        const conflictsOption = container.querySelector('.scv-filter-option[data-filter="conflicts"]');
-        expect(conflictsOption?.querySelector('.scv-filter-count')?.textContent).toBe('3');
+        expect(container.querySelector('.scv-filter-option[data-filter="all"] .scv-filter-count')?.textContent).toBe('7');
+        expect(container.querySelector('.scv-filter-option[data-filter="needsSync"] .scv-filter-count')?.textContent).toBe('5');
+        expect(container.querySelector('.scv-filter-option[data-filter="synced"] .scv-filter-count')?.textContent).toBe('2');
     });
 
-    it('calls onFilterChange with the clicked filter value', () => {
-        renderFilterMenu(container, 'all', zeroCounts, false, callbacks);
+    it('calls onFilterChange with (filter, showSynced) for the clicked chip', () => {
+        renderFilterMenu(container, { filter: 'all', showSynced: false }, zeroCounts, callbacks);
 
-        (container.querySelector('.scv-filter-option[data-filter="remote-changes"]') as HTMLButtonElement).click();
+        (container.querySelector('.scv-filter-option[data-filter="synced"]') as HTMLButtonElement).click();
 
-        expect(callbacks.onFilterChange).toHaveBeenCalledWith('remote-changes');
+        expect(callbacks.onFilterChange).toHaveBeenCalledWith('synced', true);
     });
 
-    it('renders the Show synced toggle reflecting the showSynced state', () => {
-        renderFilterMenu(container, 'all', zeroCounts, false, callbacks);
-        const checkbox = container.querySelector('.scv-filter-show-synced-checkbox') as HTMLInputElement;
-        expect(checkbox).not.toBeNull();
-        expect(checkbox.checked).toBe(false);
-    });
+    it('renders a mobile dropdown (no chips) when isMobile is true', () => {
+        renderFilterMenu(container, { filter: 'all', showSynced: false }, { ...zeroCounts, conflicts: 3 }, callbacks, { isMobile: true });
 
-    it('calls onToggleShowSynced when the Show synced checkbox changes', () => {
-        renderFilterMenu(container, 'all', zeroCounts, false, callbacks);
-
-        const checkbox = container.querySelector('.scv-filter-show-synced-checkbox') as HTMLInputElement;
-        checkbox.checked = true;
-        checkbox.dispatchEvent(new Event('change'));
-
-        expect(callbacks.onToggleShowSynced).toHaveBeenCalledWith(true);
+        expect(container.querySelector('.scv-filter-dropdown')).not.toBeNull();
+        expect(container.querySelector('.scv-filter-option')).toBeNull();
+        const options = Array.from(container.querySelectorAll('.scv-filter-dropdown option')).map(o => (o as HTMLOptionElement).value);
+        expect(options).toEqual(['all', 'needsSync', 'remote', 'conflict', 'synced']);
     });
 });

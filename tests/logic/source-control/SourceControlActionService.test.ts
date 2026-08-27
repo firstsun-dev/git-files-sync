@@ -2,14 +2,36 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
+import type { PlannedPushBatch } from '../../../src/logic/sync/PushCoordinator';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import type { SyncWorkspace } from '../../../src/logic/sync/SyncWorkspace';
-import type { FileDiff, PushResults, SyncResult } from '../../../src/logic/sync/types';
+import type { FileDiff, PushResults, SyncPlan, SyncResult } from '../../../src/logic/sync/types';
 import type { RemoteDeleteResult } from '../../../src/logic/sync/RemoteDeleteExecutor';
+
+function emptySyncPlan(overrides: Partial<SyncPlan> = {}): SyncPlan {
+    return { additions: [], modifications: [], deletions: [], moves: [], ...overrides };
+}
+
+function emptyPlannedBatch(overrides: Partial<PlannedPushBatch> = {}): PlannedPushBatch {
+    return {
+        reviewPlan: emptySyncPlan(),
+        pushes: [],
+        moves: [],
+        keepRemote: [],
+        keepLocal: [],
+        skippedConflicts: 0,
+        conflictedPaths: [],
+        cancelled: false,
+        immediate: { success: 0, updated: 0, failed: 0, errors: [], syncedPaths: [] },
+        ...overrides,
+    };
+}
 
 function emptyPushResults(overrides: Partial<PushResults> = {}): PushResults {
     return {
         success: 0,
+        added: 0,
+        updated: 0,
         failed: 0,
         conflicts: 0,
         resolvedConflicts: 0,
@@ -21,7 +43,7 @@ function emptyPushResults(overrides: Partial<PushResults> = {}): PushResults {
 }
 
 function emptySyncResult(overrides: Partial<SyncResult> = {}): SyncResult {
-    return { success: 0, failed: 0, conflicts: 0, errors: [], ...overrides };
+    return { success: 0, added: 0, updated: 0, failed: 0, conflicts: 0, errors: [], ...overrides };
 }
 
 function fakeWorkspace(overrides: Partial<SyncWorkspace> = {}): SyncWorkspace {
@@ -39,6 +61,12 @@ function fakeWorkspace(overrides: Partial<SyncWorkspace> = {}): SyncWorkspace {
         clearMetadata: vi.fn(),
         trackRename: vi.fn(),
         getDiff: vi.fn().mockResolvedValue({ path: 'a.md', kind: 'text' } as FileDiff),
+        toRepoPath: (path: string) => path,
+        planPush: vi.fn().mockResolvedValue(emptyPlannedBatch()),
+        planPull: vi.fn().mockResolvedValue(emptySyncPlan()),
+        applyPull: vi.fn().mockResolvedValue(emptySyncResult()),
+        commitResolvedBatch: vi.fn().mockResolvedValue(undefined),
+        confirmPlan: vi.fn().mockResolvedValue(true),
         ...overrides,
     } as SyncWorkspace;
 }
@@ -117,6 +145,90 @@ describe('SourceControlActionService', () => {
             await service.push([toChangeId('c-1')]);
 
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
+        });
+    });
+
+    describe('sync', () => {
+        it('commits a modified file and a locally-deleted file in exactly one commitResolvedBatch call', async () => {
+            const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+            const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                reviewPlan: emptySyncPlan({ modifications: [{ path: 'a.md', name: 'a.md' }] }),
+                pushes: [{ path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'updated', existingSha: 'sha-a' }],
+            }));
+            const { service, operations } = buildService(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' },
+                    { id: toChangeId('c-2'), path: 'gone.md', kind: 'local-deleted' },
+                ],
+                fakeWorkspace({ planPush, commitResolvedBatch }),
+            );
+
+            await service.sync([toChangeId('c-1'), toChangeId('c-2')]);
+
+            expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
+            expect(commitResolvedBatch).toHaveBeenCalledWith(
+                [expect.objectContaining({ path: 'a.md' })],
+                [],
+                [expect.objectContaining({ path: 'gone.md', repoPath: 'gone.md' })],
+                [],
+                [],
+                expect.any(Object),
+            );
+            expect(operations.get(toChangeId('c-1'))).toBe('success');
+            expect(operations.get(toChangeId('c-2'))).toBe('success');
+        });
+
+        it('creates zero commits for a pure-pull sync selection', async () => {
+            const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+            const planPush = vi.fn();
+            const applyPull = vi.fn().mockResolvedValue({ success: 1, added: 1, updated: 0, failed: 0, conflicts: 0, errors: [] } as SyncResult);
+            const planPull = vi.fn().mockResolvedValue(emptySyncPlan({ additions: [{ path: 'remote.md', name: 'remote.md' }] }));
+            const { service, operations } = buildService(
+                [{ id: toChangeId('c-1'), path: 'remote.md', kind: 'remote-only' }],
+                fakeWorkspace({ planPush, planPull, applyPull, commitResolvedBatch }),
+            );
+
+            await service.sync([toChangeId('c-1')]);
+
+            expect(planPush).not.toHaveBeenCalled();
+            expect(commitResolvedBatch).not.toHaveBeenCalled();
+            expect(applyPull).toHaveBeenCalledWith(['remote.md']);
+            expect(operations.get(toChangeId('c-1'))).toBe('success');
+        });
+
+        it('does not commit or mark anything when the merged plan is cancelled at confirm', async () => {
+            const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+            const confirmPlan = vi.fn().mockResolvedValue(false);
+            const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                reviewPlan: emptySyncPlan({ modifications: [{ path: 'a.md', name: 'a.md' }] }),
+                pushes: [{ path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'updated' }],
+            }));
+            const { service, operations } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                fakeWorkspace({ planPush, confirmPlan, commitResolvedBatch }),
+            );
+
+            await service.sync([toChangeId('c-1')]);
+
+            expect(confirmPlan).toHaveBeenCalledWith(expect.any(Object), 'sync');
+            expect(commitResolvedBatch).not.toHaveBeenCalled();
+            expect(operations.get(toChangeId('c-1'))).toBe('idle');
+        });
+
+        it('aborts before confirming when batch conflict resolution itself was cancelled', async () => {
+            const confirmPlan = vi.fn().mockResolvedValue(true);
+            const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+            const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({ cancelled: true }));
+            const { service, operations } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                fakeWorkspace({ planPush, confirmPlan, commitResolvedBatch }),
+            );
+
+            await service.sync([toChangeId('c-1')]);
+
+            expect(confirmPlan).not.toHaveBeenCalled();
+            expect(commitResolvedBatch).not.toHaveBeenCalled();
+            expect(operations.get(toChangeId('c-1'))).toBe('idle');
         });
     });
 
@@ -272,7 +384,7 @@ describe('SourceControlActionService', () => {
                 id: toChangeId('c-1'),
                 path: 'a.md',
                 kind: 'local-modified',
-                isReadyToPush: false,
+                isSelectedForSync: false,
                 operationStatus: 'idle',
             });
 
@@ -296,7 +408,7 @@ describe('SourceControlActionService', () => {
                 id: toChangeId('c-1'),
                 path: 'a.png',
                 kind: 'local-modified',
-                isReadyToPush: false,
+                isSelectedForSync: false,
                 operationStatus: 'idle',
             });
 

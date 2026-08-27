@@ -1,4 +1,4 @@
-import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchMoveItem } from './git-service-interface';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchCommitPlan } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE } from './git-service-base';
 
 /** One entry in a Gitea "change multiple files" request. */
@@ -102,13 +102,16 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
     /**
      * A real `git mv`: additions are created at their new path, moves are
      * expressed as an 'update' of the new path with `from_path` set to the
-     * old one — both a content write and a rename in the same commit.
+     * old one — both a content write and a rename in the same commit. Plain
+     * deletions ride in the same `files[]` as `operation: 'delete'`, so a
+     * Sync Plan mixing writes/moves/deletions still lands as one commit.
      */
-    async commitBatch(additions: BatchPushItem[], moves: BatchMoveItem[], branch: string, message: string): Promise<BatchPushResult[]> {
-        if (additions.length === 0 && moves.length === 0) return [];
+    async commitBatch(plan: BatchCommitPlan, branch: string, message: string): Promise<BatchPushResult[]> {
+        const { writes, moves, deletions } = plan;
+        if (writes.length === 0 && moves.length === 0 && deletions.length === 0) return [];
 
         const files: GiteaChangeFileOperation[] = [
-            ...additions.map((item): GiteaChangeFileOperation => ({
+            ...writes.map((item): GiteaChangeFileOperation => ({
                 // A "keep local" conflict resolution lands here as an addition
                 // that already exists remotely (e.g. from planPushBatch merging
                 // a resolved conflict into the ordinary push list); Gitea 422s
@@ -124,12 +127,16 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
                 from_path: this.getFullPath(item.oldPath),
                 content: this.encodeContent(item.content),
             })),
+            ...deletions.map((path): GiteaChangeFileOperation => ({
+                operation: 'delete',
+                path: this.getFullPath(path),
+            })),
         ];
 
         const result = await this.changeFiles(files, branch, message);
         return [
-            ...additions.map((item, i) => ({ path: item.path, sha: result.files[i]?.sha })),
-            ...moves.map((item, i) => ({ path: item.newPath, sha: result.files[additions.length + i]?.sha })),
+            ...writes.map((item, i) => ({ path: item.path, sha: result.files[i]?.sha })),
+            ...moves.map((item, i) => ({ path: item.newPath, sha: result.files[writes.length + i]?.sha })),
         ];
     }
 

@@ -1,4 +1,4 @@
-import type { PushSelectionStore } from './PushSelectionStore';
+import type { SyncSelectionStore } from './SyncSelectionStore';
 import type { SyncChange, SyncChangeKind } from './types';
 
 export type SourceControlFilter =
@@ -9,7 +9,7 @@ export type SourceControlFilter =
     | 'conflicts'
     | 'synced';
 
-const LOCAL_KINDS: ReadonlySet<SyncChangeKind> = new Set(['local-only', 'local-modified', 'moved']);
+const LOCAL_KINDS: ReadonlySet<SyncChangeKind> = new Set(['local-only', 'local-modified', 'local-deleted', 'moved']);
 const REMOTE_KINDS: ReadonlySet<SyncChangeKind> = new Set(['remote-only', 'remote-modified']);
 
 /**
@@ -19,15 +19,16 @@ const REMOTE_KINDS: ReadonlySet<SyncChangeKind> = new Set(['remote-only', 'remot
  * - `all` — *actionable* changes only (everything except synced). A synced
  *   file needs no action, so it never appears under All. This keeps All from
  *   duplicating the Synced bucket.
- * - `changes` — local-side changes only (local-only, local-modified, moved).
- *   Remote-only/conflict rows belong to their own filters, not Changes.
- * - `ready-to-push` — defined purely by {@link PushSelectionStore} membership;
+ * - `changes` — local-side changes only (local-only, local-modified,
+ *   local-deleted, moved). Remote-only/conflict rows belong to their own
+ *   filters, not Changes.
+ * - `ready-to-push` — defined purely by {@link SyncSelectionStore} membership;
  *   it's a user selection, not a fact derivable from the change's kind alone.
  * - `remote-changes` — remote-only / remote-modified.
  * - `conflicts` — conflict.
  * - `synced` — synced (only surfaced when the user opts in via "Show synced").
  */
-export function matchesFilter(change: SyncChange, filter: SourceControlFilter, selection: PushSelectionStore): boolean {
+export function matchesFilter(change: SyncChange, filter: SourceControlFilter, selection: SyncSelectionStore): boolean {
     switch (filter) {
         case 'all': return change.kind !== 'synced';
         case 'changes': return LOCAL_KINDS.has(change.kind);

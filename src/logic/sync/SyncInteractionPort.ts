@@ -1,7 +1,7 @@
 import type { GitServiceInterface } from '../../services/git-service-interface';
 import type { BatchPushConflict, SyncPlan } from './types';
 
-export type SyncPlanDirection = 'push' | 'pull' | 'delete';
+export type SyncPlanDirection = 'push' | 'pull' | 'delete' | 'sync';
 export type SingleConflictChoice = 'local' | 'remote';
 
 /** User interaction required by sync workflows, supplied by the composition layer. */

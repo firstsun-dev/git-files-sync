@@ -7,6 +7,7 @@ import { GitServiceInterface, GitTreeEntry } from './services/git-service-interf
 import { ConnectionTestResult } from './services/git-service-base';
 import { SyncManager } from './logic/sync-manager';
 import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from './ui/source-control/SourceControlItemView';
+import { DiffTabView, SOURCE_CONTROL_DIFF_VIEW_TYPE, type DiffTabContent } from './ui/source-control/DiffTabView';
 import { GitignoreManager } from './logic/gitignore-manager';
 import { logger } from './utils/logger';
 import { ConfirmModal } from './ui/ConfirmModal';
@@ -20,7 +21,8 @@ import { SyncDiffService } from './logic/sync/SyncDiffService';
 import { SyncManagerWorkspace, type SyncWorkspace } from './logic/sync/SyncWorkspace';
 import { ChangeRepository } from './logic/source-control/ChangeRepository';
 import { OperationState } from './logic/source-control/OperationState';
-import { PushSelectionStore } from './logic/source-control/PushSelectionStore';
+import { RefreshState } from './logic/source-control/RefreshState';
+import { SyncSelectionStore } from './logic/source-control/SyncSelectionStore';
 import { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
 import { SourceControlActionService } from './logic/source-control/SourceControlActionService';
 import { toSyncChanges } from './logic/source-control/FileStatusAdapter';
@@ -40,8 +42,9 @@ export default class GitLabFilesPush extends Plugin {
 	syncStatusRefresh: SyncStatusRefreshService;
 	gitignoreManager: GitignoreManager;
 	changeRepository: ChangeRepository;
-	pushSelectionStore: PushSelectionStore;
+	syncSelectionStore: SyncSelectionStore;
 	operationState: OperationState;
+	refreshState: RefreshState;
 	sourceControlViewModel: SourceControlViewModel;
 	sourceControlActions: SourceControlActionService;
 	private unsubscribeChangeRepository?: () => void;
@@ -59,6 +62,11 @@ export default class GitLabFilesPush extends Plugin {
 		this.registerView(
 			SOURCE_CONTROL_VIEW_TYPE,
 			(leaf) => new SourceControlItemView(leaf, this)
+		);
+
+		this.registerView(
+			SOURCE_CONTROL_DIFF_VIEW_TYPE,
+			(leaf) => new DiffTabView(leaf)
 		);
 
 		this.addRibbonIcon('git-compare', t('main.ribbon.openSyncStatus'), async () => {
@@ -106,12 +114,15 @@ export default class GitLabFilesPush extends Plugin {
 		});
 
 		this.changeRepository = new ChangeRepository();
-		this.pushSelectionStore = new PushSelectionStore();
+		this.syncSelectionStore = new SyncSelectionStore();
 		this.operationState = new OperationState();
+		this.refreshState = new RefreshState();
 		this.sourceControlViewModel = new SourceControlViewModel(
 			this.changeRepository,
-			this.pushSelectionStore,
+			this.syncSelectionStore,
 			this.operationState,
+			() => this.syncWorkspace.refresh(),
+			this.refreshState,
 		);
 		this.sourceControlActions = new SourceControlActionService(
 			this.changeRepository,
@@ -124,7 +135,7 @@ export default class GitLabFilesPush extends Plugin {
 		this.unsubscribeChangeRepository = this.sync.status.subscribe((statuses) => {
 			const changes = toSyncChanges([...statuses.values()]);
 			this.changeRepository.replace(changes);
-			this.pushSelectionStore.refresh(changes.map(change => change.id));
+			this.syncSelectionStore.refresh(changes.map(change => change.id));
 		});
 
 		this.statusBarEl = this.addStatusBarItem();
@@ -255,6 +266,38 @@ export default class GitLabFilesPush extends Plugin {
 			})
 		);
 
+		// A newly created file inside the configured vault folder should
+		// appear as a local-only (`unsynced`) row immediately rather than only
+		// after the next manual refresh. Same shared-SyncStatusService path as
+		// `modify` above; a later full refresh reconciles it against the remote
+		// tree (promoting to `synced`/`modified` if a matching entry exists).
+		this.registerEvent(
+			this.app.vault.on('create', (file) => {
+				if (file instanceof TFile && this.filterPathByVaultFolder(file.path)) {
+					this.syncStatusRefresh.handleFileCreated(file);
+				}
+			})
+		);
+
+		// A local delete inside the configured vault folder reclassifies the
+		// row immediately: a previously tracked (`synced`/`modified`) file
+		// becomes `local-deleted` (remote still holds it), while a
+		// local-only (`unsynced`) or pending-`moved` row simply drops out.
+		// This deliberately does NOT clear `syncMetadata` for the path — that
+		// evidence is still needed by `reconcileOutOfBandMoves` on the next
+		// refresh to recognize an out-of-band move (external tool, cloud sync,
+		// mobile) as a rename rather than a permanent `remote-only` ghost (the
+		// #66 bug). Only the in-memory status map is updated here; the
+		// persisted metadata is untouched, matching the long-standing
+		// no-clear-on-delete decision documented above.
+		this.registerEvent(
+			this.app.vault.on('delete', (file) => {
+				if (file instanceof TFile && this.filterPathByVaultFolder(file.path)) {
+					this.syncStatusRefresh.handleFileDeleted(file.path);
+				}
+			})
+		);
+
 		this.app.workspace.onLayoutReady(() => {
 			if (this.settings.autoRefreshOnStartup) void this.refreshSyncStatusOnStartup();
 		});
@@ -264,7 +307,7 @@ export default class GitLabFilesPush extends Plugin {
 
 	private async refreshSyncStatusOnStartup(): Promise<void> {
 		await this.activateSourceControlView();
-		await this.syncWorkspace.refresh();
+		await this.sourceControlViewModel.refresh('startup');
 	}
 
 	/**
@@ -412,6 +455,26 @@ export default class GitLabFilesPush extends Plugin {
 		if (leaf) {
 			await workspace.revealLeaf(leaf);
 		}
+	}
+
+	/**
+	 * Shows a change's diff in a main-area tab, which is where a wide
+	 * side-by-side view has room to exist -- the Source Control panel lives
+	 * in a narrow sidebar. Reuses the single existing diff tab (if any)
+	 * rather than opening a new one per file.
+	 */
+	async openDiffTab(path: string, content: DiffTabContent | null): Promise<void> {
+		const { workspace } = this.app;
+
+		let leaf = workspace.getLeavesOfType(SOURCE_CONTROL_DIFF_VIEW_TYPE)[0];
+		if (!leaf) {
+			leaf = workspace.getLeaf('tab');
+			await leaf.setViewState({ type: SOURCE_CONTROL_DIFF_VIEW_TYPE, active: true });
+		}
+
+		const view = leaf.view;
+		if (view instanceof DiffTabView) view.setDiff(path, content);
+		await workspace.revealLeaf(leaf);
 	}
 
 	async pushAllFiles(): Promise<void> {

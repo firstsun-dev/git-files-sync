@@ -9,7 +9,7 @@ import type { SyncManagerFixture } from './sync-manager-fixture';
 import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
 import { ChangeRepository } from '../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../src/logic/source-control/OperationState';
-import { PushSelectionStore } from '../../src/logic/source-control/PushSelectionStore';
+import { SyncSelectionStore } from '../../src/logic/source-control/SyncSelectionStore';
 import { SourceControlActionService } from '../../src/logic/source-control/SourceControlActionService';
 import { BoundarySyncWorkspace } from '../../src/logic/sync/SyncWorkspace';
 import { toChangeId, type SyncChange } from '../../src/logic/source-control/types';
@@ -40,13 +40,15 @@ export class SourceControlScenario {
     /**
      * Memoizes remote reads (each of which is a real `git fetch` round trip)
      * between remote mutations. Invalidated by `invalidatingProxy` below
-     * whenever `manager.pushFiles`/`pullFile` or `service.pushFile`/
-     * `deleteFile` is called on the wrapped instances this scenario hands
-     * out — including indirectly, e.g. via the selection stack's
-     * `actionService.push`, which calls `manager.pushFiles` through
-     * `BoundarySyncWorkspace` rather than through this class's own `push()`.
-     * Wrapping the instances themselves (instead of only this class's
-     * wrapper methods) is what makes that indirect path safe to cache too.
+     * whenever `manager.pushFiles`/`pullFile`/`commitResolvedBatch` or
+     * `service.pushFile`/`deleteFile` is called on the wrapped instances this
+     * scenario hands out — including indirectly, e.g. via the selection
+     * stack's `actionService.push`, which calls `manager.pushFiles` through
+     * `BoundarySyncWorkspace` rather than through this class's own `push()`,
+     * and `actionService.sync`, which commits pushes/moves/deletions through
+     * `manager.commitResolvedBatch` instead of `pushFiles`. Wrapping the
+     * instances themselves (instead of only this class's wrapper methods) is
+     * what makes those indirect paths safe to cache too.
      */
     private readonly remoteCache = new Map<string, unknown>();
 
@@ -54,7 +56,7 @@ export class SourceControlScenario {
         this.vault = fixture.createVault();
         this.settings = fixture.makeSettings();
         const invalidate = (): void => this.remoteCache.clear();
-        this.manager = invalidatingProxy(fixture.newManager(this.vault, this.settings), ['pushFiles', 'pullFile'], invalidate);
+        this.manager = invalidatingProxy(fixture.newManager(this.vault, this.settings), ['pushFiles', 'pullFile', 'commitResolvedBatch'], invalidate);
         this.service = invalidatingProxy(fixture.service, ['pushFile', 'deleteFile'], invalidate);
         this.verifier = fixture.verifier;
         this.branch = fixture.branch;
@@ -195,7 +197,7 @@ export class SourceControlScenario {
 
     /**
      * Wires the real Source Control selection layer (ChangeRepository +
-     * PushSelectionStore + OperationState + SourceControlActionService) on top
+     * SyncSelectionStore + OperationState + SourceControlActionService) on top
      * of this scenario's real SyncManager, via the thin BoundarySyncWorkspace.
      * `push`/`pull`/`deleteRemote` go through the real manager/provider; the
      * selection filter (ChangeId -> path -> workspace call) is the real
@@ -204,7 +206,7 @@ export class SourceControlScenario {
     selectionStack(changes: SyncChange[]): SelectionStack {
         const repository = new ChangeRepository();
         repository.replace(changes);
-        const selection = new PushSelectionStore();
+        const selection = new SyncSelectionStore();
         const operations = new OperationState();
         const workspace = new BoundarySyncWorkspace(
             () => this.manager,
@@ -223,7 +225,7 @@ export class SourceControlScenario {
 
 export interface SelectionStack {
     readonly repository: ChangeRepository;
-    readonly selection: PushSelectionStore;
+    readonly selection: SyncSelectionStore;
     readonly operations: OperationState;
     readonly actionService: SourceControlActionService;
     readonly workspace: BoundarySyncWorkspace;

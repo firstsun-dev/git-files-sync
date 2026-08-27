@@ -1,8 +1,8 @@
 import { App, Modal, Setting } from 'obsidian';
 import { t } from '../i18n';
 import { isBinaryPath } from '../utils/path';
-
-type ConflictPanelName = 'diff' | 'local' | 'remote';
+import { renderDiffLayoutToggle, type DiffLayout } from './components/DiffLayoutToggle';
+import { renderDiffPanel } from './components/DiffPanel';
 
 /**
  * Apply the "destructive" button style, but only when the running Obsidian
@@ -77,87 +77,47 @@ export class SyncConflictModal extends Modal {
                 }));
     }
 
+    /**
+     * The split diff layout already lays local and remote content side by
+     * side (with per-line highlighting, unlike a plain full-text dump), so a
+     * separate Local/Remote tab pair would just duplicate it -- this renders
+     * the diff view directly with no tab switching needed.
+     */
     private renderTextComparison(contentEl: HTMLElement) {
         const localContent = this.localContent as string;
         const remoteContent = this.remoteContent as string;
 
-        const panels = {} as Record<ConflictPanelName, HTMLElement>;
-        const tabs = {} as Record<ConflictPanelName, HTMLElement>;
-
-        const setActivePanel = (name: ConflictPanelName) => {
-            (Object.keys(panels) as ConflictPanelName[]).forEach(key => {
-                panels[key].toggleClass('is-active', key === name);
-                tabs[key].toggleClass('is-active', key === name);
-            });
-        };
-
-        const tabsContainer = contentEl.createDiv({ cls: 'conflict-tabs' });
-        const tabLabels: Record<ConflictPanelName, string> = {
-            diff: t('syncConflictModal.tab.diff'),
-            local: t('syncConflictModal.tab.local'),
-            remote: t('syncConflictModal.tab.remote')
-        };
-        (['diff', 'local', 'remote'] as const).forEach(name => {
-            const tab = tabsContainer.createEl('button', { text: tabLabels[name], cls: 'conflict-tab' });
-            tab.addEventListener('click', () => setActivePanel(name));
-            tabs[name] = tab;
-        });
-
         const contentArea = contentEl.createDiv({ cls: 'conflict-content-area' });
-
-        const diffContainer = contentArea.createDiv({ cls: 'conflict-diff-container' });
-
-        const localSection = diffContainer.createDiv({ cls: 'conflict-section conflict-panel' });
-        localSection.createEl('h3', { text: t('syncConflictModal.localVersion') });
-        const localPre = localSection.createEl('pre', { cls: 'conflict-content' });
-        localPre.createEl('code', { text: localContent });
-        panels.local = localSection;
-
-        const remoteSection = diffContainer.createDiv({ cls: 'conflict-section conflict-panel' });
-        remoteSection.createEl('h3', { text: t('syncConflictModal.remoteVersion') });
-        const remotePre = remoteSection.createEl('pre', { cls: 'conflict-content' });
-        remotePre.createEl('code', { text: remoteContent });
-        panels.remote = remoteSection;
-
-        const diffSection = contentArea.createDiv({ cls: 'conflict-diff-section conflict-panel' });
-        diffSection.createEl('h3', { text: t('syncConflictModal.differences') });
-        const diffPre = diffSection.createEl('pre', { cls: 'conflict-diff' });
-        this.renderDiff(diffPre, localContent, remoteContent);
-        panels.diff = diffSection;
-
-        setActivePanel('diff');
+        const diffSection = contentArea.createDiv({ cls: 'conflict-diff-section' });
+        this.renderDiffTab(diffSection, remoteContent, localContent);
     }
 
-    private renderDiff(container: HTMLElement, localContent: string, remoteContent: string) {
-        const localLines = localContent.split('\n');
-        const remoteLines = remoteContent.split('\n');
+    /**
+     * Renders the "Diff" tab via the shared `renderDiffPanel` (same component
+     * as the Source Control diff views) instead of a bespoke line-diff, with
+     * a button to switch between split (two-column) and unified (one-column)
+     * layout -- defaulting to unified so the modal doesn't open unnecessarily
+     * wide. Only one layout is ever visible at a time (see the
+     * `scv-diff-layout-*` CSS rules shared with the other diff views).
+     */
+    private renderDiffTab(container: HTMLElement, remoteContent: string, localContent: string): void {
+        const header = container.createDiv({ cls: 'conflict-diff-header' });
+        header.createEl('h3', { text: t('syncConflictModal.differences') });
+        const toggleSlot = header.createDiv({ cls: 'conflict-diff-header-toggle' });
 
-        const createLine = (text: string, type: 'header' | 'added' | 'removed' | 'unchanged') => {
-            const lineEl = container.createSpan({ cls: `diff-line ${type}` });
-            lineEl.textContent = text + '\n';
+        const body = container.createDiv({ cls: 'scv-diff-tab-body' });
+        renderDiffPanel(body, remoteContent, localContent);
+
+        let layout: DiffLayout = 'unified';
+        const applyLayout = (): void => {
+            body.className = `scv-diff-tab-body scv-diff-layout-${layout}`;
+            toggleSlot.empty();
+            renderDiffLayoutToggle(toggleSlot, layout, (next) => {
+                layout = next;
+                applyLayout();
+            });
         };
-
-        createLine('--- Remote', 'header');
-        createLine('+++ Local', 'header');
-        createLine('', 'unchanged');
-
-        const maxLines = Math.max(localLines.length, remoteLines.length);
-
-        for (let i = 0; i < maxLines; i++) {
-            const remoteLine = remoteLines[i];
-            const localLine = localLines[i];
-
-            if (remoteLine !== localLine) {
-                if (remoteLine !== undefined) {
-                    createLine(`- ${remoteLine}`, 'removed');
-                }
-                if (localLine !== undefined) {
-                    createLine(`+ ${localLine}`, 'added');
-                }
-            } else if (remoteLine !== undefined) {
-                createLine(`  ${remoteLine}`, 'unchanged');
-            }
-        }
+        applyLayout();
     }
 
     onClose() {

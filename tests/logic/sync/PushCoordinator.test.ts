@@ -53,9 +53,10 @@ function createHarness(overrides: {
     const commitBatch = vi.fn().mockImplementation(async (
         pushes: Array<{ path: string }>,
         moves: Array<{ path: string }>,
+        deletions: Array<{ path: string }>,
         result: PushResults,
     ) => {
-        const committed = [...pushes, ...moves];
+        const committed = [...pushes, ...moves, ...deletions];
         result.success += committed.length;
         result.syncedPaths.push(...committed.map(entry => ({ path: entry.path, sha: `sha:${entry.path}` })));
     });
@@ -144,6 +145,7 @@ describe('PushCoordinator', () => {
         expect(harness.commitBatch).toHaveBeenCalledWith(
             [],
             [expect.objectContaining({ path: 'notes/new.md', oldPath: 'notes/old.md', content: 'content:notes/new.md' })],
+            [],
             expect.any(Object),
         );
         expect(result).toMatchObject({ success: 1, conflicts: 0, skippedConflicts: 0 });

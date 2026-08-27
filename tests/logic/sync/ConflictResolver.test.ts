@@ -14,7 +14,7 @@ const conflict = (path: string, sha = 'reviewed'): BatchPushConflict => ({
 });
 
 function results(): PushResults {
-    return { success: 0, failed: 0, conflicts: 0, resolvedConflicts: 0, skippedConflicts: 0, errors: [], syncedPaths: [] };
+    return { success: 0, added: 0, updated: 0, failed: 0, conflicts: 0, resolvedConflicts: 0, skippedConflicts: 0, errors: [], syncedPaths: [] };
 }
 
 describe('ConflictResolver', () => {

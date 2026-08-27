@@ -6,25 +6,16 @@
 
 ## Completed This Session
 
-Implemented the local/CI Gitea split in commits `920adee`, `18de6e0`, and `b5884fc`. Local Gitea now uses a Docker-assigned loopback port, collision-safe container identity, and a unique temporary workdir. CI runs secretless Gitea on `ubuntu-latest`, keeps credentialed GitHub/GitLab E2E on self-hosted runners, and rejects fork PRs before allocating those runners.
+Implemented the local/CI Gitea split in commits `920adee`, `18de6e0`, and `b5884fc`. Local Gitea uses a Docker-assigned loopback port, collision-safe container identity, and a unique temporary workdir. CI runs secretless Gitea on `ubuntu-latest`, keeps credentialed GitHub/GitLab E2E on self-hosted runners, and rejects fork PRs before runner allocation.
 
-Real CI exposed and then verified two follow-up fixes: downstream CI needs `always()` to cross an intentionally skipped provider job after the successful aggregate gate, and manual/scheduled runs need independent concurrency identities so they cannot cancel a normal PR's required Gitea check.
+Conflict resolution merges the latest `claude/source-control-foundation` (`257b2a4`) into PR #140. The base branch's parallel lint/unit/build/provider validation and single `CI / Required Checks` release gate are retained; Gitea is added as a fifth parallel validation dependency. The base branch's new E2E tier support is retained alongside the random local workdir cleanup.
 
 ## Verification Evidence
 
-```text
-npx eslint . -> PASS, 0 errors
-npm run build -> PASS, including Obsidian 1.11 compatibility
-npx vitest run -> PASS, 56 files / 554 tests
-local Gitea E2E -> PASS, 3 files / 27 passed / 17 skipped
-two concurrent local Gitea runs -> PASS, distinct ports/workdirs, no leftovers
-bash -n + ShellCheck + actionlint + git diff --check -> PASS
-real targeted CI run 33048613679 -> PASS through Gitea, gate, shared CI, package, build/release
-PR #140 SonarCloud -> PASS
-```
+Pre-merge evidence remains green: targeted CI run 33048613679 and SonarCloud. Post-merge local verification is green: `./init.sh` passed lint/build/Obsidian 1.11 compatibility and 64 files / 723 tests; Gitea E2E passed 3 files / 30 tests with 18 tier-skipped; 8 workflow contract tests, bash syntax, ShellCheck, actionlint, and `git diff --check` all passed.
 
-The AGENTS-required Haiku verifier was unavailable, so verification ran locally and in real CI.
+The AGENTS-required Haiku verifier is unavailable, so verification runs locally and in real CI.
 
 ## Exact Next Step
 
-Review and merge PR #140. The full push run 33048499785 may still be finishing the unchanged GitHub/GitLab live-provider legs; its Gitea and SonarCloud checks are already green.
+Commit and push the merge, then confirm PR #140 is mergeable and `CI / Required Checks` passes.

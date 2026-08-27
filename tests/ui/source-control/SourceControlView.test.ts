@@ -1,8 +1,10 @@
-import { describe, expect, it, vi, beforeAll, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { Platform } from 'obsidian';
 import { SourceControlView, type SourceControlViewCallbacks } from '../../../src/ui/source-control/SourceControlView';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
-import { PushSelectionStore } from '../../../src/logic/source-control/PushSelectionStore';
+import { RefreshState } from '../../../src/logic/source-control/RefreshState';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import { setupObsidianDOM, createContainer } from '../setup-dom';
@@ -12,12 +14,21 @@ beforeAll(() => { setupObsidianDOM(); });
 function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCallbacks> = {}) {
     const repository = new ChangeRepository();
     repository.replace(changes);
-    const selection = new PushSelectionStore();
+    const selection = new SyncSelectionStore();
     const operations = new OperationState();
-    const viewModel = new SourceControlViewModel(repository, selection, operations);
-    const onPush = callbacks.onPush ?? vi.fn();
-    const view = new SourceControlView(viewModel, selection, { onPush, ...callbacks });
-    return { view, selection, operations, onPush };
+    const refreshState = new RefreshState();
+    const refreshSource = vi.fn().mockResolvedValue(undefined);
+    const viewModel = new SourceControlViewModel(repository, selection, operations, refreshSource, refreshState);
+    const onSync = callbacks.onSync ?? vi.fn();
+    const onRefresh = callbacks.onRefresh ?? vi.fn();
+    const view = new SourceControlView(viewModel, { onSync, onRefresh, ...callbacks }, () => ({
+        serviceName: 'GitHub',
+        branch: 'main',
+        vaultFolder: '',
+        lastSyncTime: 0,
+        lastCheckedAt: 0,
+    }));
+    return { view, selection, operations, refreshState, refreshSource, onSync, onRefresh };
 }
 
 describe('SourceControlView', () => {
@@ -28,7 +39,7 @@ describe('SourceControlView', () => {
     });
 
     describe('filter switching', () => {
-        it('renders "All" as a single flat tree (no section breakdown) and excludes synced', () => {
+        it('defaults to "Needs Sync" as a single flat tree (actionable only, synced excluded)', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
@@ -37,18 +48,34 @@ describe('SourceControlView', () => {
             ]);
             view.render(container);
 
-            // No section grouping under All — every filter renders one flat tree.
+            // No section grouping — every filter renders one flat tree.
             expect(container.querySelectorAll('.scv-section')).toHaveLength(0);
-            // Active-filter header reads "ALL".
-            expect(container.querySelector('.scv-active-filter-title')?.textContent).toBe('ALL');
-            expect(container.querySelector('.scv-active-filter-count')?.textContent).toBe('3');
-            // Actionable items only: synced is absent from All.
-            const kinds = Array.from(container.querySelectorAll('.scv-change-item')).map(el => el.getAttribute('class'));
-            expect(kinds.some(c => c?.includes('scv-kind-synced'))).toBe(false);
+            // The repository region carries a single role label "Repository
+            // Changes" (the active filter is shown by the chips above), with
+            // the actionable row count.
+            expect(container.querySelector('.scv-repository-title')?.textContent).toBe('Repository Changes');
+            expect(container.querySelector('.scv-repository-count')?.textContent).toBe('3');
+            // Actionable items only: synced is absent from Needs Sync.
+            expect(container.querySelector('.scv-kind-synced')).toBeNull();
             expect(container.querySelectorAll('.scv-change-item')).toHaveLength(3);
         });
 
-        it('does not render a SYNCED section under the All filter (status-grouping fix)', () => {
+        it('the "All" chip composes actionable + synced rows into one tree', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
+            ]);
+            view.render(container);
+
+            (container.querySelector('.scv-filter-option[data-filter="all"]') as HTMLButtonElement).click();
+
+            expect(container.querySelector('.scv-repository-title')?.textContent).toBe('Repository Changes');
+            expect(container.querySelector('.scv-repository-count')?.textContent).toBe('2');
+            expect(container.querySelectorAll('.scv-change-item')).toHaveLength(2);
+            expect(container.querySelector('.scv-kind-synced')).not.toBeNull();
+        });
+
+        it('does not render section grouping under any filter', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
@@ -67,7 +94,7 @@ describe('SourceControlView', () => {
             ]);
             view.render(container);
 
-            (container.querySelector('.scv-filter-option[data-filter="conflicts"]') as HTMLButtonElement).click();
+            (container.querySelector('.scv-filter-option[data-filter="conflict"]') as HTMLButtonElement).click();
 
             expect(container.querySelectorAll('.scv-section')).toHaveLength(0);
             expect(container.querySelectorAll('.scv-change-item')).toHaveLength(1);
@@ -78,59 +105,45 @@ describe('SourceControlView', () => {
             const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
             view.render(container);
 
-            (container.querySelector('.scv-filter-option[data-filter="conflicts"]') as HTMLButtonElement).click();
+            (container.querySelector('.scv-filter-option[data-filter="conflict"]') as HTMLButtonElement).click();
 
             expect(container.querySelector('.scv-empty')).not.toBeNull();
         });
     });
 
-    describe('show synced toggle', () => {
-        it('hides the synced chip and synced rows by default', () => {
+    describe('synced surfacing', () => {
+        it('renders a Synced chip', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
             ]);
             view.render(container);
 
-            expect(container.querySelector('.scv-filter-option[data-filter="synced"]')).toBeNull();
-            expect(view.getShowSynced()).toBe(false);
+            expect(container.querySelector('.scv-filter-option[data-filter="synced"]')).not.toBeNull();
         });
 
-        it('reveals the synced chip and renders synced rows when toggled on', () => {
+        it('excludes synced rows from the default Needs Sync view', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
             ]);
             view.render(container);
 
-            const checkbox = container.querySelector('.scv-filter-show-synced-checkbox') as HTMLInputElement;
-            checkbox.checked = true;
-            checkbox.dispatchEvent(new Event('change'));
-
-            expect(view.getShowSynced()).toBe(true);
-            const syncedChip = container.querySelector('.scv-filter-option[data-filter="synced"]');
-            expect(syncedChip).not.toBeNull();
-            expect(syncedChip?.querySelector('.scv-filter-count')?.textContent).toBe('1');
+            expect(container.querySelectorAll('.scv-change-item')).toHaveLength(1);
+            expect(container.querySelector('.scv-kind-synced')).toBeNull();
         });
 
-        it('falls back to All when synced is hidden while viewing the synced filter', () => {
+        it('shows only synced rows under the Synced chip', () => {
             const { view } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                 { id: toChangeId('c-2'), path: 'd.md', kind: 'synced' },
             ]);
             view.render(container);
 
-            // Opt in and switch to the synced filter.
-            const toggle = container.querySelector('.scv-filter-show-synced-checkbox') as HTMLInputElement;
-            toggle.checked = true;
-            toggle.dispatchEvent(new Event('change'));
             (container.querySelector('.scv-filter-option[data-filter="synced"]') as HTMLButtonElement).click();
-            expect(view.getFilter()).toBe('synced');
 
-            // Opt back out: filter snaps back to All.
-            toggle.checked = false;
-            toggle.dispatchEvent(new Event('change'));
-            expect(view.getFilter()).toBe('all');
+            expect(container.querySelectorAll('.scv-change-item')).toHaveLength(1);
+            expect(container.querySelector('.scv-kind-synced')).not.toBeNull();
         });
     });
 
@@ -148,9 +161,29 @@ describe('SourceControlView', () => {
             expect(pushLabel).toContain('1');
         });
 
-        it('deselecting removes the change from PushSelectionStore', () => {
+        it('keeps the Changes tree scroll position after toggling a checkbox triggers a rerender', () => {
+            const changes: SyncChange[] = Array.from({ length: 30 }, (_, index) => ({
+                id: toChangeId(`c-${index}`),
+                path: `note-${index}.md`,
+                kind: 'local-only' as const,
+            }));
+            const { view } = buildView(changes);
+            view.render(container);
+
+            const tree = container.querySelector('.scv-changes-tree') as HTMLElement;
+            tree.scrollTop = 120;
+
+            const checkbox = container.querySelector('.scv-change-select') as HTMLInputElement;
+            checkbox.checked = true;
+            checkbox.dispatchEvent(new Event('change'));
+
+            const rerenderedTree = container.querySelector('.scv-changes-tree') as HTMLElement;
+            expect(rerenderedTree.scrollTop).toBe(120);
+        });
+
+        it('deselecting removes the change from SyncSelectionStore', () => {
             const { view, selection } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
-            selection.includeForPush(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-1'));
             view.render(container);
 
             const checkbox = container.querySelector('.scv-change-select') as HTMLInputElement;
@@ -159,25 +192,228 @@ describe('SourceControlView', () => {
 
             expect(selection.isIncluded(toChangeId('c-1'))).toBe(false);
         });
+
+        it('renders the "Checked Changes" section only when at least one actionable change is selected', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'synced' },
+            ]);
+
+            view.render(container);
+            expect(container.querySelector('.scv-selected-section')).toBeNull();
+
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+            const section = container.querySelector('.scv-selected-section');
+            expect(section).not.toBeNull();
+            expect(section?.querySelector('.scv-selected-section-title')?.textContent).toBe('Sync Queue');
+            expect(section?.querySelector('.scv-selected-section-subtitle')?.textContent).toBe('1 files selected');
+        });
+
+        it('moves the selected change into Checked Changes (with a checked checkbox) and out of the lower tree', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'notes/a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'notes/b.md', kind: 'local-only' },
+            ]);
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            // The checked row lives in the Checked Changes section...
+            const section = container.querySelector('.scv-selected-section') as HTMLElement;
+            const queueRow = section.querySelector('.scv-change-item') as HTMLElement;
+            expect(queueRow?.getAttribute('data-change-id')).toBe('c-1');
+            expect(queueRow?.querySelector('.scv-change-name-text')?.textContent).toBe('a.md');
+            expect(queueRow?.querySelector('.scv-badge')?.textContent).toBe('A');
+            const queueCheckbox = queueRow?.querySelector('.scv-change-select') as HTMLInputElement;
+            expect(queueCheckbox.checked).toBe(true);
+
+            // ...and is NOT duplicated in the lower tree, which only keeps the
+            // remaining unchecked change.
+            const treeRows = container.querySelectorAll('.scv-body > .scv-change-item, .scv-tree-children .scv-change-item');
+            const treeIds = Array.from(treeRows).map(el => el.getAttribute('data-change-id'));
+            expect(treeIds).not.toContain('c-1');
+            expect(treeIds).toContain('c-2');
+        });
+
+        it('unchecks a row in Checked Changes to move it back down into the tree', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'notes/a.md', kind: 'local-only' },
+            ]);
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            const queueCheckbox = container.querySelector('.scv-selected-section .scv-change-select') as HTMLInputElement;
+            expect(queueCheckbox.checked).toBe(true);
+            queueCheckbox.checked = false;
+            queueCheckbox.dispatchEvent(new Event('change'));
+
+            expect(selection.isIncluded(toChangeId('c-1'))).toBe(false);
+            // The Checked Changes section is gone; the change is back in the tree.
+            expect(container.querySelector('.scv-selected-section')).toBeNull();
+            expect(container.querySelector('.scv-change-item[data-change-id="c-1"]')).not.toBeNull();
+        });
+
+        it('clears all selected changes at once via the Clear button in the section header', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+                { id: toChangeId('c-3'), path: 'c.md', kind: 'remote-only' },
+            ]);
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
+            selection.selectForSync(toChangeId('c-3'));
+            view.render(container);
+
+            const clearBtn = container.querySelector('.scv-selected-section-clear') as HTMLButtonElement;
+            expect(clearBtn).not.toBeNull();
+            clearBtn.click();
+
+            expect(selection.isIncluded(toChangeId('c-1'))).toBe(false);
+            expect(selection.isIncluded(toChangeId('c-2'))).toBe(false);
+            expect(selection.isIncluded(toChangeId('c-3'))).toBe(false);
+            expect(container.querySelector('.scv-selected-section')).toBeNull();
+        });
+
+        it('excludes synced changes from the Sync Queue count even when selected', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'synced' },
+            ]);
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
+            view.render(container);
+
+            // Only the actionable local-only change makes it into the queue;
+            // the synced selection is dropped from the queue's count.
+            expect(container.querySelector('.scv-selected-section-subtitle')?.textContent).toBe('1 files selected');
+        });
+    });
+
+    describe('collapsible sections', () => {
+        it('collapses the Checked Changes section when its header is clicked, hiding its rows', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+            ]);
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            const header = container.querySelector('.scv-selected-section-header') as HTMLElement;
+            expect(header.getAttribute('aria-expanded')).toBe('true');
+            expect(container.querySelector('.scv-selected-section .scv-change-item')).not.toBeNull();
+
+            header.click();
+
+            expect(container.querySelector('.scv-selected-section-header')?.getAttribute('aria-expanded')).toBe('false');
+            expect(container.querySelector('.scv-selected-section .scv-change-item')).toBeNull();
+            // The selection is unchanged — collapsing is presentation only.
+            expect(selection.isIncluded(toChangeId('c-1'))).toBe(true);
+        });
+
+        it('collapses the Repository Changes tree when its header is clicked, hiding the tree', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+            ]);
+            view.render(container);
+
+            const header = container.querySelector('.scv-repository-header') as HTMLElement;
+            expect(header.getAttribute('aria-expanded')).toBe('true');
+            expect(container.querySelectorAll('.scv-change-item').length).toBeGreaterThan(0);
+
+            header.click();
+
+            expect(container.querySelector('.scv-repository-header')?.getAttribute('aria-expanded')).toBe('false');
+            expect(container.querySelector('.scv-change-item')).toBeNull();
+        });
+
+        it('switching the view toggle to List does not collapse the region (toggle clicks stop propagation)', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+            ]);
+            view.render(container);
+
+            const listBtn = container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement;
+            listBtn.click();
+
+            // Region stays expanded and now renders the flat list variant.
+            expect(container.querySelector('.scv-repository-header')?.getAttribute('aria-expanded')).toBe('true');
+            expect(container.querySelector('.scv-change-list')).not.toBeNull();
+            expect(container.querySelector('.scv-view-toggle-btn[data-view="list"]')?.classList.contains('is-active')).toBe(true);
+            expect(container.querySelector('.scv-view-toggle-btn[data-view="tree"]')?.classList.contains('is-active')).toBe(false);
+        });
+    });
+
+    describe('view mode (Tree/List)', () => {
+        it('defaults to the Tree view (folder nesting, no path suffix)', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'blog/en/a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'blog/en/b.md', kind: 'local-only' },
+            ]);
+            view.render(container);
+
+            expect(container.querySelector('.scv-tree-folder')).not.toBeNull();
+            expect(container.querySelector('.scv-change-list')).toBeNull();
+            expect(container.querySelector('.scv-change-path')).toBeNull();
+            expect(container.querySelector('.scv-view-toggle-btn[data-view="tree"]')?.classList.contains('is-active')).toBe(true);
+        });
+
+        it('List view renders a flat list with the folder path as a suffix, no folder rows', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'blog/en/a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'archive/b.md', kind: 'local-only' },
+            ]);
+            view.render(container);
+
+            (container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement).click();
+
+            expect(container.querySelector('.scv-change-list')).not.toBeNull();
+            expect(container.querySelector('.scv-tree-folder')).toBeNull();
+            // Each row carries its folder path suffix for disambiguation.
+            const paths = Array.from(container.querySelectorAll('.scv-change-item-list .scv-change-path')).map(el => el.textContent);
+            expect(paths).toEqual(expect.arrayContaining(['blog/en', 'archive']));
+        });
+
+        it('persists the view mode across rerenders', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+            ]);
+            view.render(container);
+            (container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement).click();
+
+            view.render(container);
+
+            expect(container.querySelector('.scv-change-list')).not.toBeNull();
+        });
+
+        it('omits the path suffix for root-level files in List view', () => {
+            const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            view.render(container);
+            (container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement).click();
+
+            expect(container.querySelector('.scv-change-item-list')).not.toBeNull();
+            expect(container.querySelector('.scv-change-path')).toBeNull();
+        });
     });
 
     describe('push action', () => {
-        it('calls onPush with every selected ChangeId, without touching the Git provider itself', () => {
-            const onPush = vi.fn();
+        it('calls onSync with every selected ChangeId, without touching the Git provider itself', () => {
+            const onSync = vi.fn();
             const { view, selection } = buildView(
                 [
                     { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
                     { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
                 ],
-                { onPush },
+                { onSync },
             );
-            selection.includeForPush(toChangeId('c-1'));
-            selection.includeForPush(toChangeId('c-2'));
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
             view.render(container);
 
             (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
-            expect(onPush).toHaveBeenCalledWith([toChangeId('c-1'), toChangeId('c-2')]);
+            expect(onSync).toHaveBeenCalledWith([toChangeId('c-1'), toChangeId('c-2')]);
         });
 
         it('disables the push button when nothing is selected', () => {
@@ -185,6 +421,111 @@ describe('SourceControlView', () => {
             view.render(container);
 
             expect((container.querySelector('.scv-push-btn') as HTMLButtonElement).disabled).toBe(true);
+        });
+    });
+
+    describe('sync routing (one intent for the whole queue)', () => {
+        it('hands a mixed Sync Queue to onSync as one call with every selected id, regardless of kind', () => {
+            const onSync = vi.fn();
+            const { view, selection } = buildView(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
+                ],
+                { onSync },
+            );
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
+            view.render(container);
+
+            (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
+
+            expect(onSync).toHaveBeenCalledOnce();
+            expect(onSync).toHaveBeenCalledWith([toChangeId('c-1'), toChangeId('c-2')]);
+        });
+
+        it('hands a download-only Sync Queue to onSync too', () => {
+            const onSync = vi.fn();
+            const { view, selection } = buildView(
+                [{ id: toChangeId('c-1'), path: 'remote.md', kind: 'remote-only' }],
+                { onSync },
+            );
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
+
+            expect(onSync).toHaveBeenCalledWith([toChangeId('c-1')]);
+        });
+
+        it('hands a local-deleted change in the Sync Queue to onSync, not a separate delete callback', () => {
+            const onSync = vi.fn();
+            const { view, selection } = buildView(
+                [{ id: toChangeId('c-1'), path: 'gone.md', kind: 'local-deleted' }],
+                { onSync },
+            );
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
+
+            expect(onSync).toHaveBeenCalledWith([toChangeId('c-1')]);
+        });
+
+        it('shows Upload / Download group labels in the Sync Queue when the queue is mixed', () => {
+            const { view, selection } = buildView(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
+                ],
+            );
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
+            view.render(container);
+
+            const labels = Array.from(container.querySelectorAll('.scv-queue-group-label')).map(el => el.textContent);
+            expect(labels).toEqual(['Upload', 'Download']);
+        });
+
+        it('omits group labels when the Sync Queue is a single operation', () => {
+            const { view, selection } = buildView(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+                ],
+            );
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
+            view.render(container);
+
+            expect(container.querySelector('.scv-queue-group-label')).toBeNull();
+        });
+    });
+
+    describe('inline download action', () => {
+        it('renders a Download button on a remote-only tree row and routes it to onPull', () => {
+            const onPull = vi.fn();
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'remote.md', kind: 'remote-only' }],
+                { onPull },
+            );
+            view.render(container);
+
+            const btn = container.querySelector('.scv-changes-tree .scv-change-download') as HTMLButtonElement;
+            expect(btn).toBeTruthy();
+            btn.click();
+
+            expect(onPull).toHaveBeenCalledWith([toChangeId('c-1')]);
+        });
+
+        it('does not render a Download button on a local-only row', () => {
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'local.md', kind: 'local-only' }],
+                { onPull: vi.fn() },
+            );
+            view.render(container);
+
+            expect(container.querySelector('.scv-change-download')).toBeNull();
         });
     });
 
@@ -198,6 +539,14 @@ describe('SourceControlView', () => {
             expect(indicator?.classList.contains('scv-op-running')).toBe(true);
         });
 
+        it('renders a text label alongside the operation indicator', () => {
+            const { view, operations } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            operations.start(toChangeId('c-1'));
+            view.render(container);
+
+            expect(container.querySelector('.scv-op-indicator .scv-op-label')?.textContent).toBe('Syncing');
+        });
+
         it('shows no indicator once the operation is idle again', () => {
             const { view, operations } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
             operations.start(toChangeId('c-1'));
@@ -208,8 +557,77 @@ describe('SourceControlView', () => {
         });
     });
 
+    describe('refresh', () => {
+        it('renders the refresh button in the idle state by default', () => {
+            const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            view.render(container);
+
+            const btn = container.querySelector('.scv-refresh-btn');
+            expect(btn).not.toBeNull();
+            expect(btn?.classList.contains('is-idle')).toBe(true);
+        });
+
+        it('renders the "Refreshing…" label while loading', () => {
+            const { view, refreshState } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            view.render(container);
+            refreshState.start();
+            view.render(container);
+
+            const btn = container.querySelector('.scv-refresh-btn');
+            expect(btn?.classList.contains('is-loading')).toBe(true);
+            expect(btn?.querySelector('.scv-refresh-btn-label')?.textContent).toBe('Refreshing…');
+            expect((btn as HTMLButtonElement).disabled).toBe(true);
+        });
+
+        it('renders the "Refresh failed" label in the failed state', () => {
+            const { view, refreshState } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            view.render(container);
+            refreshState.fail();
+            view.render(container);
+
+            const btn = container.querySelector('.scv-refresh-btn');
+            expect(btn?.classList.contains('is-failed')).toBe(true);
+            expect(btn?.querySelector('.scv-refresh-btn-label')?.textContent).toBe('Refresh failed');
+        });
+
+        it('calls onRefresh when the refresh button is clicked', () => {
+            const onRefresh = vi.fn();
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { onRefresh },
+            );
+            view.render(container);
+
+            (container.querySelector('.scv-refresh-btn') as HTMLButtonElement).click();
+
+            expect(onRefresh).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not call onRefresh while a refresh is already loading', () => {
+            const onRefresh = vi.fn();
+            const { view, refreshState } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { onRefresh },
+            );
+            view.render(container);
+            refreshState.start();
+            view.render(container);
+
+            (container.querySelector('.scv-refresh-btn') as HTMLButtonElement).click();
+
+            expect(onRefresh).not.toHaveBeenCalled();
+        });
+    });
+
     describe('diff selection', () => {
-        it('loads and renders diff content for the clicked change', async () => {
+        // Desktop has no inline diff pane -- clicking a change only notifies
+        // onOpenDiff, and the host (SourceControlItemView) opens a main-area
+        // tab. Only the mobile full-screen detail view still loads/renders
+        // diff content inside SourceControlView itself.
+        afterEach(() => { Platform.isMobile = false; });
+
+        it('loads and renders diff content in the mobile detail view for the clicked change', async () => {
+            Platform.isMobile = true;
             const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
             const { view } = buildView(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
@@ -222,8 +640,19 @@ describe('SourceControlView', () => {
             await Promise.resolve();
 
             expect(loadDiffContent).toHaveBeenCalledWith(expect.objectContaining({ id: toChangeId('c-1') }));
+            expect(container.querySelector('.scv-detail-diff')).not.toBeNull();
             // Reuses the existing diff panel renderer (Phase 3 spec: don't rewrite diff UI), which uses its own 'ssv-' class prefix.
             expect(container.querySelector('.ssv-diff-split')).not.toBeNull();
+        });
+
+        it('does not render an inline diff pane on desktop -- only notifies onOpenDiff', () => {
+            const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }]);
+            view.render(container);
+
+            (container.querySelector('.scv-change-item') as HTMLElement).click();
+
+            expect(container.querySelector('.scv-diff')).toBeNull();
+            expect(container.querySelector('.scv-detail')).toBeNull();
         });
 
         it('notifies onOpenDiff with the selected item', () => {
@@ -237,6 +666,45 @@ describe('SourceControlView', () => {
             (container.querySelector('.scv-change-item') as HTMLElement).click();
 
             expect(onOpenDiff).toHaveBeenCalledWith(expect.objectContaining({ id: toChangeId('c-1'), path: 'a.md' }));
+        });
+
+        describe('mobile diff layout toggle', () => {
+            it('defaults to the unified (single-column) layout, with the split diff hidden', async () => {
+                Platform.isMobile = true;
+                const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
+                const { view } = buildView(
+                    [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                    { loadDiffContent },
+                );
+                view.render(container);
+                (container.querySelector('.scv-change-item') as HTMLElement).click();
+                await Promise.resolve();
+                await Promise.resolve();
+
+                const diffContainer = container.querySelector('.scv-detail-diff');
+                expect(diffContainer?.classList.contains('scv-diff-layout-unified')).toBe(true);
+            });
+
+            it('switches to the split layout when the toggle button is clicked, never showing both at once', async () => {
+                Platform.isMobile = true;
+                const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
+                const { view } = buildView(
+                    [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                    { loadDiffContent },
+                );
+                view.render(container);
+                (container.querySelector('.scv-change-item') as HTMLElement).click();
+                await Promise.resolve();
+                await Promise.resolve();
+
+                (container.querySelector('.scv-diff-layout-toggle') as HTMLButtonElement).click();
+                await Promise.resolve();
+                await Promise.resolve();
+
+                const diffContainer = container.querySelector('.scv-detail-diff');
+                expect(diffContainer?.classList.contains('scv-diff-layout-split')).toBe(true);
+                expect(diffContainer?.classList.contains('scv-diff-layout-unified')).toBe(false);
+            });
         });
     });
 
@@ -258,6 +726,221 @@ describe('SourceControlView', () => {
 
             expect(renamedView.getSelectedChangeId()).toBe(toChangeId('c-1'));
             expect(container.querySelector('.scv-change-rename-from')?.textContent).toBe('old.md');
+        });
+    });
+
+    describe('diff stat caching', () => {
+        async function flush(): Promise<void> {
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+        }
+
+        it('eager-loads local-only stats on render and shows them in the row', async () => {
+            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 5, deletions: 0 });
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { loadDiffStat },
+            );
+            view.render(container);
+            await flush();
+
+            expect(loadDiffStat).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local-only' }));
+            expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+5');
+        });
+
+        it('does not re-fetch a stat that is already cached on rerender', async () => {
+            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 2, deletions: 0 });
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { loadDiffStat },
+            );
+            view.render(container);
+            await flush();
+            expect(loadDiffStat).toHaveBeenCalledTimes(1);
+
+            view.render(container);
+            await flush();
+            // Eager load skips items already in the cache, so no second fetch.
+            expect(loadDiffStat).toHaveBeenCalledTimes(1);
+        });
+
+        it('clears the diff stat cache on refresh so stats re-fetch', async () => {
+            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 5, deletions: 0 });
+            const onRefresh = vi.fn();
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { loadDiffStat, onRefresh },
+            );
+            view.render(container);
+            await flush();
+            expect(loadDiffStat).toHaveBeenCalledTimes(1);
+
+            (container.querySelector('.scv-refresh-btn') as HTMLButtonElement).click();
+            expect(onRefresh).toHaveBeenCalledTimes(1);
+            // The refresh handler clears the cache; a subsequent render re-eager-loads.
+            view.render(container);
+            await flush();
+            expect(loadDiffStat).toHaveBeenCalledTimes(2);
+        });
+
+        it('lazily loads a two-sided change stat on open and caches it', async () => {
+            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 1, deletions: 4 });
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                { loadDiffStat },
+            );
+            view.render(container);
+            await flush();
+            // Two-sided changes are not eager-loaded.
+            expect(loadDiffStat).not.toHaveBeenCalled();
+            expect(container.querySelector('.scv-diff-stat')).toBeNull();
+
+            (container.querySelector('.scv-change-item') as HTMLElement).click();
+            await flush();
+
+            expect(loadDiffStat).toHaveBeenCalledTimes(1);
+            expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+1 -4');
+        });
+
+        it('eager-loads stats for selected changes of any kind so the Selected queue previews them', async () => {
+            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 2, deletions: 1 });
+            const { view, selection } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                { loadDiffStat },
+            );
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+            await flush();
+
+            // A two-sided change in the queue is eager-loaded (unlike tree-only rows).
+            expect(loadDiffStat).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local-modified' }));
+            expect(container.querySelector('.scv-selected-section .scv-change-item .scv-diff-stat')?.textContent).toBe('+2 -1');
+        });
+    });
+
+    describe('mobile layout', () => {
+        afterEach(() => { Platform.isMobile = false; });
+
+        it('renders a filter dropdown instead of chips on mobile', () => {
+            Platform.isMobile = true;
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'remote-only' },
+            ]);
+            view.render(container);
+
+            expect(container.querySelector('.scv-filter-dropdown')).not.toBeNull();
+            expect(container.querySelectorAll('.scv-filter-option')).toHaveLength(0);
+        });
+
+        it('starts the Sync Queue collapsed to a header bar on mobile, expanding on tap', () => {
+            Platform.isMobile = true;
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'local-only' },
+            ]);
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            // Collapsed by default: header present, but no rows / subtitle.
+            const header = container.querySelector('.scv-selected-section-header') as HTMLElement;
+            expect(header).not.toBeNull();
+            expect(header.getAttribute('aria-expanded')).toBe('false');
+            expect(container.querySelector('.scv-selected-section .scv-change-item')).toBeNull();
+            expect(container.querySelector('.scv-selected-section-subtitle')).toBeNull();
+
+            // Tapping the header expands the queue.
+            header.click();
+            expect(container.querySelector('.scv-selected-section-header')?.getAttribute('aria-expanded')).toBe('true');
+            expect(container.querySelector('.scv-selected-section .scv-change-item')).not.toBeNull();
+            expect(container.querySelector('.scv-selected-section-subtitle')?.textContent).toBe('1 files selected');
+        });
+
+        it('hides the header push button and shows a sticky bottom sync bar on mobile when there is a selection', () => {
+            Platform.isMobile = true;
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+            ]);
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            expect(container.querySelector('.scv-push-btn')).toBeNull();
+            expect(container.querySelector('.scv-mobile-sync-bar')).not.toBeNull();
+            expect(container.querySelector('.scv-mobile-sync-label')?.textContent).toBe('1 files selected');
+        });
+
+        it('omits the mobile bottom sync bar when nothing is selected for push', () => {
+            Platform.isMobile = true;
+            const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            view.render(container);
+
+            expect(container.querySelector('.scv-mobile-sync-bar')).toBeNull();
+        });
+
+        it('triggers onSync from the mobile bottom sync bar button', () => {
+            Platform.isMobile = true;
+            const onSync = vi.fn();
+            const { view, selection } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { onSync },
+            );
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            (container.querySelector('.scv-mobile-sync-btn') as HTMLButtonElement).click();
+
+            expect(onSync).toHaveBeenCalledWith([toChangeId('c-1')]);
+        });
+    });
+
+    describe('header info strip', () => {
+        function buildViewWithInfo(lastCheckedAt: number) {
+            const repository = new ChangeRepository();
+            repository.replace([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            const refreshState = new RefreshState();
+            const viewModel = new SourceControlViewModel(
+                repository,
+                new SyncSelectionStore(),
+                new OperationState(),
+                vi.fn().mockResolvedValue(undefined),
+                refreshState,
+            );
+            const view = new SourceControlView(
+                viewModel,
+                { onSync: vi.fn(), onRefresh: vi.fn() },
+                () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '', lastSyncTime: 0, lastCheckedAt }),
+            );
+            return { view, refreshState };
+        }
+
+        it('omits the "Last checked" line before the first refresh (lastCheckedAt = 0)', () => {
+            const { view } = buildViewWithInfo(0);
+            view.render(container);
+
+            const infoTimes = container.querySelectorAll('.scv-info-time');
+            // Only the "Never synced" line is present; no "Last checked" line.
+            expect(infoTimes).toHaveLength(1);
+            expect(infoTimes[0]?.textContent).toBe('Never synced');
+        });
+
+        it('shows "Last checked: just now" when the last refresh was within a minute', () => {
+            const { view } = buildViewWithInfo(Date.now());
+            view.render(container);
+
+            const infoTimes = container.querySelectorAll('.scv-info-time');
+            expect(infoTimes).toHaveLength(2);
+            expect(infoTimes[1]?.textContent).toBe('Last checked: just now');
+        });
+
+        it('shows "Last checked: <time>" when the last refresh was over a minute ago', () => {
+            const { view } = buildViewWithInfo(Date.now() - 120_000);
+            view.render(container);
+
+            const infoTimes = container.querySelectorAll('.scv-info-time');
+            expect(infoTimes).toHaveLength(2);
+            expect(infoTimes[1]?.textContent).toContain('Last checked:');
+            expect(infoTimes[1]?.textContent).not.toBe('Last checked: just now');
         });
     });
 });

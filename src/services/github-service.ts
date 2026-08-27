@@ -1,4 +1,4 @@
-import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchMoveItem } from './git-service-interface';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchCommitPlan } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitHubContentResponse, GitHubTreeResponse, GIT_SYMLINK_MODE, BLOB_CREATE_CONCURRENCY } from './git-service-base';
 import { PushTimingCollector, PushTimingHandler, PushTimingRecord } from './push-timing';
 
@@ -246,21 +246,27 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
      * in the same commit, via the same additions/deletions shape deleteBatch
      * already uses. GitHub's diff view then detects it as a rename on its own
      * (same blob content, one add + one delete) — no separate "move" concept
-     * needed in the mutation itself.
+     * needed in the mutation itself. Plain deletions ride in the same
+     * `deletions` array as move sources, so a Sync Plan mixing modifications
+     * and removals still lands as one commit.
      */
-    async commitBatch(additions: BatchPushItem[], moves: BatchMoveItem[], branch: string, message: string): Promise<BatchPushResult[]> {
-        if (additions.length === 0 && moves.length === 0) return [];
+    async commitBatch(plan: BatchCommitPlan, branch: string, message: string): Promise<BatchPushResult[]> {
+        const { writes, moves, deletions } = plan;
+        if (writes.length === 0 && moves.length === 0 && deletions.length === 0) return [];
 
         const allAdditions = [
-            ...additions.map(item => ({ path: this.getFullPath(item.path), contents: this.encodeContent(item.content) })),
+            ...writes.map(item => ({ path: this.getFullPath(item.path), contents: this.encodeContent(item.content) })),
             ...moves.map(item => ({ path: this.getFullPath(item.newPath), contents: this.encodeContent(item.content) })),
         ];
-        const deletions = moves.map(item => ({ path: this.getFullPath(item.oldPath) }));
+        const allDeletions = [
+            ...moves.map(item => ({ path: this.getFullPath(item.oldPath) })),
+            ...deletions.map(path => ({ path: this.getFullPath(path) })),
+        ];
 
-        await this.commitOnBranch(branch, message, { additions: allAdditions, deletions });
+        await this.commitOnBranch(branch, message, { additions: allAdditions, deletions: allDeletions });
 
         return [
-            ...additions.map(item => ({ path: item.path })),
+            ...writes.map(item => ({ path: item.path })),
             ...moves.map(item => ({ path: item.newPath })),
         ];
     }

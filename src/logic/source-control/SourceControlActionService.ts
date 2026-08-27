@@ -1,4 +1,7 @@
+import type { PlannedPushBatch } from '../sync/PushCoordinator';
 import type { SyncWorkspace } from '../sync/SyncWorkspace';
+import { isSyncPlanEmpty, type DeleteQueueEntry, type PushResults, type SyncPlan, type SyncPlanEntry } from '../sync/types';
+import { defaultSyncAction } from './ChangeActionPolicy';
 import type { ChangeRepository } from './ChangeRepository';
 import type { OperationState } from './OperationState';
 import type { SourceControlItem } from './SourceControlViewModel';
@@ -82,6 +85,109 @@ export class SourceControlActionService {
         }
     }
 
+    /**
+     * Syncs one or more changes as a single Sync Plan — the Sync Queue
+     * button's only entry point. Splits `changeIds` by
+     * {@link defaultSyncAction} into push/delete-remote/pull buckets, plans
+     * each without mutating anything, merges the result into one `SyncPlan`,
+     * shows exactly one confirm, and — if confirmed — commits the whole
+     * remote mutation set (pushes + moves + deletions) through
+     * `SyncWorkspace.commitResolvedBatch` as one provider call, then applies
+     * the pull bucket (zero-commit, local-only) separately. This is the fix
+     * for the "one Sync produces two remote commits" bug: previously the
+     * Sync Queue routed push/pull/delete-remote through three independent
+     * `SyncWorkspace` calls, each committing on its own.
+     */
+    async sync(changeIds: readonly ChangeId[]): Promise<void> {
+        const targets = this.resolve(changeIds);
+        if (targets.length === 0) return;
+
+        const pushTargets: SyncChange[] = [];
+        const deleteTargets: SyncChange[] = [];
+        const pullTargets: SyncChange[] = [];
+        for (const target of targets) {
+            const action = defaultSyncAction(target.kind);
+            if (action === 'pull') pullTargets.push(target);
+            else if (action === 'delete-remote') deleteTargets.push(target);
+            else pushTargets.push(target);
+        }
+
+        const planned = pushTargets.length > 0
+            ? await this.workspace.planPush(pushTargets.map(target => target.path))
+            : SourceControlActionService.emptyPlannedBatch();
+        // A cancelled batch-conflict resolution is a separate interactive
+        // step that happens before the merged plan is even shown; honor it
+        // the same way pushFiles() does, without touching anything.
+        if (planned.cancelled) return;
+
+        const pullPlan = pullTargets.length > 0
+            ? await this.workspace.planPull(pullTargets.map(target => target.path))
+            : SourceControlActionService.emptyPlan();
+
+        const deletions: SyncPlanEntry[] = deleteTargets.map(target => ({ path: target.path, name: basename(target.path) }));
+        const mergedPlan: SyncPlan = {
+            additions: planned.reviewPlan.additions,
+            modifications: planned.reviewPlan.modifications,
+            moves: planned.reviewPlan.moves,
+            deletions,
+            downloads: [...pullPlan.additions, ...pullPlan.modifications],
+            acceptedRemote: planned.reviewPlan.acceptedRemote,
+            skippedConflicts: planned.reviewPlan.skippedConflicts,
+        };
+
+        if (!isSyncPlanEmpty(mergedPlan) && !await this.workspace.confirmPlan(mergedPlan, 'sync')) return;
+
+        this.startAll(targets);
+        try {
+            if (planned.pushes.length > 0 || planned.moves.length > 0 || deleteTargets.length > 0) {
+                const deleteEntries: DeleteQueueEntry[] = deleteTargets.map(target => ({
+                    path: target.path,
+                    name: basename(target.path),
+                    repoPath: this.workspace.toRepoPath(target.path),
+                }));
+                const results: PushResults = {
+                    success: planned.immediate.success,
+                    added: 0,
+                    updated: planned.immediate.updated,
+                    failed: planned.immediate.failed,
+                    conflicts: 0,
+                    resolvedConflicts: 0,
+                    skippedConflicts: 0,
+                    errors: [...planned.immediate.errors],
+                    syncedPaths: [...planned.immediate.syncedPaths],
+                };
+                await this.workspace.commitResolvedBatch(planned.pushes, planned.moves, deleteEntries, planned.keepRemote, planned.keepLocal, results);
+                const failed = new Set(results.errors.map(error => error.file));
+                this.finishAll([...pushTargets, ...deleteTargets], path => (failed.has(path) ? 'failed' : 'success'));
+            }
+            if (pullTargets.length > 0) {
+                const pullResults = await this.workspace.applyPull(pullTargets.map(target => target.path));
+                const failed = new Set(pullResults.errors.map(error => error.file));
+                this.finishAll(pullTargets, path => (failed.has(path) ? 'failed' : 'success'));
+            }
+        } catch {
+            this.failAll(targets);
+        }
+    }
+
+    private static emptyPlannedBatch(): PlannedPushBatch {
+        return {
+            reviewPlan: { additions: [], modifications: [], deletions: [], moves: [] },
+            pushes: [],
+            moves: [],
+            keepRemote: [],
+            keepLocal: [],
+            skippedConflicts: 0,
+            conflictedPaths: [],
+            cancelled: false,
+            immediate: { success: 0, updated: 0, failed: 0, errors: [], syncedPaths: [] },
+        };
+    }
+
+    private static emptyPlan(): SyncPlan {
+        return { additions: [], modifications: [], deletions: [], moves: [] };
+    }
+
     /** Deletes one or more changes from the local vault only. No batch primitive exists on `SyncWorkspace`, so each runs independently and one failure doesn't block the rest. */
     async deleteLocal(changeIds: readonly ChangeId[]): Promise<void> {
         const targets = this.resolve(changeIds);
@@ -155,4 +261,10 @@ export class SourceControlActionService {
     private failAll(targets: readonly SyncChange[]): void {
         for (const target of targets) this.operations.fail(target.id);
     }
+}
+
+/** Last path segment of a change path, for the Sync Plan's deletions section. */
+function basename(path: string): string {
+    const slash = path.lastIndexOf('/');
+    return slash === -1 ? path : path.slice(slash + 1);
 }

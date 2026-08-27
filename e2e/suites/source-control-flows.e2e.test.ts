@@ -14,9 +14,12 @@ vi.mock('../../src/ui/BatchConflictResolutionModal');
 
 // Provider matrix: Core scenarios run on every provider; Extended scenarios
 // (rename chains, unicode, batch-scale, etc.) exercise SyncManager/model
-// behavior that's provider-agnostic, so they run on GitHub only to keep
-// real-API CI fast and stable. Stress (1000-file) is opt-in via E2E_STRESS=1.
+// behavior that's provider-agnostic. PR/branch CI runs the core tier; GitHub
+// main, schedule, manual, and local runs use the full tier. Stress (1000-file)
+// remains opt-in via E2E_STRESS=1.
 const isGitHub = process.env.E2E_PROVIDER === 'github';
+const e2eTier = process.env.E2E_TIER ?? 'full';
+const runExtended = isGitHub && e2eTier !== 'core';
 const isStress = process.env.E2E_STRESS === '1';
 
 describe('Source Control Flows E2E', () => {
@@ -86,7 +89,7 @@ describe('Source Control Flows E2E', () => {
 
         // Extended: nested move + rename chain (SyncManager/model behavior,
         // provider-agnostic) — GitHub only.
-        it.skipIf(!isGitHub)('moves files across nested directories in one commit', async () => {
+        it.skipIf(!runExtended)('moves files across nested directories in one commit', async () => {
             const s = scenario();
             const oldFlat = path('nested-move/folder/a.md');
             const oldNested = path('nested-move/folder/nested/b.md');
@@ -112,7 +115,7 @@ describe('Source Control Flows E2E', () => {
             await s.expectSingleCommitSince(headBefore);
         });
 
-        it.skipIf(!isGitHub)('collapses a rename chain (A->B->C) into a single move of the original path', async () => {
+        it.skipIf(!runExtended)('collapses a rename chain (A->B->C) into a single move of the original path', async () => {
             const s = scenario();
             const a = path('rename-chain/a.md');
             const b = path('rename-chain/b.md');
@@ -248,7 +251,7 @@ describe('Source Control Flows E2E', () => {
             await s.expectSingleCommitSince(headBefore);
         });
 
-        it.skipIf(!isGitHub)('overwrites a remotely-created file with local content on a no-baseline add/add (current contract)', async () => {
+        it.skipIf(!runExtended)('overwrites a remotely-created file with local content on a no-baseline add/add (current contract)', async () => {
             const s = scenario();
             const p = path('conflict-add-add/a.md');
             await s.seedRemote(p, 'remote');
@@ -343,7 +346,7 @@ describe('Source Control Flows E2E', () => {
     // Phase 5 — Mixed batch operations
     // ------------------------------------------------------------------
     describe('mixed batch operations', () => {
-        it.skipIf(!isGitHub)('pushes a create + modify + rename in one commit', async () => {
+        it.skipIf(!runExtended)('pushes a create + modify + rename in one commit', async () => {
             const s = scenario();
             const create = path('mixed-cmr/create.md');
             const modify = path('mixed-cmr/modify.md');
@@ -436,7 +439,7 @@ describe('Source Control Flows E2E', () => {
     // ------------------------------------------------------------------
     // Phase 6 — Source Control selection workflows
     //
-    // Drives the real SourceControlActionService + PushSelectionStore +
+    // Drives the real SourceControlActionService + SyncSelectionStore +
     // ChangeRepository on top of the real SyncManager (via the thin
     // BoundarySyncWorkspace), so the ChangeId -> path -> workspace.push
     // selection filter is the real production code, not a mock.
@@ -458,8 +461,8 @@ describe('Source Control Flows E2E', () => {
             const cb = change(b, 'local-modified');
             const cc = change(c, 'local-modified');
             const { selection, actionService, operations } = s.selectionStack([ca, cb, cc]);
-            selection.includeForPush(ca.id);
-            selection.includeForPush(cc.id);
+            selection.selectForSync(ca.id);
+            selection.selectForSync(cc.id);
 
             const headBefore = await s.head();
             await actionService.push([ca.id, cc.id]);
@@ -478,7 +481,7 @@ describe('Source Control Flows E2E', () => {
             expect(selection.isIncluded(cc.id)).toBe(true);
         });
 
-        it.skipIf(!isGitHub)('pushes a subset then the remaining subset as two separate commits', async () => {
+        it.skipIf(!runExtended)('pushes a subset then the remaining subset as two separate commits', async () => {
             const s = scenario();
             const a = path('subset-then-rest/a.md');
             const b = path('subset-then-rest/b.md');
@@ -496,13 +499,13 @@ describe('Source Control Flows E2E', () => {
             const { selection, actionService, operations } = s.selectionStack([ca, cb, cc]);
 
             const head0 = await s.head();
-            selection.includeForPush(ca.id);
-            selection.includeForPush(cc.id);
+            selection.selectForSync(ca.id);
+            selection.selectForSync(cc.id);
             await actionService.push([ca.id, cc.id]);
             const head1 = await s.head();
             await s.expectSingleCommitSince(head0);
 
-            selection.includeForPush(cb.id);
+            selection.selectForSync(cb.id);
             await actionService.push([cb.id]);
             const head2 = await s.head();
             expect(head2, 'second push is a separate commit').not.toBe(head1);
@@ -517,7 +520,7 @@ describe('Source Control Flows E2E', () => {
             await s.expectRemoteContent(c, 'c-v2');
         });
 
-        it.skipIf(!isGitHub)('rename yields a path-derived ChangeId; selecting the new id pushes the move', async () => {
+        it.skipIf(!runExtended)('rename yields a path-derived ChangeId; selecting the new id pushes the move', async () => {
             const s = scenario();
             const oldP = path('selection-rename/a.md');
             const newP = path('selection-rename/archive/a.md');
@@ -533,7 +536,7 @@ describe('Source Control Flows E2E', () => {
             const moved = change(newP, 'moved', oldP);
             const { selection, actionService, operations } = s.selectionStack([moved]);
             selection.refresh([moved.id]);
-            selection.includeForPush(moved.id);
+            selection.selectForSync(moved.id);
 
             const headBefore = await s.head();
             await actionService.push([moved.id]);
@@ -542,6 +545,102 @@ describe('Source Control Flows E2E', () => {
             await s.expectRemoteMissing(oldP);
             await s.expectRemoteContent(newP, 'v1');
             await s.expectSingleCommitSince(headBefore);
+        });
+    });
+
+    // ------------------------------------------------------------------
+    // Phase 6b — Download (remote-only) action
+    //
+    // The Download button / Sync-Queue download routing both resolve to
+    // SourceControlActionService.pull, which runs the real manager.pullAllFiles
+    // through BoundarySyncWorkspace. This locks the end-to-end primitive: a
+    // remote-only change (file exists on remote, absent locally) downloads
+    // into the vault and advances metadata to the remote sha.
+    // ------------------------------------------------------------------
+    describe('download (remote-only) action', () => {
+        it('downloads a remote-only change into the vault via actionService.pull, advancing metadata', async () => {
+            const s = scenario();
+            const p = path('download-remote-only/a.md');
+            await s.seedRemote(p, 'remote-content');
+
+            expect(s.localExists(p), 'no local file before download').toBe(false);
+
+            const remote = change(p, 'remote-only');
+            const { actionService, operations } = s.selectionStack([remote]);
+
+            await actionService.pull([remote.id]);
+
+            expect(operations.get(remote.id)).toBe('success');
+            expect(s.localExists(p), 'local file created by download').toBe(true);
+            expect(await s.readLocal(p)).toBe('remote-content');
+            const remoteMeta = await s.remoteContent(p);
+            expect(s.metadataSha(p), 'metadata advances to the remote sha').toBe(remoteMeta?.sha);
+        });
+
+        it.skipIf(!runExtended)('download leaves an unrelated local-only change untouched (no cross-contamination)', async () => {
+            const s = scenario();
+            const remote = path('download-isolation/remote.md');
+            const local = path('download-isolation/local.md');
+            await s.seedRemote(remote, 'remote-content');
+            s.writeLocal(local, 'local-only-content');
+
+            const remoteChange = change(remote, 'remote-only');
+            const localChange = change(local, 'local-only');
+            const { actionService, operations } = s.selectionStack([remoteChange, localChange]);
+
+            await actionService.pull([remoteChange.id]);
+
+            expect(operations.get(remoteChange.id)).toBe('success');
+            expect(operations.get(localChange.id), 'local-only change stays idle').toBe('idle');
+            expect(await s.readLocal(remote)).toBe('remote-content');
+            expect(await s.readLocal(local)).toBe('local-only-content');
+        });
+    });
+
+    // ------------------------------------------------------------------
+    // Unified Sync Plan — one Sync selecting a mix of change kinds must
+    // land as at most one remote commit, not one commit per kind.
+    // ------------------------------------------------------------------
+    describe('unified sync plan (one commit for a mixed batch)', () => {
+        it('syncs a modified file and a locally-deleted file in exactly one remote commit', async () => {
+            const s = scenario();
+            const modifyPath = path('unified-sync/modify.md');
+            const deletePath = path('unified-sync/delete.md');
+            await s.baseline(modifyPath, 'original content');
+            await s.baseline(deletePath, 'to be removed');
+
+            s.writeLocal(modifyPath, 'updated content');
+            s.deleteLocal(deletePath);
+
+            const headBefore = await s.head();
+            const modified = change(modifyPath, 'local-modified');
+            const deleted = change(deletePath, 'local-deleted');
+            const { actionService, operations } = s.selectionStack([modified, deleted]);
+
+            await actionService.sync([modified.id, deleted.id]);
+
+            expect(operations.get(modified.id)).toBe('success');
+            expect(operations.get(deleted.id)).toBe('success');
+            await s.expectSingleCommitSince(headBefore);
+            await s.expectRemoteContent(modifyPath, 'updated content');
+            await s.expectRemoteMissing(deletePath);
+            expect(s.metadata(deletePath), 'deleted metadata cleared').toBeUndefined();
+        });
+
+        it('creates zero commits for a pure-pull sync selection', async () => {
+            const s = scenario();
+            const p = path('unified-sync/pull-only.md');
+            await s.seedRemote(p, 'remote-content');
+
+            const headBefore = await s.head();
+            const remoteOnly = change(p, 'remote-only');
+            const { actionService, operations } = s.selectionStack([remoteOnly]);
+
+            await actionService.sync([remoteOnly.id]);
+
+            expect(operations.get(remoteOnly.id)).toBe('success');
+            expect(await s.readLocal(p)).toBe('remote-content');
+            await s.expectNoCommitSince(headBefore);
         });
     });
 
@@ -641,7 +740,7 @@ describe('Source Control Flows E2E', () => {
             expect(s.metadataSha(p), 'metadata not corrupted by the no-op repeat').toBe(shaAfterFirst);
         });
 
-        it.skipIf(!isGitHub)('re-syncs cleanly after a skipped conflict (no stale operation state)', async () => {
+        it.skipIf(!runExtended)('re-syncs cleanly after a skipped conflict (no stale operation state)', async () => {
             const s = scenario();
             const p = path('retry-after-skip/a.md');
             await s.baseline(p, 'v1');
@@ -671,7 +770,7 @@ describe('Source Control Flows E2E', () => {
     // Phase 8 — Path edge cases + batch scale
     // ------------------------------------------------------------------
     describe('path edge cases and batch scale', () => {
-        it.skipIf(!isGitHub)('creates, modifies, and renames a unicode-named file', async () => {
+        it.skipIf(!runExtended)('creates, modifies, and renames a unicode-named file', async () => {
             const s = scenario();
             const original = path('unicode/筆記/測試文件.md');
             const archived = path('unicode/筆記/已歸檔.md');
@@ -694,7 +793,7 @@ describe('Source Control Flows E2E', () => {
             await s.expectSingleCommitSince(headBefore);
         });
 
-        it.skipIf(!isGitHub)('creates and modifies a file with spaces and symbols', async () => {
+        it.skipIf(!runExtended)('creates and modifies a file with spaces and symbols', async () => {
             const s = scenario();
             const p = path('spaces/folder/my note (draft).md');
             await s.baseline(p, 'draft-v1');
@@ -707,7 +806,7 @@ describe('Source Control Flows E2E', () => {
             await s.expectSingleCommitSince(headBefore);
         });
 
-        it.skipIf(!isGitHub)('moves and modifies a deeply nested file', async () => {
+        it.skipIf(!runExtended)('moves and modifies a deeply nested file', async () => {
             const s = scenario();
             const oldP = path('deep/a/b/c/d/e/note.md');
             const newP = path('deep/archive/x/y/z/w/note.md');
@@ -725,7 +824,7 @@ describe('Source Control Flows E2E', () => {
             await s.expectSingleCommitSince(headBefore);
         });
 
-        it.skipIf(!isGitHub)('creates 100 files in one commit', async () => {
+        it.skipIf(!runExtended)('creates 100 files in one commit', async () => {
             const s = scenario();
             const paths = Array.from({ length: 100 }, (_, i) => path(`batch-100/${String(i).padStart(3, '0')}.md`));
             for (const p of paths) s.writeLocal(p, `content ${p}`);
@@ -740,7 +839,7 @@ describe('Source Control Flows E2E', () => {
             await s.expectRemoteContent(paths[99]!, `content ${paths[99]}`);
         });
 
-        it.skipIf(!isGitHub)('pushes a 100-file mixed batch (modify + create + rename) in one commit', async () => {
+        it.skipIf(!runExtended)('pushes a 100-file mixed batch (modify + create + rename) in one commit', async () => {
             const s = scenario();
             const modifyPaths = Array.from({ length: 40 }, (_, i) => path(`mixed-100/modify/${i}.md`));
             const createPaths = Array.from({ length: 30 }, (_, i) => path(`mixed-100/create/${i}.md`));
@@ -769,7 +868,7 @@ describe('Source Control Flows E2E', () => {
             await s.expectRemoteContent(renameNew[0]!, 'r-v1');
         });
 
-        it.skipIf(!isStress || !isGitHub)('stress: creates 1000 files', async () => {
+        it.skipIf(!isStress || !runExtended)('stress: creates 1000 files', async () => {
             const s = scenario();
             const paths = Array.from({ length: 1000 }, (_, i) => path(`batch-1000/${String(i).padStart(4, '0')}.md`));
             for (const p of paths) s.writeLocal(p, `content ${p}`);

@@ -115,12 +115,13 @@ killed run's branch is simply never touched by the next one.
 `cancel-in-progress: true`. Push and pull-request runs use the same branch identity, so a push to a
 branch with an open PR cancels its duplicate instead of both competing for runner/provider
 capacity. Manual dispatches and schedules use `<event>-<run-id>` instead: they must not cancel a
-normal PR's required Gitea check or a push's credentialed provider run. The two cleanup workflows
-share the branch-based group naming used by push/PR runs, with
+normal PR's required checks or a push's provider run. The two cleanup workflows share the
+branch-based group naming used by push/PR runs, with
 `cancel-in-progress: false`, so cleanup queues behind rather than races an active run.
-The cancelled duplicate's `e2e-gate` reports the replacement as neutral and sets `run-ci=false`,
-so it neither leaves a misleading aggregate failure nor starts a second copy of downstream CI.
-The surviving run remains responsible for the real provider result and release gate.
+The cancelled duplicate's `CI / Required Checks` treats the cancelled leg as a failure, but that
+run is for the superseded commit — the surviving run (the one GitHub uses for the latest commit)
+is responsible for the real provider result and release gate, so the cancelled duplicate's red
+gate is harmless and doesn't start any release work (it gates `package`/`publish`).
 **Cancellation is not a cleanup mechanism.** A cancelled run's `cleanup` step may never execute, or
 may be mid-delete when the runner is terminated; the next run is still safe because it always
 allocates a brand-new `run-<run-id>-<run-attempt>` branch rather than deleting and reusing the old
@@ -141,9 +142,8 @@ flowchart TD
     E --> J["Layer 3: e2e-janitor.yml (scheduled)\ndelete any e2e/** branch older than TTL"]
 ```
 
-1. **Layer 1 — current-run cleanup** (`scripts/e2e-harness.sh cleanup`; the shared wrapper uses an
-   `EXIT` trap and the credentialed CI job also has an `if: always()` fallback): deletes only the
-   one branch this run itself created, with generic
+1. **Layer 1 — current-run cleanup** (`scripts/e2e-harness.sh cleanup`, `if: always()` in
+   `ci.yml`): deletes only the one branch this run itself created, with generic
    `git push origin --delete`. `E2E_KEEP_BRANCH=1` deliberately skips this for debugging. Never a
    wildcard, never touches another run's branch.
 2. **Layer 2 — PR/branch lifecycle cleanup** (`.github/workflows/e2e-pr-cleanup.yml`,
@@ -220,20 +220,28 @@ source of truth after its container is created, so it's the one credential persi
 
 ## CI
 
-`.github/workflows/ci.yml` separates E2E by trust boundary:
+`.github/workflows/ci.yml` runs five validation jobs **in parallel** right after a push/PR, with no
+validation waiting on E2E:
 
-- `gitea-e2e` runs the disposable, secretless Gitea sandbox on a fresh `ubuntu-latest` VM. It is
-  safe for fork PRs because it receives only `contents: read`, no repository secrets, and no access
-  to the persistent self-hosted fleet. The job invokes the same `scripts/run-e2e.sh --provider
-  gitea` command used locally.
-- `provider-e2e` is the credentialed `github`/`gitlab` matrix on the self-hosted fleet. Its
-  job-level condition rejects fork PRs before a runner is allocated; a step-level gate handles
-  provider-specific manual dispatch because the matrix context is unavailable in a job-level
-  condition.
+- `CI / Lint` — `eslint .`
+- `CI / Unit Test (Node 22|24)` — `vitest run --coverage`, matrix `fail-fast: false`
+- `CI / Build` — `tsc -noEmit` + Obsidian 1.11.0 compat typecheck + esbuild; uploads
+  `main.js`/`manifest.json`/`styles.css` as an artifact for ad-hoc PR install (non-main branches
+  only)
+- `CI / Provider E2E / gitea` — disposable Gitea on `ubuntu-latest`
+- `CI / Provider E2E / <provider>` — the credentialed GitHub/GitLab matrix below
 
-Both paths are gated on relevant files computed by `changes`; both run for `main`, the weekly API
-drift schedule, and applicable manual dispatches. Each path has a per-source/provider concurrency
-group, and each uses a run/attempt/provider-scoped `E2E_WORKDIR`.
+The E2E jobs are separated by trust boundary. Gitea runs on a fresh GitHub-hosted VM with only
+`contents: read`; it is safe for fork PRs because it receives no repository secrets and cannot
+access the persistent runner fleet. The credentialed `github`/`gitlab` matrix remains self-hosted,
+and its job-level condition rejects fork PRs before runner allocation. Both depend on the
+`changes` job's path gate (`src/services/**`,
+`src/logic/sync-manager.ts`, `e2e/**`, `scripts/e2e-harness.sh`, `scripts/e2e-namespace.sh`, etc. —
+computed by the `CI / Detect Changes` job, since GitHub Actions' own `on.*.paths` would gate the
+*entire* workflow file, including the always-must-run validation/release jobs). It always runs in
+full on `workflow_dispatch`, `schedule` (weekly, Monday 06:00 UTC, for API-drift detection), and
+pushes to `main`. Each job carries a per-source/provider `concurrency` group (see "Isolation model"
+above) and a run/attempt/provider-scoped workdir.
 
 Two more workflows round out the isolation model's other cleanup layers — see "Isolation model"
 above for what each does and why:
@@ -252,32 +260,40 @@ above for what each does and why:
 | `E2E_GITLAB_PROJECT_ID` | secret (not a variable — it's treated as sensitive here) |
 | `E2E_GITLAB_TOKEN` | secret |
 
-**Fork PRs** only run `gitea-e2e` on `ubuntu-latest`. The credentialed GitHub/GitLab job is rejected
-at job level, so untrusted code is never scheduled on the privileged self-hosted runner fleet.
+**Fork PRs** only run the Gitea job on `ubuntu-latest`. The credentialed GitHub/GitLab job is
+rejected at job level, so untrusted code is never scheduled on the self-hosted runner fleet.
 
-**Missing credentials are always a hard failure**, never a silent skip, for a GitHub/GitLab cell
-that runs (`scripts/e2e-harness.sh` checks required environment variables up front). Gitea creates
-its own per-run credentials and receives no repository secrets.
+**Missing credentials are always a hard failure**, never a silent skip, for any cell that
+actually runs (`scripts/e2e-harness.sh`'s `normalize_env`/`: "${VAR:?...}"` checks required env
+vars up front) — the job-level `if:` above is what decides whether a cell *should* run for a
+given event; once it runs, it's expected to have what it needs.
 
 ## Release gating
 
 ```
-changes -> gitea-e2e [GitHub-hosted] ---------\
-                                                -> e2e-gate -> CI (shared workflow, includes semantic-release)
-changes -> provider-e2e [github | gitlab] -----/
+changes ──► gitea-e2e [GitHub-hosted] ────────────────────────┐
+        └─► provider-e2e [github | gitlab, self-hosted] ──────┤
+lint ─────────────────────────────────────────────────────────┤
+unit-test (Node 22|24) ───────────────────────────────────────┤──► required-checks ──► package
+build ────────────────────────────────────────────────────────┘                  └──► publish (main only)
 ```
 
-`e2e-gate` runs with `if: always()` and evaluates both dependencies. `success` and `skipped` pass;
-`cancelled` means a newer run replaced this one and suppresses duplicate downstream CI; any other
-result blocks CI/release. The downstream reusable `CI` job also uses `always()` plus explicit gate
-result/output checks; without it, GitHub propagates a deliberately skipped provider job through the
-successful gate and silently skips CI on Gitea-only dispatches and fork PRs.
+All five validation jobs start in parallel; a lint/unit/build error now surfaces in <1-2 min
+instead of after the real-provider matrix. `CI / Required Checks` runs with `if: always()` and
+passes only when every validation job reports `success` or `skipped` (a path-filtered-out or
+fork-gated-off `provider-e2e` leg reports `success` because its steps are skipped, not failed).
+Any other result — including a `cancelled` matrix leg replaced by a newer run in the same
+concurrency group — fails the gate; the surviving run is the one whose gate result GitHub uses
+for the latest commit. `Release / Package` and `Release / Publish` both run only after the gate
+passes, so a real provider regression still blocks the release instead of shipping and being
+caught after the fact. `Release / Publish` additionally requires `main`/`master` (semantic-release
+only releases on those branches — see `.releaserc.json`).
 
 **Branch protection** (not something this repo checkout can change — a GitHub repo-settings
-change, left for whoever has admin access): add `E2E / gitea` as a required status check.
-GitHub/GitLab (`E2E / github`, `E2E / gitlab`) are deliberately **not** required at the
-branch-protection level, so a fork PR (which only runs Gitea) is never wedged by checks it
-structurally cannot produce.
+change, left for whoever has admin access): add `CI / Required Checks` as the single required
+status check. It aggregates Gitea, credentialed providers, lint, tests, and build while still
+allowing structurally skipped jobs. Requiring only the aggregate avoids wedging a fork PR on
+GitHub/GitLab checks it cannot produce.
 
 ## Cleanup / troubleshooting
 
@@ -302,10 +318,10 @@ structurally cannot produce.
 ## Known gaps
 
 - A real external fork PR has not yet exercised the fork event context end to end. Workflow
-  contracts enforce the trust split, and Gitea-only dispatch run 33048613679 proved the equivalent
-  `Gitea success + credentialed providers skipped` gate path through downstream CI.
-- Branch-protection required-check configuration (`E2E / gitea`) is a manual follow-up for
-  whoever has admin access to the repo.
+  contracts enforce the trust split, and targeted run 33048613679 proved the equivalent
+  `Gitea success + credentialed providers skipped` path through downstream validation.
+- Branch-protection required-check configuration (`CI / Required Checks`) is a manual follow-up
+  for whoever has admin access to the repo.
 - The official Obsidian community-plugin scanner rescan (as opposed to this repo's own
   grep-based self-audit, `docs/obsidian-scanner-audit.md`) hasn't been re-run against this
   harness from this checkout.

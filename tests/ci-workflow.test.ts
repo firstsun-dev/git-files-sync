@@ -25,23 +25,30 @@ describe('CI workflow contracts', () => {
         expect(workflow).toContain('github.event.pull_request.head.repo.full_name == github.repository');
     });
 
-    it('requires both Gitea and credentialed-provider results before downstream CI', () => {
-        expect(workflow).toContain('needs: [gitea-e2e, provider-e2e]');
-        expect(workflow).toContain('gitea_result="${{ needs.gitea-e2e.result }}"');
-        expect(workflow).toContain('provider_result="${{ needs.provider-e2e.result }}"');
-    });
-
-    it('deduplicates push and PR runs without cancelling manual or scheduled checks', () => {
+    it('allocates isolated concurrency identities to manual and scheduled E2E', () => {
         const independentRunIdentity = "format('{0}-{1}', github.event_name, github.run_id)";
         expect(workflow.split(independentRunIdentity)).toHaveLength(3);
     });
 
-    it('does not fail or continue downstream CI when a provider run is replaced', () => {
-        expect(workflow).toContain('if [ "$result" = "cancelled" ]; then');
-        expect(workflow).toContain('echo "run-ci=false" >> "$GITHUB_OUTPUT"');
-        expect(workflow).toContain(
-            "if: always() && needs.e2e-gate.result == 'success' && needs.e2e-gate.outputs.run-ci == 'true'",
-        );
+    it('runs lint, unit-test, build, and provider-e2e in parallel (no validation waits on E2E)', () => {
+        // The old preflight -> provider-e2e -> e2e-gate -> reusable-CI serial
+        // chain is gone; every validation job starts right after the push.
+        expect(workflow).not.toContain('preflight:');
+        expect(workflow).not.toContain('e2e-gate:');
+        expect(workflow).not.toContain('needs: [changes, preflight]');
+        expect(workflow).not.toContain('needs: e2e-gate');
+    });
+
+    it('gates release behind a single required-checks aggregate that runs even on failure', () => {
+        expect(workflow).toContain('name: CI / Required Checks');
+        expect(workflow).toContain('needs: [lint, unit-test, build, gitea-e2e, provider-e2e]');
+        expect(workflow).toContain('if: always()');
+        // Release only starts after the gate; a cancelled matrix leg is a hard
+        // failure here (the surviving run owns the latest-commit gate), not a
+        // silent pass-through that lets downstream CI/release continue.
+        expect(workflow).toContain('needs: [required-checks]');
+        expect(workflow).not.toContain('run-ci=false');
+        expect(workflow).not.toContain('needs.e2e-gate.outputs.run-ci');
     });
 });
 
