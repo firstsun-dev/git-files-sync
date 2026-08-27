@@ -20,6 +20,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
     const operations = new OperationState();
     const refreshState = new RefreshState();
     const viewModel = new SourceControlViewModel(repository, selection, operations, vi.fn().mockResolvedValue(undefined), refreshState);
+    const sync = vi.fn().mockResolvedValue(undefined);
     const push = vi.fn().mockResolvedValue(undefined);
     const pull = vi.fn().mockResolvedValue(undefined);
     const deleteRemote = vi.fn().mockResolvedValue(undefined);
@@ -33,7 +34,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
         pushSelectionStore: selection,
         operationState: operations,
         sourceControlViewModel: viewModel,
-        sourceControlActions: { push, pull, deleteRemote, loadDiffContent },
+        sourceControlActions: { sync, push, pull, deleteRemote, loadDiffContent },
         sync: { status },
         syncWorkspace: { getInfo: () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '' }), getRemoteFileUrl },
         settings: { syncMetadata: {} },
@@ -41,7 +42,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
         openDiffTab,
     } as unknown as GitLabFilesPush;
 
-    return { plugin, repository, selection, push, pull, deleteRemote, loadDiffContent, openDiffTab, getRemoteFileUrl, status };
+    return { plugin, repository, selection, sync, push, pull, deleteRemote, loadDiffContent, openDiffTab, getRemoteFileUrl, status };
 }
 
 function buildLeaf() {
@@ -72,8 +73,8 @@ describe('SourceControlItemView', () => {
         expect(container.querySelector('.scv-change-item')).not.toBeNull();
     });
 
-    it('forwards push clicks to SourceControlActionService.push, never touching a Git provider directly', async () => {
-        const { plugin, selection, push } = buildPlugin();
+    it('forwards Sync Queue clicks to SourceControlActionService.sync, never touching a Git provider directly', async () => {
+        const { plugin, selection, sync } = buildPlugin();
         selection.selectForSync(toChangeId('a.md'));
         const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
         await view.onOpen();
@@ -81,11 +82,11 @@ describe('SourceControlItemView', () => {
         const container = view.containerEl.children[1] as HTMLElement;
         (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
-        expect(push).toHaveBeenCalledWith([toChangeId('a.md')]);
+        expect(sync).toHaveBeenCalledWith([toChangeId('a.md')]);
     });
 
-    it('does not start pull until push actually settles through the production runAction wiring (regression: runAction used to discard the action promise)', async () => {
-        const { plugin, repository, selection, push, pull } = buildPlugin('local-only');
+    it('waits for sync to settle through the production runAction wiring before re-rendering (regression: runAction used to discard the action promise)', async () => {
+        const { plugin, repository, selection, sync } = buildPlugin('local-only');
         repository.replace([
             { id: toChangeId('a.md'), path: 'a.md', kind: 'local-only' },
             { id: toChangeId('b.md'), path: 'b.md', kind: 'remote-only' },
@@ -93,24 +94,19 @@ describe('SourceControlItemView', () => {
         selection.selectForSync(toChangeId('a.md'));
         selection.selectForSync(toChangeId('b.md'));
 
-        let resolvePush!: () => void;
-        push.mockReturnValue(new Promise<void>(resolve => { resolvePush = resolve; }));
+        let resolveSync!: () => void;
+        sync.mockReturnValue(new Promise<void>(resolve => { resolveSync = resolve; }));
 
         const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
         await view.onOpen();
         const container = view.containerEl.children[1] as HTMLElement;
         (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
-        // Push is in flight; pull must not have started yet even after a
-        // microtask flush -- if `runAction` swallows the push promise
-        // (returns `void` instead of forwarding it), `onPull` fires here.
-        await Promise.resolve();
-        await Promise.resolve();
-        expect(pull).not.toHaveBeenCalled();
+        expect(sync).toHaveBeenCalledWith([toChangeId('a.md'), toChangeId('b.md')]);
 
-        resolvePush();
+        resolveSync();
         await new Promise(resolve => setTimeout(resolve, 0));
-        expect(pull).toHaveBeenCalledWith([toChangeId('b.md')]);
+        expect(sync).toHaveBeenCalledTimes(1);
     });
 
     it('forwards refresh clicks to the ViewModel refresh delegate', async () => {

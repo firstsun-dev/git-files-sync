@@ -598,6 +598,53 @@ describe('Source Control Flows E2E', () => {
     });
 
     // ------------------------------------------------------------------
+    // Unified Sync Plan — one Sync selecting a mix of change kinds must
+    // land as at most one remote commit, not one commit per kind.
+    // ------------------------------------------------------------------
+    describe('unified sync plan (one commit for a mixed batch)', () => {
+        it('syncs a modified file and a locally-deleted file in exactly one remote commit', async () => {
+            const s = scenario();
+            const modifyPath = path('unified-sync/modify.md');
+            const deletePath = path('unified-sync/delete.md');
+            await s.baseline(modifyPath, 'original content');
+            await s.baseline(deletePath, 'to be removed');
+
+            s.writeLocal(modifyPath, 'updated content');
+            s.deleteLocal(deletePath);
+
+            const headBefore = await s.head();
+            const modified = change(modifyPath, 'local-modified');
+            const deleted = change(deletePath, 'local-deleted');
+            const { actionService, operations } = s.selectionStack([modified, deleted]);
+
+            await actionService.sync([modified.id, deleted.id]);
+
+            expect(operations.get(modified.id)).toBe('success');
+            expect(operations.get(deleted.id)).toBe('success');
+            await s.expectSingleCommitSince(headBefore);
+            await s.expectRemoteContent(modifyPath, 'updated content');
+            await s.expectRemoteMissing(deletePath);
+            expect(s.metadata(deletePath), 'deleted metadata cleared').toBeUndefined();
+        });
+
+        it('creates zero commits for a pure-pull sync selection', async () => {
+            const s = scenario();
+            const p = path('unified-sync/pull-only.md');
+            await s.seedRemote(p, 'remote-content');
+
+            const headBefore = await s.head();
+            const remoteOnly = change(p, 'remote-only');
+            const { actionService, operations } = s.selectionStack([remoteOnly]);
+
+            await actionService.sync([remoteOnly.id]);
+
+            expect(operations.get(remoteOnly.id)).toBe('success');
+            expect(await s.readLocal(p)).toBe('remote-content');
+            await s.expectNoCommitSince(headBefore);
+        });
+    });
+
+    // ------------------------------------------------------------------
     // Phase 7 — Remote divergence + idempotency
     // ------------------------------------------------------------------
     describe('divergence and idempotency flows', () => {

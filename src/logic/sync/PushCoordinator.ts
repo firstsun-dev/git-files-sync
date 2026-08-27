@@ -12,6 +12,7 @@ import type { SyncScanner } from './SyncScanner';
 import { SyncPlanner } from './SyncPlanner';
 import {
     type BatchPushConflict,
+    type DeleteQueueEntry,
     type MoveQueueEntry,
     type PushQueueEntry,
     type PushResults,
@@ -27,6 +28,19 @@ interface BatchPushPlan {
     moves: MoveQueueEntry[];
     conflicts: BatchPushConflict[];
     autoSkipped: SyncPlanEntry[];
+}
+
+/** The classified-and-conflict-resolved result of {@link PushCoordinator.planSyncBatch}. */
+export interface PlannedPushBatch {
+    reviewPlan: SyncPlan;
+    pushes: PushQueueEntry[];
+    moves: MoveQueueEntry[];
+    keepRemote: BatchPushConflict[];
+    keepLocal: BatchPushConflict[];
+    skippedConflicts: number;
+    conflictedPaths: string[];
+    cancelled: boolean;
+    immediate: { success: number; updated: number; failed: number; errors: Array<{ file: string; error: string }>; syncedPaths: Array<{ path: string; sha?: string }> };
 }
 
 interface PushCoordinatorDependencies {
@@ -88,11 +102,71 @@ export class PushCoordinator {
             return results;
         }
 
-        await this.commitResolvedBatch(plan.pushes, plan.moves, keepRemote, keepLocal, results);
+        await this.commitResolvedBatch(plan.pushes, plan.moves, [], keepRemote, keepLocal, results);
         results.skippedConflicts = skipped.length + plan.autoSkipped.length;
         await this.dependencies.saveSettings();
         this.notifyResult(results);
         return results;
+    }
+
+    /**
+     * Classifies and conflict-resolves a batch without confirming or
+     * committing — the plan-building half of `pushFiles()`, exposed so a
+     * caller merging this with other change kinds (deletions, downloads)
+     * into one combined Sync Plan can show a single review/confirm step
+     * before calling {@link commitResolvedBatch} itself. `pushFiles()` keeps
+     * its own inline classify→confirm→commit flow for standalone push-only
+     * callers rather than routing through this, so existing single-purpose
+     * push behavior is untouched.
+     */
+    async planSyncBatch(
+        files: Array<TFile | string>,
+        onProgress?: (current: number, total: number, fileName: string) => void,
+        remoteTree?: GitTreeEntry[],
+    ): Promise<PlannedPushBatch> {
+        const syncableFiles = files.filter(file => file && !this.dependencies.isPathIgnored(this.fileInfo(file).path));
+        if (syncableFiles.length === 0) {
+            return {
+                reviewPlan: { additions: [], modifications: [], deletions: [], moves: [] },
+                pushes: [],
+                moves: [],
+                keepRemote: [],
+                keepLocal: [],
+                skippedConflicts: 0,
+                conflictedPaths: [],
+                cancelled: false,
+                immediate: { success: 0, updated: 0, failed: 0, errors: [], syncedPaths: [] },
+            };
+        }
+
+        const tree = remoteTree ?? await this.dependencies.gitService().listFilesDetailed(this.dependencies.settings.branch, false);
+        const { plan, immediate } = await this.buildPlan(syncableFiles, onProgress, tree);
+        const results: PushResults = {
+            ...this.emptyResults(),
+            success: immediate.success,
+            updated: immediate.updated,
+            failed: immediate.failed,
+            conflicts: plan.conflicts.length + plan.autoSkipped.length,
+            errors: immediate.errors,
+            syncedPaths: immediate.syncedPaths,
+        };
+        const skipped: BatchPushConflict[] = [];
+        const keepRemote: BatchPushConflict[] = [];
+        const keepLocal: BatchPushConflict[] = [];
+        const resolved = await this.resolvePlanConflicts(plan, syncableFiles.length, results, skipped, keepRemote, keepLocal);
+        const reviewPlan = this.buildReviewPlan(plan, skipped, keepRemote);
+
+        return {
+            reviewPlan,
+            pushes: plan.pushes,
+            moves: plan.moves,
+            keepRemote,
+            keepLocal,
+            skippedConflicts: skipped.length + plan.autoSkipped.length,
+            conflictedPaths: this.conflictedPaths(plan),
+            cancelled: !resolved,
+            immediate,
+        };
     }
 
     private emptyResults(): PushResults {
@@ -161,22 +235,31 @@ export class PushCoordinator {
         return [...plan.conflicts.map(conflict => conflict.path), ...plan.autoSkipped.map(entry => entry.path)];
     }
 
-    private async commitResolvedBatch(
+    /**
+     * Commits the resolved pushes/moves/deletions as one provider mutation
+     * set via `PushExecutor.commitBatch` — public so a unified Sync Plan
+     * orchestrator (which merges pushes/moves from {@link planSyncBatch} with
+     * deletions from elsewhere) can commit everything through a single call
+     * after its own single confirm step, rather than each change kind
+     * committing separately.
+     */
+    async commitResolvedBatch(
         pushes: PushQueueEntry[],
         moves: MoveQueueEntry[],
+        deletions: DeleteQueueEntry[],
         keepRemote: BatchPushConflict[],
         keepLocal: BatchPushConflict[],
         results: PushResults,
     ): Promise<void> {
         const stale = keepLocal.length > 0 ? await this.dependencies.conflicts.findStale(keepLocal) : [];
         if (stale.length > 0) {
-            this.recordStaleFailure(pushes, moves, stale, results);
+            this.recordStaleFailure(pushes, moves, deletions, stale, results);
             return;
         }
 
-        const hadWork = pushes.length > 0 || moves.length > 0;
+        const hadWork = pushes.length > 0 || moves.length > 0 || deletions.length > 0;
         const failedBefore = results.failed;
-        if (hadWork) await this.dependencies.executor.commitBatch(pushes, moves, results);
+        if (hadWork) await this.dependencies.executor.commitBatch(pushes, moves, deletions, results);
         if (hadWork && results.failed !== failedBefore) return;
 
         const keepLocalPaths = new Set(keepLocal.map(conflict => conflict.path));
@@ -187,11 +270,12 @@ export class PushCoordinator {
     private recordStaleFailure(
         pushes: PushQueueEntry[],
         moves: MoveQueueEntry[],
+        deletions: DeleteQueueEntry[],
         stale: BatchPushConflict[],
         results: PushResults,
     ): void {
         const message = `Remote content changed since you reviewed this conflict (${stale.map(conflict => conflict.path).join(', ')}). Nothing was pushed — resolve the conflict again.`;
-        for (const item of [...pushes, ...moves]) {
+        for (const item of [...pushes, ...moves, ...deletions]) {
             results.failed += 1;
             results.errors.push({ file: item.path, error: message });
         }

@@ -316,8 +316,8 @@ describe('GiteaService', () => {
     });
 
     describe('commitBatch', () => {
-        it('returns [] and makes no requests when both additions and moves are empty', async () => {
-            const result = await service.commitBatch([], [], 'main', 'nothing');
+        it('returns [] and makes no requests when writes, moves, and deletions are all empty', async () => {
+            const result = await service.commitBatch({ writes: [], moves: [], deletions: [] }, 'main', 'nothing');
             expect(result).toEqual([]);
             expect(requestUrl).not.toHaveBeenCalled();
         });
@@ -329,8 +329,11 @@ describe('GiteaService', () => {
             });
 
             const result = await service.commitBatch(
-                [{ path: 'a.md', content: 'hello' }],
-                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                {
+                    writes: [{ path: 'a.md', content: 'hello' }],
+                    moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                    deletions: [],
+                },
                 'main',
                 'Push 1 file(s) and move 1 file(s) from Obsidian'
             );
@@ -361,8 +364,11 @@ describe('GiteaService', () => {
             });
 
             await service.commitBatch(
-                [{ path: 'existing.md', content: 'resolved content', existedRemotely: true }],
-                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                {
+                    writes: [{ path: 'existing.md', content: 'resolved content', existedRemotely: true }],
+                    moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                    deletions: [],
+                },
                 'main',
                 'Push 1 file(s) and move 1 file(s) from Obsidian'
             );
@@ -372,6 +378,32 @@ describe('GiteaService', () => {
             expect(body.files).toEqual([
                 { operation: 'update', path: 'existing.md', content: btoa('resolved content') },
                 { operation: 'update', path: 'new.md', from_path: 'old.md', content: btoa('moved content') },
+            ]);
+        });
+
+        it('commits writes, moves, and deletions in one request — the one-Sync-Plan-one-commit contract', async () => {
+            mockRequest({
+                status: 201,
+                json: { files: [{ path: 'a.md', sha: 'blob-a' }, { path: 'new.md', sha: 'blob-move' }] },
+            });
+
+            await service.commitBatch(
+                {
+                    writes: [{ path: 'a.md', content: 'hello' }],
+                    moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                    deletions: ['gone.md'],
+                },
+                'main',
+                'Sync 3 file(s) from Obsidian'
+            );
+
+            expect(requestUrl).toHaveBeenCalledTimes(1);
+            const call = getLastRequestCall();
+            const body = JSON.parse(call.body as string) as { files: Array<{ operation: string; path: string; from_path?: string }> };
+            expect(body.files).toEqual([
+                { operation: 'create', path: 'a.md', content: btoa('hello') },
+                { operation: 'update', path: 'new.md', from_path: 'old.md', content: btoa('moved content') },
+                { operation: 'delete', path: 'gone.md' },
             ]);
         });
     });

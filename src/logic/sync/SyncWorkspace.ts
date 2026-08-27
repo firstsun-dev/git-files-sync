@@ -3,16 +3,18 @@ import type { GitServiceInterface, GitTreeEntry } from '../../services/git-servi
 import { getServiceName, type GitLabFilesPushSettings } from '../../settings';
 import type { GitignoreManager } from '../gitignore-manager';
 import type { FileStatus, SyncStatusService } from '../sync-status-service';
+import type { PlannedPushBatch } from './PushCoordinator';
 import { RemoteDeleteExecutor, type RemoteDeleteResult } from './RemoteDeleteExecutor';
 import { SyncDiffService } from './SyncDiffService';
 import type { SyncManager } from './SyncManager';
+import type { SyncPlanDirection } from './SyncInteractionPort';
 import {
     SyncStatusRefreshService,
     type SyncStatusRefreshDependencies,
     SyncStatusRefreshProgress,
     SyncStatusRefreshResult,
 } from './SyncStatusRefreshService';
-import type { FileDiff, PushResults, SyncResult } from './types';
+import type { BatchPushConflict, DeleteQueueEntry, FileDiff, MoveQueueEntry, PushQueueEntry, PushResults, SyncPlan, SyncResult } from './types';
 import { ensureParentDirs } from '../../utils/vault-path';
 import { buildRemoteFileUrl } from '../../utils/remote-url';
 
@@ -39,6 +41,25 @@ export interface SyncWorkspace {
     clearMetadata(path: string): Promise<void>;
     trackRename(newPath: string, oldPath: string): Promise<void>;
     getDiff(path: string): Promise<FileDiff>;
+    /** Repo-relative path a provider mutation needs for a given vault path. */
+    toRepoPath(path: string): string;
+    /** Classifies and conflict-resolves a push batch without confirming or committing — for a unified Sync Plan. */
+    planPush(paths: readonly string[]): Promise<PlannedPushBatch>;
+    /** Computes what a pull batch would do, without writing anything — for a unified Sync Plan. */
+    planPull(paths: readonly string[]): Promise<SyncPlan>;
+    /** Applies an already-confirmed pull batch without showing its own confirm modal. */
+    applyPull(paths: readonly string[]): Promise<SyncResult>;
+    /** Commits already-planned pushes/moves/deletions as one provider mutation set. */
+    commitResolvedBatch(
+        pushes: PushQueueEntry[],
+        moves: MoveQueueEntry[],
+        deletions: DeleteQueueEntry[],
+        keepRemote: BatchPushConflict[],
+        keepLocal: BatchPushConflict[],
+        results: PushResults,
+    ): Promise<void>;
+    /** Shows one review/confirm modal for a merged Sync Plan. */
+    confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean>;
 }
 
 export interface SyncWorkspaceRuntimeDependencies {
@@ -152,6 +173,40 @@ export class SyncManagerWorkspace implements SyncWorkspace {
         return this.dependencies.diffService.getDiff(path);
     }
 
+    toRepoPath(path: string): string {
+        return this.dependencies.normalizePath(path);
+    }
+
+    async planPush(paths: readonly string[]): Promise<PlannedPushBatch> {
+        const remoteTree = await this.reusableRemoteTree();
+        return this.dependencies.manager().planSyncBatch([...paths], undefined, remoteTree);
+    }
+
+    async planPull(paths: readonly string[]): Promise<SyncPlan> {
+        const remoteTree = await this.reusableRemoteTree();
+        return this.dependencies.manager().planPullBatch([...paths], remoteTree);
+    }
+
+    async applyPull(paths: readonly string[]): Promise<SyncResult> {
+        const remoteTree = await this.reusableRemoteTree();
+        return this.dependencies.manager().applyPullBatch([...paths], undefined, remoteTree);
+    }
+
+    commitResolvedBatch(
+        pushes: PushQueueEntry[],
+        moves: MoveQueueEntry[],
+        deletions: DeleteQueueEntry[],
+        keepRemote: BatchPushConflict[],
+        keepLocal: BatchPushConflict[],
+        results: PushResults,
+    ): Promise<void> {
+        return this.dependencies.manager().commitResolvedBatch(pushes, moves, deletions, keepRemote, keepLocal, results);
+    }
+
+    confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean> {
+        return this.dependencies.manager().confirmPlan(plan, direction);
+    }
+
     private async reusableRemoteTree(): Promise<GitTreeEntry[] | undefined> {
         const snapshot = this.remoteTreeSnapshot;
         const settings = this.dependencies.settings();
@@ -191,6 +246,21 @@ export class BoundarySyncWorkspace implements SyncWorkspace {
     clearMetadata(path: string): Promise<void> { return this.getManager().clearMetadata(path); }
     trackRename(newPath: string, oldPath: string): Promise<void> { return this.getManager().trackRename(newPath, oldPath); }
     getDiff(path: string): Promise<FileDiff> { return this.boundaries.getDiff(path); }
+    toRepoPath(path: string): string { return path; }
+    planPush(paths: readonly string[]): Promise<PlannedPushBatch> { return this.getManager().planSyncBatch([...paths]); }
+    planPull(paths: readonly string[]): Promise<SyncPlan> { return this.getManager().planPullBatch([...paths]); }
+    applyPull(paths: readonly string[]): Promise<SyncResult> { return this.getManager().applyPullBatch([...paths]); }
+    commitResolvedBatch(
+        pushes: PushQueueEntry[],
+        moves: MoveQueueEntry[],
+        deletions: DeleteQueueEntry[],
+        keepRemote: BatchPushConflict[],
+        keepLocal: BatchPushConflict[],
+        results: PushResults,
+    ): Promise<void> {
+        return this.getManager().commitResolvedBatch(pushes, moves, deletions, keepRemote, keepLocal, results);
+    }
+    confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean> { return this.getManager().confirmPlan(plan, direction); }
 }
 
 export type SyncFile = TFile | string;

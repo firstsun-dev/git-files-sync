@@ -93,7 +93,7 @@ describe('GitLabService E2E', () => {
         await service.pushFile(oldPath, 'rename me', branch, 'e2e: create file for rename test');
         expect(await verifier.fileMissing(oldPath, branch)).toBe(false);
 
-        await service.commitBatch!([], [{ oldPath, newPath, content: 'rename me' }], branch, 'e2e: rename file');
+        await service.commitBatch!({ writes: [], moves: [{ oldPath, newPath, content: 'rename me' }], deletions: [] }, branch, 'e2e: rename file');
 
         expect(await verifier.fileMissing(oldPath, branch)).toBe(true);
         const remote = await verifier.getFile(newPath, branch);

@@ -1,4 +1,4 @@
-import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchMoveItem } from './git-service-interface';
+import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchCommitPlan } from './git-service-interface';
 import { BaseGitService, ConnectionTestResult, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
 import { isBinaryPath } from '../utils/path';
 
@@ -83,15 +83,18 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
     /**
      * A real `git mv`: additions and moves land in one commit via the Commits
      * API's native `action: 'move'`, which GitLab records as an actual rename
-     * (previous_path) rather than a same-content add+delete pair.
+     * (previous_path) rather than a same-content add+delete pair. Plain
+     * deletions ride in the same `actions[]` as `action: 'delete'`, so a Sync
+     * Plan mixing writes/moves/deletions still lands as one commit.
      */
-    async commitBatch(additions: BatchPushItem[], moves: BatchMoveItem[], branch: string, message: string): Promise<BatchPushResult[]> {
-        if (additions.length === 0 && moves.length === 0) return [];
+    async commitBatch(plan: BatchCommitPlan, branch: string, message: string): Promise<BatchPushResult[]> {
+        const { writes, moves, deletions } = plan;
+        if (writes.length === 0 && moves.length === 0 && deletions.length === 0) return [];
         const encodedProjectId = encodeURIComponent(this.projectId);
         const url = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/commits`;
 
         const actions = [
-            ...await Promise.all(additions.map(async item => ({
+            ...await Promise.all(writes.map(async item => ({
                 action: item.existedRemotely ? 'update' : 'create',
                 file_path: this.getFullPath(item.path),
                 content: this.encodeContent(item.content),
@@ -106,6 +109,11 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
                 encoding: 'base64',
                 ...(item.oldRevision ? { last_commit_id: item.oldRevision } : {}),
             }))),
+            ...await Promise.all(deletions.map(async path => ({
+                action: 'delete',
+                file_path: this.getFullPath(path),
+                last_commit_id: (await this.getFile(path, branch)).revision,
+            }))),
         ];
 
         await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
@@ -113,7 +121,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         const freshTree = await this.listFilesDetailed(branch, false);
         const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
         return [
-            ...additions.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) })),
+            ...writes.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) })),
             ...moves.map(item => ({ path: item.newPath, sha: shaByPath.get(this.getFullPath(item.newPath)) })),
         ];
     }

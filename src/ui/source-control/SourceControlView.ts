@@ -20,13 +20,19 @@ export interface SourceControlDiffContent {
 }
 
 export interface SourceControlViewCallbacks {
-    /** Hands push intent off to whatever wires this view to the sync pipeline; never called by the UI directly against a Git provider. */
-    onPush: (changeIds: ChangeId[]) => void | Promise<void>;
     /**
-     * Hands pull intent off to the sync pipeline for the download side of the
-     * Sync Queue (remote-only / remote-modified rows). The Sync button routes
-     * each selected change to {@link onPush} (upload kinds) or this (download
-     * kinds); a row's inline Download button calls this with a single id.
+     * Hands the whole Sync Queue's intent off to whatever wires this view to
+     * the sync pipeline — one call per Sync button click, regardless of how
+     * many of the queued changes are pushes, pulls, or remote deletions.
+     * Never called by the UI directly against a Git provider; the plan
+     * building, single confirm, and single commit all happen behind this
+     * one call (`SourceControlActionService.sync()`).
+     */
+    onSync: (changeIds: ChangeId[]) => void | Promise<void>;
+    /**
+     * Pulls one or more changes — used only by the inline per-row Download
+     * button (a single `remote-only`/`local-deleted` row), not by the Sync
+     * Queue button.
      */
     onPull?: (changeIds: ChangeId[]) => void | Promise<void>;
     /** Triggers a view-wide refresh; the host wires this to the ViewModel's refresh delegate. */
@@ -53,14 +59,6 @@ export interface SourceControlViewCallbacks {
      * the Sync Queue.
      */
     onDownload?: (item: SourceControlItem) => void | Promise<void>;
-    /**
-     * Deletes one or more changes from the remote only — the default Sync
-     * action for `local-deleted` rows (a tracked file removed locally, still
-     * present on remote). Receives full {@link SourceControlItem}s rather
-     * than bare ids because the confirmation step needs each item's `path`
-     * (and derived name) to show what's about to be deleted.
-     */
-    onDeleteRemote?: (items: SourceControlItem[]) => void | Promise<void>;
     /**
      * Supplies the +/- diff stat for a change row. For a `local-only` change
      * this is expected to be a cheap in-memory read (no provider call); for
@@ -456,34 +454,16 @@ export class SourceControlView {
     }
 
     /**
-     * Routes the Sync Queue to its operations by {@link defaultSyncAction}:
-     * `push` kinds (local-only / local-modified / moved / conflict) go to
-     * {@link onPush}, `pull` kinds (remote-only / remote-modified) go to
-     * {@link onPull}, and `delete-remote` kinds (local-deleted) go to
-     * {@link onDeleteRemote}. Splitting here — rather than pushing every
-     * selection — means a queued remote-only row is actually pulled into the
-     * vault and a queued local-deleted row is actually deleted on the remote,
-     * instead of either being a silent no-op.
-     *
-     * Runs push, then pull, then delete-remote sequentially (awaiting each
-     * before starting the next) rather than firing all three in parallel, so
-     * a mixed batch doesn't race the same underlying `SyncWorkspace`/Git
-     * provider calls and the Sync button's busy state reflects one operation
-     * finishing before the next begins.
+     * Hands the whole Sync Queue to {@link onSync} as one intent — push,
+     * pull, and delete-remote kinds are no longer split into separate calls
+     * here. That split now happens inside `SourceControlActionService.sync()`,
+     * which builds one merged Sync Plan, shows one confirm, and commits the
+     * remote mutation set (pushes + moves + deletions) as a single provider
+     * commit instead of the previous push-then-delete two-commit sequence.
      */
     private async runSync(queue: readonly SourceControlItem[]): Promise<void> {
-        const push: ChangeId[] = [];
-        const pull: ChangeId[] = [];
-        const deleteRemote: SourceControlItem[] = [];
-        for (const item of queue) {
-            const action = defaultSyncAction(item.kind);
-            if (action === 'pull') pull.push(item.id);
-            else if (action === 'delete-remote') deleteRemote.push(item);
-            else push.push(item.id);
-        }
-        if (push.length > 0) await this.callbacks.onPush(push);
-        if (pull.length > 0 && this.callbacks.onPull) await this.callbacks.onPull(pull);
-        if (deleteRemote.length > 0 && this.callbacks.onDeleteRemote) await this.callbacks.onDeleteRemote(deleteRemote);
+        if (queue.length === 0) return;
+        await this.callbacks.onSync(queue.map(item => item.id));
     }
 
     /** Pulls a single remote-only change into the vault — the inline Download button. */

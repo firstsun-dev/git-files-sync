@@ -272,8 +272,8 @@ describe('GitLabService', () => {
     });
 
     describe('commitBatch', () => {
-        it('returns [] and makes no requests when both additions and moves are empty', async () => {
-            const result = await service.commitBatch([], [], 'main', 'nothing');
+        it('returns [] and makes no requests when writes, moves, and deletions are all empty', async () => {
+            const result = await service.commitBatch({ writes: [], moves: [], deletions: [] }, 'main', 'nothing');
             expect(result).toEqual([]);
             expect(requestUrl).not.toHaveBeenCalled();
         });
@@ -287,8 +287,11 @@ describe('GitLabService', () => {
                 ] } as unknown as RequestUrlResponse);
 
             await service.commitBatch(
-                [{ path: 'existing.md', content: 'new', existedRemotely: true, revision: 'update-revision' }],
-                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved', oldRevision: 'move-revision' }],
+                {
+                    writes: [{ path: 'existing.md', content: 'new', existedRemotely: true, revision: 'update-revision' }],
+                    moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved', oldRevision: 'move-revision' }],
+                    deletions: [],
+                },
                 'main', 'locked batch'
             );
 
@@ -308,8 +311,11 @@ describe('GitLabService', () => {
                 ] } as unknown as RequestUrlResponse); // follow-up listFilesDetailed
 
             const result = await service.commitBatch(
-                [{ path: 'a.md', content: 'hello', existedRemotely: true }],
-                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                {
+                    writes: [{ path: 'a.md', content: 'hello', existedRemotely: true }],
+                    moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                    deletions: [],
+                },
                 'main',
                 'Push 1 file(s) and move 1 file(s) from Obsidian'
             );
@@ -324,6 +330,35 @@ describe('GitLabService', () => {
             expect(body.actions).toEqual([
                 { action: 'update', file_path: 'a.md', content: btoa('hello'), encoding: 'base64' },
                 { action: 'move', file_path: 'new.md', previous_path: 'old.md', content: btoa('moved content'), encoding: 'base64' },
+            ]);
+        });
+
+        it('commits writes, moves, and plain deletions in one request — the one-Sync-Plan-one-commit contract', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 200, json: { content: btoa('gone'), blob_id: 'gone-blob', last_commit_id: 'gone-revision' } } as unknown as RequestUrlResponse) // getFile for the deletion's last_commit_id
+                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse) // POST commits
+                .mockResolvedValueOnce({ status: 200, json: [
+                    { path: 'a.md', type: 'blob', id: 'new-sha-a' },
+                    { path: 'new.md', type: 'blob', id: 'new-sha-move' },
+                ] } as unknown as RequestUrlResponse); // follow-up listFilesDetailed
+
+            await service.commitBatch(
+                {
+                    writes: [{ path: 'a.md', content: 'hello' }],
+                    moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                    deletions: ['gone.md'],
+                },
+                'main',
+                'Sync 3 file(s) from Obsidian'
+            );
+
+            const postCalls = vi.mocked(requestUrl).mock.calls.filter(call => (call[0] as { method: string }).method === 'POST');
+            expect(postCalls).toHaveLength(1);
+            const body = JSON.parse((postCalls[0]?.[0] as { body: string }).body) as { actions: Array<{ action: string; file_path: string }> };
+            expect(body.actions).toEqual([
+                { action: 'create', file_path: 'a.md', content: btoa('hello'), encoding: 'base64' },
+                { action: 'move', file_path: 'new.md', previous_path: 'old.md', content: btoa('moved content'), encoding: 'base64' },
+                { action: 'delete', file_path: 'gone.md', last_commit_id: 'gone-revision' },
             ]);
         });
     });

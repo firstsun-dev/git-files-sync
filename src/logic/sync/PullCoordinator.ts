@@ -46,6 +46,21 @@ export class PullCoordinator {
         return this.processBatch(files, onProgress, tree);
     }
 
+    /**
+     * Applies an already-planned/confirmed pull batch without showing its own
+     * confirm modal — for a unified Sync Plan orchestrator that already got
+     * one confirmation covering the whole plan (pushes/moves/deletions and
+     * this download set together), so pulling shouldn't prompt a second time.
+     */
+    async applyPullBatch(
+        files: Array<TFile | string>,
+        onProgress?: (current: number, total: number, fileName: string) => void,
+        remoteTree?: GitTreeEntry[],
+    ): Promise<SyncResult> {
+        const tree = await this.resolveTree(remoteTree);
+        return this.processBatch(files, onProgress, tree);
+    }
+
     async planPullBatch(files: Array<TFile | string>, remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
         const tree = remoteTree ? new Map(remoteTree.map(entry => [entry.path, entry])) : undefined;
         const plan: SyncPlan = { additions: [], modifications: [], deletions: [], moves: [] };

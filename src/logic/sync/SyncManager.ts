@@ -68,6 +68,7 @@ export class SyncManager {
             () => this.serviceName,
             message => this.interaction.notify(message),
             oldPath => { delete this.settings.syncMetadata[oldPath]; },
+            path => this.clearMetadata(path),
         );
         const pullExecutor = new PullExecutor(
             this.app,
@@ -165,7 +166,8 @@ export class SyncManager {
      * already in sync or skipped as a conflict) resolves immediately without
      * showing anything — there is nothing to review.
      */
-    private confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean> {
+    /** Public per docs/source-control-refactor: a unified Sync Plan orchestrator confirms the whole merged plan through this one call rather than through push/pull's own internal confirm. */
+    confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean> {
         if (isSyncPlanEmpty(plan)) return Promise.resolve(true);
         return this.interaction.confirmPlan(plan, direction);
     }
@@ -279,6 +281,29 @@ export class SyncManager {
     /** Computes what a pull-all would do, without writing anything, for the plan-review modal. */
     async planPullBatch(files: (TFile | string)[], remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
         return this.pullCoordinator.planPullBatch(files, remoteTree);
+    }
+
+    /** Applies an already-confirmed pull batch without showing its own confirm modal. */
+    async applyPullBatch(
+        files: (TFile | string)[],
+        onProgress?: (current: number, total: number, fileName: string) => void,
+        remoteTree?: GitTreeEntry[],
+    ): Promise<SyncResult> {
+        return this.pullCoordinator.applyPullBatch(files, onProgress, remoteTree);
+    }
+
+    /** Classifies and conflict-resolves a push batch without confirming or committing, for a unified Sync Plan orchestrator. */
+    planSyncBatch(
+        files: (TFile | string)[],
+        onProgress?: (current: number, total: number, fileName: string) => void,
+        remoteTree?: GitTreeEntry[],
+    ): ReturnType<PushCoordinator['planSyncBatch']> {
+        return this.pushCoordinator.planSyncBatch(files, onProgress, remoteTree);
+    }
+
+    /** Commits already-planned pushes/moves/deletions as one provider mutation set. */
+    commitResolvedBatch(...args: Parameters<PushCoordinator['commitResolvedBatch']>): ReturnType<PushCoordinator['commitResolvedBatch']> {
+        return this.pushCoordinator.commitResolvedBatch(...args);
     }
 
     /** Migrates a legacy GitLab last_commit_id baseline only when the current
