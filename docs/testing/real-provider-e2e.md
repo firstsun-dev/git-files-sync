@@ -301,8 +301,9 @@ structurally cannot produce.
 
 ## Known gaps
 
-- The new GitHub-hosted `gitea-e2e` job and two-input `e2e-gate` must be confirmed by a real
-  workflow run before issue #139 is complete; local runs cannot prove GitHub runner behavior.
+- A real external fork PR has not yet exercised the fork event context end to end. Workflow
+  contracts enforce the trust split, and Gitea-only dispatch run 33048613679 proved the equivalent
+  `Gitea success + credentialed providers skipped` gate path through downstream CI.
 - Branch-protection required-check configuration (`E2E / gitea`) is a manual follow-up for
   whoever has admin access to the repo.
 - The official Obsidian community-plugin scanner rescan (as opposed to this repo's own
