@@ -7,107 +7,157 @@
 
 **[English](README.md)** · **[繁體中文](USAGE_zh.md)** · **[更新日志](CHANGELOG.md)**
 
-<video src="https://blog-assets.firstsun.org/obsidian/plugins/git-file-sync/git-file-sync-zh.webm" width="100%" controls autoplay loop muted playsinline></video>
+Git File Sync 让你通过 GitHub、GitLab 或自建 Gitea，在桌面端与移动端 Obsidian 中**选择性同步文件**，不需要把整个 vault 都交给同一套同步服务。
 
-本指南介绍如何使用 Git File Sync 插件，在移动设备与桌面端之间，通过 GitLab、GitHub 或自建 Gitea 选择性同步笔记。
+你可以先检查变更、选择这次真正要同步的项目，再从“同步队列”一次确认并应用。插件直接通过 Git 服务 API 操作，不需要安装 Git CLI，也不需要在 vault 中创建本地 `.git` 仓库。
 
-Git File Sync 不会同步整个 vault；您可以只选择要分享、发布或备份的笔记，同时将私人笔记保留在本地。它直接连接 Git 服务的 API，不需要安装 Git、使用命令行，或在 vault 中创建本地 `.git` 仓库。
+## 新版操作模型
 
----
+Git File Sync 的版本控制流程可以记成：
+
+**检查变更 → 加入同步队列 → 同步**
+
+1. **检查“仓库变更”** — 在同一个界面查看本地变更、远程变更、重命名、删除和冲突。
+2. **建立“同步队列”** — 勾选这次真正要处理的项目。
+3. **检查并同步** — 在应用前先查看完整同步计划，再执行上传、下载和删除。
+
+被选中的项目会从“仓库变更”移动到“同步队列”，同一条变更不会同时出现在两个区域。
+
+## 主要功能
+
+- **只同步你选择的文件** — 私人笔记或无关文件可以留在本地。
+- **统一的版本控制界面** — 集中查看本地、远程、移动、删除与冲突状态。
+- **一个同步队列** — 同一次操作可以包含上传、下载和远程删除。
+- **应用前先检查** — 新增、修改、移动、下载和删除都会先出现在同步计划中。
+- **内置差异对比** — 支持单栏与并排 Diff，对比本地与远程版本。
+- **明确处理冲突** — 由你决定保留本地或远程，不会静默覆盖。
+- **多平台与多服务** — 支持 GitHub、GitLab、Gitea，以及桌面端和移动端 Obsidian。
+- **三种界面语言** — English、繁體中文、简体中文。
+
+## 快速开始
+
+1. 从 Obsidian 社区插件安装 Git File Sync。
+2. 在 **设置 → Git File Sync** 中配置 GitHub、GitLab 或 Gitea。
+3. 从侧边功能栏或命令面板打开 **版本控制（Source Control）**。
+4. 检查 **仓库变更**。
+5. 勾选要同步的项目，项目会移动到 **同步队列**。
+6. 点击 **同步**，检查同步计划后选择 **应用**。
+
+## 版本控制界面
+
+### 仓库变更
+
+显示当前需要处理、但尚未加入下一次同步的项目。可以使用搜索、筛选器与树状／列表视图快速缩小范围。
+
+### 同步队列
+
+显示下一次“同步”会实际处理的项目。每一项都会标示预计执行的动作：
+
+- **上传** — 将本地版本应用到远程仓库。
+- **下载** — 将远程版本带回当前 vault。
+- **删除** — 将本地已删除的跟踪文件同步删除远程版本。
+
+点击 **同步** 后会先生成一份合并的同步计划。远程的新增、修改、移动和删除会一起提交；下载则在确认后应用到本地。
+
+### 文件状态
+
+| 状态 | 含义 |
+|---|---|
+| `A` | 本地新增 |
+| `M` | 本地已修改 |
+| `D` | 本地已删除 |
+| `R` | 已重命名或移动 |
+| `↓` | 远程可下载 |
+| `↕` | 远程已修改 |
+| `!` | 冲突 |
+| `S` | 已同步 |
+
+> **本地已删除：** 将 `D` 项目加入同步队列后，默认会同步删除远程的跟踪文件。如果是误删，请改用 **下载**，把远程版本恢复到本地。
+
+## 常见操作
+
+| 情况 | 操作结果 |
+|---|---|
+| 本地新增文件 | `A` → 同步队列 → **上传** |
+| 本地修改文件 | `M` → 同步队列 → **上传** |
+| 文件只存在远程 | `↓` → 同步队列 → **下载** |
+| 远程版本已修改 | `↕` → 同步队列 → **下载** |
+| 本地删除跟踪文件 | `D` → 同步队列 → **删除**远程 |
+| 本地误删 | `D` → **下载** → 恢复本地 |
+| 重命名／移动 | `R` → 同步队列 → 以移动方式**上传** |
+| 本地与远程都修改 | `!` → 检查冲突 → **保留本地**或**采用远程** |
+
+## 差异对比与冲突
+
+选择有变更的文件后，可以在同步前查看本地与远程内容差异。Diff 支持单栏与并排布局，并在可用时显示新增／删除行数。
+
+![conflict](imgs/git-diff.png)
+*同步前先检查本地与远程的差异，再决定保留哪一侧。*
+
+如果本地与远程都修改过同一个文件，Git File Sync 会保留明确的冲突状态：
+
+- **Keep Local／保留本地** — 使用本地内容覆盖远程。
+- **Keep Remote／采用远程** — 接受远程版本并覆盖本地。
 
 ## 支持的 Git 服务
 
 | 服务 | 适用场景 | 最低版本 |
-| :--- | :--- | :--- |
-| **GitHub** | 公开／私有仓库 | — |
-| **GitLab** | gitlab.com 或自建实例 | GitLab 13.0+ |
+|---|---|---|
+| **GitHub** | github.com／GitHub Enterprise | — |
+| **GitLab** | gitlab.com／自建 | GitLab 13.0+ |
 | **Gitea** | 自建 Git 服务器 | Gitea 1.12+ |
 
----
-
-## 1. 初始设置
-
-在开始同步前，请完成以下设置：
+## 初始设置
 
 ![Plugin Settings](imgs/plugin-settings.png)
-*在设置面板选择 Git 服务，并填写对应的凭据和路径。*
+*在设置面板选择 Git 服务并配置仓库。*
 
-1. **选择服务**：在 `设置` > `Git File Sync` 中选择 GitLab、GitHub 或 Gitea。
-2. **填写凭据**：
+| 服务 | 必要信息 | 建议权限 |
+|---|---|---|
+| **GitHub** | Token、owner、repository | Fine-grained token：**Contents: Read and write** |
+| **GitLab** | Token、project ID、base URL | `read_repository`、`write_repository` |
+| **Gitea** | Token、owner、repository、base URL | Gitea 1.19+：`write:repository` |
 
-   > **安全提示：** 请把每个令牌的权限范围缩到最小：只允许需要同步的仓库、只授予必要权限，并设置较短的有效期。令牌只应保存在本插件的设置中，不要粘贴到会被同步的笔记里。如果令牌可能泄露，请立即撤销并重新创建；不再使用的令牌也应直接撤销。
+其他设置包括语言、同步分支、仓库 Root Path、vault folder 范围、启动时刷新、忽略规则，以及 symbolic link 处理方式。Symbolic link 详细行为请参考 [Symbolic link handling](docs/symlink-handling.md)。
 
-   - **GitHub**：建议创建 [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)，而不是 classic token。在 **Repository access** 中选择 *Only select repositories*，只指定要同步的仓库；设置 **Expiration**（建议不超过 90 天），并只授予 **Contents: Read and write**。如果必须使用 classic token，则使用 `repo` scope，并为该用途设置到期时间。
-   - **GitLab**：建议优先使用 [project access token](https://docs.gitlab.com/user/project/settings/project_access_tokens/)（`Project` > `Settings` > `Access tokens`），而不是个人访问令牌，使权限限制在单个项目内，也可以独立撤销。插件只会调用 repository tree、blob、commit 和 branch 相关 API，因此只需要 `read_repository` 和 `write_repository`，**不需要** `api`。如需推送到非 protected branch，最低角色为 **Developer**。请设置到期时间；服务器网址默认为 `https://gitlab.com`，自建环境请改为您的实例网址。
-   - **Gitea**：在 `用户设置` > `应用程序` > `访问令牌` 中创建令牌。插件只会操作仓库内容、分支和 Git data；Gitea 1.19+ 支持 scoped token，请只选择 **`write:repository`**（已包含读取权限），不要选择全部权限。较旧版本（最低支持到 1.12）没有 scoped token，令牌默认是账号级别；这种情况下建议使用只拥有目标仓库权限的专用 bot / service account，而不是个人账号。若实例支持到期时间也请设置，并将服务器网址指向您的 Gitea 实例（例如 `https://gitea.example.com`）。
+> **安全建议：** 令牌只授予必要仓库和最低权限，能设置到期时间就设置；不要把令牌写进可能被同步的笔记。如果怀疑泄露，请立即撤销并重新签发。
 
-   三种服务都可以从各自的设置页面立即撤销令牌。如果令牌可能泄露，请先撤销，再签发新的令牌。
-3. **仓库路径**：如需把笔记存放在仓库中的特定目录（例如 `notes/`），请设置 `Root Path`。
-4. **语言和自动刷新**：可以选择跟随系统、English、繁體中文或简体中文。“Obsidian 启动时自动刷新同步状态”默认开启，也可在设置中关闭。
+## 移动端
 
----
+移动端使用相同的版本控制模型。同步队列默认保持紧凑，避免把“仓库变更”推离屏幕；选择文件后会进入适合手机操作的详情／Diff 界面。
 
-## 2. 核心操作流程
+跨设备工作时，建议先刷新远程状态再开始修改；完成后只把真正要同步的项目加入同步队列。
 
-### 💡 检查同步状态
+## 安装
 
-每次开始工作或切换设备时，建议先查看状态：
+### 从社区插件安装（推荐）
 
-1. 点击侧边栏的**列表图标**，或打开命令面板 (`Ctrl/Cmd + P`) 并运行 `Open sync status view`。
-2. 同步状态会在 Obsidian 启动后自动刷新；需要时仍可点击 **Refresh status**。
-3. 使用状态标签、路径搜索或可选的树状视图浏览文件。树状视图支持展开文件夹和三态复选框，可一次选中整个文件夹。
-4. 文件会显示为：
-   - **Synced**：已同步（与远程一致）。
-   - **Modified**：本地已修改（需要 Push）。
-   - **Remote only**：远程有新文件（需要 Pull）。
-   - **Moved**：文件或文件夹已重命名／移动，尚待同步；可以 Push 或撤销移动。
+1. 打开 **设置 → 社区插件**，必要时关闭限制模式。
+2. 点击 **浏览**，搜索 **Git File Sync**。
+3. 点击 **安装**，完成后 **启用**。
 
-![sync-status](imgs/sync-status.png)
-*同步状态面板让您一目了然地确认哪些文件已经修改，并进行上传或下载。*
+### 手动安装
 
-### ⬆️ 如何上传（Push）
+1. 从 [最新 Release](https://github.com/firstsun-dev/git-files-sync/releases/latest) 下载 `main.js`、`manifest.json`、`styles.css`。
+2. 创建 `<vault>/.obsidian/plugins/git-file-sync/`。
+3. 将三个文件放入该目录。
+4. 重新加载 Obsidian，并在 **设置 → 社区插件** 中启用 Git File Sync。
 
-写完笔记后，您可以：
+## 隐私与安全
 
-- **单个文件**：点击左侧功能栏的云上传图标，或在文件列表中右键选择 `Push to GitLab/GitHub/Gitea`。
-- **批量上传**：在同步面板勾选多个文件，然后点击 **Push selected**。
-- **确认计划**：每次 Push 前都会列出新增、修改、移动和删除项目；确认后点击 **Apply**。文件重命名或文件夹移动会作为真正的移动提交，不会在远程留下重复文件。
+- **Token 仅保存在本地** — 访问令牌保存在 vault 内的插件数据中，只会发送给你配置的 Git 服务。
+- **无遥测** — 插件不收集使用分析或个人数据。
+- **选择性同步** — 未选入同步流程的文件不会因为新版版本控制流程而自动上传。
 
-### ⬇️ 如何下载（Pull）
+## 系统要求
 
-1. 打开同步面板并点击 **Refresh status**。
-2. 找到标记为 **Remote only** 或 **Modified**（远程版本较新）的文件。
-3. 勾选后点击 **Pull selected**。
-4. 查看即将应用的同步计划，然后点击 **Apply**。
-5. **注意**：Pull 会覆盖本地内容。如果两端都有修改，会自动打开冲突解决窗口。
+- Obsidian **1.11.0** 或更新版本
+- 支持桌面端与移动端
 
----
+## 更多文档
 
-## 3. 冲突解决（Conflict Resolution）
-
-当同一文件在本地和远程都被修改时，会显示冲突窗口：
-
-1. 左侧是**本地版本**，右侧是**远程版本**。
-2. 查看两侧的差异。
-3. 选择 **Keep Local**（保留本地版本）或 **Keep Remote**（采用远程版本）。
-4. 选择后，插件会更新文件。
-
-![conflict](imgs/git-diff.png)
-*内置差异查看器可在同步前并排对比本地与远程的修改。*
-
-在桌面端，点击 **Diff** 会在专用窗格打开对比；移动端仍在面板内显示。可以点击文件路径打开本地笔记，或在支持的服务上打开远程文件页面。
-
----
-
-## 4. 移动设备使用技巧
-
-- **打开面板**：从屏幕左侧向右滑动，展开功能栏后即可看到同步图标。
-- **工作前先 Pull**：每次开始编辑前，先刷新状态以确认已获取最新版本。
-- **完成后及时 Push**：编辑完成后及时 Push，确保变更已保存到远程。
-
----
-
-## 🔒 隐私与安全
-
-- 个人访问令牌只保存在本地 vault 的插件数据目录中，只会发送到您配置的 Git 服务。
-- 插件不收集使用数据或分析信息。
+- [English README](README.md)
+- [繁體中文使用指南](USAGE_zh.md)
+- [Symbolic link handling](docs/symlink-handling.md)
+- [完整更新日志](CHANGELOG.md)
+- [Releases](https://github.com/firstsun-dev/git-files-sync/releases)
