@@ -18,6 +18,11 @@ Unlike full-vault sync solutions, Git File Sync gives you control over exactly w
 
 <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub" height="20"> <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab" height="20"> <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea" height="20">
 
+<video src="https://blog-assets.firstsun.org/obsidian/plugins/git-file-sync/git-file-sync-en.webm" autoplay loop muted playsinline width="600"></video>
+
+![Source Control](imgs/sync-status.png)
+*Review repository changes, choose what to sync, and apply them through the Sync Queue.*
+
 ## How it works
 
 Git File Sync uses a simple Source Control workflow:
