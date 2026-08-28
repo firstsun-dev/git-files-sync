@@ -10,8 +10,10 @@ import { describePushResult } from '../support/push-result-diagnostic';
 // suite's minimal generated shim provides. A type-only import is erased
 // entirely, so none of that module ever loads.
 import type { GitLabFilesPushSettings } from '../../src/settings';
+import { TFile as ObsidianTFile } from 'obsidian';
+import { GitVerifier } from '@e2e-runtime/git-verifier';
 import { FakeVault, fakeApp, type TFileLike, type TFileCtor } from '../shim/fake-vault';
-import { currentProvider, timeouts, contextFor, runtimeDir } from '../config/env';
+import { currentProvider, timeouts, contextFor } from '../config/env';
 import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
 
 // Every push/pull SyncManager does shows a plan-review modal first, and any
@@ -66,11 +68,8 @@ describe('SyncManager E2E', () => {
         const ctx = contextFor(provider);
         service = ctx.service;
         branch = ctx.branch;
-        const dir = runtimeDir();
-        const { GitVerifier } = await import(/* @vite-ignore */ `${dir}/verifier/git-verifier.ts`) as { GitVerifier: new () => GitVerifierType };
-        const obsidianShim = await import(/* @vite-ignore */ `${dir}/obsidian-request-url.ts`) as { TFile: TFileCtor };
         verifier = new GitVerifier();
-        TFile = obsidianShim.TFile;
+        TFile = ObsidianTFile;
 
         conflictResolver = () => 'skip';
         vi.mocked(SyncPlanModal).mockImplementation(function (

@@ -13,8 +13,9 @@ export default tseslint.config(
 			parserOptions: {
 				projectService: {
 					allowDefaultProject: [
-						'eslint.config.js',
-						'manifest.json'
+						'eslint.config.mts',
+						'manifest.json',
+						'scripts/typecheck-compat.mjs'
 					]
 				},
 				tsconfigRootDir: import.meta.dirname,
@@ -38,6 +39,20 @@ export default tseslint.config(
 		rules: {
 			"import/no-nodejs-modules": "off",
 			"no-restricted-globals": "off",
+			"obsidianmd/rule-custom-message": "off",
+		},
+	},
+	{
+		// These two suites deliberately exercise the pre-1.13 `display()`
+		// imperative-render fallback (see PluginSettingTab.display() in
+		// obsidian.d.ts) for back-compat coverage, so calling it is the point
+		// of the test, not something to migrate away from.
+		files: [
+			"tests/ui/SettingsConnectionStatus.test.ts",
+			"tests/ui/SettingsObsidian113Compatibility.test.ts",
+		],
+		rules: {
+			"@typescript-eslint/no-deprecated": "off",
 		},
 	},
 	{

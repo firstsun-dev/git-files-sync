@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/unbound-method */
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn() mocks intentionally reference methods unbound; safe under Vitest's mocking model */
 import { describe, expect, it, vi } from 'vitest';
 import { ConflictResolver } from '../../../src/logic/sync/ConflictResolver';
 import type { PullExecutor } from '../../../src/logic/sync/PullExecutor';
@@ -51,3 +51,5 @@ describe('ConflictResolver', () => {
         expect(pull.pull).not.toHaveBeenCalled();
     });
 });
+
+/* eslint-enable @typescript-eslint/unbound-method -- re-enable after the whole-file exemption above */

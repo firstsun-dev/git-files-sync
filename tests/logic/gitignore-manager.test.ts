@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/unbound-method */
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn() mocks intentionally reference methods unbound; safe under Vitest's mocking model */
 import { describe, it, expect, vi, beforeEach, Mocked } from 'vitest';
 import { GitignoreManager } from '../../src/logic/gitignore-manager';
 import { App, DataAdapter } from 'obsidian';
@@ -398,3 +398,5 @@ describe('GitignoreManager', () => {
         });
     });
 });
+
+/* eslint-enable @typescript-eslint/unbound-method -- re-enable after the whole-file exemption above */

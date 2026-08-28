@@ -2,9 +2,10 @@
  * Type-only contract for the git-CLI-backed verifier `scripts/e2e-harness.sh
  * provision` generates at `${E2E_RUNTIME_DIR}/verifier/git-verifier.ts`
  * (never committed — see docs/testing/real-provider-e2e.md). Suites import
- * only this type statically and load the concrete implementation via a
- * runtime-computed dynamic `import()`, so `npm run build`'s typecheck never
- * needs the generated file to exist on disk.
+ * the concrete implementation statically from `@e2e-runtime/git-verifier`
+ * (see `e2e/runtime-modules.d.ts`), which only resolves at E2E runtime via
+ * the `vitest.e2e.config.ts` alias — `npm run build`'s typecheck never needs
+ * the generated file to exist on disk.
  *
  * A suite must never call `service.getFile()` to confirm `service.pushFile()`
  * worked — that only proves the service agrees with itself, not that the

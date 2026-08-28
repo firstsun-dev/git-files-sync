@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/unbound-method */
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn() mocks intentionally reference methods unbound; safe under Vitest's mocking model */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BoundarySyncWorkspace } from '../../../src/logic/sync/SyncWorkspace';
 import { createSyncManagerMocks } from '../../logic/sync-manager-test-helpers';
@@ -32,3 +32,5 @@ describe('SyncWorkspace pull integration', () => {
         expect(mockAdapter.write).toHaveBeenCalledWith('remote.md', 'remote');
     });
 });
+
+/* eslint-enable @typescript-eslint/unbound-method -- re-enable after the whole-file exemption above */

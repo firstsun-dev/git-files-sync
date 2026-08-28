@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { githubContext, runtimeDir } from '../config/env';
+import { GitVerifier } from '@e2e-runtime/git-verifier';
+import { githubContext } from '../config/env';
 import type { GitServiceInterface } from '../../src/services/git-service-interface';
 import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
 
@@ -39,7 +40,6 @@ describe('GitHubService E2E', () => {
         const ctx = githubContext();
         service = ctx.service;
         branch = ctx.branch;
-        const { GitVerifier } = await import(/* @vite-ignore */ `${runtimeDir()}/verifier/git-verifier.ts`) as { GitVerifier: new () => GitVerifierType };
         verifier = new GitVerifier();
     });
 

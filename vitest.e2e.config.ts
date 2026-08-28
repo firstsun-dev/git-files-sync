@@ -17,7 +17,10 @@ export default defineConfig({
         globals: true,
         // Real requestUrl shim, not the vi.fn() mock tests/setup.ts installs —
         // E2E suites need actual network calls to reach the provisioned provider.
-        alias: runtimeDir ? { obsidian: `${runtimeDir}/obsidian-request-url.ts` } : {},
+        alias: runtimeDir ? {
+            obsidian: `${runtimeDir}/obsidian-request-url.ts`,
+            '@e2e-runtime/git-verifier': `${runtimeDir}/verifier/git-verifier.ts`,
+        } : {},
         // Minimal `window` alias so production code written for Obsidian's
         // Electron renderer (e.g. window.setTimeout) runs as-is under Node.
         setupFiles: runtimeDir ? [`${runtimeDir}/window-timers.ts`] : [],

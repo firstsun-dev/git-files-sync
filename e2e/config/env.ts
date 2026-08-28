@@ -42,18 +42,6 @@ export const timeouts = {
     testMs: Number(process.env.E2E_TEST_TIMEOUT_MS ?? 120_000),
 };
 
-/** Path to the vitest-runtime adapters `scripts/e2e-harness.sh provision` generated. */
-export function runtimeDir(): string {
-    const dir = process.env.E2E_RUNTIME_DIR;
-    if (!dir) {
-        throw new Error(
-            'E2E_RUNTIME_DIR is not set. Run "scripts/e2e-harness.sh provision" before the E2E suites — ' +
-            'it generates the vitest-only requestUrl/timer/verifier adapters this harness needs and never commits.'
-        );
-    }
-    return dir;
-}
-
 export function requiredEnv(name: string): string {
     const value = process.env[name];
     if (!value) {

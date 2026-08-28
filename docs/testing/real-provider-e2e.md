@@ -38,10 +38,13 @@ uses those APIs at all:
 - Everything Node-only that the suites still need at runtime (the real `requestUrl` shim
   production services import from `obsidian`, the `window.setTimeout` alias, and a small
   git-CLI-backed verifier) is **generated fresh per run** by `scripts/e2e-harness.sh provision`
-  into `$E2E_RUNTIME_DIR`, not committed. Suites only import a type-only contract
-  (`e2e/verifier-runtime-types.ts`) statically, and load the concrete implementation via a
-  runtime-computed dynamic `import()` — so `npm run build`'s typecheck never needs the generated
-  files to exist, and there's nothing scanner-visible for them to flag.
+  into `$E2E_RUNTIME_DIR`, not committed. Suites import these statically — `obsidian` and
+  `@e2e-runtime/git-verifier` are both resolved via `vitest.e2e.config.ts`'s `alias` map to
+  `$E2E_RUNTIME_DIR` at E2E runtime only. `e2e/runtime-modules.d.ts` gives
+  `@e2e-runtime/git-verifier` a compile-time shape (backed by `e2e/verifier-runtime-types.ts`)
+  so `npm run build`'s typecheck never needs the generated files to exist — no committed
+  suite ever does a runtime-computed dynamic `import()`, so there's nothing scanner-visible
+  for the Obsidian security lint rules to flag.
 
 ## Layout
 

@@ -1,5 +1,4 @@
 // CI contract tests run in Node and intentionally inspect the committed workflow file.
-// eslint-disable-next-line import/no-nodejs-modules
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 

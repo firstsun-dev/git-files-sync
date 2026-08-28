@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/unbound-method */
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn() mocks intentionally reference methods unbound; safe under Vitest's mocking model */
 import { beforeAll, describe, it, expect, vi } from 'vitest';
 import { App } from 'obsidian';
 import { SyncPlanModal } from '../../src/ui/SyncPlanModal';
@@ -86,3 +86,5 @@ describe('SyncPlanModal', () => {
         expect(onConfirm).not.toHaveBeenCalled();
     });
 });
+
+/* eslint-enable @typescript-eslint/unbound-method -- re-enable after the whole-file exemption above */

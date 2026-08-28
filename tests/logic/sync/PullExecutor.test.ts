@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/unbound-method */
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn() mocks intentionally reference methods unbound; safe under Vitest's mocking model */
 import { describe, expect, it, vi } from 'vitest';
 import { PullExecutor } from '../../../src/logic/sync/PullExecutor';
 import type { App } from 'obsidian';
@@ -53,3 +53,5 @@ describe('PullExecutor', () => {
         expect(mockApp.vault.adapter.write).toHaveBeenCalledWith('link', '../target');
     });
 });
+
+/* eslint-enable @typescript-eslint/unbound-method -- re-enable after the whole-file exemption above */

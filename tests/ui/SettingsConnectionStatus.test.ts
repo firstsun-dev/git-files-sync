@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-deprecated -- exercising the Obsidian < 1.13 display() compat fallback intentionally */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabSyncSettingTab } from '../../src/settings';
