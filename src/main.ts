@@ -341,7 +341,7 @@ export default class GitLabFilesPush extends Plugin {
 			if (lastSeen && compareVersions(currentVersion, lastSeen) > 0) {
 				const newReleases = getUnseenReleases(CHANGELOG, lastSeen);
 				if (newReleases.length > 0) {
-					new WhatsNewModal(this.app, newReleases).open();
+					new WhatsNewModal(this.app, newReleases, () => void this.activateSourceControlView()).open();
 				}
 			}
 

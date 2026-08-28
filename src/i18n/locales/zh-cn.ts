@@ -113,9 +113,13 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'whatsNew.viewOnGitHub': '在 GitHub 上查看',
 	'whatsNew.viewChangelog': '查看完整更新日志',
 	'whatsNew.gotIt': '知道了',
+	'whatsNew.openSourceControl': '打开源代码控制',
+	'whatsNew.close': '关闭',
+	'whatsNew.stepLabel': '步骤 {number}',
 
 	'settings.whatsNewBanner.title': 'v{version} 更新重点',
 	'settings.whatsNewBanner.dismiss': '关闭提示',
+	'settings.whatsNewBanner.view': '查看更新内容',
 	'settings.releaseHistory.name': '版本更新记录',
 	'settings.releaseHistory.desc': '查看当前与过往版本的更新内容',
 	'settings.releaseHistory.button': '查看更新记录',

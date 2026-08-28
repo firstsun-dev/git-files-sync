@@ -1,4 +1,4 @@
-import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
+import {App, PluginSettingTab, Setting, Notice, TextComponent, ButtonComponent} from 'obsidian';
 import GitLabFilesPush, { type ConnectionStatus } from "./main";
 import {FolderSuggest} from "./ui/FolderSuggest";
 import {RemoteFolderSuggest} from "./ui/RemoteFolderSuggest";
@@ -183,13 +183,24 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		const notableEntries = release?.entries.filter(entry => entry.notable) ?? [];
 		if (notableEntries.length === 0) return;
 
+		// Onboarding releases already teach their mental model in the modal's
+		// step-by-step layout — keep the banner itself to a couple of highlights
+		// rather than repeating every notable entry.
+		const bannerEntries = release?.onboarding ? notableEntries.slice(0, 2) : notableEntries;
+
 		const banner = containerEl.createDiv({ cls: 'gfs-whats-new-banner' });
 		const textEl = banner.createDiv({ cls: 'gfs-whats-new-banner-text' });
 		textEl.createEl('strong', { text: t('settings.whatsNewBanner.title', { version: currentVersion }) });
 		const list = textEl.createEl('ul', { cls: 'gfs-whats-new-banner-list' });
-		for (const entry of notableEntries) {
+		for (const entry of bannerEntries) {
 			list.createEl('li', { text: entryText(entry) });
 		}
+		const viewBtn = new ButtonComponent(textEl)
+			.setButtonText(t('settings.whatsNewBanner.view'))
+			.onClick(() => {
+				new WhatsNewModal(this.app, CHANGELOG, () => void this.plugin.activateSourceControlView()).open();
+			});
+		viewBtn.buttonEl.addClass('gfs-whats-new-banner-view');
 
 		const dismissBtn = banner.createEl('button', {
 			cls: 'gfs-whats-new-banner-dismiss',
@@ -212,7 +223,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 			.addButton(button => button
 				.setButtonText(t('settings.releaseHistory.button'))
 				.onClick(() => {
-					new WhatsNewModal(this.app, CHANGELOG).open();
+					new WhatsNewModal(this.app, CHANGELOG, () => void this.plugin.activateSourceControlView()).open();
 				}));
 	}
 

@@ -111,9 +111,13 @@ const en = {
 	'whatsNew.viewOnGitHub': 'View on GitHub',
 	'whatsNew.viewChangelog': 'View full changelog',
 	'whatsNew.gotIt': 'Got it',
+	'whatsNew.openSourceControl': 'Open Source Control',
+	'whatsNew.close': 'Close',
+	'whatsNew.stepLabel': 'Step {number}',
 
 	'settings.whatsNewBanner.title': "What's new in v{version}",
 	'settings.whatsNewBanner.dismiss': 'Dismiss',
+	'settings.whatsNewBanner.view': "See what's new",
 	'settings.releaseHistory.name': 'Release history',
 	'settings.releaseHistory.desc': "Review what's new in current and previous versions",
 	'settings.releaseHistory.button': 'View release history',

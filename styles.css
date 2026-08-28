@@ -1347,6 +1347,43 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     font-weight: 600;
 }
 
+.ssv-whats-new-summary {
+    color: var(--text-muted);
+    margin: 0 0 12px;
+}
+
+.ssv-whats-new-steps {
+    list-style: none;
+    margin: 0 0 16px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.ssv-whats-new-step {
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--background-secondary);
+}
+
+.ssv-whats-new-step-label {
+    display: block;
+    font-size: 0.8em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.ssv-whats-new-step strong {
+    display: block;
+}
+
+.ssv-whats-new-step p {
+    margin: 2px 0 0;
+    color: var(--text-muted);
+}
+
 /* ── Settings "what's new" banner ──────────────────────────────── */
 .gfs-whats-new-banner {
     display: flex;
@@ -1367,6 +1404,10 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 .gfs-whats-new-banner-list {
     margin: 4px 0 0;
     padding-left: 20px;
+}
+
+.gfs-whats-new-banner-view {
+    margin-top: 6px;
 }
 
 .gfs-whats-new-banner-dismiss {

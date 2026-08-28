@@ -45,3 +45,32 @@ describe('1.5.0 release notes', () => {
         }
     });
 });
+
+describe('CHANGELOG ordering and content', () => {
+    it('lists 1.6.0 before 1.5.0', () => {
+        const versions = CHANGELOG.map(r => r.version);
+        expect(versions.indexOf('1.6.0')).toBeLessThan(versions.indexOf('1.5.0'));
+        expect(versions.indexOf('1.6.0')).toBeGreaterThanOrEqual(0);
+    });
+
+    it('1.6.0 provides an onboarding headline, summary, and three steps in every supported language', () => {
+        const release = CHANGELOG.find(r => r.version === '1.6.0');
+        expect(release?.headline?.en).toBeTruthy();
+        expect(release?.summary?.en).toBeTruthy();
+        expect(release?.onboarding?.steps).toHaveLength(3);
+        expect(release?.onboarding?.action).toBe('open-source-control');
+
+        for (const step of release?.onboarding?.steps ?? []) {
+            expect(step.title.en).toBeTruthy();
+            expect(step.title['zh-tw']).toBeTruthy();
+            expect(step.title['zh-cn']).toBeTruthy();
+            expect(step.description?.en).toBeTruthy();
+        }
+    });
+
+    it('does not require headline/onboarding on legacy releases', () => {
+        const release = CHANGELOG.find(r => r.version === '1.5.0');
+        expect(release?.headline).toBeUndefined();
+        expect(release?.onboarding).toBeUndefined();
+    });
+});
