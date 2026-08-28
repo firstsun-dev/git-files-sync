@@ -317,6 +317,17 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'sync.notice.pullSummary': '已从 {service} 拉取：新增 {added} 个、更新 {updated} 个。',
 	'sync.notice.pullAddedOnly': '已从 {service} 拉取：新增 {added} 个。',
 	'sync.notice.pullUpdatedOnly': '已从 {service} 拉取：更新 {updated} 个。',
+	'sourceControl.notice.sync.success': '同步完成 — {details}',
+	'sourceControl.notice.sync.partial': '同步完成但有问题 — {details}',
+	'sourceControl.notice.sync.failed': '同步失败 — {details}',
+	'sourceControl.notice.sync.added': '新增 {count} 个',
+	'sourceControl.notice.sync.updated': '更新 {count} 个',
+	'sourceControl.notice.sync.moved': '移动 {count} 个',
+	'sourceControl.notice.sync.deleted': '删除 {count} 个',
+	'sourceControl.notice.sync.downloaded': '下载 {count} 个',
+	'sourceControl.notice.sync.failedCount': '失败 {count} 个',
+	'sourceControl.notice.sync.conflicts': '{count} 个冲突',
+	'sourceControl.notice.sync.skippedConflicts': '跳过 {count} 个冲突',
 };
 
 export default zhCn;

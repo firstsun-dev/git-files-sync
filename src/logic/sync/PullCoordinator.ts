@@ -8,7 +8,7 @@ import { t } from '../../i18n';
 import type { PullExecutor } from './PullExecutor';
 import type { SyncScanner } from './SyncScanner';
 import { SyncPlanner } from './SyncPlanner';
-import type { PlannedFileAction, SyncPlan, SyncPlanEntry, SyncResult } from './types';
+import type { PlannedFileAction, PullExecutionOptions, SyncPlan, SyncPlanEntry, SyncResult } from './types';
 import { isSyncPlanEmpty } from './types';
 
 type BatchOutcome = 'added' | 'updated' | 'unchanged' | 'conflict';
@@ -56,9 +56,10 @@ export class PullCoordinator {
         files: Array<TFile | string>,
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[],
+        options: PullExecutionOptions = {},
     ): Promise<SyncResult> {
         const tree = await this.resolveTree(remoteTree);
-        return this.processBatch(files, onProgress, tree);
+        return this.processBatch(files, onProgress, tree, options);
     }
 
     async planPullBatch(files: Array<TFile | string>, remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
@@ -90,6 +91,7 @@ export class PullCoordinator {
         files: Array<TFile | string>,
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[],
+        options: PullExecutionOptions = {},
     ): Promise<SyncResult> {
         const results: SyncResult = { success: 0, added: 0, updated: 0, failed: 0, conflicts: 0, errors: [] };
         const tree = remoteTree ? new Map(remoteTree.map(entry => [entry.path, entry])) : undefined;
@@ -110,7 +112,7 @@ export class PullCoordinator {
             }
         }
         await this.dependencies.saveSettings();
-        this.notifyResult(results);
+        if (options.notify !== false) this.notifyResult(results);
         return results;
     }
 

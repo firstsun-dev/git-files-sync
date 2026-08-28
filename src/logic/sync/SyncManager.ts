@@ -3,6 +3,7 @@ import { GitServiceInterface, GitTreeEntry } from '../../services/git-service-in
 import { GitLabFilesPushSettings, getServiceName } from '../../settings';
 import {
     type PushResults,
+    type PullExecutionOptions,
     type SyncResult,
     SyncPlan,
     SyncPlanEntry,
@@ -288,8 +289,9 @@ export class SyncManager {
         files: (TFile | string)[],
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[],
+        options?: PullExecutionOptions,
     ): Promise<SyncResult> {
-        return this.pullCoordinator.applyPullBatch(files, onProgress, remoteTree);
+        return this.pullCoordinator.applyPullBatch(files, onProgress, remoteTree, options);
     }
 
     /** Classifies and conflict-resolves a push batch without confirming or committing, for a unified Sync Plan orchestrator. */

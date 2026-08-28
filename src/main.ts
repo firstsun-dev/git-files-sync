@@ -25,6 +25,7 @@ import { RefreshState } from './logic/source-control/RefreshState';
 import { SyncSelectionStore } from './logic/source-control/SyncSelectionStore';
 import { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
 import { SourceControlActionService } from './logic/source-control/SourceControlActionService';
+import { SyncResultNotifier } from './logic/source-control/SyncResultNotifier';
 import { toSyncChanges } from './logic/source-control/FileStatusAdapter';
 
 export type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
@@ -128,6 +129,7 @@ export default class GitLabFilesPush extends Plugin {
 			this.changeRepository,
 			this.operationState,
 			this.syncWorkspace,
+			new SyncResultNotifier(message => new Notice(message)),
 		);
 		// Keeps ChangeRepository (and therefore the Source Control view) in
 		// sync with the same SyncStatusService instance the sync domain

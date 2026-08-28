@@ -8,6 +8,7 @@ import { GitServiceInterface } from '../../src/services/git-service-interface';
 import { gitBlobSha } from '../../src/utils/git-blob-sha';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
 import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
+import type { SyncInteractionPort } from '../../src/logic/sync/SyncInteractionPort';
 
 vi.mock('obsidian');
 // Every push/pull-all now shows a plan for review before applying;
@@ -336,6 +337,26 @@ describe('SyncManager Batch Operations', () => {
             expect(results.success).toBe(2);
             expect(vi.mocked(adapter.write)).toHaveBeenCalledWith('file1.md', 'remote content');
             expect(vi.mocked(mockApp.vault.modify)).toHaveBeenCalledWith(mockFile, 'remote content');
+        });
+
+        it('suppresses the nested completion notification for a unified-sync pull', async () => {
+            const path = 'remote.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            const notify = vi.fn();
+            const interaction: SyncInteractionPort = {
+                confirmPlan: vi.fn().mockResolvedValue(true),
+                openConflict: vi.fn(),
+                resolveBatchConflicts: vi.fn().mockResolvedValue(true),
+                notify,
+            };
+            const silentManager = new SyncManager(mockApp, mockGitService, mockSettings, undefined, undefined, undefined, interaction);
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path, symlink: false }]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+
+            await silentManager.applyPullBatch([path], undefined, undefined, { notify: false });
+
+            expect(notify).not.toHaveBeenCalled();
         });
 
         it('skips downloading a file whose tree sha already matches the local content', async () => {

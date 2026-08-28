@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
+import type { SyncExecutionResult, SyncResultNotificationPort } from '../../../src/logic/source-control/SyncResultNotifier';
 import type { PlannedPushBatch } from '../../../src/logic/sync/PushCoordinator';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import type { SyncWorkspace } from '../../../src/logic/sync/SyncWorkspace';
@@ -71,12 +72,16 @@ function fakeWorkspace(overrides: Partial<SyncWorkspace> = {}): SyncWorkspace {
     } as SyncWorkspace;
 }
 
-function buildService(changes: SyncChange[], workspace: SyncWorkspace) {
+function buildService(
+    changes: SyncChange[],
+    workspace: SyncWorkspace,
+    notifier: SyncResultNotificationPort = { notify: vi.fn() },
+) {
     const repository = new ChangeRepository();
     repository.replace(changes);
     const operations = new OperationState();
-    const service = new SourceControlActionService(repository, operations, workspace);
-    return { service, operations };
+    const service = new SourceControlActionService(repository, operations, workspace, notifier);
+    return { service, operations, notifier };
 }
 
 describe('SourceControlActionService', () => {
@@ -149,8 +154,9 @@ describe('SourceControlActionService', () => {
     });
 
     describe('sync', () => {
-        it('commits a modified file and a locally-deleted file in exactly one commitResolvedBatch call', async () => {
+        it('commits a modified file and a locally-deleted file once, then shows one unified completion result', async () => {
             const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+            const notify = vi.fn();
             const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
                 reviewPlan: emptySyncPlan({ modifications: [{ path: 'a.md', name: 'a.md' }] }),
                 pushes: [{ path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'updated', existingSha: 'sha-a' }],
@@ -161,6 +167,7 @@ describe('SourceControlActionService', () => {
                     { id: toChangeId('c-2'), path: 'gone.md', kind: 'local-deleted' },
                 ],
                 fakeWorkspace({ planPush, commitResolvedBatch }),
+                { notify },
             );
 
             await service.sync([toChangeId('c-1'), toChangeId('c-2')]);
@@ -176,6 +183,8 @@ describe('SourceControlActionService', () => {
             );
             expect(operations.get(toChangeId('c-1'))).toBe('success');
             expect(operations.get(toChangeId('c-2'))).toBe('success');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({ updated: 1, deleted: 1, downloaded: 0 }));
         });
 
         it('creates zero commits for a pure-pull sync selection', async () => {
@@ -183,17 +192,72 @@ describe('SourceControlActionService', () => {
             const planPush = vi.fn();
             const applyPull = vi.fn().mockResolvedValue({ success: 1, added: 1, updated: 0, failed: 0, conflicts: 0, errors: [] } as SyncResult);
             const planPull = vi.fn().mockResolvedValue(emptySyncPlan({ additions: [{ path: 'remote.md', name: 'remote.md' }] }));
+            const notify = vi.fn();
             const { service, operations } = buildService(
                 [{ id: toChangeId('c-1'), path: 'remote.md', kind: 'remote-only' }],
                 fakeWorkspace({ planPush, planPull, applyPull, commitResolvedBatch }),
+                { notify },
             );
 
             await service.sync([toChangeId('c-1')]);
 
             expect(planPush).not.toHaveBeenCalled();
             expect(commitResolvedBatch).not.toHaveBeenCalled();
-            expect(applyPull).toHaveBeenCalledWith(['remote.md']);
+            expect(applyPull).toHaveBeenCalledWith(['remote.md'], { notify: false });
             expect(operations.get(toChangeId('c-1'))).toBe('success');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({ downloaded: 1 }));
+        });
+
+        it('aggregates mixed remote and pull results into one partial notification', async () => {
+            const notify = vi.fn();
+            const commitResolvedBatch = vi.fn(async (_pushes, _moves, _deletions, _keepRemote, _keepLocal, results: PushResults) => {
+                results.updated = 1;
+                results.errors.push({ file: 'gone.md', error: 'locked' });
+                results.failed = 1;
+            });
+            const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                reviewPlan: emptySyncPlan({ modifications: [{ path: 'a.md', name: 'a.md' }] }),
+                pushes: [{ path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'updated', existingSha: 'sha-a' }],
+            }));
+            const applyPull = vi.fn().mockResolvedValue(emptySyncResult({ added: 1, success: 1 }));
+            const { service } = buildService(
+                [
+                    { id: toChangeId('update'), path: 'a.md', kind: 'local-modified' },
+                    { id: toChangeId('delete'), path: 'gone.md', kind: 'local-deleted' },
+                    { id: toChangeId('download'), path: 'remote.md', kind: 'remote-only' },
+                ],
+                fakeWorkspace({ planPush, applyPull, commitResolvedBatch }),
+                { notify },
+            );
+
+            await service.sync([toChangeId('update'), toChangeId('delete'), toChangeId('download')]);
+
+            expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
+            expect(applyPull).toHaveBeenCalledWith(['remote.md'], { notify: false });
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+                updated: 1, deleted: 0, downloaded: 1, failed: 1,
+            } satisfies Partial<SyncExecutionResult>));
+        });
+
+        it('reports a thrown execution as one total-failure notification', async () => {
+            const notify = vi.fn();
+            const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                reviewPlan: emptySyncPlan({ modifications: [{ path: 'a.md', name: 'a.md' }] }),
+                pushes: [{ path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'updated', existingSha: 'sha-a' }],
+            }));
+            const { service, operations } = buildService(
+                [{ id: toChangeId('update'), path: 'a.md', kind: 'local-modified' }],
+                fakeWorkspace({ planPush, commitResolvedBatch: vi.fn().mockRejectedValue(new Error('offline')) }),
+                { notify },
+            );
+
+            await service.sync([toChangeId('update')]);
+
+            expect(operations.get(toChangeId('update'))).toBe('failed');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({ failed: 1 }));
         });
 
         it('does not commit or mark anything when the merged plan is cancelled at confirm', async () => {

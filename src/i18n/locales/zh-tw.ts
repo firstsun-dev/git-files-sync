@@ -317,6 +317,17 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'sync.notice.pullSummary': '已從 {service} 拉取：新增 {added} 個、更新 {updated} 個。',
 	'sync.notice.pullAddedOnly': '已從 {service} 拉取：新增 {added} 個。',
 	'sync.notice.pullUpdatedOnly': '已從 {service} 拉取：更新 {updated} 個。',
+	'sourceControl.notice.sync.success': '同步完成 — {details}',
+	'sourceControl.notice.sync.partial': '同步完成但有問題 — {details}',
+	'sourceControl.notice.sync.failed': '同步失敗 — {details}',
+	'sourceControl.notice.sync.added': '新增 {count} 個',
+	'sourceControl.notice.sync.updated': '更新 {count} 個',
+	'sourceControl.notice.sync.moved': '移動 {count} 個',
+	'sourceControl.notice.sync.deleted': '刪除 {count} 個',
+	'sourceControl.notice.sync.downloaded': '下載 {count} 個',
+	'sourceControl.notice.sync.failedCount': '失敗 {count} 個',
+	'sourceControl.notice.sync.conflicts': '{count} 個衝突',
+	'sourceControl.notice.sync.skippedConflicts': '略過 {count} 個衝突',
 };
 
 export default zhTw;

@@ -1,6 +1,7 @@
 import type { PlannedPushBatch } from '../sync/PushCoordinator';
 import type { SyncWorkspace } from '../sync/SyncWorkspace';
 import { isSyncPlanEmpty, type DeleteQueueEntry, type PushResults, type SyncPlan, type SyncPlanEntry } from '../sync/types';
+import { type SyncExecutionResult, type SyncResultNotificationPort } from './SyncResultNotifier';
 import { defaultSyncAction } from './ChangeActionPolicy';
 import type { ChangeRepository } from './ChangeRepository';
 import type { OperationState } from './OperationState';
@@ -38,6 +39,7 @@ export class SourceControlActionService {
         private readonly changes: ChangeRepository,
         private readonly operations: OperationState,
         private readonly workspace: SyncWorkspace,
+        private readonly syncResultNotifier: SyncResultNotificationPort = { notify: () => {} },
     ) {}
 
     /** Pushes one or more changes (single push and batch push share this path). */
@@ -135,9 +137,11 @@ export class SourceControlActionService {
             skippedConflicts: planned.reviewPlan.skippedConflicts,
         };
 
-        if (!isSyncPlanEmpty(mergedPlan) && !await this.workspace.confirmPlan(mergedPlan, 'sync')) return;
+        if (isSyncPlanEmpty(mergedPlan)) return;
+        if (!await this.workspace.confirmPlan(mergedPlan, 'sync')) return;
 
         this.startAll(targets);
+        const summary = SourceControlActionService.emptyExecutionResult();
         try {
             if (planned.pushes.length > 0 || planned.moves.length > 0 || deleteTargets.length > 0) {
                 const deleteEntries: DeleteQueueEntry[] = deleteTargets.map(target => ({
@@ -159,14 +163,22 @@ export class SourceControlActionService {
                 await this.workspace.commitResolvedBatch(planned.pushes, planned.moves, deleteEntries, planned.keepRemote, planned.keepLocal, results);
                 const failed = new Set(results.errors.map(error => error.file));
                 this.finishAll([...pushTargets, ...deleteTargets], path => (failed.has(path) ? 'failed' : 'success'));
+                this.addRemoteResult(summary, planned, deleteEntries, results);
             }
             if (pullTargets.length > 0) {
-                const pullResults = await this.workspace.applyPull(pullTargets.map(target => target.path));
+                const pullResults = await this.workspace.applyPull(pullTargets.map(target => target.path), { notify: false });
                 const failed = new Set(pullResults.errors.map(error => error.file));
                 this.finishAll(pullTargets, path => (failed.has(path) ? 'failed' : 'success'));
+                summary.downloaded += pullResults.added + pullResults.updated;
+                summary.failed += pullResults.failed;
+                summary.conflicts += pullResults.conflicts;
+                summary.errors.push(...pullResults.errors);
             }
+            this.syncResultNotifier.notify(summary);
         } catch {
             this.failAll(targets);
+            summary.failed = Math.max(summary.failed, targets.length);
+            this.syncResultNotifier.notify(summary);
         }
     }
 
@@ -186,6 +198,27 @@ export class SourceControlActionService {
 
     private static emptyPlan(): SyncPlan {
         return { additions: [], modifications: [], deletions: [], moves: [] };
+    }
+
+    private static emptyExecutionResult(): SyncExecutionResult {
+        return { added: 0, updated: 0, moved: 0, deleted: 0, downloaded: 0, failed: 0, conflicts: 0, skippedConflicts: 0, errors: [] };
+    }
+
+    private addRemoteResult(
+        summary: SyncExecutionResult,
+        planned: PlannedPushBatch,
+        deletions: readonly DeleteQueueEntry[],
+        results: PushResults,
+    ): void {
+        const failedPaths = new Set(results.errors.map(error => error.file));
+        summary.added += planned.pushes.filter(entry => !entry.existingSha && !failedPaths.has(entry.path)).length;
+        summary.updated += planned.pushes.filter(entry => entry.existingSha && !failedPaths.has(entry.path)).length + planned.immediate.updated;
+        summary.moved += planned.moves.filter(entry => !failedPaths.has(entry.path)).length;
+        summary.deleted += deletions.filter(entry => !failedPaths.has(entry.path)).length;
+        summary.failed += results.failed;
+        summary.conflicts += results.conflicts;
+        summary.skippedConflicts += results.skippedConflicts;
+        summary.errors.push(...results.errors);
     }
 
     /** Deletes one or more changes from the local vault only. No batch primitive exists on `SyncWorkspace`, so each runs independently and one failure doesn't block the rest. */

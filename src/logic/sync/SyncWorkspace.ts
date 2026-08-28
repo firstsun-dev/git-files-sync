@@ -14,7 +14,7 @@ import {
     SyncStatusRefreshProgress,
     SyncStatusRefreshResult,
 } from './SyncStatusRefreshService';
-import type { BatchPushConflict, DeleteQueueEntry, FileDiff, MoveQueueEntry, PushQueueEntry, PushResults, SyncPlan, SyncResult } from './types';
+import type { BatchPushConflict, DeleteQueueEntry, FileDiff, MoveQueueEntry, PullExecutionOptions, PushQueueEntry, PushResults, SyncPlan, SyncResult } from './types';
 import { ensureParentDirs } from '../../utils/vault-path';
 import { buildRemoteFileUrl } from '../../utils/remote-url';
 
@@ -48,7 +48,7 @@ export interface SyncWorkspace {
     /** Computes what a pull batch would do, without writing anything — for a unified Sync Plan. */
     planPull(paths: readonly string[]): Promise<SyncPlan>;
     /** Applies an already-confirmed pull batch without showing its own confirm modal. */
-    applyPull(paths: readonly string[]): Promise<SyncResult>;
+    applyPull(paths: readonly string[], options?: PullExecutionOptions): Promise<SyncResult>;
     /** Commits already-planned pushes/moves/deletions as one provider mutation set. */
     commitResolvedBatch(
         pushes: PushQueueEntry[],
@@ -187,9 +187,9 @@ export class SyncManagerWorkspace implements SyncWorkspace {
         return this.dependencies.manager().planPullBatch([...paths], remoteTree);
     }
 
-    async applyPull(paths: readonly string[]): Promise<SyncResult> {
+    async applyPull(paths: readonly string[], options?: PullExecutionOptions): Promise<SyncResult> {
         const remoteTree = await this.reusableRemoteTree();
-        return this.dependencies.manager().applyPullBatch([...paths], undefined, remoteTree);
+        return this.dependencies.manager().applyPullBatch([...paths], undefined, remoteTree, options);
     }
 
     commitResolvedBatch(
@@ -249,7 +249,7 @@ export class BoundarySyncWorkspace implements SyncWorkspace {
     toRepoPath(path: string): string { return path; }
     planPush(paths: readonly string[]): Promise<PlannedPushBatch> { return this.getManager().planSyncBatch([...paths]); }
     planPull(paths: readonly string[]): Promise<SyncPlan> { return this.getManager().planPullBatch([...paths]); }
-    applyPull(paths: readonly string[]): Promise<SyncResult> { return this.getManager().applyPullBatch([...paths]); }
+    applyPull(paths: readonly string[], options?: PullExecutionOptions): Promise<SyncResult> { return this.getManager().applyPullBatch([...paths], undefined, undefined, options); }
     commitResolvedBatch(
         pushes: PushQueueEntry[],
         moves: MoveQueueEntry[],

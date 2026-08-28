@@ -94,6 +94,11 @@ export interface SyncResult {
     errors: SyncFailure[];
 }
 
+/** Controls presentation owned by a caller that composes pull into a larger transaction. */
+export interface PullExecutionOptions {
+    notify?: boolean;
+}
+
 export interface FileDiff {
     path: string;
     localContent?: string | ArrayBuffer;

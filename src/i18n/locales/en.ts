@@ -315,6 +315,17 @@ const en = {
 	'sync.notice.pullSummary': 'Pulled from {service}: {added} added, {updated} updated.',
 	'sync.notice.pullAddedOnly': 'Pulled from {service}: {added} added.',
 	'sync.notice.pullUpdatedOnly': 'Pulled from {service}: {updated} updated.',
+	'sourceControl.notice.sync.success': 'Sync complete — {details}',
+	'sourceControl.notice.sync.partial': 'Sync completed with issues — {details}',
+	'sourceControl.notice.sync.failed': 'Sync failed — {details}',
+	'sourceControl.notice.sync.added': '{count} added',
+	'sourceControl.notice.sync.updated': '{count} updated',
+	'sourceControl.notice.sync.moved': '{count} moved',
+	'sourceControl.notice.sync.deleted': '{count} deleted',
+	'sourceControl.notice.sync.downloaded': '{count} downloaded',
+	'sourceControl.notice.sync.failedCount': '{count} failed',
+	'sourceControl.notice.sync.conflicts': '{count} conflicts',
+	'sourceControl.notice.sync.skippedConflicts': '{count} skipped conflicts',
 };
 
 export default en;
