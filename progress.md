@@ -4,7 +4,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-08-27
+**Last Updated:** 2026-08-28
 **Active Feature:** feat-027 / issue #139 — disposable Gitea local/CI portability and runner trust separation.
 **Branch / PR:** `codex/test-gitea-e2e-ci` / PR #140, based on `claude/source-control-foundation`.
 
@@ -16,6 +16,7 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Verification Evidence
 
+- PR #129 commit `17b361f`: unified Sync queue completion notification. `SyncExecutionResult` keeps added/updated/moved/deleted/downloaded outcomes separate from push-specific `PushResults`; `SourceControlActionService.sync()` aggregates the whole transaction and owns one final notification. Pulls inside unified Sync use `{ notify: false }`, while standalone pull/download notifications remain. `npx eslint .` — 0 errors; `npm run build` — passed incl. Obsidian 1.11 compatibility; `npx vitest run` — 65 files / 724 tests passed; `git diff --check` — clean.
 - Commits `920adee`, `18de6e0`, `b5884fc`: Gitea uses a Docker-assigned loopback port and each local invocation owns a `mktemp` workdir; Gitea CI runs on `ubuntu-latest` with `contents: read`; GitHub/GitLab stay on self-hosted runners with fork rejection at job level; manual/scheduled concurrency cannot cancel normal push/PR checks.
 - Pre-merge local verification: `npx eslint .` — 0 errors; `npm run build` — pass including Obsidian 1.11 compatibility; `npx vitest run` — 56 files / 554 tests; shell syntax/ShellCheck/actionlint/diff checks — pass; Gitea E2E — 3 files / 27 passed, 17 skipped, including concurrent-run isolation.
 - Pre-merge real CI: targeted Gitea run 33048613679 passed through Gitea and downstream validation. Concurrent push run 33048499785 retained a successful Gitea check, proving concurrency isolation. SonarCloud passed on PR #140.
