@@ -5,17 +5,21 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-08-30
-**Active Feature:** PR #129 (`claude/source-control-foundation`) — lifecycle hardening + legacy cleanup; awaiting CI + iPad regression, then merge.
-**Branch / PR:** `claude/source-control-foundation` / PR #129.
+**Active Feature:** PR #129 (`claude/source-control-foundation`) — 4 remaining review fixes done; awaiting CI + iPad regression, then final merge gate.
+**Branch / PR:** `claude/source-control-foundation` / PR #129 (head `fbe0787`).
 
 ## Outstanding Items
 
-1. CI run `33273746958` (pull_request @ af376f2) must finish all green — Lint, Build, Unit 22/24, Provider E2E (github/gitea/gitlab), Required Checks, Package.
-2. Manual iPad regression on build deployed 2026-08-30 04:33 to `~/Obsidian/MyPKM` — scenario list in `session-handoff.md` Next Step.
-3. Merge PR #129 once 1+2 pass; PR body already updated with the lifecycle hardening + legacy cleanup section.
+1. New push run(s) for `fbe0787` must finish all green — with the new whole-run concurrency, ONE complete run (push or PR) must own all 9 check groups: Lint, Build, Unit 22, Unit 24, GitHub E2E, GitLab E2E, Gitea E2E, Required Checks, Package.
+2. Verify the workflow-level concurrency works as contracted: push + pull_request for the same branch → only one survives in full.
+3. Manual iPad regression checklist (merge-gate list in the review) on a fresh `npm run deploy` build.
+4. Final merge-ready review of PR #129, then merge.
 
 ## Verification Evidence
 
-- Commit `05f6628` fix(source-control): harden scroll, diff-stat and create lifecycles. `npx eslint .` — 0 errors; `npm run build` — passed incl. Obsidian 1.11 compat; `npx vitest run` — 66 files / 788 tests passed; coverage thresholds introduced (70/70/70/60), full-run numbers 84.02/75.57/81.61/86.11.
-- Commit `af376f2` chore(source-control): finish legacy sync-status presentation cleanup. Same gate green at commit time; `-273/+61` lines; dead i18n keys removed (81 per locale), user-facing wording → "Source Control", ESLint restricted-imports guard added, `src/ui/source-control/**` in coverage.
-- Previous round (CI-verified): run `33260979664` all green at `2d6cf91`+`709905a`. The push run `33260978068` was cancelled by design (same-branch e2e concurrency; pull_request run supersedes, ci.yml:360).
+- `acd2046` fix(ci): serialize branch validation workflows — workflow-level `concurrency:` keyed `ci-<branch>` for push/pull_request, unique groups for workflow_dispatch/schedule; per-job e2e concurrency removed (split-winner race gone). New contract tests in `tests/ci-workflow.test.ts` (10 passed). `npx eslint .` 0 errors, `npm run build` passed (hook).
+- `78a78e8` fix(source-control): track diff stat requests by generation token — `active` is now a `Map<ChangeId, ActiveDiffStatRequest>` (token + generations); a finishing request deletes only its own marker; `physicalInFlight` (not `active.size`) gates the 4-concurrency cap. Regression tests: old-finally can't clear newer marker, no duplicate #3 on re-render while stale+current in flight, rapid-invalidate burst never exceeds 4 physically concurrent calls. `npx vitest run tests/ui/source-control/DiffStatProvider.test.ts` — 22 passed.
+- `49f3033` fix(sync-status): preserve refreshed state across live modifications — `handleFileModified` re-reads the row after its await and classifies from `current`, not the pre-await snapshot; full-refresh state (remoteSha/remoteContent/isSymlink/movedFrom) survives; modify during pending delete can't resurrect (stays `local-deleted`, content-less); rename-away path not written back. Tests +3 (20 passed in file).
+- `fbe0787` fix(source-control): correct one-sided diff stat direction — `addedContentStat`/`deletedContentStat` in ChangePresentation; `SourceControlItemView.loadDiffStat` applies ↓=+N / D=-N without touching the diff-pane FileDiff sides. Rendered-stat tests: remote-only 2 lines → `+2`, local-deleted 2 lines → `-2`. Helper tests in ChangePresentation.test.ts.
+- Full gate after all 4: `npx eslint .` — 0 errors; `npx vitest run` — 66 files / 804 tests passed; per-commit `npm run build` (+ Obsidian 1.11 compat) passed via the husky pre-commit hook on all 4 commits.
+- Pushed `9eb3713..fbe0787`.

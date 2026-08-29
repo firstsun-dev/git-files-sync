@@ -2,33 +2,26 @@
 
 **Date:** 2026-08-30
 **Branch / PR:** `claude/source-control-foundation` / PR #129
-**Latest commits:** `05f6628 fix(source-control): harden scroll, diff-stat and create lifecycles`, `af376f2 chore(source-control): finish legacy sync-status presentation cleanup` (both pushed)
-**Build:** deployed to `~/Obsidian/MyPKM` via `npm run deploy` (2026-08-30 04:33)
+**Latest commits (all pushed):** `acd2046` fix(ci): serialize branch validation workflows → `78a78e8` fix(source-control): track diff stat requests by generation token → `49f3033` fix(sync-status): preserve refreshed state across live modifications → `fbe0787` fix(source-control): correct one-sided diff stat direction
 
 ## Completed (this round)
 
-Fix-all plan from the review (no more piecemeal patches):
+Final 4-fix round from the merge-gate review (no scope expansion):
 
-1. **Mobile scroll lifecycle** — navigation restore (`mainScrollState` + `navigationAnchorId`) now runs ONLY on the Back transition via `restoreNavigationScrollOnNextRender`; regular rerenders (checkbox/diff-stat/status) use the captured-DOM path and never re-anchor.
-2. **DiffStatProvider stale async writes** — two-level generation guard (globalGeneration + per-row generations). `invalidate()`/`clear()` evict queued AND in-flight markers, bump generations; stale responses are denied the cache write (not aborted). Loader rejections = retryable, never cached `unavailable`, never unhandled rejections.
-3. **Invalidation fingerprint** — `DiffStatFingerprint` (status/localContent/remoteContent/remoteSha/movedFrom/isSymlink) in SourceControlItemView; stale-path snapshots removed when republish drops rows.
-4. **handleFileCreated resilient two-step** — publish A immediately (no content, pending stat) → async read → republish under per-path `contentRevisions` guard (create read cannot clobber raced modify; read failure leaves row visible/retryable).
-5. **loadVisible scoped to rendered rows** — collapsed Repository Changes AND collapsed queue (desktop `checkedChanges`, mobile `mobileQueueExpanded`) fire zero stat requests.
-6. **One-sided diff semantics in SyncDiffService** — local-only ⇒ remote `''`; remote-only/local-deleted ⇒ local `''`; computeDiffStat turns `''→content` into +N. Plus in-flight remote-blob memoization keyed `remoteSha:path`.
-7. **Error policy** — background `run()`/`lazyLoad()` catch loader throws: not cached, retryable, no unhandled rejection.
-8. **Tests** — +18 lifecycle regression tests (stale-result, clear-in-flight, out-of-order settle, rejection retry, mobile scroll matrix, one-sided stats, dedup, raced-create guard).
-9. **Legacy cleanup** — audit confirmed `src/ui/sync-status/*` + `SyncStatusView` already deleted. Removed 81 dead i18n keys per locale; reworded ribbon/command/view-title to "Source Control" (kept `open-sync-status` command ID + `sync-status-view` type); ESLint `no-restricted-imports` guard vs `ui/sync-status`; renamed `SyncStatusView.revertMove.test.ts` → `VaultPath.test.ts` (never tested the legacy view); stale SyncStatusView comments cleaned; coverage now includes `src/ui/source-control/**` (~90% lines) with thresholds 70/70/70/60. CSS audit: all `.ssv-diff-*` is shared DiffPanel CSS (kept); zero orphan legacy CSS.
+1. **CI whole-run concurrency** — `concurrency:` moved to workflow level in `.github/workflows/ci.yml`: group `ci-<head_ref|ref_name>` for push/pull_request (one whole CI DAG per branch survives; the split per-provider winners race is gone), `format('{0}-{1}', event_name, run_id)` for workflow_dispatch/schedule so manual/scheduled runs never cancel (or get cancelled by) branch CI. Per-job `concurrency:` blocks on `provider-e2e` and `gitea-e2e` removed. Contract tests updated + added in `tests/ci-workflow.test.ts`: independent dispatch/schedule identity, workflow-level serialization (no `group: e2e-` left, `ci-` group present), dispatch/schedule never cancel branch CI.
+2. **DiffStatProvider request tokens** — `active` changed from `Set<ChangeId>` to `Map<ChangeId, ActiveDiffStatRequest>` (`token` from a monotonic counter + the two generation values). A request's finally deletes only its own marker (`active.get(id)?.token === request.token`). New `physicalInFlight` counter (incremented on dispatch, decremented in `finish`) gates the MAX_CONCURRENT=4 pump — never `active.size`; `invalidate`/`clear` may drop the row's marker immediately but abandoned physical calls still count until they settle. Regressions added: old-finally-cannot-clear-newer-marker, stale+current-in-flight-no-duplicate, rapid-invalidate burst peak ≤ 4.
+3. **SyncStatusRefreshService modify vs full refresh** — `handleFileModified` no longer writes back its pre-await `existing` snapshot. Two-phase: bump revision, read content, bail if revision superseded; then re-read `this.statuses.get(path)` and bail if the row is gone or `file` changed; classification uses `current` (including `current.remoteSha`); final write spreads `{ ...current, status, localContent }`. Full-refresh state (remoteSha A→B, remoteContent, isSymlink, movedFrom) now survives a pending modify read; a delete during pending read stays `local-deleted` without content; a rename-away old path is not written back. Tests +3.
+4. **One-sided diff stat direction** — the pane's FileDiff sides (local='' for ↓/D) are download-oriented and must not define the row stat. `ChangePresentation` gains `addedContentStat(content)` (+N) and `deletedContentStat(content)` (−N); `SourceControlItemView.loadDiffStat` routes `remote-only` → additions(remote content), `local-deleted` → deletions(remote content), everything else keeps `computeDiffStat`. `SyncDiffService` doc updated to note DTO-vs-stat semantics split. Tests assert the RENDERED stat: remote-only 2 lines → `+2`, local-deleted 2 lines → `−2` (plus helper unit tests).
 
 ## Verification
 
-- `npx eslint .` — 0 errors (incl. new restricted-imports guard)
-- `npm run build` — passed incl. Obsidian 1.11 compat
-- `npx vitest run` — 66 files / 788 tests passed
-- `npx vitest run --coverage` — statements 84.02% / branches 75.57% / functions 81.61% / lines 86.11% (above thresholds)
-- Local provider E2E impossible (no E2E_* credentials locally; they live in GitHub secrets) — CI runs: push `33273745179`, pull_request `33273746958` (in progress at handoff)
+- `npx eslint .` — 0 errors (full repo, after all 4 commits)
+- `npx vitest run` — 66 files / 804 tests passed
+- `npm run build` (+ Obsidian 1.11 compat typecheck) — passed via husky pre-commit on each of the 4 commits
+- Local provider E2E impossible (secrets live in GitHub only). Push `9eb3713..fbe0787` fired new CI. NOTE: with the new whole-run concurrency, only ONE of the push/pull_request runs survives — that is by design; require the survivor to be fully green.
 
-## Next Step
+## Next Step (final merge gate)
 
-1. Check CI run `33273746958` (pull_request, sha af376f2) — must be all green (Lint, Build, Unit 22/24, E2E github/gitea/gitlab, Required Checks, Package).
-2. Manual iPad regression on the deployed build — full list in Fix-all plan item 10: 80+ rows scroll/diff/Back, background +/- progressive without jumping, A immediate + +N when content ready, M +N/−N auto-update, rapid consecutive edits → latest stat wins, local delete → −N, remote-only → +N, collapse Repository Changes → no background diff downloads.
-3. After CI + manual PASS → review → merge PR #129.
+1. Watch CI for `fbe0787`; confirm exactly one complete run owns all nine green groups: Lint, Build, Unit 22, Unit 24, GitHub E2E, GitLab E2E, Gitea E2E, Required Checks, Package.
+2. `npm run deploy` a fresh build, then run the iPad manual matrix from the review's merge gate (80+ row scroll stability, M-diff Back restore, Back+scroll no re-anchor, A +N on content arrival, M auto +N/−N, rapid edit latest-wins, remote-only +N, local delete −N, collapsed sections do zero background stat fetches).
+3. Final merge-ready review of PR #129 → merge.
