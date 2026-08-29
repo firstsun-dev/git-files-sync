@@ -56,6 +56,15 @@ export default tseslint.config(
 		},
 	},
 	{
+		// CI contract suite asserts against the *committed* workflow/harness
+		// files, so reading them from disk with node:fs is the point of the
+		// test — same local-Node-tooling rationale as scripts/ above.
+		files: ["tests/ci-workflow.test.ts"],
+		rules: {
+			"import/no-nodejs-modules": "off",
+		},
+	},
+	{
 		// E2E harness glue runs under Node (vitest, `environment: 'node'`), not
 		// Obsidian's Electron renderer — needs `process`, same as scripts/. Unlike
 		// scripts/, it deliberately keeps fetch/globalThis/node:* built-ins out

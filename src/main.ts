@@ -1,4 +1,4 @@
-import { Plugin, TFile, TFolder, MarkdownView, Notice, Platform, setTooltip, setIcon } from 'obsidian';
+import { Plugin, TFile, TFolder, MarkdownView, Notice, Platform, setTooltip, setIcon, type WorkspaceLeaf } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getServiceName } from "./settings";
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
@@ -55,6 +55,7 @@ export default class GitLabFilesPush extends Plugin {
 	connectionStatus: ConnectionStatus = { state: 'checking' };
 	private connectionStatusListeners: Set<(status: ConnectionStatus) => void> = new Set();
 	private connectionTestSeq = 0;
+	private sourceControlActivation?: Promise<void>;
 
 	async onload() {
 		await this.loadSettings();
@@ -301,6 +302,11 @@ export default class GitLabFilesPush extends Plugin {
 		);
 
 		this.app.workspace.onLayoutReady(() => {
+			// Legacy workspaces may hold more than one persisted sync-status
+			// leaf (duplicates accumulated across old plugin versions).
+			// Normalize first so startup activation reuses a single canonical
+			// leaf instead of revealing one duplicate while others linger.
+			this.normalizeSourceControlLeaves();
 			if (this.settings.autoRefreshOnStartup) void this.refreshSyncStatusOnStartup();
 		});
 
@@ -438,10 +444,32 @@ export default class GitLabFilesPush extends Plugin {
 		if (this.pushRibbonEl) setTooltip(this.pushRibbonEl, this.pushRibbonLabel());
 	}
 
+	/**
+	 * Ensures concurrent entry points (startup auto refresh, ribbon icon,
+	 * command palette, What's New CTA) share one activation run, so two
+	 * simultaneous calls can't both pass the "no existing leaf" check and
+	 * each create a leaf -- the race that historically produced duplicate
+	 * Sync status panes.
+	 */
 	async activateSourceControlView(): Promise<void> {
+		if (this.sourceControlActivation) {
+			return this.sourceControlActivation;
+		}
+		this.sourceControlActivation = this.doActivateSourceControlView();
+		try {
+			await this.sourceControlActivation;
+		} finally {
+			this.sourceControlActivation = undefined;
+		}
+	}
+
+	private async doActivateSourceControlView(): Promise<void> {
 		const { workspace } = this.app;
 
-		let leaf = workspace.getLeavesOfType(SOURCE_CONTROL_VIEW_TYPE)[0];
+		// Reuse an existing leaf whenever one is present (including the
+		// legacy persisted sync-status leaf this view type inherits) instead
+		// of creating a second one.
+		let leaf = this.normalizeSourceControlLeaves();
 
 		if (!leaf) {
 			const rightLeaf = workspace.getRightLeaf(false);
@@ -451,12 +479,40 @@ export default class GitLabFilesPush extends Plugin {
 					active: true,
 				});
 				leaf = rightLeaf;
+				// A concurrent activation may have created a leaf while
+				// setViewState() was in flight; collapse any duplicates the
+				// interleaving produced before revealing.
+				leaf = this.normalizeSourceControlLeaves() ?? leaf;
 			}
 		}
 
 		if (leaf) {
 			await workspace.revealLeaf(leaf);
 		}
+	}
+
+	/**
+	 * Legacy layouts may contain more than one persisted `sync-status-view`
+	 * leaf (duplicates accumulated across older plugin versions and
+	 * activation races). Normalize them to one canonical Source Control leaf:
+	 * keep the active leaf if it is one of them, otherwise the first existing
+	 * leaf, and detach the rest. Detaching -- not detaching everything and
+	 * recreating -- preserves the user's pinned/positioned pane state.
+	 * Returns the canonical leaf, or null when none exist.
+	 */
+	private normalizeSourceControlLeaves(): WorkspaceLeaf | null {
+		const leaves = this.app.workspace.getLeavesOfType(SOURCE_CONTROL_VIEW_TYPE);
+		if (leaves.length === 0) return null;
+
+		const activeLeaf = this.app.workspace.getActiveViewOfType(SourceControlItemView);
+		let canonical = leaves[0];
+		if (activeLeaf?.leaf && leaves.includes(activeLeaf.leaf)) {
+			canonical = activeLeaf.leaf;
+		}
+		for (const leaf of leaves) {
+			if (leaf !== canonical) leaf.detach();
+		}
+		return canonical ?? null;
 	}
 
 	/**

@@ -9,6 +9,10 @@ import { cheapLocalStat, computeDiffStat, type ChangeStat } from './ChangePresen
 // Reuses the legacy sync-status view's registered type string so an already
 // open/pinned leaf from before this cutover resolves into the new view
 // instead of Obsidian showing an "unrecognized view type" placeholder.
+// Keeping that type means only ONE leaf of it may exist workspace-wide;
+// enforcing that singleton invariant (deduping legacy persisted duplicates,
+// guarding concurrent activation) is a workspace-lifecycle concern owned by
+// the plugin (main.ts), not by this view or its view model.
 export const SOURCE_CONTROL_VIEW_TYPE = 'sync-status-view';
 
 /**
