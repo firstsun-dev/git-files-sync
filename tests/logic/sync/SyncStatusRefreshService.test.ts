@@ -238,6 +238,117 @@ describe('SyncStatusRefreshService local-change handlers', () => {
         });
     });
 
+    describe('handleFileModified', () => {
+        it('does not overwrite newer full-refresh state while the modify read is pending (regression)', async () => {
+            const statuses = new SyncStatusService();
+            let resolveRead: ((content: string) => void) | undefined;
+            const file = makeFile('note.md');
+            const service = buildService(statuses, {
+                app: {
+                    vault: {
+                        read: vi.fn().mockImplementation(() => new Promise<string>(resolve => { resolveRead = resolve; })),
+                        readBinary: vi.fn(),
+                        adapter: { stat: vi.fn().mockResolvedValue(null), read: vi.fn() },
+                    },
+                } as never,
+            });
+
+            // Tracked file synced at remoteSha A.
+            statuses.set({
+                file,
+                path: 'note.md',
+                status: 'synced',
+                remoteSha: 'a'.repeat(40),
+                remoteContent: 'old remote',
+            });
+
+            // User edits → modify starts, read pending.
+            const modifyPromise = service.handleFileModified(file);
+
+            // Full refresh completes while the read is still pending:
+            // remoteSha A → B, remoteContent updated.
+            statuses.set('note.md', {
+                file,
+                path: 'note.md',
+                status: 'modified',
+                remoteSha: 'b'.repeat(40),
+                remoteContent: 'latest remote',
+            });
+
+            // The modify read lands.
+            resolveRead?.('locally edited content');
+            await modifyPromise;
+
+            const final = statuses.get('note.md');
+            // localContent = the modified content...
+            expect(final?.localContent).toBe('locally edited content');
+            // ...but the refreshed remote state is preserved, not overwritten
+            // by the stale pre-await snapshot.
+            expect(final?.remoteSha).toBe('b'.repeat(40));
+            expect(final?.remoteContent).toBe('latest remote');
+            // Old sha A would have classified "not equal" → modified; new sha B
+            // also not equal → still modified, but derived from the CURRENT row.
+            expect(final?.status).toBe('modified');
+        });
+
+        it('does not resurrect a row deleted while the modify read is pending', async () => {
+            const statuses = new SyncStatusService();
+            let resolveRead: ((content: string) => void) | undefined;
+            const file = makeFile('note.md');
+            const service = buildService(statuses, {
+                app: {
+                    vault: {
+                        read: vi.fn().mockImplementation(() => new Promise<string>(resolve => { resolveRead = resolve; })),
+                        readBinary: vi.fn(),
+                        adapter: { stat: vi.fn().mockResolvedValue(null), read: vi.fn() },
+                    },
+                } as never,
+            });
+
+            statuses.set({ path: 'note.md', status: 'synced', remoteSha: 'abc' });
+            const modifyPromise = service.handleFileModified(file);
+
+            // File deleted while the read is pending (synced → local-deleted).
+            service.handleFileDeleted('note.md');
+            resolveRead?.('late content');
+            await modifyPromise;
+
+            // The modify must not resurrect the row as modified/synced with
+            // local content — it stays a local deletion, content-less.
+            const row = statuses.get('note.md');
+            expect(row?.status).toBe('local-deleted');
+            expect(row?.localContent).toBeUndefined();
+        });
+
+        it('does not write back to a path renamed away while the modify read is pending', async () => {
+            const statuses = new SyncStatusService();
+            let resolveRead: ((content: string) => void) | undefined;
+            const file = makeFile('note.md');
+            const service = buildService(statuses, {
+                app: {
+                    vault: {
+                        read: vi.fn().mockImplementation(() => new Promise<string>(resolve => { resolveRead = resolve; })),
+                        readBinary: vi.fn(),
+                        adapter: { stat: vi.fn().mockResolvedValue(null), read: vi.fn() },
+                    },
+                } as never,
+            });
+
+            statuses.set({ file, path: 'note.md', status: 'synced', remoteSha: 'abc' });
+            const modifyPromise = service.handleFileModified(file);
+
+            // Renamed to a different path while pending: the old path's row is
+            // re-keyed by handleFileRenamed (same file object moves with it),
+            // so the modify read for note.md must not write old-path state.
+            const renamed = makeFile('renamed.md');
+            service.handleFileRenamed(renamed, 'note.md');
+            resolveRead?.('late content');
+            await modifyPromise;
+
+            expect(statuses.has('note.md')).toBe(false);
+        });
+    });
+
     describe('identifyExtraFiles local-deleted classification', () => {
         it('classifies a previously-tracked removed file as local-deleted', async () => {
             const statuses = new SyncStatusService();

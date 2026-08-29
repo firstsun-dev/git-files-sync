@@ -312,17 +312,25 @@ export class SyncStatusRefreshService {
         // A create's slow async read may still be in flight behind this
         // modify; only the newest read may write.
         if (this.contentRevisions.get(file.path) !== revision) return true;
-        let status: FileStatus['status'] = existing.status;
-        if (existing.status !== 'moved') {
-            status = existing.remoteSha === undefined
+        // Re-read AFTER the await: a full refresh may have completed while
+        // the read was pending and replaced the row's remoteSha/
+        // remoteContent/isSymlink/movedFrom. Classifying from the stale
+        // pre-await snapshot would write that old state back over the fresh
+        // refresh result; the row may even no longer exist (deleted/renamed
+        // away while pending) — in both cases the snapshot must be abandoned.
+        const current = this.statuses.get(file.path);
+        if (!current || current.file !== file) return true;
+        let status: FileStatus['status'] = current.status;
+        if (current.status !== 'moved') {
+            status = current.remoteSha === undefined
                 ? this.statuses.classify({ localExists: true, remoteExists: false })
                 : this.statuses.classify({
                     localExists: true,
                     remoteExists: true,
-                    contentsEqual: await gitBlobSha(localContent) === existing.remoteSha,
+                    contentsEqual: await gitBlobSha(localContent) === current.remoteSha,
                 });
         }
-        this.statuses.set(file.path, { ...existing, status, localContent });
+        this.statuses.set(file.path, { ...current, status, localContent });
         return true;
     }
 
