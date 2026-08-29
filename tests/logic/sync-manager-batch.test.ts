@@ -181,7 +181,7 @@ describe('SyncManager Batch Operations', () => {
             ]);
             // syncedPaths lets the caller mark these files synced directly, without
             // a follow-up remote read that could race a provider's eventual
-            // consistency window (see SyncStatusView's use of this field).
+            // consistency window.
             expect(results.syncedPaths).toEqual([
                 { path: 'a.md', sha: 'sha-a' },
                 { path: 'b.md', sha: 'sha-b' },

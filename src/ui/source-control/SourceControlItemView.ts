@@ -143,7 +143,7 @@ export class SourceControlItemView extends ItemView {
     }
 
     getViewType(): string { return SOURCE_CONTROL_VIEW_TYPE; }
-    getDisplayText(): string { return t('syncStatus.viewTitle'); }
+    getDisplayText(): string { return t('sourceControl.viewTitle'); }
     getIcon(): string { return 'git-compare'; }
 
     onOpen(): Promise<void> {

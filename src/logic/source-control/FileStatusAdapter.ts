@@ -22,16 +22,14 @@ const KIND_BY_STATUS: Record<SyncStatus, SyncChangeKind> = {
  * - `FileStatus.status` never distinguishes which side changed for a
  *   two-sided diff (`SyncStatusService.classify` collapses both directions
  *   into `'modified'`), so `'modified'` maps to `'local-modified'` as a
- *   best-effort approximation. This mirrors the legacy SyncStatusView, whose
- *   "modified" rows already offered both push and pull regardless of which
- *   side actually changed.
+ *   best-effort approximation: the row therefore offers both push and pull
+ *   regardless of which side actually changed.
  * - No `FileStatus` value ever produces `'conflict'`: conflicts are only
  *   detected during `SyncManager.pushFiles` (via `SyncPlanner.classify`
  *   against a stored base sha) and resolved interactively through
- *   `ObsidianSyncInteraction`, not pre-computed for display. The legacy UI
- *   had the same limitation. Widening this is out of scope for a UI/wiring
- *   cutover -- it would mean adding new sync classification behavior, not
- *   just rewiring existing behavior.
+ *   `ObsidianSyncInteraction`, not pre-computed for display. Widening this
+ *   is out of scope for a UI/wiring cutover -- it would mean adding new
+ *   sync classification behavior, not just rewiring existing behavior.
  *
  * `'local-deleted'` (a tracked file removed locally, remote still holds it)
  * IS produced and maps to `'local-deleted'`, keeping a user deletion distinct

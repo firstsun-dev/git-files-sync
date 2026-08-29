@@ -220,10 +220,10 @@ export default class GitLabFilesPush extends Plugin {
 		// An out-of-band move (external tool, cloud sync, mobile) often reaches
 		// Obsidian's watcher as a bare delete of the old path with no correlated
 		// rename event, so eagerly wiping syncMetadata[oldPath] on every delete
-		// would destroy the exact evidence SyncStatusView.reconcileOutOfBandMoves
-		// needs on the next refresh to recognize it as a move rather than a
-		// permanent 'remote-only' ghost -- reintroducing the #66 bug for exactly
-		// the case that reconciler exists to catch. A genuine, intentional local
+		// would destroy the exact evidence the refresh's out-of-band move
+		// reconciliation needs on the next refresh to recognize it as a move
+		// rather than a permanent 'remote-only' ghost -- reintroducing the #66
+		// bug for exactly the case that reconciler exists to catch. A genuine, intentional local
 		// delete (via the sync panel's own delete action) clears its own
 		// metadata directly; an unrelated stale entry left behind by a real
 		// delete costs nothing further; detectRename's candidate scan reads it
@@ -323,8 +323,8 @@ export default class GitLabFilesPush extends Plugin {
 	 * it, computing each file's old path by swapping the folder's new path
 	 * prefix for its old one. `vault.getFiles()` walks the whole vault
 	 * (including nested subfolders under the moved one), so this covers
-	 * arbitrary nesting depth in one pass, same as SyncStatusView's
-	 * folder-move grouping later reassembles it into a single row.
+	 * arbitrary nesting depth in one pass; the refresh's status reconciliation
+	 * later reassembles the per-file renames into single moved rows.
 	 */
 	private async trackFolderRename(folder: TFolder, oldFolderPath: string): Promise<void> {
 		const newPrefix = folder.path + '/';

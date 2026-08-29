@@ -11,8 +11,14 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/.claude/**'],
     coverage: {
-      include: ['src/**/*.ts'],
-      exclude: ['src/ui/**', 'src/main.ts', 'src/settings.ts', '**/.claude/**'],
+      include: ['src/logic/**/*.ts', 'src/services/**/*.ts', 'src/ui/source-control/**/*.ts', 'src/utils/**/*.ts'],
+      exclude: ['src/main.ts', 'src/settings.ts', '**/.claude/**'],
+      thresholds: {
+        lines: 70,
+        statements: 70,
+        functions: 70,
+        branches: 60,
+      },
       reporter: ['text', 'json', 'html', 'lcov'],
     },
   },

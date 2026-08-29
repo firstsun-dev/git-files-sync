@@ -25,6 +25,32 @@ export default tseslint.config(
 	},
 	...obsidianmd.configs.recommended,
 	{
+		// Architecture regression guard: the legacy sync-status presentation
+		// layer was removed when Source Control became the single view (PR
+		// #129). `SyncStatusService`/`SyncStatusRefreshService` (domain state)
+		// remain, but nothing may import the deleted `ui/sync-status` modules
+		// or resurrect them — the directory no longer exists on disk, and this
+		// rule keeps any future file of the same name from being re-wired in.
+		files: ["src/**/*.ts", "src/**/*.tsx"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [
+						{
+							group: ["**/ui/sync-status", "**/ui/sync-status/*", "./sync-status", "./sync-status/*"],
+							message: "The legacy sync-status presentation layer was removed; use ui/source-control instead.",
+						},
+						{
+							group: ["**/SyncStatusView", "**/ui/SyncStatusView"],
+							message: "The legacy SyncStatusView was replaced by SourceControlItemView (ui/source-control).",
+						},
+					],
+				},
+			],
+		},
+	},
+	{
 		files: ["src/**/*.ts", "src/**/*.tsx"],
 		...sonarjs.configs.recommended,
 	},

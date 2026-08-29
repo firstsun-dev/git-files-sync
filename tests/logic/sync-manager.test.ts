@@ -511,14 +511,12 @@ describe('SyncManager', () => {
         });
 
         it('regression: an Individual Push resolved as a path string (no live TFile) must still classify a tracked rename as a move, not an addition', async () => {
-            // Regression test for the reported bug: SyncStatusView's per-row push
-            // button calls `pushFiles([fileStatus.file || fileStatus.path])` -- a raw
+            // Regression test for the reported bug: a UI push entry can call
+            // `pushFiles([fileStatus.file || fileStatus.path])` -- a raw
             // path string whenever no live TFile is attached to that row's status
-            // entry yet (e.g. right after a rename, before the panel's next refresh
-            // re-resolves it). "Selected x1 Push" resolves the exact same `pushFiles`
-            // pipeline, normally with a live TFile -- there is now only one function,
-            // so "Individual Push" and "Selected x1 Push" can no longer structurally
-            // diverge. A string input must still classify a tracked rename as a move.
+            // entry yet (e.g. right after a rename, before the next refresh
+            // re-resolves it). A string input must still classify a tracked
+            // rename as a move, never an addition.
             const oldPath = 'old.md';
             const newPath = 'new.md';
 
