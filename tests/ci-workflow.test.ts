@@ -24,9 +24,34 @@ describe('CI workflow contracts', () => {
         expect(workflow).toContain('github.event.pull_request.head.repo.full_name == github.repository');
     });
 
-    it('allocates isolated concurrency identities to manual and scheduled E2E', () => {
+    it('allocates an isolated concurrency identity to manual and scheduled runs', () => {
         const independentRunIdentity = "format('{0}-{1}', github.event_name, github.run_id)";
-        expect(workflow.split(independentRunIdentity)).toHaveLength(3);
+        expect(workflow.split(independentRunIdentity)).toHaveLength(2);
+    });
+
+    it('serializes whole branch CI runs at workflow level (no split provider winners)', () => {
+        // A push + pull_request race for the same commit must let ONE whole
+        // run survive; concurrency is keyed by source branch at workflow
+        // level, and per-provider job groups are gone.
+        expect(workflow).toMatch(/^concurrency:\n/m);
+        expect(workflow).toContain('&& (github.head_ref || github.ref_name)');
+        expect(workflow).toContain('cancel-in-progress: true');
+        // No job-level concurrency remains: the workflow-level block is the
+        // single top-level one, keyed by `ci-`.
+        // The top-level workflow block is the only concurrency block, keyed
+        // by `ci-` (folded scalar: "group: >-" followed by the ci- prefix).
+        expect(workflow.match(/group: >-\n\s+ci-\$\{\{/)).toBeTruthy();
+        expect(workflow).not.toContain('group: e2e-');
+    });
+
+    it('does not let workflow_dispatch or schedule cancel branch CI', () => {
+        // Manual/scheduled runs get unique groups (event_name + run_id), so
+        // they can neither cancel nor be cancelled by branch CI runs.
+        const concurrencyBlock = workflow.slice(workflow.indexOf('concurrency:'), workflow.indexOf('jobs:'));
+        expect(concurrencyBlock).toContain("github.event_name == 'push' || github.event_name == 'pull_request'");
+        expect(concurrencyBlock).toContain("format('{0}-{1}', github.event_name, github.run_id)");
+        expect(concurrencyBlock).not.toContain('workflow_dispatch');
+        expect(concurrencyBlock).not.toContain('schedule');
     });
 
     it('runs lint, unit-test, build, and provider-e2e in parallel (no validation waits on E2E)', () => {

@@ -42,7 +42,28 @@ on:
 # Release (package/publish) runs only after that gate passes, so a real
 # provider regression still blocks the release instead of shipping and being
 # caught after the fact.
+#
+# Whole-run concurrency (workflow level, NOT per job): a `push` to a branch
+# with an open PR fires both a `push` and a `pull_request` run for the same
+# commit. Keying concurrency per provider job (an earlier design) let the two
+# runs pick *different* winners per provider -- push cancels the PR run's
+# GitHub/GitLab legs, the PR run cancels the push run's Gitea leg -- so no
+# single run ever had all providers green and the required-checks DAG could
+# wedge. Keying at workflow level by source branch alone
+# (github.head_ref || github.ref_name) means only ONE whole CI DAG per branch
+# survives: the newest run supersedes the older one entirely. Manual
+# (workflow_dispatch) and scheduled runs are keyed by event_name+run_id, so
+# they get unique groups and never cancel -- or get cancelled by -- branch CI.
 # ─────────────────────────────────────────────────────────────────────────────
+
+concurrency:
+  group: >-
+    ci-${{
+      (github.event_name == 'push' || github.event_name == 'pull_request')
+      && (github.head_ref || github.ref_name)
+      || format('{0}-{1}', github.event_name, github.run_id)
+    }}
+  cancel-in-progress: true
 
 jobs:
   # `on.push.paths`/`on.pull_request.paths` would gate this *whole* workflow
@@ -96,9 +117,6 @@ jobs:
       (github.event_name != 'workflow_dispatch' ||
       github.event.inputs.provider == 'all' ||
       github.event.inputs.provider == 'gitea')
-    concurrency:
-      group: e2e-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && (github.head_ref || github.ref_name) || format('{0}-{1}', github.event_name, github.run_id) }}-gitea
-      cancel-in-progress: true
     env:
       E2E_KEEP_BRANCH: ${{ github.event.inputs.keep_branch }}
       E2E_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -223,26 +241,15 @@ jobs:
       max-parallel: 2
       matrix:
         provider: [github, gitlab]
-    # One group per source branch/provider -- keyed by branch name alone
-    # (github.head_ref || github.ref_name, same expression E2E_SOURCE_BRANCH
-    # below uses), deliberately NOT split by event type. A `push` to a branch
-    # with an open PR fires both a `push` and a `pull_request` run for the
-    # same commit; keying by event type (PR number vs branch name, as an
-    # earlier version of this did) put those two runs in different groups,
-    # so they ran fully concurrently against the same shared provider
-    # sandbox and starved each other (observed as real GitLab API timeouts
-    # under that double load -- see docs/testing/real-provider-e2e.md).
-    # Keying by branch name alone means the later of the two cancels the
-    # earlier instead, same as a repeated push or a workflow rerun. This is
-    # NOT a cleanup mechanism (see scripts/e2e-harness.sh's per-run branch
-    # naming): a cancelled run's branch can still be mid-delete when the
-    # next one starts, which is exactly why every run gets its own unique
-    # branch regardless of cancellation. `concurrency:` at job level *does*
-    # support the `matrix` context (unlike job-level `if:`, see the comment
-    # below), so each matrix leg still gets its own group.
-    concurrency:
-      group: e2e-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && (github.head_ref || github.ref_name) || format('{0}-{1}', github.event_name, github.run_id) }}-${{ matrix.provider }}
-      cancel-in-progress: true
+    # Concurrency is handled at WORKFLOW level (see the header comment on the
+    # `concurrency:` block above): one whole CI DAG per source branch, so a
+    # push + pull_request race for the same commit can never split provider
+    # winners across two runs. Per-provider job groups were removed for that
+    # reason -- they let each provider pick a different surviving run.
+    # This is NOT a cleanup mechanism (see scripts/e2e-harness.sh's per-run
+    # branch naming): a cancelled run's branch can still be mid-delete when
+    # the next one starts, which is exactly why every run gets its own unique
+    # branch regardless of cancellation.
     env:
       E2E_GITHUB_OWNER: ${{ vars.E2E_GITHUB_OWNER }}
       E2E_GITHUB_REPO: ${{ vars.E2E_GITHUB_REPO }}
