@@ -22,6 +22,20 @@ type DiffStatCacheEntry =
     | { state: 'unavailable' };
 
 /**
+ * One in-flight load request's identity. The map key (change id) answers "is
+ * there a current request for this row"; the record itself carries the
+ * request's unique token and the generations it was started under, so a
+ * finishing request can only remove ITS OWN marker — never a newer request's
+ * (the old `Set<ChangeId>` conflated both and let request #1's finally block
+ * delete request #2's marker after an `invalidate` re-request).
+ */
+interface ActiveDiffStatRequest {
+    readonly token: number;
+    readonly globalGeneration: number;
+    readonly itemGeneration: number;
+}
+
+/**
  * Loads (load) and caches the +/- diff stat for change rows, isolated from
  * the view so cache + load + invalidate live in one place instead of being
  * scattered across `SourceControlView` render methods. The view owns no diff
@@ -45,7 +59,12 @@ type DiffStatCacheEntry =
  * generation) drops the cache AND makes the still-running request's result
  * stale, so a late-resolving old response can never commit into the cache
  * over the fresh reload. The stale request is not aborted — it is simply
- * denied the cache write.
+ * denied the cache write. Identity of in-flight work is per-REQUEST (a token
+ * on {@link ActiveDiffStatRequest}), not per-row: `invalidate` may start a
+ * new request while the old one is still physically running, and only the
+ * token owner may remove its own marker. Physical concurrency is tracked
+ * separately (`physicalInFlight`) so abandoned calls still count against the
+ * {@link DiffStatProvider.MAX_CONCURRENT} cap.
  */
 export class DiffStatProvider {
     /** Upper bound on concurrent loader calls — a long list must not fire 80 fetches at once. */
@@ -55,7 +74,17 @@ export class DiffStatProvider {
     private readonly cache = new Map<ChangeId, DiffStatCacheEntry>();
     /** Items queued for a background load (insertion order = render order). */
     private readonly queued = new Map<ChangeId, SourceControlItem>();
-    private readonly active = new Set<ChangeId>();
+    /** Current (newest) in-flight request per row, keyed by change id. */
+    private readonly active = new Map<ChangeId, ActiveDiffStatRequest>();
+    /**
+     * Physical HTTP/loader calls that have not finished yet. Distinct from
+     * `active.size`: `invalidate` drops a row's active marker immediately so
+     * a fresh request can start, but the abandoned call is still physically
+     * running and must keep counting against
+     * {@link DiffStatProvider.MAX_CONCURRENT} until it settles.
+     */
+    private physicalInFlight = 0;
+    private nextRequestToken = 0;
     /** Bumped by `clear()`; any in-flight request carrying an older value is stale. */
     private globalGeneration = 0;
     /** Bumped per row by `invalidate()`; an in-flight request for that row carrying an older value is stale. */
@@ -92,6 +121,8 @@ export class DiffStatProvider {
         this.cache.clear();
         this.queued.clear();
         this.active.clear();
+        // `physicalInFlight` is deliberately NOT zeroed: the abandoned calls
+        // still occupy real loader/HTTP capacity until they settle.
     }
 
     /**
@@ -105,6 +136,10 @@ export class DiffStatProvider {
         this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
         this.cache.delete(id);
         this.queued.delete(id);
+        // Drop the row's active marker so a new-generation request can start
+        // immediately. The abandoned physical call keeps counting in
+        // `physicalInFlight` until it settles; its finally block can only
+        // delete its OWN marker (token check), never the new request's.
         this.active.delete(id);
     }
 
@@ -135,28 +170,37 @@ export class DiffStatProvider {
      */
     async lazyLoad(item: SourceControlItem): Promise<void> {
         if (!this.loadDiffStat || this.cache.has(item.id) || this.active.has(item.id)) return;
-        const globalGeneration = this.globalGeneration;
-        const itemGeneration = this.generations.get(item.id) ?? 0;
-        this.active.add(item.id);
+        const request: ActiveDiffStatRequest = {
+            token: ++this.nextRequestToken,
+            globalGeneration: this.globalGeneration,
+            itemGeneration: this.generations.get(item.id) ?? 0,
+        };
+        this.active.set(item.id, request);
+        this.physicalInFlight++;
         try {
             const result = await this.loadDiffStat(item);
-            if (!this.isStale(item.id, globalGeneration, itemGeneration)) {
+            if (!this.isStale(item.id, request.globalGeneration, request.itemGeneration)) {
                 this.commit(item.id, result);
             }
         } catch {
             // Transient failure: don't cache unavailable, allow later retry.
         } finally {
-            this.active.delete(item.id);
-            this.pump();
+            this.finish(item.id, request);
         }
     }
 
     private pump(): void {
-        while (this.active.size < DiffStatProvider.MAX_CONCURRENT && this.queued.size > 0) {
+        while (this.physicalInFlight < DiffStatProvider.MAX_CONCURRENT && this.queued.size > 0) {
             const item = this.takeNext();
             if (!item) break;
-            this.active.add(item.id);
-            void this.run(item);
+            const request: ActiveDiffStatRequest = {
+                token: ++this.nextRequestToken,
+                globalGeneration: this.globalGeneration,
+                itemGeneration: this.generations.get(item.id) ?? 0,
+            };
+            this.active.set(item.id, request);
+            this.physicalInFlight++;
+            void this.run(item, request);
         }
     }
 
@@ -176,12 +220,10 @@ export class DiffStatProvider {
     }
 
     /** Background single-row load: same generation guard + error policy as `lazyLoad`. */
-    private async run(item: SourceControlItem): Promise<void> {
-        const globalGeneration = this.globalGeneration;
-        const itemGeneration = this.generations.get(item.id) ?? 0;
+    private async run(item: SourceControlItem, request: ActiveDiffStatRequest): Promise<void> {
         try {
             const result = await this.loadDiffStat!(item);
-            if (!this.isStale(item.id, globalGeneration, itemGeneration)) {
+            if (!this.isStale(item.id, request.globalGeneration, request.itemGeneration)) {
                 this.commit(item.id, result);
             }
         } catch {
@@ -191,9 +233,21 @@ export class DiffStatProvider {
             // rejection from a *background* stat must never surface as if
             // the sync pipeline had failed.
         } finally {
-            this.active.delete(item.id);
-            this.pump();
+            this.finish(item.id, request);
         }
+    }
+
+    /**
+     * Settles one request: removes ONLY its own active marker (a newer
+     * request may own the row after an invalidate), releases its physical
+     * slot, and wakes the queue.
+     */
+    private finish(id: ChangeId, request: ActiveDiffStatRequest): void {
+        if (this.active.get(id)?.token === request.token) {
+            this.active.delete(id);
+        }
+        this.physicalInFlight--;
+        this.pump();
     }
 
     private isStale(id: ChangeId, globalGeneration: number, itemGeneration: number): boolean {

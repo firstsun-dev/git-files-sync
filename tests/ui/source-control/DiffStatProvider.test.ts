@@ -336,4 +336,87 @@ describe('DiffStatProvider', () => {
         await provider.lazyLoad(item('c-1'));
         expect(provider.get(toChangeId('c-1'))).toEqual({ additions: 2, deletions: 0 });
     });
+
+    // ---------------------------------------------------------------
+    // Physical in-flight tracking: request identity is per-token
+    // ---------------------------------------------------------------
+
+    it('a finishing old request cannot clear the marker of a newer re-request (regression)', async () => {
+        const deferred: Array<(result: DiffStatLoadResult) => void> = [];
+        const loadDiffStat = vi.fn((_item: SourceControlItem): Promise<DiffStatLoadResult> =>
+            new Promise(resolve => { deferred.push(resolve); }));
+        const provider = new DiffStatProvider(loadDiffStat, vi.fn());
+
+        // Request #1 running.
+        provider.loadVisible([item('c-1')]);
+        expect(loadDiffStat).toHaveBeenCalledTimes(1);
+
+        // invalidate while #1 is in flight → new request #2 starts immediately.
+        provider.invalidate(toChangeId('c-1'));
+        provider.loadVisible([item('c-1')]);
+        expect(loadDiffStat).toHaveBeenCalledTimes(2);
+
+        // Request #1 finally-block runs: must remove only ITS OWN marker.
+        deferred[0]?.(ready({ additions: 3, deletions: 0 }));
+        await flush();
+
+        // #2's marker must survive; a third loadVisible must NOT duplicate #2.
+        provider.loadVisible([item('c-1')]);
+        expect(loadDiffStat).toHaveBeenCalledTimes(2);
+
+        // #2 settles and commits.
+        deferred[1]?.(ready({ additions: 8, deletions: 1 }));
+        await flush();
+        expect(provider.get(toChangeId('c-1'))).toEqual({ additions: 8, deletions: 1 });
+    });
+
+    it('stale request + current request in flight: loadVisible does not spawn a duplicate', async () => {
+        const deferred: Array<(result: DiffStatLoadResult) => void> = [];
+        const loadDiffStat = vi.fn((_item: SourceControlItem): Promise<DiffStatLoadResult> =>
+            new Promise(resolve => { deferred.push(resolve); }));
+        const provider = new DiffStatProvider(loadDiffStat, vi.fn());
+
+        provider.loadVisible([item('c-1')]);
+        provider.invalidate(toChangeId('c-1'));
+        provider.loadVisible([item('c-1')]);
+
+        // #1 (stale) and #2 (current) both running; re-render fires again.
+        provider.loadVisible([item('c-1')]);
+        expect(loadDiffStat).toHaveBeenCalledTimes(2);
+
+        // Settle both; the generation guard decides: #1 stale → nothing, #2 wins.
+        deferred[0]?.(ready({ additions: 99, deletions: 0 }));
+        deferred[1]?.(ready({ additions: 8, deletions: 2 }));
+        await flush();
+        expect(provider.get(toChangeId('c-1'))).toEqual({ additions: 8, deletions: 2 });
+    });
+
+    it('rapid invalidate bursts never exceed 4 physically concurrent loader calls', async () => {
+        let inFlight = 0;
+        let peak = 0;
+        let dispatched = 0;
+        const loadDiffStat = vi.fn((_item: SourceControlItem): Promise<DiffStatLoadResult> => {
+            dispatched += 1;
+            inFlight += 1;
+            peak = Math.max(peak, inFlight);
+            return new Promise<DiffStatLoadResult>(resolve => {
+                queueMicrotask(() => {
+                    inFlight -= 1;
+                    resolve(ready({ additions: 1, deletions: 0 }));
+                });
+            });
+        });
+        const provider = new DiffStatProvider(loadDiffStat, vi.fn());
+
+        // Burst: start loads, invalidate (which abandons in-flight work and
+        // re-requests), repeat. peak tracks REAL concurrent loader calls.
+        for (let round = 0; round < 10; round++) {
+            provider.loadVisible([item('c-1'), item('c-2'), item('c-3'), item('c-4'), item('c-5'), item('c-6'), item('c-7'), item('c-8')]);
+            provider.invalidate(toChangeId(`c-${(round % 8) + 1}`));
+        }
+
+        await vi.waitFor(() => { expect(provider.get(toChangeId('c-8'))).toBeDefined(); });
+        expect(peak).toBeLessThanOrEqual(4);
+        expect(dispatched).toBeGreaterThan(0);
+    });
 });
