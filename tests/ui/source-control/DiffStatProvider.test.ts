@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { DiffStatProvider } from '../../../src/ui/source-control/DiffStatProvider';
 import type { SourceControlItem } from '../../../src/logic/source-control/SourceControlViewModel';
 import type { ChangeStat } from '../../../src/ui/source-control/ChangePresentation';
-import type { OperationStatus } from '../../../src/logic/source-control/OperationState';
 import { toChangeId } from '../../../src/logic/source-control/types';
 
 function item(id: string, kind: SourceControlItem['kind'] = 'local-only'): SourceControlItem {

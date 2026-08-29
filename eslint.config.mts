@@ -62,6 +62,41 @@ export default tseslint.config(
 		files: ["tests/ci-workflow.test.ts"],
 		rules: {
 			"import/no-nodejs-modules": "off",
+			"obsidianmd/no-nodejs-modules": "off",
+		},
+	},
+	{
+		// These suites mock the Obsidian *plugin host environment* under Node
+		// (vitest), not Obsidian's Electron renderer — the obsidianmd popout-
+		// compatibility rules (window.createEl, activeWindow, window timers)
+		// assume plugin runtime code, but here document/window/globalThis
+		// shim globals that don't exist in a bare Node test process, and
+		// createEl/createDiv/createSpan don't exist until the mock defines
+		// them later in the file. Following the suggested rewrites (e.g.
+		// swapping globalThis for window) breaks the tests.
+		files: ["tests/setup.ts", "tests/ui/setup-dom.ts"],
+		rules: {
+			"obsidianmd/no-global-this": "off",
+			"obsidianmd/prefer-create-el": "off",
+			"obsidianmd/prefer-window-timers": "off",
+		},
+	},
+	{
+		// Local Node build tooling invoked by npm scripts, not plugin code;
+		// typecheck-compat deliberately shells out to tsc. Reported as
+		// warning-level by obsidianmd/no-nodejs-modules.
+		files: ["scripts/typecheck-compat.mjs"],
+		rules: {
+			"obsidianmd/no-nodejs-modules": "off",
+		},
+	},
+	{
+		// tseslint.config() is deprecated in favor of ESLint core
+		// defineConfig() in typescript-eslint 8.68+; migrating is a separate
+		// config refactor, not a code-quality issue.
+		files: ["eslint.config.mts"],
+		rules: {
+			"@typescript-eslint/no-deprecated": "off",
 		},
 	},
 	{

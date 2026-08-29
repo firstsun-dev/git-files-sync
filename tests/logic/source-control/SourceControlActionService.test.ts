@@ -6,8 +6,7 @@ import type { SyncExecutionResult, SyncResultNotificationPort } from '../../../s
 import type { PlannedPushBatch } from '../../../src/logic/sync/PushCoordinator';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import type { SyncWorkspace } from '../../../src/logic/sync/SyncWorkspace';
-import type { FileDiff, PushResults, SyncPlan, SyncResult } from '../../../src/logic/sync/types';
-import type { RemoteDeleteResult } from '../../../src/logic/sync/RemoteDeleteExecutor';
+import type { PushResults, SyncPlan, SyncResult } from '../../../src/logic/sync/types';
 
 function emptySyncPlan(overrides: Partial<SyncPlan> = {}): SyncPlan {
     return { additions: [], modifications: [], deletions: [], moves: [], ...overrides };
