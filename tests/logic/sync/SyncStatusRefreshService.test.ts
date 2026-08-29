@@ -53,21 +53,80 @@ describe('SyncStatusRefreshService local-change handlers', () => {
             expect(statuses.get('new.md')?.status).toBe('unsynced');
         });
 
-        it('carries the new file’s content into the status so a local-only row can show its +N stat', async () => {
+        it('publishes the row immediately, then lands content async so the row can show its +N stat', async () => {
+            const statuses = new SyncStatusService();
+            let resolveRead: ((content: string) => void) | undefined;
+            const service = buildService(statuses, {
+                app: {
+                    vault: {
+                        read: vi.fn().mockImplementation(() => new Promise<string>(resolve => { resolveRead = resolve; })),
+                        readBinary: vi.fn(),
+                        adapter: { stat: vi.fn().mockResolvedValue(null), read: vi.fn() },
+                    },
+                } as never,
+            });
+            const file = makeFile('new.md');
+
+            await service.handleFileCreated(file);
+
+            // Step 1: row visible without content (no poisoned stat cache).
+            expect(statuses.get('new.md')?.status).toBe('unsynced');
+            expect(statuses.get('new.md')?.localContent).toBeUndefined();
+
+            // Step 2: the async read lands and is republished.
+            resolveRead?.('# Hello\nworld\n');
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(statuses.get('new.md')?.localContent).toBe('# Hello\nworld\n');
+        });
+
+        it('keeps the A row visible (pending, uncached) when the initial content read fails', async () => {
             const statuses = new SyncStatusService();
             const service = buildService(statuses, {
                 app: {
                     vault: {
-                        read: vi.fn().mockResolvedValue('# Hello\nworld\n'),
+                        read: vi.fn().mockRejectedValue(new Error('disk error')),
+                        // The adapter fallback also fails, so even readFileContent's
+                        // fallback path throws -> the republish is skipped.
                         readBinary: vi.fn(),
-                        adapter: { stat: vi.fn().mockResolvedValue(null), read: vi.fn() },
+                        adapter: { stat: vi.fn().mockResolvedValue(null) },
                     },
                 } as never,
             });
 
             await service.handleFileCreated(makeFile('new.md'));
 
-            expect(statuses.get('new.md')?.localContent).toBe('# Hello\nworld\n');
+            expect(statuses.get('new.md')?.status).toBe('unsynced');
+            expect(statuses.get('new.md')?.localContent).toBeUndefined();
+        });
+
+        it('a create read that lands after a raced modify must not clobber the newer content', async () => {
+            const statuses = new SyncStatusService();
+            let resolveRead: ((content: string) => void) | undefined;
+            let modifyContent = 'older modify content';
+            const service = buildService(statuses, {
+                app: {
+                    vault: {
+                        read: vi.fn()
+                            .mockImplementationOnce(() => new Promise<string>(resolve => { resolveRead = resolve; }))
+                            .mockImplementation(() => Promise.resolve(modifyContent)),
+                        readBinary: vi.fn(),
+                        adapter: { stat: vi.fn().mockResolvedValue(null), read: vi.fn() },
+                    },
+                } as never,
+            });
+            const file = makeFile('new.md');
+
+            await service.handleFileCreated(file);
+            // The user edits while the create's read is still in flight.
+            statuses.set(file.path, { file, path: file.path, status: 'unsynced' });
+            modifyContent = 'newer modify content';
+            await service.handleFileModified(file);
+            // Now the stale create read resolves — it must lose.
+            resolveRead?.('stale create content');
+            await Promise.resolve();
+            await Promise.resolve();
+            await expect.poll(() => statuses.get('new.md')?.localContent).toBe('newer modify content');
         });
 
         it('reads binary create events through readBinary so content survives for the provider', async () => {
@@ -84,6 +143,8 @@ describe('SyncStatusRefreshService local-change handlers', () => {
             });
 
             await service.handleFileCreated(makeFile('image.png'));
+            await Promise.resolve();
+            await Promise.resolve();
 
             expect(statuses.get('image.png')?.localContent).toBe(binary);
         });

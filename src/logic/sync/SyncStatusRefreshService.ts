@@ -50,6 +50,9 @@ interface DiscoveredFiles {
 export class SyncStatusRefreshService {
     private static readonly STATUS_CHECK_CONCURRENCY = 8;
 
+    /** Per-path monotonic revision ordering async content writes (create read vs a raced modify). */
+    private readonly contentRevisions = new Map<string, number>();
+
     constructor(
         private readonly dependencies: SyncStatusRefreshDependencies,
         private readonly statuses: SyncStatusService,
@@ -253,15 +256,22 @@ export class SyncStatusRefreshService {
     /**
      * Handles an out-of-band local create so a brand-new file appears in the
      * Source Control view immediately rather than waiting for the next full
-     * refresh. The file is classified `unsynced` (local-only) optimistically:
-     * a full refresh later reconciles it against the remote tree, promoting
-     * it to `synced`/`modified` if a matching remote entry exists.
+     * refresh. The file is published in two resilient steps:
      *
-     * The handler reads the new file's content before publishing so the
-     * local-only row can show its diff stat (+line count) as soon as it
-     * appears — a status without `localContent` would leave the row's stat
-     * permanently absent (the provider would see only a missing-content
-     * state until the next full refresh).
+     * 1. The `unsynced` (local-only) row is published *immediately* without
+     *    content, so the row is visible even if the subsequent read fails
+     *    (its stat stays pending — never cached — until content lands).
+     * 2. The file content is read asynchronously; on success the row is
+     *    republished with `localContent` so its `+N` stat can compute, on
+     *    failure only a warning is logged (a later modify/full refresh
+     *    retries the read).
+     *
+     * A per-path async revision guards the republish against racing
+     * create → modify/delete/rename events: the read's result is applied
+     * only if the path still exists in the map under the same file object
+     * (a delete/rename re-keys or removes it) and is still the newest
+     * pending read for that path, so an old read cannot clobber a newer
+     * one's content.
      *
      * No-op when the path is already tracked (a `modify`/`rename` event will
      * have handled it) or falls outside the configured vault folder. Returns
@@ -269,20 +279,39 @@ export class SyncStatusRefreshService {
      */
     async handleFileCreated(file: TFile): Promise<boolean> {
         if (this.statuses.has(file.path) || !this.dependencies.filterPathByVaultFolder(file.path)) return false;
-        const localContent = await this.readFileContent(file, isBinaryPath(file.path), false);
+        const revision = this.bumpContentRevision(file.path);
         this.statuses.set(file.path, {
             file,
             path: file.path,
             status: this.statuses.classify({ localExists: true, remoteExists: false }),
-            localContent,
+        });
+        void this.readFileContent(file, isBinaryPath(file.path), false).then(localContent => {
+            const current = this.statuses.get(file.path);
+            if (!current
+                || current.file !== file
+                || this.contentRevisions.get(file.path) !== revision) return;
+            this.statuses.set(file.path, { ...current, localContent });
+        }).catch(error => {
+            logger.warn(`Failed to read created file ${file.path}; its row stays pending until the next refresh`, error);
         });
         return true;
+    }
+
+    /** Monotonic per-path counter ordering async content reads so only the newest one may write. */
+    private bumpContentRevision(path: string): number {
+        const next = (this.contentRevisions.get(path) ?? 0) + 1;
+        this.contentRevisions.set(path, next);
+        return next;
     }
 
     async handleFileModified(file: TFile): Promise<boolean> {
         const existing = this.statuses.get(file.path);
         if (!existing || !['synced', 'modified', 'unsynced', 'moved'].includes(existing.status)) return false;
+        const revision = this.bumpContentRevision(file.path);
         const localContent = await this.readFileContent(file, isBinaryPath(file.path), false);
+        // A create's slow async read may still be in flight behind this
+        // modify; only the newest read may write.
+        if (this.contentRevisions.get(file.path) !== revision) return true;
         let status: FileStatus['status'] = existing.status;
         if (existing.status !== 'moved') {
             status = existing.remoteSha === undefined
@@ -299,6 +328,7 @@ export class SyncStatusRefreshService {
 
     handleFileRenamed(file: TFile, oldPath: string): boolean {
         const existing = this.statuses.get(oldPath);
+        this.contentRevisions.delete(oldPath);
         if (!existing || existing.status === 'checking') return false;
         this.statuses.delete(oldPath);
         if (!this.dependencies.filterPathByVaultFolder(file.path)) return true;
@@ -342,6 +372,7 @@ export class SyncStatusRefreshService {
      */
     handleFileDeleted(path: string): boolean {
         const existing = this.statuses.get(path);
+        this.contentRevisions.delete(path);
         if (!existing || existing.status === 'checking' || existing.status === 'remote-only' || existing.status === 'local-deleted') return false;
         if (existing.status === 'moved') {
             this.statuses.delete(path);

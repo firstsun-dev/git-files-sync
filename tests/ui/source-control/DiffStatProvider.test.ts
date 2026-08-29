@@ -226,4 +226,114 @@ describe('DiffStatProvider', () => {
         await flush();
         expect(provider.get(toChangeId('c-1'))).toBeUndefined();
     });
+
+    // ---------------------------------------------------------------
+    // Stale async results must never poison the cache (lifecycle)
+    // ---------------------------------------------------------------
+
+    it('discards an in-flight load result that settled after invalidate()', async () => {
+        const deferred: Array<(result: DiffStatLoadResult) => void> = [];
+        const loadDiffStat = vi.fn((_item: SourceControlItem): Promise<DiffStatLoadResult> =>
+            new Promise(resolve => { deferred.push(resolve); }));
+        const provider = new DiffStatProvider(loadDiffStat, vi.fn());
+
+        // Request #1 starts (old content).
+        provider.loadVisible([item('c-1')]);
+        expect(loadDiffStat).toHaveBeenCalledTimes(1);
+
+        // invalidate() while the request is in flight (content changed).
+        provider.invalidate(toChangeId('c-1'));
+
+        // Request #1 returns the OLD stat — stale; must not enter the cache.
+        deferred[0]?.(ready({ additions: 3, deletions: 1 }));
+        await flush();
+        expect(provider.get(toChangeId('c-1'))).toBeUndefined();
+
+        // Next load pass: request #2 fires and the new stat wins.
+        provider.loadVisible([item('c-1')]);
+        expect(loadDiffStat).toHaveBeenCalledTimes(2);
+        deferred[1]?.(ready({ additions: 8, deletions: 2 }));
+        await flush();
+        expect(provider.get(toChangeId('c-1'))).toEqual({ additions: 8, deletions: 2 });
+    });
+
+    it('a freshly-requeued row whose old request settles after re-request does not overwrite (out-of-order settle)', async () => {
+        const deferred: Array<(result: DiffStatLoadResult) => void> = [];
+        const loadDiffStat = vi.fn((_item: SourceControlItem): Promise<DiffStatLoadResult> =>
+            new Promise(resolve => { deferred.push(resolve); }));
+        const provider = new DiffStatProvider(loadDiffStat, vi.fn());
+
+        provider.loadVisible([item('c-1')]);
+        provider.invalidate(toChangeId('c-1'));
+        provider.loadVisible([item('c-1')]);
+        // Deferred[0] = stale request #1; deferred[1] = fresh request #2.
+        // Settle them out of order to prove the generation guard, not
+        // resolution order, decides the winner.
+        deferred[0]?.(ready({ additions: 99, deletions: 0 }));
+        await flush();
+        expect(provider.get(toChangeId('c-1'))).toBeUndefined();
+        deferred[1]?.(ready({ additions: 8, deletions: 2 }));
+        await flush();
+        expect(provider.get(toChangeId('c-1'))).toEqual({ additions: 8, deletions: 2 });
+    });
+
+    it('clear() while requests are in flight rejects ALL old results — none repopulate the cache', async () => {
+        const deferred: Array<(result: DiffStatLoadResult) => void> = [];
+        const loadDiffStat = vi.fn((_item: SourceControlItem): Promise<DiffStatLoadResult> =>
+            new Promise(resolve => { deferred.push(resolve); }));
+        const provider = new DiffStatProvider(loadDiffStat, vi.fn());
+
+        provider.loadVisible([item('c-1'), item('c-2'), item('c-3'), item('c-4')]);
+        // All four wave-1 requests are in flight when the refresh clears.
+        provider.clear();
+
+        for (let index = 0; index < 4; index++) {
+            deferred[index]?.(ready({ additions: index + 1, deletions: 0 }));
+        }
+        await flush();
+
+        for (const id of ['c-1', 'c-2', 'c-3', 'c-4']) {
+            expect(provider.get(toChangeId(id))).toBeUndefined();
+        }
+        // A later full reload starts fresh and commits normally.
+        provider.loadVisible([item('c-1')]);
+        expect(loadDiffStat).toHaveBeenCalledTimes(5);
+        deferred[4]?.(ready({ additions: 42, deletions: 0 }));
+        await flush();
+        expect(provider.get(toChangeId('c-1'))).toEqual({ additions: 42, deletions: 0 });
+    });
+
+    it('a background loader rejection is not cached as unavailable and does not reject fire-and-forget callers', async () => {
+        const loader: (item: SourceControlItem) => Promise<DiffStatLoadResult> = vi.fn()
+            .mockRejectedValueOnce(new Error('transient network failure'))
+            .mockResolvedValueOnce(ready({ additions: 5, deletions: 0 }));
+        const loadDiffStat = loader as ReturnType<typeof vi.fn>;
+        const settle = vi.fn();
+        const provider = new DiffStatProvider(loader, settle);
+
+        // `run` swallows the rejection; no unhandled rejection escapes.
+        provider.loadVisible([item('c-1')]);
+        await flush();
+        expect(provider.get(toChangeId('c-1'))).toBeUndefined();
+        expect(settle).not.toHaveBeenCalled();
+
+        // The row stays retryable — the next pass succeeds and caches.
+        provider.loadVisible([item('c-1')]);
+        await flush();
+        expect(loadDiffStat).toHaveBeenCalledTimes(2);
+        expect(provider.get(toChangeId('c-1'))).toEqual({ additions: 5, deletions: 0 });
+    });
+
+    it('a lazyLoad rejection is swallowed and the row retries later', async () => {
+        const loader: (item: SourceControlItem) => Promise<DiffStatLoadResult> = vi.fn()
+            .mockRejectedValueOnce(new Error('transient'))
+            .mockResolvedValueOnce(ready({ additions: 2, deletions: 0 }));
+        const provider = new DiffStatProvider(loader, vi.fn());
+
+        await expect(provider.lazyLoad(item('c-1'))).resolves.toBeUndefined();
+        expect(provider.get(toChangeId('c-1'))).toBeUndefined();
+
+        await provider.lazyLoad(item('c-1'));
+        expect(provider.get(toChangeId('c-1'))).toEqual({ additions: 2, deletions: 0 });
+    });
 });

@@ -34,11 +34,18 @@ type DiffStatCacheEntry =
  * user-opened diff without waiting behind the queue.
  *
  * Only permanent outcomes are cached (`ready` / `unavailable`); `pending`
- * stays uncached so the row retries. The injected `settle` callback
- * re-renders the view once a batch lands; `lazyLoad` settles only when it
- * produced a stat (nothing to render otherwise). Per-row
- * {@link DiffStatProvider.invalidate} lets a single file's status update
- * drop just that row's stat without clearing the other rows' caches.
+ * stays uncached so the row retries. A loader *throwing* is also not
+ * cached — a transient background failure must not poison the row as
+ * permanently `unavailable`; the next load pass retries it. The injected
+ * `settle` callback re-renders the view once a batch lands; `lazyLoad`
+ * settles only when it produced a stat (nothing to render otherwise).
+ *
+ * In-flight loads are guarded by a two-level generation counter: an
+ * `invalidate` (bumps the row generation) or `clear` (bumps the global
+ * generation) drops the cache AND makes the still-running request's result
+ * stale, so a late-resolving old response can never commit into the cache
+ * over the fresh reload. The stale request is not aborted — it is simply
+ * denied the cache write.
  */
 export class DiffStatProvider {
     /** Upper bound on concurrent loader calls — a long list must not fire 80 fetches at once. */
@@ -49,6 +56,10 @@ export class DiffStatProvider {
     /** Items queued for a background load (insertion order = render order). */
     private readonly queued = new Map<ChangeId, SourceControlItem>();
     private readonly active = new Set<ChangeId>();
+    /** Bumped by `clear()`; any in-flight request carrying an older value is stale. */
+    private globalGeneration = 0;
+    /** Bumped per row by `invalidate()`; an in-flight request for that row carrying an older value is stale. */
+    private readonly generations = new Map<ChangeId, number>();
     private settleScheduled = false;
 
     constructor(
@@ -69,14 +80,32 @@ export class DiffStatProvider {
         return entry?.state === 'ready' ? entry.stat : undefined;
     }
 
-    /** Empties the cache so all rows reload after a refresh or sync. */
+    /**
+     * Empties the cache so all rows reload after a refresh or sync. Bumps
+     * the global generation so results from every in-flight request are
+     * rejected — none of them may repopulate the emptied cache. Queued and
+     * in-flight markers are dropped too, so the next load pass re-requests
+     * everything fresh instead of waiting behind stale work.
+     */
     clear(): void {
+        this.globalGeneration++;
         this.cache.clear();
+        this.queued.clear();
+        this.active.clear();
     }
 
-    /** Drops one row's cached entry so only it reloads (a single file's content changed). */
+    /**
+     * Drops one row's cached entry so only it reloads (a single file's
+     * content changed). Also drops the row's queued/in-flight markers and
+     * bumps its generation: the next load pass re-requests immediately, and
+     * any still-running request for the OLD content cannot commit its stale
+     * result over the fresh reload.
+     */
     invalidate(id: ChangeId): void {
+        this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
         this.cache.delete(id);
+        this.queued.delete(id);
+        this.active.delete(id);
     }
 
     /**
@@ -100,19 +129,22 @@ export class DiffStatProvider {
      * queue (a user just opened that row's diff), caching it so subsequent
      * renders show the stat without a refetch. Settles only when a stat was
      * actually produced (an `unavailable`/`pending` result changes nothing on
-     * screen); pending is retried on a later call.
+     * screen); pending is retried on a later call. A thrown loader error is
+     * neither cached nor re-thrown (the caller is fire-and-forget too) — the
+     * row simply stays retryable.
      */
     async lazyLoad(item: SourceControlItem): Promise<void> {
         if (!this.loadDiffStat || this.cache.has(item.id) || this.active.has(item.id)) return;
+        const globalGeneration = this.globalGeneration;
+        const itemGeneration = this.generations.get(item.id) ?? 0;
         this.active.add(item.id);
         try {
             const result = await this.loadDiffStat(item);
-            if (result.status === 'ready') {
-                this.cache.set(item.id, { state: 'ready', stat: result.stat });
-                this.settleOnce();
-            } else if (result.status === 'unavailable') {
-                this.cache.set(item.id, { state: 'unavailable' });
+            if (!this.isStale(item.id, globalGeneration, itemGeneration)) {
+                this.commit(item.id, result);
             }
+        } catch {
+            // Transient failure: don't cache unavailable, allow later retry.
         } finally {
             this.active.delete(item.id);
             this.pump();
@@ -143,18 +175,39 @@ export class DiffStatProvider {
         return item;
     }
 
+    /** Background single-row load: same generation guard + error policy as `lazyLoad`. */
     private async run(item: SourceControlItem): Promise<void> {
+        const globalGeneration = this.globalGeneration;
+        const itemGeneration = this.generations.get(item.id) ?? 0;
         try {
             const result = await this.loadDiffStat!(item);
-            if (result.status === 'ready') {
-                this.cache.set(item.id, { state: 'ready', stat: result.stat });
-                this.settleOnce();
-            } else if (result.status === 'unavailable') {
-                this.cache.set(item.id, { state: 'unavailable' });
+            if (!this.isStale(item.id, globalGeneration, itemGeneration)) {
+                this.commit(item.id, result);
             }
+        } catch {
+            // Transient failure: not a permanent unavailable. Leave the row
+            // uncached so a later load pass retries it. Swallow here — the
+            // caller (`pump`) is a fire-and-forget `void`, and an unhandled
+            // rejection from a *background* stat must never surface as if
+            // the sync pipeline had failed.
         } finally {
             this.active.delete(item.id);
             this.pump();
+        }
+    }
+
+    private isStale(id: ChangeId, globalGeneration: number, itemGeneration: number): boolean {
+        return globalGeneration !== this.globalGeneration
+            || itemGeneration !== (this.generations.get(id) ?? 0);
+    }
+
+    /** Commits a still-fresh load result to the cache. */
+    private commit(id: ChangeId, result: DiffStatLoadResult): void {
+        if (result.status === 'ready') {
+            this.cache.set(id, { state: 'ready', stat: result.stat });
+            this.settleOnce();
+        } else if (result.status === 'unavailable') {
+            this.cache.set(id, { state: 'unavailable' });
         }
     }
 

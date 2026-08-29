@@ -31,6 +31,27 @@ function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCa
     return { view, selection, operations, refreshState, refreshSource, onSync, onRefresh };
 }
 
+/** Same as buildView, but also exposes the ChangeRepository so tests can mutate the change set mid-flight. */
+function buildViewWithRepository(changes: SyncChange[], callbacks: Partial<SourceControlViewCallbacks> = {}) {
+    const repository = new ChangeRepository();
+    repository.replace(changes);
+    const selection = new SyncSelectionStore();
+    const operations = new OperationState();
+    const refreshState = new RefreshState();
+    const refreshSource = vi.fn().mockResolvedValue(undefined);
+    const viewModel = new SourceControlViewModel(repository, selection, operations, refreshSource, refreshState);
+    const onSync = callbacks.onSync ?? vi.fn();
+    const onRefresh = callbacks.onRefresh ?? vi.fn();
+    const view = new SourceControlView(viewModel, { onSync, onRefresh, ...callbacks }, () => ({
+        serviceName: 'GitHub',
+        branch: 'main',
+        vaultFolder: '',
+        lastSyncTime: 0,
+        lastCheckedAt: 0,
+    }));
+    return { view, repository, selection, operations, refreshState, refreshSource, onSync, onRefresh };
+}
+
 describe('SourceControlView', () => {
     let container: HTMLElement;
 
@@ -1006,6 +1027,90 @@ describe('SourceControlView', () => {
                 // The background stat batch lands after Back and settles a rerender.
                 await flush();
                 expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(900);
+            });
+
+            // Ø(est) lifecycle matrix: every rerender class on the main list
+            // must keep the user's pixels; only the Back transition may
+            // restore the captured navigation scroll.
+            describe('rerender classes never reset scroll (δ-zombie guard)', () => {
+                it('stat rerender at scroll=900 keeps 900; then Back→900, scroll to 1400, stat rerender keeps 1400', async () => {
+                    Platform.isMobile = true;
+                    const loadDiffStat = vi.fn().mockResolvedValue({ status: 'ready', stat: { additions: 7, deletions: 3 } });
+                    const { view } = buildView(manyModified(50), { loadDiffStat });
+                    view.render(container);
+                    (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 900;
+
+                    await flush();
+                    view.render(container);
+                    expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(900);
+
+                    // Back transition restores the navigation capture...
+                    row(container, 35).click();
+                    (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+                    expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(900);
+
+                    // ...then the USER scrolls further; later stat settles must not yank back to 900.
+                    (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 1400;
+                    await flush();
+                    expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(1400);
+                });
+
+                it('checkbox rerender at scroll=900 keeps 900', async () => {
+                    Platform.isMobile = true;
+                    const changes = manyModified(50).map(change => ({ ...change, kind: 'local-only' as const }));
+                    const { view, selection } = buildView(changes);
+                    view.render(container);
+                    (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 900;
+
+                    const checkbox = container.querySelector('.scv-change-select') as HTMLInputElement;
+                    checkbox.checked = true;
+                    checkbox.dispatchEvent(new Event('change'));
+                    expect(selection.isIncluded(toChangeId('c-0'))).toBe(true);
+
+                    expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(900);
+                });
+
+                it('a filter/menu rerender at scroll=900 keeps 900', async () => {
+                    Platform.isMobile = true;
+                    const { view } = buildView(manyModified(50));
+                    view.render(container);
+                    (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 900;
+
+                    view.render(container);
+                    expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(900);
+                });
+
+                it('a re-anchor never runs outside the Back transition (anchor left at the Back render only)', async () => {
+                    Platform.isMobile = true;
+                    const loadDiffStat = vi.fn().mockResolvedValue({ status: 'ready', stat: { additions: 1, deletions: 0 } });
+                    const { view } = buildView(manyModified(50), { loadDiffStat });
+                    view.render(container);
+                    (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 900;
+
+                    row(container, 35).click();
+                    (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+                    // The anchor was consumed by this Back render.
+                    expect(view.getSelectedChangeId()).toBeNull();
+
+                    // Any later rerender must NOT scroll back to the anchor's position.
+                    (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 1400;
+                    view.render(container);
+                    expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(1400);
+                });
+
+                it('a clicked row that disappeared while in detail gracefully keeps the pixel position on Back', async () => {
+                    Platform.isMobile = true;
+                    const { view, repository } = buildViewWithRepository(manyModified(50));
+                    view.render(container);
+                    (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 900;
+
+                    row(container, 35).click();
+                    // The change drops out while the diff is open (e.g. synced from elsewhere).
+                    repository.replace(manyModified(50).filter(change => change.id !== toChangeId('c-35')));
+                    (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+
+                    expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(900);
+                });
             });
 
             it('backs out of the detail view preserving other presentation state (view mode, filter, search)', async () => {

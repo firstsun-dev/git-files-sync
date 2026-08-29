@@ -36,8 +36,8 @@ export class SourceControlItemView extends ItemView {
     );
     /** Guards against a slower diff load finishing after a later click and clobbering it in the main-area tab. */
     private diffTabRequestSeq = 0;
-    /** Last published status content, so a live status update can invalidate only the affected rows' diff stats. */
-    private lastStatusContents = new Map<string, string | ArrayBuffer | undefined>();
+    /** Last published diff-stat backing snapshot per path, so a live status update can invalidate only the affected rows' stats. */
+    private readonly lastStatusSnapshots = new Map<string, DiffStatFingerprint>();
 
     constructor(leaf: WorkspaceLeaf, private readonly plugin: GitLabFilesPush) {
         super(leaf);
@@ -68,17 +68,29 @@ export class SourceControlItemView extends ItemView {
 
     /**
      * Bridges domain status lifecycle → presentation cache: when a republished
-     * status map carries new backing content for a path (created, edited,
-     * reclassified), only that path's row drops its cached diff stat so it
-     * recomputes on the next load pass. The domain service is never imported
-     * by the provider — this view owns the subscription boundary.
+     * status map changes anything a row's diff stat depends on (local content,
+     * remote content/SHA, status classification, move source, symlink flag),
+     * only that path's row drops its cached diff stat so it recomputes on the
+     * next load pass. Paths that dropped out of the map entirely (published
+     * over, row removed) get their snapshot cleared so a later path re-publish
+     * is treated as fresh. The domain service is never imported by the
+     * provider — this view owns the subscription boundary.
      */
     private onStatusesPublished(statuses: ReadonlyMap<string, FileStatus>): void {
         for (const [path, status] of statuses) {
-            const previous = this.lastStatusContents.get(path);
-            this.lastStatusContents.set(path, status.localContent);
-            if (previous === status.localContent) continue;
-            this.view.invalidateDiffStat(toChangeId(path));
+            const previous = this.lastStatusSnapshots.get(path);
+            this.lastStatusSnapshots.set(path, statusDiffStatSnapshot(status));
+            if (previous !== undefined && hasDiffStatBackingChanged(previous, status)) {
+                this.view.invalidateDiffStat(toChangeId(path));
+            }
+        }
+        // Statuses removed from the map (bulk replace / republish): drop
+        // their snapshots so a future re-appearance isn't compared against
+        // pre-removal data.
+        if (this.lastStatusSnapshots.size > statuses.size) {
+            for (const path of this.lastStatusSnapshots.keys()) {
+                if (!statuses.has(path)) this.lastStatusSnapshots.delete(path);
+            }
         }
     }
 
@@ -184,4 +196,50 @@ export class SourceControlItemView extends ItemView {
         this.renderView();
         void refresh.then(() => this.renderView(), () => this.renderView());
     }
+}
+
+/** Everything a row's diff stat depends on, snapshotted per publish for change detection. */
+type StatusContent = FileStatus['localContent'];
+
+interface DiffStatFingerprint {
+    status: FileStatus['status'];
+    localContent: StatusContent;
+    remoteContent: StatusContent;
+    remoteSha: string | undefined;
+    movedFrom: string | undefined;
+    isSymlink: boolean | undefined;
+}
+
+function statusDiffStatSnapshot(status: FileStatus): DiffStatFingerprint {
+    return {
+        status: status.status,
+        localContent: status.localContent,
+        remoteContent: status.remoteContent,
+        remoteSha: status.remoteSha,
+        movedFrom: status.movedFrom,
+        isSymlink: status.isSymlink,
+    };
+}
+
+/**
+ * Whether anything the row's diff stat depends on changed between two
+ * publishes. Large strings are compared by shallow re-check, not hashed and
+ * not JSON-stringified: content references are compared first (a republish
+ * usually carries identical values), falling back to an exact-equality
+ * check only when a new object identity arrived — a full string scan is
+ * still far cheaper than re-deriving the stat.
+ */
+function hasDiffStatBackingChanged(previous: DiffStatFingerprint, current: FileStatus): boolean {
+    return previous.status !== current.status
+        || changed(previous.localContent, current.localContent)
+        || changed(previous.remoteContent, current.remoteContent)
+        || previous.remoteSha !== current.remoteSha
+        || previous.movedFrom !== current.movedFrom
+        || previous.isSymlink !== current.isSymlink;
+}
+
+function changed(a: StatusContent, b: StatusContent): boolean {
+    if (a === b) return false;
+    if (a === undefined || b === undefined) return true;
+    return a !== b;
 }

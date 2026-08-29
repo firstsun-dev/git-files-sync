@@ -129,13 +129,15 @@ export class SourceControlView {
     /** Mobile detail view only: which layout the diff renders in, toggled explicitly rather than by container width, so only one ever takes up space. */
     private mobileDiffLayout: DiffLayout = 'unified';
     /**
-     * Navigation scroll state for the mobile list → detail transition. The
-     * per-render capture/restore in `render()` covers rerenders of the same
-     * DOM, but navigating into the diff replaces the main list entirely, so
-     * the list's scroll positions must live at View level and survive until
-     * Back restores them.
+     * Navigation scroll state for the mobile list → detail transition. It is
+     * captured only when navigating INTO a diff and consumed exactly once by
+     * the Back transition's main render — regular rerenders (checkbox,
+     * diff-stat settle, status updates) never touch it, so they restore
+     * their own captured DOM scroll positions instead.
      */
     private mainScrollState: MainScrollState = { repository: 0, queue: 0 };
+    /** Set on mobile Back; the next main render restores the navigation scroll + anchor once, then clears it. */
+    private restoreNavigationScrollOnNextRender = false;
     /** The row the user navigated into the diff from; Back re-anchors to it after restoring scrollTop. */
     private navigationAnchorId: ChangeId | null = null;
     private container?: HTMLElement;
@@ -178,8 +180,15 @@ export class SourceControlView {
 
         const main = container.createDiv({ cls: 'scv-main' });
         this.renderMain(main);
-        if (isMobile) this.restoreMainScrollState(container);
-        else this.restoreScrollState(container, scrollState);
+        if (isMobile && this.restoreNavigationScrollOnNextRender) {
+            // Back transition: restore the saved navigation scroll + anchor
+            // exactly once. Ordinary rerenders take the captured-DOM path
+            // below, so background stat settles don't re-anchor.
+            this.restoreMainScrollState(container);
+            this.restoreNavigationScrollOnNextRender = false;
+        } else {
+            this.restoreScrollState(container, scrollState);
+        }
     }
 
     getFilter(): SourceControlFilter { return this.filter; }
@@ -219,10 +228,11 @@ export class SourceControlView {
     }
 
     /**
-     * Restores the persisted navigation scroll state after the main list is
-     * rebuilt (mobile Back), then re-anchors to the row the diff was opened
-     * from — pixel offsets alone may be stale if status/stat updates changed
-     * row heights or ordering while the diff was open.
+     * Restores the persisted navigation scroll state after the Back main
+     * render, then re-anchors to the row the diff was opened from — pixel
+     * offsets alone may be stale if status/stat updates changed row heights
+     * or ordering while the diff was open. Only runs on the Back transition;
+     * the anchor lives for that single restore.
      */
     private restoreMainScrollState(container: HTMLElement): void {
         const tree = container.querySelector<HTMLElement>('.scv-changes-tree');
@@ -328,11 +338,15 @@ export class SourceControlView {
                 renderChangeTree(treeWrap, unchecked, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
             }
         }
-        // The queue's rows preview their stats immediately; the (possibly
-        // long) repository region loads in the background, `local-only`
-        // rows first, at the provider's concurrency cap.
-        this.diffStat.loadVisible(state.syncQueue);
-        this.diffStat.loadVisible(unchecked);
+        // Only rendered rows background-load their stats: a collapsed
+        // Repository Changes section renders no tree, so hidden rows must
+        // not fire provider fetches; expanding the section re-renders and
+        // queues them then.
+        if (!this.collapsedSections.has('changes')) this.diffStat.loadVisible(unchecked);
+        // Same scoping for the queue region: desktop collapsed sections and
+        // the mobile collapsed queue render no row lists.
+        const queueRendered = isMobile ? this.mobileQueueExpanded : !this.collapsedSections.has('checkedChanges');
+        if (queueRendered) this.diffStat.loadVisible(state.syncQueue);
 
         if (isMobile) this.renderMobileSyncBar(container, state.counts['ready-to-push'], state.syncQueue);
     }
@@ -542,6 +556,9 @@ export class SourceControlView {
         backBtn.createSpan({ cls: 'scv-detail-back-label', text: t('sourceControl.detail.back') });
         backBtn.addEventListener('click', () => {
             this.selectedChangeId = null;
+            // Flag — not direct action — so the scroll restore happens on the
+            // next main render, after the detail DOM has been torn down.
+            this.restoreNavigationScrollOnNextRender = true;
             this.rerender();
         });
 
