@@ -257,4 +257,37 @@ describe('SourceControlItemView', () => {
         expect(container.querySelector('.scv-change-item[data-change-id="a.md"] .scv-diff-stat')?.textContent).toBe(aStat);
         expect(container.querySelector('.scv-change-item[data-change-id="b.md"] .scv-diff-stat')?.textContent).toBe('+3');
     });
+
+    // ---------------------------------------------------------------
+    // One-sided stat direction (stat loader, not the FileDiff DTO)
+    // ---------------------------------------------------------------
+
+    it('shows +N for a remote-only row whose remote content is two lines', async () => {
+        const { plugin, repository, status, loadDiffContent } = buildPlugin('remote-only');
+        loadDiffContent.mockResolvedValue({ remote: 'line1\nline2\n', local: '' });
+        repository.replace([{ id: toChangeId('a.md'), path: 'a.md', kind: 'remote-only' }]);
+        status.set({ path: 'a.md', status: 'remote-only', remoteContent: 'line1\nline2\n' });
+        // The shared loadDiffContent path returns ↓ semantics (local '',
+        // remote content) — exactly the DTO whose plain LCS diff would count
+        // as -N; the row must still show +N.
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+
+        const container = view.containerEl.children[1] as HTMLElement;
+        expect(container.querySelector('.scv-change-item[data-change-id="a.md"] .scv-diff-stat')?.textContent).toBe('+2');
+    });
+
+    it('shows -N for a local-deleted row whose removed content is two lines', async () => {
+        const { plugin, repository, status, loadDiffContent } = buildPlugin('local-deleted');
+        loadDiffContent.mockResolvedValue({ remote: 'line1\nline2\n', local: '' });
+        repository.replace([{ id: toChangeId('a.md'), path: 'a.md', kind: 'local-deleted' }]);
+        status.set({ path: 'a.md', status: 'local-deleted', remoteContent: 'line1\nline2\n' });
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+
+        const container = view.containerEl.children[1] as HTMLElement;
+        expect(container.querySelector('.scv-change-item[data-change-id="a.md"] .scv-diff-stat')?.textContent).toBe('-2');
+    });
 });

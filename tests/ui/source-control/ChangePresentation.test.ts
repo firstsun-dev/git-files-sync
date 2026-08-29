@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { cheapLocalStat, computeDiffStat, presentChange } from '../../../src/ui/source-control/ChangePresentation';
+import { addedContentStat, cheapLocalStat, computeDiffStat, deletedContentStat, presentChange } from '../../../src/ui/source-control/ChangePresentation';
 import type { SourceControlItem } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId } from '../../../src/logic/source-control/types';
 import { setupObsidianDOM } from '../setup-dom';
@@ -118,5 +118,32 @@ describe('cheapLocalStat', () => {
 
     it('normalizes CRLF line endings', () => {
         expect(cheapLocalStat('a\r\nb\r\nc')).toEqual({ additions: 3, deletions: 0 });
+    });
+});
+describe('addedContentStat', () => {
+    it('counts every line as an addition for a one-sided +N change', () => {
+        expect(addedContentStat('line1\nline2')).toEqual({ additions: 2, deletions: 0 });
+    });
+
+    it('reports zero for empty content', () => {
+        expect(addedContentStat('')).toEqual({ additions: 0, deletions: 0 });
+    });
+
+    it('does not count a trailing newline as a phantom line', () => {
+        expect(addedContentStat('line1\nline2\n')).toEqual({ additions: 2, deletions: 0 });
+    });
+});
+
+describe('deletedContentStat', () => {
+    it('counts every line as a deletion for a one-sided -N change', () => {
+        expect(deletedContentStat('line1\nline2')).toEqual({ additions: 0, deletions: 2 });
+    });
+
+    it('reports zero for empty content', () => {
+        expect(deletedContentStat('')).toEqual({ additions: 0, deletions: 0 });
+    });
+
+    it('does not count a trailing newline as a phantom line', () => {
+        expect(deletedContentStat('line1\nline2\n')).toEqual({ additions: 0, deletions: 2 });
     });
 });

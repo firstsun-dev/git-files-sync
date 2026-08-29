@@ -6,7 +6,7 @@ import type { FileStatus } from '../../logic/sync-status-service';
 import { toChangeId } from '../../logic/source-control/types';
 import { SourceControlView, type SourceControlViewCallbacks } from './SourceControlView';
 import type { SourceControlWorkspaceInfo } from './SourceControlHeader';
-import { cheapLocalStat, computeDiffStat } from './ChangePresentation';
+import { addedContentStat, cheapLocalStat, computeDiffStat, deletedContentStat } from './ChangePresentation';
 import type { DiffStatLoadResult } from './DiffStatProvider';
 
 // Reuses the legacy sync-status view's registered type string so an already
@@ -118,8 +118,9 @@ export class SourceControlItemView extends ItemView {
      * `pending` (so the provider retries later) rather than a permanent
      * unavailable. Binary `ArrayBuffer` content has no meaningful line count
      * and is `unavailable`, as are two-sided changes whose diff content can't
-     * be fetched. All other kinds reuse the diff content the diff pane would
-     * fetch and derive additions/deletions from the LCS ops.
+     * be fetched. Other kinds reuse the diff content the diff pane would
+     * fetch, with one-sided UX direction applied (`remote-only` = +N,
+     * `local-deleted` = -N) instead of the raw side-vs-side diff.
      */
     private async loadDiffStat(item: SourceControlItem): Promise<DiffStatLoadResult> {
         if (item.kind === 'local-only') {
@@ -131,6 +132,19 @@ export class SourceControlItemView extends ItemView {
         }
         const content = await this.plugin.sourceControlActions.loadDiffContent(item);
         if (!content) return { status: 'unavailable' };
+        // One-sided changes must not lean on computeDiffStat: both
+        // `remote-only` (↓) and `local-deleted` (D) produce a FileDiff with
+        // local='' / remote=content, which a plain content-vs-'' diff counts
+        // as -N for BOTH — but the UX semantics are ↓ = +N (lines you'd gain
+        // by downloading) and D = -N (lines you'd lose by pushing the
+        // deletion). The diff pane keeps its download-oriented sides; only
+        // the stat is directional.
+        if (item.kind === 'remote-only' && typeof content.remote === 'string') {
+            return { status: 'ready', stat: addedContentStat(content.remote) };
+        }
+        if (item.kind === 'local-deleted' && typeof content.remote === 'string') {
+            return { status: 'ready', stat: deletedContentStat(content.remote) };
+        }
         return { status: 'ready', stat: computeDiffStat(content.remote, content.local) };
     }
 

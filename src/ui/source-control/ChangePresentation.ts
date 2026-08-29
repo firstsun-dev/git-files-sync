@@ -101,6 +101,24 @@ export function cheapLocalStat(local: string): ChangeStat {
     return { additions: countLines(local), deletions: 0 };
 }
 
+/**
+ * Stat for a one-sided change whose only content is the ADDED side: every
+ * line is an addition, no deletions. Used for `local-only` (A) and
+ * `remote-only` (↓) — both show +N, not the -N a content-vs-'' diff would
+ * produce for the download direction.
+ */
+export function addedContentStat(content: string): ChangeStat {
+    return { additions: countLines(content), deletions: 0 };
+}
+
+/**
+ * Stat for a one-sided DELETION: the content existed remotely and is gone
+ * locally, so every line is a deletion. Used for `local-deleted` (D).
+ */
+export function deletedContentStat(content: string): ChangeStat {
+    return { additions: 0, deletions: countLines(content) };
+}
+
 function countLines(s: string): number {
     if (s === '') return 0;
     const lines = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
