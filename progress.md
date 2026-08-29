@@ -4,24 +4,18 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-08-28
-**Active Feature:** feat-027 / issue #139 — disposable Gitea local/CI portability and runner trust separation.
-**Branch / PR:** `codex/test-gitea-e2e-ci` / PR #140, based on `claude/source-control-foundation`.
+**Last Updated:** 2026-08-30
+**Active Feature:** PR #129 (`claude/source-control-foundation`) — lifecycle hardening + legacy cleanup; awaiting CI + iPad regression, then merge.
+**Branch / PR:** `claude/source-control-foundation` / PR #129.
 
 ## Outstanding Items
 
-1. Push the conflict-resolution merge and confirm PR #140 is mergeable with green required checks.
-2. Configure `CI / Required Checks` as the single required branch-protection check when repository settings are next updated.
-3. Optionally validate the fork-only event path with a controlled external fork PR.
+1. CI run `33273746958` (pull_request @ af376f2) must finish all green — Lint, Build, Unit 22/24, Provider E2E (github/gitea/gitlab), Required Checks, Package.
+2. Manual iPad regression on build deployed 2026-08-30 04:33 to `~/Obsidian/MyPKM` — scenario list in `session-handoff.md` Next Step.
+3. Merge PR #129 once 1+2 pass; PR body already updated with the lifecycle hardening + legacy cleanup section.
 
 ## Verification Evidence
 
-- PR #129 commit `17b361f`: unified Sync queue completion notification. `SyncExecutionResult` keeps added/updated/moved/deleted/downloaded outcomes separate from push-specific `PushResults`; `SourceControlActionService.sync()` aggregates the whole transaction and owns one final notification. Pulls inside unified Sync use `{ notify: false }`, while standalone pull/download notifications remain. `npx eslint .` — 0 errors; `npm run build` — passed incl. Obsidian 1.11 compatibility; `npx vitest run` — 65 files / 724 tests passed; `git diff --check` — clean.
-- PR #129 follow-up (uncommitted): constrained generated E2E runtime imports to validated absolute `E2E_RUNTIME_DIR` paths behind one loader and documented the trusted-provisioner exception for static analysis; removed two redundant modal mock assertions. `npx eslint .` — 0 errors; `npm run build` — passed incl. Obsidian 1.11 compatibility; `npx vitest run` — 65 files / 729 tests passed; `git diff --check` — clean.
-- Commits `920adee`, `18de6e0`, `b5884fc`: Gitea uses a Docker-assigned loopback port and each local invocation owns a `mktemp` workdir; Gitea CI runs on `ubuntu-latest` with `contents: read`; GitHub/GitLab stay on self-hosted runners with fork rejection at job level; manual/scheduled concurrency cannot cancel normal push/PR checks.
-- Pre-merge local verification: `npx eslint .` — 0 errors; `npm run build` — pass including Obsidian 1.11 compatibility; `npx vitest run` — 56 files / 554 tests; shell syntax/ShellCheck/actionlint/diff checks — pass; Gitea E2E — 3 files / 27 passed, 17 skipped, including concurrent-run isolation.
-- Pre-merge real CI: targeted Gitea run 33048613679 passed through Gitea and downstream validation. Concurrent push run 33048499785 retained a successful Gitea check, proving concurrency isolation. SonarCloud passed on PR #140.
-- Conflict resolution integrates base commit `257b2a4` and its parallel lint/unit/build/release DAG with the separate hosted Gitea job and self-hosted GitHub/GitLab matrix.
-- Post-merge local verification: `./init.sh` — lint 0 errors, build/Obsidian 1.11 compatibility pass, 64 files / 723 tests pass; Gitea E2E — 3 files / 30 passed / 18 skipped; workflow contract tests — 8 passed; bash syntax, ShellCheck, actionlint, and `git diff --check` pass.
-
-The AGENTS-required Haiku verifier is unavailable in this environment; verification runs locally and through real CI.
+- Commit `05f6628` fix(source-control): harden scroll, diff-stat and create lifecycles. `npx eslint .` — 0 errors; `npm run build` — passed incl. Obsidian 1.11 compat; `npx vitest run` — 66 files / 788 tests passed; coverage thresholds introduced (70/70/70/60), full-run numbers 84.02/75.57/81.61/86.11.
+- Commit `af376f2` chore(source-control): finish legacy sync-status presentation cleanup. Same gate green at commit time; `-273/+61` lines; dead i18n keys removed (81 per locale), user-facing wording → "Source Control", ESLint restricted-imports guard added, `src/ui/source-control/**` in coverage.
+- Previous round (CI-verified): run `33260979664` all green at `2d6cf91`+`709905a`. The push run `33260978068` was cancelled by design (same-branch e2e concurrency; pull_request run supersedes, ci.yml:360).
