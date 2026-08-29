@@ -32,7 +32,7 @@ describe('SyncManager Batch Operations', () => {
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
         vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
             this: BatchConflictResolutionModal,
             _app: unknown,
@@ -46,7 +46,7 @@ describe('SyncManager Batch Operations', () => {
             for (const conflict of conflicts) conflict.resolution = conflictResolver(conflict);
             onResolve();
             return this;
-        } as never);
+        });
 
         const mockAdapter = {
             exists: vi.fn(),
@@ -79,7 +79,7 @@ describe('SyncManager Batch Operations', () => {
             deleteFile: vi.fn(),
             getRepoGitignores: vi.fn(),
             updateConfig: vi.fn(),
-        } as unknown as Mocked<GitServiceInterface>;
+        };
 
         mockSettings = {
             serviceType: 'github',
@@ -759,7 +759,7 @@ describe('SyncManager Batch Operations', () => {
             ) {
                 onCancel();
                 return this;
-            } as never);
+            });
 
             const results = await manager.pushFiles([path]);
 
@@ -791,7 +791,7 @@ describe('SyncManager Batch Operations', () => {
             ) {
                 onCancel?.();
                 return this;
-            } as never);
+            });
 
             const results = await manager.pushFiles([path]);
 
@@ -1063,7 +1063,7 @@ describe('SyncManager Batch Operations', () => {
             ) {
                 onCancel?.();
                 return this;
-            } as never);
+            });
 
             const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
             vi.mocked(adapter.exists).mockResolvedValue(true);

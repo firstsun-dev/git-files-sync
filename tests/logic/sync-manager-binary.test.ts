@@ -19,7 +19,7 @@ describe('SyncManager – binary file handling', () => {
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
         mocks = createSyncManagerMocks();
     });
 

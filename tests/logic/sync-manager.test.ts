@@ -92,7 +92,7 @@ describe('SyncManager', () => {
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
         vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
             this: BatchConflictResolutionModal,
             _app: unknown,
@@ -106,7 +106,7 @@ describe('SyncManager', () => {
             for (const conflict of conflicts) conflict.resolution = conflictResolver(conflict);
             onResolve();
             return this;
-        } as never);
+        });
         mockSettings.syncMetadata = {};
         // Default: file exists in vault
         vi.spyOn(mockApp.vault, 'getFileByPath').mockReturnValue(new TFile());
@@ -753,7 +753,7 @@ describe('SyncManager', () => {
             ) {
                 onCancel?.();
                 return this;
-            } as never);
+            });
 
             const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
@@ -772,7 +772,7 @@ describe('SyncManager', () => {
             ) {
                 onCancel?.();
                 return this;
-            } as never);
+            });
 
             const path = 'new-remote-file.md';
             vi.mocked(mockGitLab.getFile).mockResolvedValue({ content: 'remote content', sha: 'new-sha' });

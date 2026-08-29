@@ -6,7 +6,7 @@ import type { OperationStatus } from '../../../src/logic/source-control/Operatio
 import { toChangeId } from '../../../src/logic/source-control/types';
 
 function item(id: string, kind: SourceControlItem['kind'] = 'local-only'): SourceControlItem {
-    return { id: toChangeId(id), path: `${id}.md`, kind, isSelectedForSync: false, operationStatus: 'idle' as OperationStatus };
+    return { id: toChangeId(id), path: `${id}.md`, kind, isSelectedForSync: false, operationStatus: 'idle' };
 }
 
 async function flush(): Promise<void> {

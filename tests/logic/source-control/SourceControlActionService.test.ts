@@ -56,12 +56,12 @@ function fakeWorkspace(overrides: Partial<SyncWorkspace> = {}): SyncWorkspace {
         push: vi.fn().mockResolvedValue(emptyPushResults()),
         pull: vi.fn().mockResolvedValue(emptySyncResult()),
         pullOne: vi.fn().mockResolvedValue(undefined),
-        deleteRemote: vi.fn().mockResolvedValue({ deletedPaths: [], errors: [] } as RemoteDeleteResult),
+        deleteRemote: vi.fn().mockResolvedValue({ deletedPaths: [], errors: [] }),
         deleteLocal: vi.fn().mockResolvedValue(undefined),
         moveLocal: vi.fn(),
         clearMetadata: vi.fn(),
         trackRename: vi.fn(),
-        getDiff: vi.fn().mockResolvedValue({ path: 'a.md', kind: 'text' } as FileDiff),
+        getDiff: vi.fn().mockResolvedValue({ path: 'a.md', kind: 'text' }),
         toRepoPath: (path: string) => path,
         planPush: vi.fn().mockResolvedValue(emptyPlannedBatch()),
         planPull: vi.fn().mockResolvedValue(emptySyncPlan()),
@@ -69,7 +69,7 @@ function fakeWorkspace(overrides: Partial<SyncWorkspace> = {}): SyncWorkspace {
         commitResolvedBatch: vi.fn().mockResolvedValue(undefined),
         confirmPlan: vi.fn().mockResolvedValue(true),
         ...overrides,
-    } as SyncWorkspace;
+    };
 }
 
 function buildService(
@@ -190,7 +190,7 @@ describe('SourceControlActionService', () => {
         it('creates zero commits for a pure-pull sync selection', async () => {
             const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
             const planPush = vi.fn();
-            const applyPull = vi.fn().mockResolvedValue({ success: 1, added: 1, updated: 0, failed: 0, conflicts: 0, errors: [] } as SyncResult);
+            const applyPull = vi.fn().mockResolvedValue({ success: 1, added: 1, updated: 0, failed: 0, conflicts: 0, errors: [] });
             const planPull = vi.fn().mockResolvedValue(emptySyncPlan({ additions: [{ path: 'remote.md', name: 'remote.md' }] }));
             const notify = vi.fn();
             const { service, operations } = buildService(
@@ -325,7 +325,7 @@ describe('SourceControlActionService', () => {
 
     describe('deleteRemote / deleteLocal', () => {
         it('deletes selected changes from the remote', async () => {
-            const deleteRemote = vi.fn().mockResolvedValue({ deletedPaths: ['a.md'], errors: [] } as RemoteDeleteResult);
+            const deleteRemote = vi.fn().mockResolvedValue({ deletedPaths: ['a.md'], errors: [] });
             const { service, operations } = buildService(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'remote-only' }],
                 fakeWorkspace({ deleteRemote }),
@@ -438,7 +438,7 @@ describe('SourceControlActionService', () => {
                 localContent: 'local text',
                 remoteContent: 'remote text',
                 kind: 'text',
-            } as FileDiff);
+            });
             const { service } = buildService(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
                 fakeWorkspace({ getDiff }),
@@ -462,7 +462,7 @@ describe('SourceControlActionService', () => {
                 localContent: undefined,
                 remoteContent: undefined,
                 kind: 'binary',
-            } as FileDiff);
+            });
             const { service } = buildService(
                 [{ id: toChangeId('c-1'), path: 'a.png', kind: 'local-modified' }],
                 fakeWorkspace({ getDiff }),

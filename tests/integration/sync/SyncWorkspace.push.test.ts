@@ -14,7 +14,7 @@ describe('SyncWorkspace push integration', () => {
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
     });
 
     it('runs the real scanner/planner/push executor through the manager facade', async () => {

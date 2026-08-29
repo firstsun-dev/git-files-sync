@@ -90,7 +90,7 @@ describe('RefreshState', () => {
             state.start();
             state.succeed();
             const first = state.getLastCheckedAt();
-            await new Promise(resolve => setTimeout(resolve, 5));
+            await new Promise(resolve => window.setTimeout(resolve, 5));
             state.start();
             state.succeed();
             expect(state.getLastCheckedAt()).toBeGreaterThan(first);

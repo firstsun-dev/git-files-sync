@@ -33,24 +33,24 @@
 		"@semantic-release/github": "^12.0.9",
 		"@types/jsdom": "^28.0.3",
 		"@types/node": "^24.0.0",
-		"@vitest/coverage-v8": "^4.1.9",
-		"@vitest/ui": "^4.1.9",
+		"@vitest/coverage-v8": "^4.1.11",
+		"@vitest/ui": "^4.1.11",
 		"conventional-changelog-conventionalcommits": "^9.3.1",
 		"esbuild": "0.28.1",
 		"eslint-plugin-obsidianmd": "^0.4.2",
-		"eslint-plugin-sonarjs": "^4.0.3",
+		"eslint-plugin-sonarjs": "^4.2.0",
 		"globals": "14.0.0",
 		"husky": "^9.1.7",
 		"jiti": "2.6.1",
 		"jsdom": "^29.1.1",
-		"semantic-release": "^25.0.5",
+		"semantic-release": "^25.0.9",
 		"tslib": "2.4.0",
-		"typescript": "^5.8.3",
-		"typescript-eslint": "8.35.1",
-		"vitest": "^4.1.9"
+		"typescript": "~5.9.3",
+		"typescript-eslint": "^8.68.0",
+		"vitest": "^4.1.11"
 	},
 	"dependencies": {
-		"ignore": "^7.0.5",
+		"ignore": "^7.0.6",
 		"obsidian": "^1.13.1"
 	},
 	"overrides": {

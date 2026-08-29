@@ -42,7 +42,7 @@ export const PluginSettingTab = class {
   constructor(app?: unknown, plugin?: unknown) {
     this.app = app;
     this.plugin = plugin;
-    this.containerEl = document.createElement('div') as HTMLElement;
+    this.containerEl = document.createElement('div');
   }
 };
 
@@ -202,7 +202,7 @@ export const Modal = class {
 
   constructor(app?: unknown) {
     this.app = app;
-    this.contentEl = document.createElement('div') as HTMLElement;
+    this.contentEl = document.createElement('div');
   }
 
   open() {
@@ -233,7 +233,7 @@ export const ItemView = class {
     this.app = leaf?.app;
     // Real ItemView's containerEl has a header at children[0] and the
     // content root at children[1]; views render into the latter.
-    this.containerEl = document.createElement('div') as HTMLElement;
+    this.containerEl = document.createElement('div');
     this.containerEl.appendChild(document.createElement('div'));
     this.containerEl.appendChild(document.createElement('div'));
   }

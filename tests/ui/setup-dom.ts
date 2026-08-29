@@ -43,13 +43,13 @@ export function setupObsidianDOM(): void {
             const el = window.document.createElement('div');
             applyOpts(el, toOpts(opts));
             (this as HTMLElement).appendChild(el);
-            return el as unknown as HTMLDivElement;
+            return el;
         },
         createSpan(opts?: DomOpts | string): HTMLSpanElement {
             const el = window.document.createElement('span');
             applyOpts(el, toOpts(opts));
             (this as HTMLElement).appendChild(el);
-            return el as unknown as HTMLSpanElement;
+            return el;
         },
         addClass(cls: string): void {
             (this as HTMLElement).classList.add(cls);
@@ -78,5 +78,5 @@ export function setupObsidianDOM(): void {
 }
 
 export function createContainer(): HTMLElement {
-    return dom.window.document.createElement('div') as unknown as HTMLElement;
+    return dom.window.document.createElement('div');
 }

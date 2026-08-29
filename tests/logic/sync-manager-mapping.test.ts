@@ -77,7 +77,7 @@ describe('SyncManager Mapping', () => {
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
         mockSettings.syncMetadata = {};
         manager = new SyncManager(mockApp, mockGitService, mockSettings, undefined, undefined, undefined, new ObsidianSyncInteraction(mockApp));
     });

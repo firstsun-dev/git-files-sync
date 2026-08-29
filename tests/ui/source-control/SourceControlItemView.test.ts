@@ -105,7 +105,7 @@ describe('SourceControlItemView', () => {
         expect(sync).toHaveBeenCalledWith([toChangeId('a.md'), toChangeId('b.md')]);
 
         resolveSync();
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => window.setTimeout(resolve, 0));
         expect(sync).toHaveBeenCalledTimes(1);
     });
 
@@ -133,7 +133,7 @@ describe('SourceControlItemView', () => {
         ]);
         status.set({ path: 'b.md', status: 'remote-only' });
         // Render is debounced (150ms) to match the previous sync-status view's throttle.
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => window.setTimeout(resolve, 200));
 
         // The "all" filter groups every change into every section it matches
         // (e.g. a remote-only change appears under both CHANGES and REMOTE
@@ -177,9 +177,14 @@ describe('SourceControlItemView', () => {
     });
 
     it('opens the remote file in the browser for a remote-only change (nothing local to diff against)', async () => {
+        // Capturing window.open reads an unbound method by necessity (save/
+        // restore around the stub); the mock never relies on Window's `this`.
+        // eslint-disable-next-line @typescript-eslint/unbound-method -- mocking a Window builtin requires capturing the unbound original
         const originalOpen = window.open;
-        const windowOpen = vi.fn();
-        window.open = windowOpen;
+        const windowOpen = vi.fn<(url: string, target: string) => void>();
+        window.open = ((_url: string | URL, _target?: string) => {
+            windowOpen((_url as string), (_target as string));
+        }) as typeof window.open;
         try {
             const { plugin, getRemoteFileUrl, openDiffTab } = buildPlugin('remote-only');
             const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);

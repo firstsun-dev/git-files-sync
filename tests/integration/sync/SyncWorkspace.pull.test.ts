@@ -14,7 +14,7 @@ describe('SyncWorkspace pull integration', () => {
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
     });
 
     it('creates a remote-only file through the real pull executor', async () => {

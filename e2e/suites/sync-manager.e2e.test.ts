@@ -77,7 +77,7 @@ describe('SyncManager E2E', () => {
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
         vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
             this: BatchConflictResolutionModal,
             _app: unknown,
@@ -91,7 +91,7 @@ describe('SyncManager E2E', () => {
             for (const conflict of conflicts) conflict.resolution = conflictResolver(conflict);
             onResolve();
             return this;
-        } as never);
+        });
     }, timeouts.containerReadyMs + 30_000);
 
     function newManager(vault: FakeVault, settings: GitLabFilesPushSettings): SyncManager {

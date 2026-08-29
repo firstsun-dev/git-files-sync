@@ -80,7 +80,7 @@ export class WhatsNewModal extends Modal {
         const steps = contentEl.createEl('ol', { cls: 'ssv-whats-new-steps' });
         release.onboarding!.steps.forEach((step, index) => {
             const item = steps.createEl('li', { cls: 'ssv-whats-new-step' });
-            item.createEl('span', { cls: 'ssv-whats-new-step-label', text: t('whatsNew.stepLabel', { number: index + 1 }) });
+            item.createSpan({ cls: 'ssv-whats-new-step-label', text: t('whatsNew.stepLabel', { number: index + 1 }) });
             item.createEl('strong', { text: resolveText(step.title) });
             if (step.description) {
                 item.createEl('p', { text: resolveText(step.description) });

@@ -19,7 +19,7 @@ describe('SyncManager – hidden file support', () => {
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
         mocks = createSyncManagerMocks();
     });
 
