@@ -18,10 +18,10 @@ Final 4-fix round from the merge-gate review (no scope expansion):
 - `npx eslint .` — 0 errors (full repo, after all 4 commits)
 - `npx vitest run` — 66 files / 804 tests passed
 - `npm run build` (+ Obsidian 1.11 compat typecheck) — passed via husky pre-commit on each of the 4 commits
-- Local provider E2E impossible (secrets live in GitHub only). Push `9eb3713..fbe0787` fired new CI. NOTE: with the new whole-run concurrency, only ONE of the push/pull_request runs survives — that is by design; require the survivor to be fully green.
+- **CI (whole-run concurrency verified in production):** push `9eb3713..17d241c`. For head `17d241c`, push run `33274606265` was cancelled by the new workflow-level group and pull_request run `33274607880` survived with ALL nine groups green: Lint ✅ Build ✅ Unit 22 ✅ Unit 24 ✅ GitHub E2E ✅ GitLab E2E ✅ Gitea E2E ✅ Required Checks ✅ Package ✅ (Publish skipped: non-main). One whole DAG per branch — no split winners.
 
 ## Next Step (final merge gate)
 
-1. Watch CI for `fbe0787`; confirm exactly one complete run owns all nine green groups: Lint, Build, Unit 22, Unit 24, GitHub E2E, GitLab E2E, Gitea E2E, Required Checks, Package.
+1. ~~Watch CI for `fbe0787`~~ DONE: pull_request run `33274607880` @ `17d241c` is the whole-run winner (the push run cancelled as designed); ALL groups green — Lint, Build, Unit 22, Unit 24, GitHub E2E, GitLab E2E, Gitea E2E, Required Checks, Package. The split-winner defect is fixed and verified in production.
 2. `npm run deploy` a fresh build, then run the iPad manual matrix from the review's merge gate (80+ row scroll stability, M-diff Back restore, Back+scroll no re-anchor, A +N on content arrival, M auto +N/−N, rapid edit latest-wins, remote-only +N, local delete −N, collapsed sections do zero background stat fetches).
 3. Final merge-ready review of PR #129 → merge.
