@@ -73,6 +73,17 @@ const TREE_OPTIONS = { collapseSingleChild: true };
 const MOBILE_TREE_OPTIONS = { collapseSingleChild: true, maxDepth: 2 };
 
 /**
+ * Scroll positions of the main list's independently-scrolling regions,
+ * persisted at View level so the mobile list → detail → Back round trip
+ * restores position (a single-render capture can't survive the DOM being
+ * replaced by the detail view).
+ */
+interface MainScrollState {
+    repository: number;
+    queue: number;
+}
+
+/**
  * Composes the Source Control UI (Header, Filter, change tree, Diff panel)
  * from `SourceControlViewModel` state, per
  * docs/source-control-refactor/phase-3-source-control-ui.md.
@@ -117,6 +128,16 @@ export class SourceControlView {
     private readonly diffStat: DiffStatProvider;
     /** Mobile detail view only: which layout the diff renders in, toggled explicitly rather than by container width, so only one ever takes up space. */
     private mobileDiffLayout: DiffLayout = 'unified';
+    /**
+     * Navigation scroll state for the mobile list → detail transition. The
+     * per-render capture/restore in `render()` covers rerenders of the same
+     * DOM, but navigating into the diff replaces the main list entirely, so
+     * the list's scroll positions must live at View level and survive until
+     * Back restores them.
+     */
+    private mainScrollState: MainScrollState = { repository: 0, queue: 0 };
+    /** The row the user navigated into the diff from; Back re-anchors to it after restoring scrollTop. */
+    private navigationAnchorId: ChangeId | null = null;
     private container?: HTMLElement;
     private readonly applySearchDebounced = debounce(
         (value: string) => this.applySearch(value),
@@ -157,7 +178,8 @@ export class SourceControlView {
 
         const main = container.createDiv({ cls: 'scv-main' });
         this.renderMain(main);
-        this.restoreScrollState(container, scrollState);
+        if (isMobile) this.restoreMainScrollState(container);
+        else this.restoreScrollState(container, scrollState);
     }
 
     getFilter(): SourceControlFilter { return this.filter; }
@@ -185,6 +207,40 @@ export class SourceControlView {
         for (const [cls, top] of state) {
             const el = container.querySelector<HTMLElement>(`.${cls}`);
             if (el) el.scrollTop = top;
+        }
+    }
+
+    /** Copies the live DOM scroll positions into the View-level navigation state. */
+    private captureMainScrollState(container: HTMLElement): void {
+        this.mainScrollState = {
+            repository: container.querySelector<HTMLElement>('.scv-changes-tree')?.scrollTop ?? 0,
+            queue: container.querySelector<HTMLElement>('.scv-selected-section-list')?.scrollTop ?? 0,
+        };
+    }
+
+    /**
+     * Restores the persisted navigation scroll state after the main list is
+     * rebuilt (mobile Back), then re-anchors to the row the diff was opened
+     * from — pixel offsets alone may be stale if status/stat updates changed
+     * row heights or ordering while the diff was open.
+     */
+    private restoreMainScrollState(container: HTMLElement): void {
+        const tree = container.querySelector<HTMLElement>('.scv-changes-tree');
+        if (tree) tree.scrollTop = this.mainScrollState.repository;
+        const list = container.querySelector<HTMLElement>('.scv-selected-section-list');
+        if (list) list.scrollTop = this.mainScrollState.queue;
+
+        if (this.navigationAnchorId === null) return;
+        const anchor = container.querySelector<HTMLElement>(`[data-change-id="${escapeChangeId(this.navigationAnchorId)}"]`);
+        this.navigationAnchorId = null;
+        if (!anchor || !tree) return;
+        // Only correct the scroll when the anchor row fell outside the tree's
+        // viewport — inside it, the pixel restore is already exact.
+        const treeTop = tree.getBoundingClientRect().top;
+        const anchorTop = anchor.getBoundingClientRect().top;
+        const anchorBottom = anchor.getBoundingClientRect().bottom;
+        if (anchorTop < treeTop || anchorBottom > treeTop + tree.clientHeight) {
+            anchor.scrollIntoView({ block: 'nearest' });
         }
     }
 
@@ -540,6 +596,14 @@ export class SourceControlView {
             return;
         }
 
+        // Mobile navigates to a detail view that replaces the whole main
+        // list DOM, so the list's scroll positions must be copied into the
+        // View-level state BEFORE the render (the per-render capture reads
+        // DOM that will be emptied).
+        if (Platform.isMobile) {
+            if (this.container) this.captureMainScrollState(this.container);
+            this.navigationAnchorId = item.id;
+        }
         this.selectedChangeId = item.id;
         if (this.callbacks.onOpenDiff) void this.callbacks.onOpenDiff(item);
         // Lazy-load the diff stat for two-sided changes (local-only is
@@ -568,4 +632,10 @@ export class SourceControlView {
 function basename(path: string): string {
     const slash = path.lastIndexOf('/');
     return slash === -1 ? path : path.slice(slash + 1);
+}
+
+/** Attribute-safe escaping for a ChangeId used inside a `[data-change-id="…"]` selector. */
+function escapeChangeId(id: string): string {
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(id);
+    return id.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }

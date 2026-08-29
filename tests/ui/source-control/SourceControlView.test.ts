@@ -881,6 +881,153 @@ describe('SourceControlView', () => {
     describe('mobile layout', () => {
         afterEach(() => { Platform.isMobile = false; });
 
+        describe('Back navigation scroll restoration', () => {
+            function manyModified(count: number): SyncChange[] {
+                return Array.from({ length: count }, (_, index) => ({
+                    id: toChangeId(`c-${index}`),
+                    path: `notes/note-${index}.md`,
+                    kind: 'local-modified' as const,
+                }));
+            }
+
+            async function flush(): Promise<void> {
+                await Promise.resolve();
+                await Promise.resolve();
+                await Promise.resolve();
+            }
+
+            function row(container: HTMLElement, index: number): HTMLElement {
+                return container.querySelector(`.scv-change-item[data-change-id="c-${index}"]`) as HTMLElement;
+            }
+
+            it('logged regression: opening a diff and pressing Back restores the repository scroll position', async () => {
+                Platform.isMobile = true;
+                const { view } = buildView(manyModified(50), {
+                    loadDiffContent: vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' }),
+                });
+                view.render(container);
+
+                const tree = container.querySelector('.scv-changes-tree') as HTMLElement;
+                tree.scrollTop = 900;
+
+                row(container, 35).click();
+                expect(container.querySelector('.scv-detail')).not.toBeNull();
+
+                (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+
+                const restored = container.querySelector('.scv-changes-tree') as HTMLElement;
+                expect(restored).not.toBeNull();
+                expect(restored.scrollTop).toBe(900);
+            });
+
+            it('Tree mode preserves position across open diff → Back', async () => {
+                Platform.isMobile = true;
+                const { view } = buildView(manyModified(50), {
+                    loadDiffContent: vi.fn().mockResolvedValue({ remote: 'r', local: 'l' }),
+                });
+                view.render(container);
+                (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 400;
+
+                row(container, 10).click();
+                (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+
+                expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(400);
+            });
+
+            it('List mode preserves position across open diff → Back', async () => {
+                Platform.isMobile = true;
+                const { view } = buildView(manyModified(50), {
+                    loadDiffContent: vi.fn().mockResolvedValue({ remote: 'r', local: 'l' }),
+                });
+                view.render(container);
+                (container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement).click();
+                (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 600;
+
+                row(container, 20).click();
+                (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+
+                expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(600);
+                // The list layout itself is preserved after Back.
+                expect(container.querySelector('.scv-change-list')).not.toBeNull();
+            });
+
+            it('Search preserves position across open diff → Back (search query and scroll both kept)', async () => {
+                Platform.isMobile = true;
+                const { view } = buildView(manyModified(50), {
+                    loadDiffContent: vi.fn().mockResolvedValue({ remote: 'r', local: 'l' }),
+                });
+                view.render(container);
+                // Only rows 10-19 match the folder search.
+                const searchInput = container.querySelector('.scv-search-input') as HTMLInputElement;
+                searchInput.value = 'note-1';
+                searchInput.dispatchEvent(new Event('input'));
+                await new Promise(resolve => window.setTimeout(resolve, 200));
+                (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 250;
+
+                row(container, 12).click();
+                (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+
+                expect(((container.querySelector('.scv-search-input') as HTMLInputElement).value)).toBe('note-1');
+                expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(250);
+            });
+
+            it('re-anchors to the clicked row after Back, so later status/stat rerenders cannot scroll it away', async () => {
+                Platform.isMobile = true;
+                const { view } = buildView(manyModified(50), {
+                    loadDiffContent: vi.fn().mockResolvedValue({ remote: 'r', local: 'l' }),
+                });
+                view.render(container);
+                (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 900;
+                const anchorTop = row(container, 35).getBoundingClientRect().top;
+
+                row(container, 35).click();
+                (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+
+                // Pixel restore ran; the anchor re-check keeps row 35 at (or
+                // near) the same viewport position.
+                expect(Math.abs(row(container, 35).getBoundingClientRect().top - anchorTop)).toBeLessThanOrEqual(1);
+            });
+
+            it('an async diff-stat rerender after Back does not reset the scroll position', async () => {
+                Platform.isMobile = true;
+                const loadDiffStat = vi.fn().mockResolvedValue({ status: 'ready', stat: { additions: 7, deletions: 3 } });
+                const { view } = buildView(manyModified(50), {
+                    loadDiffContent: vi.fn().mockResolvedValue({ remote: 'r', local: 'l' }),
+                    loadDiffStat,
+                });
+                view.render(container);
+                (container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop = 900;
+
+                row(container, 35).click();
+                await flush();
+                (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+                expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(900);
+
+                // The background stat batch lands after Back and settles a rerender.
+                await flush();
+                expect((container.querySelector('.scv-changes-tree') as HTMLElement).scrollTop).toBe(900);
+            });
+
+            it('backs out of the detail view preserving other presentation state (view mode, filter, search)', async () => {
+                Platform.isMobile = true;
+                const { view } = buildView(manyModified(50), {
+                    loadDiffContent: vi.fn().mockResolvedValue({ remote: 'r', local: 'l' }),
+                });
+                view.render(container);
+                (container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement).click();
+                const searchInput = container.querySelector('.scv-search-input') as HTMLInputElement;
+                searchInput.value = 'note-2';
+                searchInput.dispatchEvent(new Event('input'));
+                await new Promise(resolve => window.setTimeout(resolve, 200));
+
+                row(container, 21).click();
+                (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+
+                expect(view.getSelectedChangeId()).toBeNull();
+                expect(container.querySelector('.scv-change-list')).not.toBeNull();
+                expect((container.querySelector('.scv-search-input') as HTMLInputElement).value).toBe('note-2');
+            });
+        });
 
         it('renders a filter dropdown instead of chips on mobile', () => {
             Platform.isMobile = true;
