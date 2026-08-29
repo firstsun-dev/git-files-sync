@@ -209,4 +209,52 @@ describe('SourceControlItemView', () => {
 
         expect(() => status.set({ path: 'z.md', status: 'synced' })).not.toThrow();
     });
+
+    it('re-computes a local-only row’s +N after a pending start once the status carries localContent', async () => {
+        const { plugin, repository, status } = buildPlugin('local-only');
+        repository.replace([{ id: toChangeId('a.md'), path: 'a.md', kind: 'local-only' }]);
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+        const container = view.containerEl.children[1] as HTMLElement;
+
+        // First publish: content not yet read — no stat, and nothing cached.
+        status.set({ path: 'a.md', status: 'unsynced' });
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+        expect(container.querySelector('.scv-diff-stat')).toBeNull();
+
+        // Live status update carries the content: the row may now show +N.
+        status.set({
+            path: 'a.md',
+            status: 'unsynced',
+            localContent: '# Title\n\nbody text\n',
+        });
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+
+        expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+3');
+    });
+
+    it('invalidates only the changed row’s diff stat when a status republish carries new content', async () => {
+        const { plugin, repository, status } = buildPlugin('local-only');
+        repository.replace([
+            { id: toChangeId('a.md'), path: 'a.md', kind: 'local-only' },
+            { id: toChangeId('b.md'), path: 'b.md', kind: 'local-only' },
+        ]);
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+        const container = view.containerEl.children[1] as HTMLElement;
+
+        status.set({ path: 'a.md', status: 'unsynced', localContent: 'a\n' });
+        status.set({ path: 'b.md', status: 'unsynced', localContent: 'b\n' });
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+        const statsBefore = container.querySelectorAll('.scv-diff-stat').length;
+        expect(statsBefore).toBe(2);
+
+        // Only b.md's content changes; a.md must keep its cached stat without a refetch.
+        const aStat = container.querySelector('.scv-change-item[data-change-id="a.md"] .scv-diff-stat')?.textContent;
+        status.set({ path: 'b.md', status: 'unsynced', localContent: 'b\nb\nb\n' });
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+
+        expect(container.querySelector('.scv-change-item[data-change-id="a.md"] .scv-diff-stat')?.textContent).toBe(aStat);
+        expect(container.querySelector('.scv-change-item[data-change-id="b.md"] .scv-diff-stat')?.textContent).toBe('+3');
+    });
 });

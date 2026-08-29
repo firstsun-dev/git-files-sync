@@ -2,9 +2,12 @@ import { ItemView, Platform, TFile, WorkspaceLeaf, debounce } from 'obsidian';
 import GitLabFilesPush from '../../main';
 import { t } from '../../i18n';
 import type { SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
+import type { FileStatus } from '../../logic/sync-status-service';
+import { toChangeId } from '../../logic/source-control/types';
 import { SourceControlView, type SourceControlViewCallbacks } from './SourceControlView';
 import type { SourceControlWorkspaceInfo } from './SourceControlHeader';
-import { cheapLocalStat, computeDiffStat, type ChangeStat } from './ChangePresentation';
+import { cheapLocalStat, computeDiffStat } from './ChangePresentation';
+import type { DiffStatLoadResult } from './DiffStatProvider';
 
 // Reuses the legacy sync-status view's registered type string so an already
 // open/pinned leaf from before this cutover resolves into the new view
@@ -33,6 +36,8 @@ export class SourceControlItemView extends ItemView {
     );
     /** Guards against a slower diff load finishing after a later click and clobbering it in the main-area tab. */
     private diffTabRequestSeq = 0;
+    /** Last published status content, so a live status update can invalidate only the affected rows' diff stats. */
+    private lastStatusContents = new Map<string, string | ArrayBuffer | undefined>();
 
     constructor(leaf: WorkspaceLeaf, private readonly plugin: GitLabFilesPush) {
         super(leaf);
@@ -61,6 +66,22 @@ export class SourceControlItemView extends ItemView {
         );
     }
 
+    /**
+     * Bridges domain status lifecycle → presentation cache: when a republished
+     * status map carries new backing content for a path (created, edited,
+     * reclassified), only that path's row drops its cached diff stat so it
+     * recomputes on the next load pass. The domain service is never imported
+     * by the provider — this view owns the subscription boundary.
+     */
+    private onStatusesPublished(statuses: ReadonlyMap<string, FileStatus>): void {
+        for (const [path, status] of statuses) {
+            const previous = this.lastStatusContents.get(path);
+            this.lastStatusContents.set(path, status.localContent);
+            if (previous === status.localContent) continue;
+            this.view.invalidateDiffStat(toChangeId(path));
+        }
+    }
+
     private async openDesktopDiffTab(item: SourceControlItem): Promise<void> {
         const requestId = ++this.diffTabRequestSeq;
         const content = await this.plugin.sourceControlActions.loadDiffContent(item);
@@ -81,19 +102,24 @@ export class SourceControlItemView extends ItemView {
     /**
      * Resolves the +/- diff stat for a change row. `local-only` reads the
      * already-in-memory local content from `sync.status` (no I/O, no provider
-     * call) and counts its lines. All other kinds reuse the diff content the
-     * diff pane would fetch and derive additions/deletions from the LCS ops.
+     * call) and counts its lines — content that hasn't been read yet reports
+     * `pending` (so the provider retries later) rather than a permanent
+     * unavailable. Binary `ArrayBuffer` content has no meaningful line count
+     * and is `unavailable`, as are two-sided changes whose diff content can't
+     * be fetched. All other kinds reuse the diff content the diff pane would
+     * fetch and derive additions/deletions from the LCS ops.
      */
-    private async loadDiffStat(item: SourceControlItem): Promise<ChangeStat | null> {
+    private async loadDiffStat(item: SourceControlItem): Promise<DiffStatLoadResult> {
         if (item.kind === 'local-only') {
             const raw = this.plugin.sync.status.get(item.path)?.localContent;
+            if (raw === undefined) return { status: 'pending' };
             // Binary files (ArrayBuffer) have no meaningful line count; skip them.
-            if (typeof raw !== 'string') return null;
-            return cheapLocalStat(raw);
+            if (typeof raw !== 'string') return { status: 'unavailable' };
+            return { status: 'ready', stat: cheapLocalStat(raw) };
         }
         const content = await this.plugin.sourceControlActions.loadDiffContent(item);
-        if (!content) return null;
-        return computeDiffStat(content.remote, content.local);
+        if (!content) return { status: 'unavailable' };
+        return { status: 'ready', stat: computeDiffStat(content.remote, content.local) };
     }
 
     private getWorkspaceInfo(): SourceControlWorkspaceInfo {
@@ -109,7 +135,10 @@ export class SourceControlItemView extends ItemView {
     getIcon(): string { return 'git-compare'; }
 
     onOpen(): Promise<void> {
-        this.unsubscribeStatuses = this.plugin.sync.status.subscribe(() => this.renderOnStatusChange());
+        this.unsubscribeStatuses = this.plugin.sync.status.subscribe((statuses) => {
+            this.onStatusesPublished(statuses);
+            this.renderOnStatusChange();
+        });
         this.renderView();
         return Promise.resolve();
     }

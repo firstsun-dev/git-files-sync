@@ -3,14 +3,13 @@ import { t } from '../../i18n';
 import type { SourceControlFilter } from '../../logic/source-control/SourceControlFilter';
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
-import type { ChangeStat } from './ChangePresentation';
 import { defaultSyncAction } from '../../logic/source-control/ChangeActionPolicy';
 import { ICONS } from '../components/icons';
 import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
 import { renderDiffPanel } from '../components/DiffPanel';
 import { renderChangeTree, renderChangeList, type ChangeTreeCallbacks } from './ChangeTree';
 import { renderChangeItem } from './ChangeItem';
-import { DiffStatProvider } from './DiffStatProvider';
+import { DiffStatProvider, type DiffStatLoadResult } from './DiffStatProvider';
 import { renderFilterMenu } from './FilterMenu';
 import { renderSourceControlHeader, type SourceControlWorkspaceInfo } from './SourceControlHeader';
 
@@ -60,12 +59,12 @@ export interface SourceControlViewCallbacks {
      */
     onDownload?: (item: SourceControlItem) => void | Promise<void>;
     /**
-     * Supplies the +/- diff stat for a change row. For a `local-only` change
-     * this is expected to be a cheap in-memory read (no provider call); for
-     * others it may involve a remote fetch. The view caches results and
-     * clears the cache on refresh. Omit to leave rows without a stat.
+     * Supplies the +/- diff stat for a change row. See
+     * {@link DiffStatLoadResult} for the ready/pending/unavailable contract.
+     * The view's provider caches results and clears them on refresh. Omit to
+     * leave rows without a stat.
      */
-    loadDiffStat?: (item: SourceControlItem) => Promise<ChangeStat | null>;
+    loadDiffStat?: (item: SourceControlItem) => Promise<DiffStatLoadResult>;
 }
 
 /** Tree shaping so the change tree stays a compact change view, not a full Explorer. */
@@ -114,7 +113,7 @@ export class SourceControlView {
     /** Mobile-only: the Sync Queue starts collapsed (header bar only) so it doesn't push the repository tree off-screen; tapping the header expands it. */
     private mobileQueueExpanded = false;
     private selectedChangeId: ChangeId | null = null;
-    /** Owns the +/- diff-stat cache + eager/lazy load + clear-on-refresh, isolating that data concern from rendering. */
+    /** Owns the +/- diff-stat cache + background bounded loading + invalidation, isolating that data concern from rendering. */
     private readonly diffStat: DiffStatProvider;
     /** Mobile detail view only: which layout the diff renders in, toggled explicitly rather than by container width, so only one ever takes up space. */
     private mobileDiffLayout: DiffLayout = 'unified';
@@ -163,6 +162,11 @@ export class SourceControlView {
 
     getFilter(): SourceControlFilter { return this.filter; }
     getSelectedChangeId(): ChangeId | null { return this.selectedChangeId; }
+
+    /** Lets the host drop one row's cached diff stat when its backing content changed. */
+    invalidateDiffStat(id: ChangeId): void {
+        this.diffStat.invalidate(id);
+    }
 
     private rerender(): void {
         if (this.container) this.render(this.container);
@@ -264,13 +268,15 @@ export class SourceControlView {
                 treeWrap.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
             } else if (this.viewMode === 'list') {
                 renderChangeList(treeWrap, unchecked, treeCallbacks);
-                this.diffStat.eagerLocal(unchecked);
             } else {
                 renderChangeTree(treeWrap, unchecked, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
-                this.diffStat.eagerLocal(unchecked);
             }
         }
-        this.diffStat.eagerSelected(state.syncQueue);
+        // The queue's rows preview their stats immediately; the (possibly
+        // long) repository region loads in the background, `local-only`
+        // rows first, at the provider's concurrency cap.
+        this.diffStat.loadVisible(state.syncQueue);
+        this.diffStat.loadVisible(unchecked);
 
         if (isMobile) this.renderMobileSyncBar(container, state.counts['ready-to-push'], state.syncQueue);
     }
@@ -487,7 +493,6 @@ export class SourceControlView {
             this.mobileDiffLayout = next;
             this.rerender();
         });
-
         const diffContainer = detail.createDiv({ cls: `scv-detail-diff scv-diff-layout-${this.mobileDiffLayout}` });
         if (this.selectedChangeId) void this.loadAndRenderDiff(diffContainer, this.selectedChangeId);
     }
@@ -537,8 +542,9 @@ export class SourceControlView {
 
         this.selectedChangeId = item.id;
         if (this.callbacks.onOpenDiff) void this.callbacks.onOpenDiff(item);
-        // Lazy-load the diff stat for two-sided changes (local-only is eager);
-        // re-render once it lands so the row shows its +/- without blocking.
+        // Lazy-load the diff stat for two-sided changes (local-only is
+        // background-loaded); re-render once it lands so the row shows its
+        // +/- without blocking.
         void this.diffStat.lazyLoad(item);
         this.rerender();
     }

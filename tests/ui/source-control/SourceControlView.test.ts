@@ -5,7 +5,7 @@ import { ChangeRepository } from '../../../src/logic/source-control/ChangeReposi
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { RefreshState } from '../../../src/logic/source-control/RefreshState';
 import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
-import { SourceControlViewModel } from '../../../src/logic/source-control/SourceControlViewModel';
+import { SourceControlViewModel, type SourceControlItem } from '../../../src/logic/source-control/SourceControlViewModel';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import { setupObsidianDOM, createContainer } from '../setup-dom';
 
@@ -736,8 +736,14 @@ describe('SourceControlView', () => {
             await Promise.resolve();
         }
 
-        it('eager-loads local-only stats on render and shows them in the row', async () => {
-            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 5, deletions: 0 });
+        function statLoader(stat = { additions: 5, deletions: 0 }) {
+            return vi.fn(
+                (_item: SourceControlItem) => Promise.resolve({ status: 'ready' as const, stat }),
+            );
+        }
+
+        it('background-loads local-only stats on render and shows them in the row', async () => {
+            const loadDiffStat = statLoader();
             const { view } = buildView(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
                 { loadDiffStat },
@@ -749,8 +755,21 @@ describe('SourceControlView', () => {
             expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+5');
         });
 
+        it('background-loads two-sided (M) repository rows so they show +N/-N without being opened', async () => {
+            const loadDiffStat = statLoader({ additions: 3, deletions: 2 });
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                { loadDiffStat },
+            );
+            view.render(container);
+            await flush();
+
+            expect(loadDiffStat).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local-modified' }));
+            expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+3 -2');
+        });
+
         it('does not re-fetch a stat that is already cached on rerender', async () => {
-            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 2, deletions: 0 });
+            const loadDiffStat = statLoader({ additions: 2, deletions: 0 });
             const { view } = buildView(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
                 { loadDiffStat },
@@ -761,12 +780,33 @@ describe('SourceControlView', () => {
 
             view.render(container);
             await flush();
-            // Eager load skips items already in the cache, so no second fetch.
+            // The load pass skips items already in the cache, so no second fetch.
             expect(loadDiffStat).toHaveBeenCalledTimes(1);
         });
 
+        it('a pending result is not cached, so the row retries on the next render pass', async () => {
+            const stat = { additions: 4, deletions: 0 };
+            const loadDiffStat = vi
+                .fn()
+                .mockResolvedValueOnce({ status: 'pending' })
+                .mockResolvedValueOnce({ status: 'ready', stat });
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                { loadDiffStat },
+            );
+            view.render(container);
+            await flush();
+            expect(loadDiffStat).toHaveBeenCalledTimes(1);
+            expect(container.querySelector('.scv-diff-stat')).toBeNull();
+
+            view.render(container);
+            await flush();
+            expect(loadDiffStat).toHaveBeenCalledTimes(2);
+            expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+4');
+        });
+
         it('clears the diff stat cache on refresh so stats re-fetch', async () => {
-            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 5, deletions: 0 });
+            const loadDiffStat = statLoader();
             const onRefresh = vi.fn();
             const { view } = buildView(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
@@ -778,33 +818,32 @@ describe('SourceControlView', () => {
 
             (container.querySelector('.scv-refresh-btn') as HTMLButtonElement).click();
             expect(onRefresh).toHaveBeenCalledTimes(1);
-            // The refresh handler clears the cache; a subsequent render re-eager-loads.
+            // The refresh handler clears the cache; a subsequent render re-loads.
             view.render(container);
             await flush();
             expect(loadDiffStat).toHaveBeenCalledTimes(2);
         });
 
         it('lazily loads a two-sided change stat on open and caches it', async () => {
-            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 1, deletions: 4 });
+            const loadDiffStat = statLoader({ additions: 1, deletions: 4 });
             const { view } = buildView(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
                 { loadDiffStat },
             );
             view.render(container);
             await flush();
-            // Two-sided changes are not eager-loaded.
-            expect(loadDiffStat).not.toHaveBeenCalled();
-            expect(container.querySelector('.scv-diff-stat')).toBeNull();
+            expect(loadDiffStat).toHaveBeenCalledTimes(1);
 
             (container.querySelector('.scv-change-item') as HTMLElement).click();
             await flush();
 
+            // Already background-loaded: opening the row does not re-fetch.
             expect(loadDiffStat).toHaveBeenCalledTimes(1);
             expect(container.querySelector('.scv-diff-stat')?.textContent).toBe('+1 -4');
         });
 
         it('eager-loads stats for selected changes of any kind so the Selected queue previews them', async () => {
-            const loadDiffStat = vi.fn().mockResolvedValue({ additions: 2, deletions: 1 });
+            const loadDiffStat = statLoader({ additions: 2, deletions: 1 });
             const { view, selection } = buildView(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
                 { loadDiffStat },
@@ -813,14 +852,35 @@ describe('SourceControlView', () => {
             view.render(container);
             await flush();
 
-            // A two-sided change in the queue is eager-loaded (unlike tree-only rows).
             expect(loadDiffStat).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local-modified' }));
             expect(container.querySelector('.scv-selected-section .scv-change-item .scv-diff-stat')?.textContent).toBe('+2 -1');
+        });
+
+        it('invalidateDiffStat drops one row so only it re-fetches', async () => {
+            const loadDiffStat = statLoader({ additions: 1, deletions: 0 });
+            const { view } = buildView(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'local-only' },
+                ],
+                { loadDiffStat },
+            );
+            view.render(container);
+            await flush();
+            expect(loadDiffStat).toHaveBeenCalledTimes(2);
+
+            view.invalidateDiffStat(toChangeId('c-1'));
+            view.render(container);
+            await flush();
+
+            expect(loadDiffStat).toHaveBeenCalledTimes(3);
+            expect(loadDiffStat).toHaveBeenLastCalledWith(expect.objectContaining({ id: toChangeId('c-1') }));
         });
     });
 
     describe('mobile layout', () => {
         afterEach(() => { Platform.isMobile = false; });
+
 
         it('renders a filter dropdown instead of chips on mobile', () => {
             Platform.isMobile = true;

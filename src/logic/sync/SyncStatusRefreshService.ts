@@ -257,16 +257,24 @@ export class SyncStatusRefreshService {
      * a full refresh later reconciles it against the remote tree, promoting
      * it to `synced`/`modified` if a matching remote entry exists.
      *
+     * The handler reads the new file's content before publishing so the
+     * local-only row can show its diff stat (+line count) as soon as it
+     * appears — a status without `localContent` would leave the row's stat
+     * permanently absent (the provider would see only a missing-content
+     * state until the next full refresh).
+     *
      * No-op when the path is already tracked (a `modify`/`rename` event will
      * have handled it) or falls outside the configured vault folder. Returns
      * whether the status map changed, so a caller can skip a republish.
      */
-    handleFileCreated(file: TFile): boolean {
+    async handleFileCreated(file: TFile): Promise<boolean> {
         if (this.statuses.has(file.path) || !this.dependencies.filterPathByVaultFolder(file.path)) return false;
+        const localContent = await this.readFileContent(file, isBinaryPath(file.path), false);
         this.statuses.set(file.path, {
             file,
             path: file.path,
             status: this.statuses.classify({ localExists: true, remoteExists: false }),
+            localContent,
         });
         return true;
     }

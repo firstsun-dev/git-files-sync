@@ -34,35 +34,78 @@ function buildService(statuses: SyncStatusService, deps: Partial<SyncStatusRefre
 
 describe('SyncStatusRefreshService local-change handlers', () => {
     describe('handleFileCreated', () => {
-        it('adds a brand-new in-scope file as local-only (unsynced)', () => {
+        it('adds a brand-new in-scope file as local-only (unsynced)', async () => {
             const statuses = new SyncStatusService();
-            const service = buildService(statuses);
+            const service = buildService(statuses, {
+                app: {
+                    vault: {
+                        read: vi.fn().mockResolvedValue(''),
+                        readBinary: vi.fn(),
+                        adapter: { stat: vi.fn().mockResolvedValue(null) },
+                    },
+                } as never,
+            });
             const file = makeFile('new.md');
 
-            const changed = service.handleFileCreated(file);
+            const changed = await service.handleFileCreated(file);
 
             expect(changed).toBe(true);
             expect(statuses.get('new.md')?.status).toBe('unsynced');
         });
 
-        it('returns false (no-op) when the path is already tracked', () => {
+        it('carries the new file’s content into the status so a local-only row can show its +N stat', async () => {
+            const statuses = new SyncStatusService();
+            const service = buildService(statuses, {
+                app: {
+                    vault: {
+                        read: vi.fn().mockResolvedValue('# Hello\nworld\n'),
+                        readBinary: vi.fn(),
+                        adapter: { stat: vi.fn().mockResolvedValue(null), read: vi.fn() },
+                    },
+                } as never,
+            });
+
+            await service.handleFileCreated(makeFile('new.md'));
+
+            expect(statuses.get('new.md')?.localContent).toBe('# Hello\nworld\n');
+        });
+
+        it('reads binary create events through readBinary so content survives for the provider', async () => {
+            const statuses = new SyncStatusService();
+            const binary = new ArrayBuffer(4);
+            const service = buildService(statuses, {
+                app: {
+                    vault: {
+                        read: vi.fn(),
+                        readBinary: vi.fn().mockResolvedValue(binary),
+                        adapter: { stat: vi.fn().mockResolvedValue(null) },
+                    },
+                } as never,
+            });
+
+            await service.handleFileCreated(makeFile('image.png'));
+
+            expect(statuses.get('image.png')?.localContent).toBe(binary);
+        });
+
+        it('returns false (no-op) when the path is already tracked', async () => {
             const statuses = new SyncStatusService();
             statuses.set({ path: 'note.md', status: 'synced' });
             const service = buildService(statuses);
 
-            const changed = service.handleFileCreated(makeFile('note.md'));
+            const changed = await service.handleFileCreated(makeFile('note.md'));
 
             expect(changed).toBe(false);
             expect(statuses.get('note.md')?.status).toBe('synced');
         });
 
-        it('ignores a file outside the configured vault folder', () => {
+        it('ignores a file outside the configured vault folder', async () => {
             const statuses = new SyncStatusService();
             const service = buildService(statuses, {
                 filterPathByVaultFolder: path => path.startsWith('notes/'),
             });
 
-            const changed = service.handleFileCreated(makeFile('outside/new.md'));
+            const changed = await service.handleFileCreated(makeFile('outside/new.md'));
 
             expect(changed).toBe(false);
             expect(statuses.has('outside/new.md')).toBe(false);

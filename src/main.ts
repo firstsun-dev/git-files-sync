@@ -277,7 +277,7 @@ export default class GitLabFilesPush extends Plugin {
 		this.registerEvent(
 			this.app.vault.on('create', (file) => {
 				if (file instanceof TFile && this.filterPathByVaultFolder(file.path)) {
-					this.syncStatusRefresh.handleFileCreated(file);
+					void this.syncStatusRefresh.handleFileCreated(file);
 				}
 			})
 		);
