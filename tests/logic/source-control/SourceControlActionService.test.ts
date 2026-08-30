@@ -6,7 +6,16 @@ import type { SyncExecutionResult, SyncResultNotificationPort } from '../../../s
 import type { PlannedPushBatch } from '../../../src/logic/sync/PushCoordinator';
 import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import type { SyncWorkspace } from '../../../src/logic/sync/SyncWorkspace';
-import type { PushResults, SyncPlan, SyncResult } from '../../../src/logic/sync/types';
+import type { BatchPushConflict, PushResults, SyncPlan, SyncResult } from '../../../src/logic/sync/types';
+
+const keepRemoteConflict = (path: string, remoteSha = 'reviewed'): BatchPushConflict => ({
+    path,
+    name: path,
+    repoPath: path,
+    localContent: 'local',
+    remoteSha,
+    resolution: 'keep-remote',
+});
 
 function emptySyncPlan(overrides: Partial<SyncPlan> = {}): SyncPlan {
     return { additions: [], modifications: [], deletions: [], moves: [], ...overrides };
@@ -293,6 +302,76 @@ describe('SourceControlActionService', () => {
             expect(commitResolvedBatch).not.toHaveBeenCalled();
             expect(operations.get(toChangeId('c-1'))).toBe('idle');
         });
+
+        it('counts keep-remote conflict resolutions as acceptedRemote in the single sync notification (full success)', async () => {
+            const notify = vi.fn();
+            const commitResolvedBatch = vi.fn(async (_pushes, _moves, _deletions, _keepRemote, _keepLocal, results: PushResults) => {
+                results.resolvedConflicts = 1;
+            });
+            const keepRemote = [keepRemoteConflict('a.md')];
+            const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                reviewPlan: emptySyncPlan({ acceptedRemote: [{ path: 'a.md', name: 'a.md' }] }),
+                keepRemote,
+            }));
+            const { service, operations } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'conflict' }],
+                fakeWorkspace({ planPush, commitResolvedBatch, confirmPlan: vi.fn().mockResolvedValue(true) }),
+                { notify },
+            );
+
+            await service.sync([toChangeId('c-1')]);
+
+            expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
+            expect(commitResolvedBatch).toHaveBeenCalledWith(
+                [],
+                [],
+                [],
+                keepRemote,
+                [],
+                expect.any(Object),
+            );
+            expect(operations.get(toChangeId('c-1'))).toBe('success');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+                acceptedRemote: 1,
+                failed: 0,
+            }));
+        });
+
+        it('excludes failed keep-remote paths from acceptedRemote in a partial sync notification', async () => {
+            const notify = vi.fn();
+            const commitResolvedBatch = vi.fn(async (_pushes, _moves, _deletions, _keepRemote, _keepLocal, results: PushResults) => {
+                results.resolvedConflicts = 1;
+                results.failed = 1;
+                results.errors.push({ file: 'b.md', error: 'blob missing' });
+            });
+            const keepRemote = [keepRemoteConflict('a.md'), keepRemoteConflict('b.md')];
+            const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                reviewPlan: emptySyncPlan({
+                    acceptedRemote: [{ path: 'a.md', name: 'a.md' }, { path: 'b.md', name: 'b.md' }],
+                }),
+                keepRemote,
+            }));
+            const { service, operations } = buildService(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'conflict' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'conflict' },
+                ],
+                fakeWorkspace({ planPush, commitResolvedBatch, confirmPlan: vi.fn().mockResolvedValue(true) }),
+                { notify },
+            );
+
+            await service.sync([toChangeId('c-1'), toChangeId('c-2')]);
+
+            expect(operations.get(toChangeId('c-1'))).toBe('success');
+            expect(operations.get(toChangeId('c-2'))).toBe('failed');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+                acceptedRemote: 1,
+                failed: 1,
+                downloaded: 0,
+            }));
+        });
     });
 
     describe('pull', () => {
@@ -370,29 +449,79 @@ describe('SourceControlActionService', () => {
             expect(operations.get(toChangeId('c-1'))).toBe('success');
         });
 
-        it('pulls the remote copy when resolution is "remote"', async () => {
-            const pullOne = vi.fn().mockResolvedValue(undefined);
+        it('accepts the reviewed remote version without pullOne when resolution is "remote"', async () => {
+            const notify = vi.fn();
+            const acceptRemoteConflict = vi.fn().mockResolvedValue(undefined);
+            const pullOne = vi.fn();
+            const workspace = {
+                ...fakeWorkspace({ pullOne }),
+                acceptRemoteConflict,
+            } as unknown as SyncWorkspace;
             const { service, operations } = buildService(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'conflict' }],
-                fakeWorkspace({ pullOne }),
+                workspace,
+                { notify },
             );
 
             await service.resolveConflict(toChangeId('c-1'), 'remote');
 
-            expect(pullOne).toHaveBeenCalledWith('a.md');
+            expect(acceptRemoteConflict).toHaveBeenCalledTimes(1);
+            expect(acceptRemoteConflict).toHaveBeenCalledWith('a.md');
+            expect(pullOne).not.toHaveBeenCalled();
             expect(operations.get(toChangeId('c-1'))).toBe('success');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+                acceptedRemote: 1,
+            }));
         });
 
-        it('marks the change failed when the resolution attempt throws', async () => {
-            const pullOne = vi.fn().mockRejectedValue(new Error('boom'));
+        it('marks the change failed and reports one failure when accepting the remote version throws', async () => {
+            const notify = vi.fn();
+            const acceptRemoteConflict = vi.fn().mockRejectedValue(new Error('reviewed sha unavailable'));
+            const workspace = {
+                ...fakeWorkspace({}),
+                acceptRemoteConflict,
+            } as unknown as SyncWorkspace;
             const { service, operations } = buildService(
                 [{ id: toChangeId('c-1'), path: 'a.md', kind: 'conflict' }],
-                fakeWorkspace({ pullOne }),
+                workspace,
+                { notify },
             );
 
             await service.resolveConflict(toChangeId('c-1'), 'remote');
 
+            expect(acceptRemoteConflict).toHaveBeenCalledTimes(1);
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+                failed: 1,
+                acceptedRemote: 0,
+            }));
+        });
+
+        it('keeps the push path for "local" resolution and never touches acceptRemoteConflict', async () => {
+            const notify = vi.fn();
+            const push = vi.fn().mockResolvedValue(emptyPushResults({ syncedPaths: [{ path: 'a.md', sha: 'sha-1' }] }));
+            const acceptRemoteConflict = vi.fn();
+            const workspace = {
+                ...fakeWorkspace({ push }),
+                acceptRemoteConflict,
+            } as unknown as SyncWorkspace;
+            const { service, operations } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'conflict' }],
+                workspace,
+                { notify },
+            );
+
+            await service.resolveConflict(toChangeId('c-1'), 'local');
+
+            expect(push).toHaveBeenCalledWith(['a.md']);
+            expect(acceptRemoteConflict).not.toHaveBeenCalled();
+            expect(operations.get(toChangeId('c-1'))).toBe('success');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+                updated: 1,
+            } satisfies Partial<SyncExecutionResult>));
         });
     });
 

@@ -50,6 +50,38 @@ describe('ConflictResolver', () => {
         expect(output.errors).toEqual([{ file: 'a.md', error: 'provider failed' }]);
         expect(pull.pull).not.toHaveBeenCalled();
     });
+
+    it('never resolves against the latest HEAD file during applyRemote', async () => {
+        const service = {
+            getFile: vi.fn(),
+            getBlob: vi.fn().mockResolvedValue({ sha: 'reviewed', content: 'remote' }),
+        } as unknown as GitServiceInterface;
+        const pull = { pull: vi.fn().mockResolvedValue(undefined) } as unknown as PullExecutor;
+        const output = results();
+
+        await new ConflictResolver(() => service, () => 'main', pull).applyRemote([conflict('a.md', 'reviewed-sha')], output);
+
+        expect(service.getBlob).toHaveBeenCalledWith('reviewed-sha', 'a.md');
+        expect(service.getFile).not.toHaveBeenCalled();
+        expect(output.resolvedConflicts).toBe(1);
+        expect(output.failed).toBe(0);
+        expect(output.errors).toEqual([]);
+        expect(output.syncedPaths).toEqual([{ path: 'a.md', sha: 'reviewed' }]);
+    });
+
+    it('records a getBlob rejection as a failure without incrementing resolvedConflicts', async () => {
+        const service = { getBlob: vi.fn().mockRejectedValue(new Error('sha not found')) } as unknown as GitServiceInterface;
+        const pull = { pull: vi.fn() } as unknown as PullExecutor;
+        const output = results();
+
+        await new ConflictResolver(() => service, () => 'main', pull).applyRemote([conflict('a.md', 'reviewed-sha')], output);
+
+        expect(service.getBlob).toHaveBeenCalledWith('reviewed-sha', 'a.md');
+        expect(output.failed).toBe(1);
+        expect(output.resolvedConflicts).toBe(0);
+        expect(output.syncedPaths).toEqual([]);
+        expect(output.errors).toContainEqual({ file: 'a.md', error: 'sha not found' });
+    });
 });
 
 /* eslint-enable @typescript-eslint/unbound-method -- re-enable after the whole-file exemption above */
