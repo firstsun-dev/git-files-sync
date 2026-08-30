@@ -1,6 +1,8 @@
 import type { SyncStatusService } from '../sync-status-service';
 import { isBinaryPath } from '../../utils/path';
 import type { FileDiff } from './types';
+import { computeDiffStat } from '../../ui/source-control/ChangePresentation';
+import type { DiffStatLoadResult } from '../../ui/source-control/DiffStatProvider';
 
 export type BlobReader = (sha: string, path: string) => Promise<{ content: string | ArrayBuffer }>;
 
@@ -62,6 +64,39 @@ export class SyncDiffService {
             remoteContent: remoteExists ? remoteContent ?? '' : '',
             kind,
         };
+    }
+
+    /**
+     * Resolves the +/- diff stat for one batch-conflict row — the data side
+     * of the conflict modal's `ConflictDiffStatLoader` (the modal itself
+     * stays presentation-only; SyncDiffService owns remote/local diff data).
+     *
+     * Binary (by path or by actual `ArrayBuffer` content) files have no
+     * line diff and are terminally `unavailable`; non-string content ditto.
+     * Text conflicts fetch the reviewed remote blob by SHA (sharing the
+     * in-flight memoization with `getDiff`, so a stat racing a user-opened
+     * diff is one round-trip) and count additions/deletions with the same
+     * `computeDiffStat` the Source Control rows use.
+     */
+    async getConflictStat(conflict: {
+        path: string;
+        localContent: string | ArrayBuffer;
+        remoteSha: string;
+        repoPath: string;
+    }): Promise<DiffStatLoadResult> {
+        if (isBinaryPath(conflict.path) || typeof conflict.localContent !== 'string') {
+            return { status: 'unavailable' };
+        }
+        const remoteContent = await this.resolveRemoteContent({
+            path: conflict.path,
+            status: 'conflict',
+            remoteSha: conflict.remoteSha,
+            movedFrom: conflict.repoPath,
+        });
+        if (typeof remoteContent !== 'string') {
+            return { status: 'unavailable' };
+        }
+        return { status: 'ready', stat: computeDiffStat(remoteContent, conflict.localContent) };
     }
 
     /** Fetches the remote blob once per `remoteSha:path`, coalescing concurrent consumers. */
