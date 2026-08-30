@@ -36,8 +36,8 @@ export class SyncConflictModal extends Modal {
     }
 
     onOpen() {
-        const { contentEl } = this;
-        contentEl.addClass('sync-conflict-modal');
+        const { contentEl, modalEl } = this;
+        modalEl.addClass('sync-conflict-modal');
 
         contentEl.createEl('h2', { text: t('syncConflictModal.title', { fileName: this.fileName }) });
         contentEl.createEl('p', {

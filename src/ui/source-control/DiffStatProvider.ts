@@ -1,5 +1,3 @@
-import type { ChangeId } from '../../logic/source-control/types';
-import type { SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeStat } from './ChangePresentation';
 
 /**
@@ -36,16 +34,27 @@ interface ActiveDiffStatRequest {
 }
 
 /**
+ * Minimal row contract: any item with a string id can get backgrounded,
+ * bounded, cached diff-stat loading.
+ */
+export type DiffStatItem<TId extends string> = { readonly id: TId };
+
+/**
  * Loads (load) and caches the +/- diff stat for change rows, isolated from
  * the view so cache + load + invalidate live in one place instead of being
- * scattered across `SourceControlView` render methods. The view owns no diff
- * cache of its own anymore — it asks this provider.
+ * scattered across render methods. The view owns no diff cache of its own —
+ * it asks this provider.
+ *
+ * Generic over the row item: `SourceControlView` feeds `SourceControlItem`s,
+ * the batch conflict modal feeds `BatchPushConflict`s, and any other surface
+ * reuses the same bounded-queue + generation-guard + settle-batching
+ * machinery instead of growing its own cache architecture.
  *
  * Loading is bounded ({@link DiffStatProvider.MAX_CONCURRENT}) and runs in
- * the background: `loadVisible` queues every uncached row — `local-only`
- * first (cheap in-memory reads), then two-sided changes — progressively
- * settling re-renders as stats land. `lazyLoad` serves the single
- * user-opened diff without waiting behind the queue.
+ * the background: `loadVisible` queues every uncached row — prioritizeable
+ * rows first (cheap in-memory reads), then the rest — progressively settling
+ * re-renders as stats land. `lazyLoad` serves the single user-opened diff
+ * without waiting behind the queue.
  *
  * Only permanent outcomes are cached (`ready` / `unavailable`); `pending`
  * stays uncached so the row retries. A loader *throwing* is also not
@@ -66,16 +75,16 @@ interface ActiveDiffStatRequest {
  * separately (`physicalInFlight`) so abandoned calls still count against the
  * {@link DiffStatProvider.MAX_CONCURRENT} cap.
  */
-export class DiffStatProvider {
+export class DiffStatProvider<TId extends string, TItem extends DiffStatItem<TId>> {
     /** Upper bound on concurrent loader calls — a long list must not fire 80 fetches at once. */
     private static readonly MAX_CONCURRENT = 4;
 
     /** Cached stat state per change id; `pending` results are deliberately absent. */
-    private readonly cache = new Map<ChangeId, DiffStatCacheEntry>();
+    private readonly cache = new Map<TId, DiffStatCacheEntry>();
     /** Items queued for a background load (insertion order = render order). */
-    private readonly queued = new Map<ChangeId, SourceControlItem>();
+    private readonly queued = new Map<TId, TItem>();
     /** Current (newest) in-flight request per row, keyed by change id. */
-    private readonly active = new Map<ChangeId, ActiveDiffStatRequest>();
+    private readonly active = new Map<TId, ActiveDiffStatRequest>();
     /**
      * Physical HTTP/loader calls that have not finished yet. Distinct from
      * `active.size`: `invalidate` drops a row's active marker immediately so
@@ -88,23 +97,28 @@ export class DiffStatProvider {
     /** Bumped by `clear()`; any in-flight request carrying an older value is stale. */
     private globalGeneration = 0;
     /** Bumped per row by `invalidate()`; an in-flight request for that row carrying an older value is stale. */
-    private readonly generations = new Map<ChangeId, number>();
+    private readonly generations = new Map<TId, number>();
     private settleScheduled = false;
 
     constructor(
         /**
-         * Supplies the load outcome for a change row. `local-only` is expected
-         * to be a cheap in-memory read; other kinds may involve a remote
-         * fetch. When omitted the provider is inert (the view renders
+         * Supplies the load outcome for a change row. Cheap in-memory reads
+         * are expected to resolve instantly; other kinds may involve a
+         * remote fetch. When omitted the provider is inert (the view renders
          * without stats).
          */
-        private readonly loadDiffStat: ((item: SourceControlItem) => Promise<DiffStatLoadResult>) | undefined,
+        private readonly loadDiffStat: ((item: TItem) => Promise<DiffStatLoadResult>) | undefined,
         /** Re-renders the view after an async load settles so rows show their stat. */
         private readonly settle: () => void,
+        /**
+         * Marks rows that should jump the background queue because their stat
+         * is a cheap in-memory read (e.g. `local-only` source-control rows).
+         */
+        private readonly isPriority: (item: TItem) => boolean = () => false,
     ) {}
 
     /** Returns the cached stat for `id`, or `undefined` when none is cached (incl. never-attempted / pending). */
-    get(id: ChangeId): ChangeStat | undefined {
+    get(id: TId): ChangeStat | undefined {
         const entry = this.cache.get(id);
         return entry?.state === 'ready' ? entry.stat : undefined;
     }
@@ -132,7 +146,7 @@ export class DiffStatProvider {
      * any still-running request for the OLD content cannot commit its stale
      * result over the fresh reload.
      */
-    invalidate(id: ChangeId): void {
+    invalidate(id: TId): void {
         this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
         this.cache.delete(id);
         this.queued.delete(id);
@@ -145,12 +159,13 @@ export class DiffStatProvider {
 
     /**
      * Background-loads stats for the given visible rows. Every uncached/not-
-     * in-flight item is queued (priority: `local-only` first, then two-sided
-     * kinds), run at most {@link DiffStatProvider.MAX_CONCURRENT} at a time,
-     * and each `ready` result settles (batched per microtask) one progressive
-     * re-render. `pending` results stay uncached and retry on the next pass.
+     * in-flight item is queued (priority rows via {@link isPriority} first,
+     * then the rest), run at most {@link DiffStatProvider.MAX_CONCURRENT} at
+     * a time, and each `ready` result settles (batched per microtask) one
+     * progressive re-render. `pending` results stay uncached and retry on
+     * the next pass.
      */
-    loadVisible(items: readonly SourceControlItem[]): void {
+    loadVisible(items: readonly TItem[]): void {
         if (!this.loadDiffStat) return;
         for (const item of items) {
             if (this.cache.has(item.id) || this.active.has(item.id) || this.queued.has(item.id)) continue;
@@ -168,7 +183,7 @@ export class DiffStatProvider {
      * neither cached nor re-thrown (the caller is fire-and-forget too) — the
      * row simply stays retryable.
      */
-    async lazyLoad(item: SourceControlItem): Promise<void> {
+    async lazyLoad(item: TItem): Promise<void> {
         if (!this.loadDiffStat || this.cache.has(item.id) || this.active.has(item.id)) return;
         const request: ActiveDiffStatRequest = {
             token: ++this.nextRequestToken,
@@ -204,10 +219,10 @@ export class DiffStatProvider {
         }
     }
 
-    /** Dequeues the highest-priority item (`local-only` cheap reads before two-sided fetches). */
-    private takeNext(): SourceControlItem | undefined {
+    /** Dequeues the highest-priority item (cheap reads before remote fetches). */
+    private takeNext(): TItem | undefined {
         for (const item of this.queued.values()) {
-            if (item.kind === 'local-only') {
+            if (this.isPriority(item)) {
                 this.queued.delete(item.id);
                 return item;
             }
@@ -220,7 +235,7 @@ export class DiffStatProvider {
     }
 
     /** Background single-row load: same generation guard + error policy as `lazyLoad`. */
-    private async run(item: SourceControlItem, request: ActiveDiffStatRequest): Promise<void> {
+    private async run(item: TItem, request: ActiveDiffStatRequest): Promise<void> {
         try {
             const result = await this.loadDiffStat!(item);
             if (!this.isStale(item.id, request.globalGeneration, request.itemGeneration)) {
@@ -242,7 +257,7 @@ export class DiffStatProvider {
      * request may own the row after an invalidate), releases its physical
      * slot, and wakes the queue.
      */
-    private finish(id: ChangeId, request: ActiveDiffStatRequest): void {
+    private finish(id: TId, request: ActiveDiffStatRequest): void {
         if (this.active.get(id)?.token === request.token) {
             this.active.delete(id);
         }
@@ -250,13 +265,13 @@ export class DiffStatProvider {
         this.pump();
     }
 
-    private isStale(id: ChangeId, globalGeneration: number, itemGeneration: number): boolean {
+    private isStale(id: TId, globalGeneration: number, itemGeneration: number): boolean {
         return globalGeneration !== this.globalGeneration
             || itemGeneration !== (this.generations.get(id) ?? 0);
     }
 
     /** Commits a still-fresh load result to the cache. */
-    private commit(id: ChangeId, result: DiffStatLoadResult): void {
+    private commit(id: TId, result: DiffStatLoadResult): void {
         if (result.status === 'ready') {
             this.cache.set(id, { state: 'ready', stat: result.stat });
             this.settleOnce();

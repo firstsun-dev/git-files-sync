@@ -165,7 +165,6 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'batchConflictModal.keepLocalAll': '全部保留本機',
 	'batchConflictModal.keepRemoteAll': '全部保留遠端',
 	'batchConflictModal.skipAll': '全部略過',
-	'batchConflictModal.row.badge': '本機已變更 · 遠端已變更',
 	'batchConflictModal.row.binary': '二進位檔案',
 	'batchConflictModal.row.viewDiff': '檢視差異',
 	'batchConflictModal.row.keepLocal': '保留本機',

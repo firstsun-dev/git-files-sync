@@ -1141,7 +1141,7 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 .batch-conflict-modal.modal {
     width: min(1600px, 96vw);
     max-width: 96vw;
-    height: min(1000px, 92vh);
+    height: auto;
     max-height: 92vh;
     display: flex;
     flex-direction: column;
@@ -1151,7 +1151,8 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 .batch-conflict-modal .modal-content {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    min-height: 0;
+    max-height: inherit;
     overflow: hidden;
 }
 
@@ -1163,7 +1164,7 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 }
 
 .conflict-content-area {
-    flex: 1;
+    flex: 1 1 auto;
     overflow-y: auto;
     min-height: 0;
 }
@@ -1227,7 +1228,7 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 }
 
 .batch-conflict-row-list {
-    flex: 1;
+    flex: 0 1 auto;
     overflow-y: auto;
     min-height: 0;
     display: flex;
@@ -1237,36 +1238,74 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 
 .batch-conflict-row {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 8px;
     padding: 10px 12px;
     background: var(--background-secondary);
     border-radius: 6px;
 }
 
+/* Top block: identity — filename + diff stat on one line, parent dir below. */
 .batch-conflict-row-info {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    gap: 2px;
     min-width: 0;
-    flex: 1;
 }
 
-.batch-conflict-row-path {
+/* Filename + stat share the first line: name left, +/- stat pushed right.
+   The name never truncates; wide rows read "file .......... +3 -1". */
+.batch-conflict-row-name-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+}
+
+.batch-conflict-row-name {
     font-family: var(--font-monospace);
     font-size: 0.9em;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Fills with the shared .scv-diff-stat spans when a stat lands; empty (no
+   gap, no reserved space) until then. */
+.batch-conflict-row-stat {
+    display: inline-flex;
+    flex-shrink: 0;
+}
+
+.batch-conflict-row-stat:empty {
+    display: none;
+}
+
+.batch-conflict-row-dir {
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+    color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
 }
 
-.batch-conflict-row-badge,
 .batch-conflict-row-binary-badge {
     font-size: 0.78em;
     color: var(--text-muted);
     white-space: nowrap;
+}
+
+/* Bottom block: actions — View Diff + the three radios. Never competes
+   with the filename for horizontal space. */
+.batch-conflict-row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
 }
 
 .batch-conflict-view-diff {
@@ -1299,12 +1338,21 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 }
 
 @media (max-width: 700px) {
-    .batch-conflict-row {
+    .batch-conflict-row-actions {
         flex-direction: column;
         align-items: stretch;
     }
     .batch-conflict-row-radios {
         justify-content: space-between;
+    }
+    .batch-conflict-row-name {
+        white-space: normal;
+        word-break: break-all;
+    }
+    .batch-conflict-row-dir {
+        white-space: normal;
+        word-break: break-all;
+        text-overflow: unset;
     }
 }
 

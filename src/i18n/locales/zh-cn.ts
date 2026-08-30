@@ -165,7 +165,6 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'batchConflictModal.keepLocalAll': '全部保留本地',
 	'batchConflictModal.keepRemoteAll': '全部保留远程',
 	'batchConflictModal.skipAll': '全部跳过',
-	'batchConflictModal.row.badge': '本地已更改 · 远程已更改',
 	'batchConflictModal.row.binary': '二进制文件',
 	'batchConflictModal.row.viewDiff': '查看差异',
 	'batchConflictModal.row.keepLocal': '保留本地',

@@ -198,11 +198,15 @@ export const Notice = class {
 
 export const Modal = class {
   app: unknown;
+  modalEl: HTMLElement;
   contentEl: HTMLElement;
 
   constructor(app?: unknown) {
     this.app = app;
+    // Real Modal nests contentEl inside modalEl, like Obsidian's DOM.
+    this.modalEl = document.createElement('div');
     this.contentEl = document.createElement('div');
+    this.modalEl.appendChild(this.contentEl);
   }
 
   open() {

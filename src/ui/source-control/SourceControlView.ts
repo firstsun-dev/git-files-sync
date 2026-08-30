@@ -125,7 +125,7 @@ export class SourceControlView {
     private mobileQueueCollapsed = false;
     private selectedChangeId: ChangeId | null = null;
     /** Owns the +/- diff-stat cache + background bounded loading + invalidation, isolating that data concern from rendering. */
-    private readonly diffStat: DiffStatProvider;
+    private readonly diffStat: DiffStatProvider<ChangeId, SourceControlItem>;
     /** Mobile detail view only: which layout the diff renders in, toggled explicitly rather than by container width, so only one ever takes up space. */
     private mobileDiffLayout: DiffLayout = 'unified';
     /**
@@ -152,7 +152,7 @@ export class SourceControlView {
         private readonly callbacks: SourceControlViewCallbacks,
         private readonly getWorkspaceInfo: () => SourceControlWorkspaceInfo,
     ) {
-        this.diffStat = new DiffStatProvider(callbacks.loadDiffStat, () => this.rerender());
+        this.diffStat = new DiffStatProvider(callbacks.loadDiffStat, () => this.rerender(), item => item.kind === 'local-only');
     }
 
     /**

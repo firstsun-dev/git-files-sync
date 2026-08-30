@@ -53,7 +53,7 @@ describe('DiffStatProvider', () => {
             calls.push(item);
             return new Promise(resolve => { deferred.push(resolve); });
         });
-        const provider = new DiffStatProvider(loadDiffStat, vi.fn());
+        const provider = new DiffStatProvider(loadDiffStat, vi.fn(), i => i.kind === 'local-only');
 
         provider.loadVisible([item('m-1', 'local-modified'), item('a-1', 'local-only'), item('m-2', 'local-modified'), item('m-3', 'local-modified'), item('a-2', 'local-only'), item('m-4', 'local-modified')]);
         // First dispatch wave fills up to the concurrency cap, but takes

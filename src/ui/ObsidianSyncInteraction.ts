@@ -4,6 +4,7 @@ import { BatchConflictResolutionModal } from './BatchConflictResolutionModal';
 import { SyncConflictModal } from './SyncConflictModal';
 import { SyncPlanModal } from './SyncPlanModal';
 import type {
+    ConflictDiffStatLoader,
     SingleConflictChoice,
     SyncInteractionPort,
     SyncPlanDirection,
@@ -34,6 +35,7 @@ export class ObsidianSyncInteraction implements SyncInteractionPort {
         conflicts: BatchPushConflict[],
         totalFiles: number,
         safeCount: number,
+        diffStatLoader?: ConflictDiffStatLoader,
     ): Promise<boolean> {
         return new Promise(resolve => {
             new BatchConflictResolutionModal(
@@ -44,6 +46,7 @@ export class ObsidianSyncInteraction implements SyncInteractionPort {
                 safeCount,
                 () => resolve(true),
                 () => resolve(false),
+                diffStatLoader,
             ).open();
         });
     }

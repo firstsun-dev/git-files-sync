@@ -24,6 +24,7 @@ import { PushCoordinator } from './PushCoordinator';
 import { SyncPlanner } from './SyncPlanner';
 import {
     HeadlessSyncInteraction,
+    type ConflictDiffStatLoader,
     type SyncInteractionPort,
     type SyncPlanDirection,
 } from './SyncInteractionPort';
@@ -41,6 +42,8 @@ export class SyncManager {
     private readonly pushCoordinator: PushCoordinator;
     private readonly planner = new SyncPlanner();
     private readonly interaction: SyncInteractionPort;
+    /** Optional progressive +/- diff-stat source handed to the batch conflict modal. */
+    private diffStatLoader?: ConflictDiffStatLoader;
     readonly status: SyncStatusService;
 
     constructor(
@@ -106,7 +109,7 @@ export class SyncManager {
             isPathIgnored: path => this.isPathIgnored(path),
             confirmPlan: plan => this.confirmPlan(plan, 'push'),
             resolveConflicts: (conflicts, totalFiles, safeCount) => (
-                this.interaction.resolveBatchConflicts(this.gitService, conflicts, totalFiles, safeCount)
+                this.interaction.resolveBatchConflicts(this.gitService, conflicts, totalFiles, safeCount, this.diffStatLoader)
             ),
             updateMetadata: (path, sha) => this.updateMetadata(path, sha),
             migrateBaseline: (path, repoPath, entry) => this.migrateGitLabLegacyBaseline(path, repoPath, entry),
@@ -151,6 +154,11 @@ export class SyncManager {
 
     updateGitService(gitService: GitServiceInterface): void {
         this.gitService = gitService;
+    }
+
+    /** Wires the composition layer's progressive diff-stat source into the batch conflict modal. */
+    setConflictDiffStatLoader(loader: ConflictDiffStatLoader | undefined): void {
+        this.diffStatLoader = loader;
     }
 
     /** A plan with exactly one entry, for a single-file push/pull's confirm step. */

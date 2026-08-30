@@ -163,7 +163,6 @@ const en = {
 	'batchConflictModal.keepLocalAll': 'Keep Local for All',
 	'batchConflictModal.keepRemoteAll': 'Keep Remote for All',
 	'batchConflictModal.skipAll': 'Skip All',
-	'batchConflictModal.row.badge': 'Local changed · Remote changed',
 	'batchConflictModal.row.binary': 'Binary',
 	'batchConflictModal.row.viewDiff': 'View Diff',
 	'batchConflictModal.row.keepLocal': 'Keep Local',
