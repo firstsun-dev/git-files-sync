@@ -143,7 +143,7 @@ export class SourceControlActionService {
         this.startAll(targets);
         const summary = SourceControlActionService.emptyExecutionResult();
         try {
-            if (planned.pushes.length > 0 || planned.moves.length > 0 || deleteTargets.length > 0) {
+            if (planned.pushes.length > 0 || planned.moves.length > 0 || planned.keepRemote.length > 0 || planned.keepLocal.length > 0 || deleteTargets.length > 0) {
                 const deleteEntries: DeleteQueueEntry[] = deleteTargets.map(target => ({
                     path: target.path,
                     name: basename(target.path),

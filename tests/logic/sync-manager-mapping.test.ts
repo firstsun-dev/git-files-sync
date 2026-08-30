@@ -90,7 +90,6 @@ describe('SyncManager Mapping', () => {
         const readSpy = vi.spyOn(mockApp.vault, 'read');
         getFileByPathSpy.mockReturnValue(mockFile);
         readSpy.mockResolvedValue('content');
-
         vi.mocked(mockPushFile).mockResolvedValue({ path: 'notes/test.md' });
 
         await manager.pushFiles([mockFile]);
@@ -106,6 +105,9 @@ describe('SyncManager Mapping', () => {
             undefined,
             undefined
         );
+        // PullExecutor resolves plain targets through vault lookup again; a
+        // sticky mockReturnValue here would leak into the pull test below.
+        getFileByPathSpy.mockReturnValue(null);
     });
 
     it('should map back to vaultFolder when pulling', async () => {

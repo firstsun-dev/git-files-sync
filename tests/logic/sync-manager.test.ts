@@ -83,9 +83,12 @@ describe('SyncManager', () => {
     let manager: SyncManager;
     /** How the mocked BatchConflictResolutionModal resolves each conflict by default; override per-test. */
     let conflictResolver: (conflict: BatchPushConflict) => ConflictResolution;
+    /** Vault files "existing" on disk per path, so getFileByPath resolves to the exact TFile instances tests created. */
+    let createdFiles: Map<string, TFile>;
 
     beforeEach(() => {
         vi.clearAllMocks();
+        createdFiles = new Map();
         conflictResolver = () => 'skip';
         vi.mocked(SyncPlanModal).mockImplementation(function (
             this: SyncPlanModal, _app: unknown, _plan: unknown, _direction: SyncPlanDirection, onConfirm: () => void
@@ -109,7 +112,14 @@ describe('SyncManager', () => {
         });
         mockSettings.syncMetadata = {};
         // Default: file exists in vault
-        vi.spyOn(mockApp.vault, 'getFileByPath').mockReturnValue(new TFile());
+        vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation((path: string) => {
+            const found = createdFiles.get(path);
+            if (found) return found;
+            const synthetic = new TFile();
+            synthetic.path = path;
+            synthetic.name = path.slice(path.lastIndexOf('/') + 1);
+            return synthetic;
+        });
         manager = new SyncManager(mockApp, mockGitLab, mockSettings, undefined, undefined, undefined, new ObsidianSyncInteraction(mockApp));
     });
 
@@ -238,20 +248,21 @@ describe('SyncManager', () => {
 
     it('should handle conflict by choosing remote', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
+        createdFiles.set('test.md', mockFile);
         mockSettings.syncMetadata['test.md'] = { lastSyncedSha: 'old', lastSyncedAt: 0 };
 
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
         vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'test.md', sha: 'remote-sha', symlink: false }]);
         vi.spyOn(mockGitLab, 'getBlob').mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
-        // The batch conflict pipeline applies "keep remote" by path (via the
-        // adapter), not through the original TFile reference.
-        const writeSpy = vi.spyOn(mockApp.vault.adapter, 'write').mockResolvedValue(undefined);
+        // Keep Remote now writes through vault.modify on the existing TFile
+        // instead of bypassing the vault with a raw adapter write.
+        const modifySpy = vi.spyOn(mockApp.vault, 'modify').mockResolvedValue(undefined);
         conflictResolver = () => 'keep-remote';
 
         await manager.pushFiles([mockFile]);
 
-        expect(writeSpy).toHaveBeenCalledWith('test.md', 'remote content');
+        expect(modifySpy).toHaveBeenCalledWith(mockFile, 'remote content');
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('remote-sha');
     });
 
@@ -709,6 +720,7 @@ describe('SyncManager', () => {
         it('pulls a remote-only change without opening conflict resolution', async () => {
             const path = 'remote-edited.md';
             const file = Object.assign(new TFile(), { path, name: path });
+            createdFiles.set(path, file);
             const baseSha = await gitBlobSha('base content');
             mockSettings.syncMetadata[path] = {
                 lastSyncedSha: baseSha,

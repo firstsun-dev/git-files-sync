@@ -67,6 +67,7 @@ function fakeWorkspace(overrides: Partial<SyncWorkspace> = {}): SyncWorkspace {
         deleteRemote: vi.fn().mockResolvedValue({ deletedPaths: [], errors: [] }),
         deleteLocal: vi.fn().mockResolvedValue(undefined),
         moveLocal: vi.fn(),
+        acceptRemoteConflict: vi.fn().mockResolvedValue(undefined),
         clearMetadata: vi.fn(),
         trackRename: vi.fn(),
         getDiff: vi.fn().mockResolvedValue({ path: 'a.md', kind: 'text' }),
