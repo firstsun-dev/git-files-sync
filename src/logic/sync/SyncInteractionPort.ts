@@ -31,7 +31,6 @@ export interface SyncInteractionPort {
     resolveBatchConflicts(
         gitService: GitServiceInterface,
         conflicts: BatchPushConflict[],
-        totalFiles: number,
         safeCount: number,
         /**
          * Optional progressive +/- diff-stat source for the batch conflict

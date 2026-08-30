@@ -52,7 +52,7 @@ interface PushCoordinatorDependencies {
     conflicts: ConflictResolver;
     isPathIgnored(path: string): boolean;
     confirmPlan(plan: SyncPlan): Promise<boolean>;
-    resolveConflicts(conflicts: BatchPushConflict[], totalFiles: number, safeCount: number): Promise<boolean>;
+    resolveConflicts(conflicts: BatchPushConflict[], safeCount: number): Promise<boolean>;
     updateMetadata(path: string, sha: string): Promise<void>;
     migrateBaseline(path: string, repoPath: string, entry: GitTreeEntry | undefined): Promise<void>;
     saveSettings(): Promise<void>;
@@ -89,7 +89,7 @@ export class PushCoordinator {
         const keepRemote: BatchPushConflict[] = [];
         const keepLocal: BatchPushConflict[] = [];
 
-        if (!await this.resolvePlanConflicts(plan, syncableFiles.length, results, skipped, keepRemote, keepLocal)) {
+        if (!await this.resolvePlanConflicts(plan, results, skipped, keepRemote, keepLocal)) {
             return results;
         }
 
@@ -153,7 +153,7 @@ export class PushCoordinator {
         const skipped: BatchPushConflict[] = [];
         const keepRemote: BatchPushConflict[] = [];
         const keepLocal: BatchPushConflict[] = [];
-        const resolved = await this.resolvePlanConflicts(plan, syncableFiles.length, results, skipped, keepRemote, keepLocal);
+        const resolved = await this.resolvePlanConflicts(plan, results, skipped, keepRemote, keepLocal);
         const reviewPlan = this.buildReviewPlan(plan, skipped, keepRemote);
 
         return {
@@ -175,7 +175,6 @@ export class PushCoordinator {
 
     private async resolvePlanConflicts(
         plan: BatchPushPlan,
-        totalFiles: number,
         results: PushResults,
         skipped: BatchPushConflict[],
         keepRemote: BatchPushConflict[],
@@ -184,7 +183,6 @@ export class PushCoordinator {
         if (plan.conflicts.length === 0) return true;
         const resolved = await this.dependencies.resolveConflicts(
             plan.conflicts,
-            totalFiles,
             plan.pushes.length + plan.moves.length,
         );
         if (!resolved) {

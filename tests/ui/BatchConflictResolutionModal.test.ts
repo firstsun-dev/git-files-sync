@@ -21,21 +21,31 @@ function fakeGitService(): GitServiceInterface {
 describe('BatchConflictResolutionModal', () => {
     beforeAll(() => { setupObsidianDOM(); });
 
-    it('shows the conflict and ready-file counts in the header', () => {
+    it('shows the conflict count in the header and omits the safe-count line when zero', () => {
         const conflicts = makeConflicts();
-        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 5, 3, vi.fn(), vi.fn());
+        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 0, vi.fn(), vi.fn());
         modal.contentEl = createContainer();
 
         modal.onOpen();
 
         expect(modal.contentEl.querySelector('h2')?.textContent).toContain('2');
-        expect(modal.contentEl.querySelector('h2')?.textContent).toContain('5');
+        expect(modal.contentEl.querySelector('h2')?.textContent).not.toContain('5');
+        expect(modal.contentEl.querySelector('.conflict-description')).toBeNull();
+    });
+
+    it('mentions how many other files are ready when there are safe files alongside conflicts', () => {
+        const conflicts = makeConflicts();
+        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 3, vi.fn(), vi.fn());
+        modal.contentEl = createContainer();
+
+        modal.onOpen();
+
         expect(modal.contentEl.querySelector('.conflict-description')?.textContent).toContain('3');
     });
 
     it('renders one row per conflict with a radio per resolution', () => {
         const conflicts = makeConflicts();
-        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 2, 0, vi.fn(), vi.fn());
+        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 0, vi.fn(), vi.fn());
         modal.contentEl = createContainer();
 
         modal.onOpen();
@@ -49,7 +59,7 @@ describe('BatchConflictResolutionModal', () => {
     it('disables Continue until every conflict has a resolution, then enables it', () => {
         const conflicts = makeConflicts();
         const onResolve = vi.fn();
-        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 2, 0, onResolve, vi.fn());
+        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 0, onResolve, vi.fn());
         modal.contentEl = createContainer();
 
         modal.onOpen();
@@ -78,7 +88,7 @@ describe('BatchConflictResolutionModal', () => {
 
     it('"Keep Local for All" sets every conflict\'s resolution and checks the matching radio', () => {
         const conflicts = makeConflicts();
-        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 2, 0, vi.fn(), vi.fn());
+        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 0, vi.fn(), vi.fn());
         modal.contentEl = createContainer();
 
         modal.onOpen();
@@ -95,7 +105,7 @@ describe('BatchConflictResolutionModal', () => {
     it('calls onCancel and not onResolve when Cancel is clicked', () => {
         const onResolve = vi.fn();
         const onCancel = vi.fn();
-        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), makeConflicts(), 2, 0, onResolve, onCancel);
+        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), makeConflicts(), 0, onResolve, onCancel);
         modal.contentEl = createContainer();
         modal.close = vi.fn();
 
@@ -113,7 +123,7 @@ describe('BatchConflictResolutionModal', () => {
         const conflicts: BatchPushConflict[] = [
             { path: 'image.png', name: 'image.png', repoPath: 'image.png', localContent: new ArrayBuffer(3), remoteSha: 'sha-img' },
         ];
-        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 1, 0, vi.fn(), vi.fn());
+        const modal = new BatchConflictResolutionModal(new App(), fakeGitService(), conflicts, 0, vi.fn(), vi.fn());
         modal.contentEl = createContainer();
 
         modal.onOpen();

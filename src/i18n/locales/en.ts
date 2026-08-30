@@ -158,8 +158,8 @@ const en = {
 	'syncPlanModal.confirm': 'Apply',
 	'syncPlanModal.cancel': 'Cancel',
 
-	'batchConflictModal.title': 'Resolve {count} conflict(s) before pushing {total} file(s)',
-	'batchConflictModal.description': '{safeCount} file(s) are ready. {conflictCount} file(s) changed both locally and remotely. Resolve them before continuing.',
+	'batchConflictModal.title': 'Resolve {count|conflict|conflicts}',
+	'batchConflictModal.description': 'other {safeCount|file|files}: ready to sync, pushed with this batch.',
 	'batchConflictModal.keepLocalAll': 'Keep Local for All',
 	'batchConflictModal.keepRemoteAll': 'Keep Remote for All',
 	'batchConflictModal.skipAll': 'Skip All',

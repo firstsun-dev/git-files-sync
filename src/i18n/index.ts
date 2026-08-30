@@ -50,7 +50,16 @@ export function t(key: TranslationKey, vars?: Record<string, string | number>): 
 	const dict = locales[getActiveLocale()] ?? en;
 	const template = dict[key] ?? en[key];
 	if (!vars) return template;
-	return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-		name in vars ? String(vars[name]) : match
-	);
+	return template.replace(/\{(\w+)(?:\|([^|]*)\|([^}]*))?\}/g, (match, name: string, singular: string | undefined, plural: string | undefined) => {
+		if (!(name in vars)) return match;
+		const value = String(vars[name]);
+		// Inline plural form: '{count|conflict|conflicts}' renders the value
+		// suffixed with the singular branch when it is exactly 1 and the
+		// plural branch otherwise ('1 conflict' / '3 conflicts'). Locales
+		// without inflection (zh) simply omit the |-branches.
+		if (singular !== undefined && plural !== undefined) {
+			return vars[name] === 1 ? `${value} ${singular}` : `${value} ${plural}`;
+		}
+		return value;
+	});
 }

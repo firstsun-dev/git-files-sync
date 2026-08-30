@@ -38,7 +38,6 @@ describe('SyncManager Batch Operations', () => {
             _app: unknown,
             _gitService: unknown,
             conflicts: BatchPushConflict[],
-            _totalFiles: number,
             _safeCount: number,
             onResolve: () => void,
             _onCancel: () => void,
@@ -754,7 +753,7 @@ describe('SyncManager Batch Operations', () => {
 
             vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
                 this: BatchConflictResolutionModal,
-                _app: unknown, _git: unknown, _conflicts: unknown, _total: unknown, _safe: unknown,
+                _app: unknown, _git: unknown, _conflicts: unknown, _safe: unknown,
                 _onResolve: () => void, onCancel: () => void
             ) {
                 onCancel();

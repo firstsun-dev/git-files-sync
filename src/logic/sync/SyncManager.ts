@@ -108,8 +108,8 @@ export class SyncManager {
             conflicts: conflictResolver,
             isPathIgnored: path => this.isPathIgnored(path),
             confirmPlan: plan => this.confirmPlan(plan, 'push'),
-            resolveConflicts: (conflicts, totalFiles, safeCount) => (
-                this.interaction.resolveBatchConflicts(this.gitService, conflicts, totalFiles, safeCount, this.diffStatLoader)
+            resolveConflicts: (conflicts, safeCount) => (
+                this.interaction.resolveBatchConflicts(this.gitService, conflicts, safeCount, this.diffStatLoader)
             ),
             updateMetadata: (path, sha) => this.updateMetadata(path, sha),
             migrateBaseline: (path, repoPath, entry) => this.migrateGitLabLegacyBaseline(path, repoPath, entry),

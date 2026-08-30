@@ -80,7 +80,6 @@ export async function createSyncManagerFixture(): Promise<SyncManagerFixture> {
         _app: unknown,
         _gitService: unknown,
         conflicts: BatchPushConflict[],
-        _totalFiles: number,
         _safeCount: number,
         onResolve: () => void,
         _onCancel: () => void,

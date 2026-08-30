@@ -33,7 +33,6 @@ export class ObsidianSyncInteraction implements SyncInteractionPort {
     resolveBatchConflicts(
         gitService: GitServiceInterface,
         conflicts: BatchPushConflict[],
-        totalFiles: number,
         safeCount: number,
         diffStatLoader?: ConflictDiffStatLoader,
     ): Promise<boolean> {
@@ -42,7 +41,6 @@ export class ObsidianSyncInteraction implements SyncInteractionPort {
                 this.app,
                 gitService,
                 conflicts,
-                totalFiles,
                 safeCount,
                 () => resolve(true),
                 () => resolve(false),

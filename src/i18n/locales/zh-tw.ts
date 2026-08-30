@@ -160,8 +160,8 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'syncPlanModal.confirm': '套用',
 	'syncPlanModal.cancel': '取消',
 
-	'batchConflictModal.title': '在推送 {total} 個檔案前，先解決 {count} 個衝突',
-	'batchConflictModal.description': '{safeCount} 個檔案已就緒。{conflictCount} 個檔案同時在本機與遠端變更，請先解決後再繼續。',
+	'batchConflictModal.title': '先解決 {count} 個衝突',
+	'batchConflictModal.description': '另有 {safeCount} 個檔案已就緒，將隨本次一併推送。',
 	'batchConflictModal.keepLocalAll': '全部保留本機',
 	'batchConflictModal.keepRemoteAll': '全部保留遠端',
 	'batchConflictModal.skipAll': '全部略過',
