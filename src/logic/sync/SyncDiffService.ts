@@ -12,14 +12,21 @@ function remoteContentKey(remoteSha: string, path: string): string {
 /**
  * Builds the only diff DTO exposed across the UI/domain boundary.
  *
- * `getDiff` also defines one-sided diff semantics for the summary stat and
- * the diff pane alike, so the UI never has to branch per change kind:
+ * `getDiff` also defines one-sided diff semantics for the diff pane, so the
+ * UI never has to branch per change kind when rendering sides:
  * - `local-only` (A): remote side renders as '' — everything in the local
- *   content shows as +N additions.
- * - `remote-only` / `local-deleted` (↓ / D): local side renders as '' — the
- *   remote content relands entirely (+N additions) with no phantom
- *   deletions, and no separate blob-download round-trip per consumer.
+ *   content shows as +N additions in the pane.
+ * - `remote-only` (↓) / `local-deleted` (D): local side renders as '' — the
+ *   remote content relands entirely with no phantom deletions, and no
+ *   separate blob-download round-trip per consumer.
  * - two-sided kinds (`modified` / `moved`): both sides as stored.
+ *
+ * NOTE: the FileDiff sides are the PANE's semantics (what you'd see after
+ * the action), not the row stat's direction. Both one-sided remote kinds
+ * produce local=''/remote=content, which a plain LCS count reads as -N; the
+ * row stat instead applies the UX direction (+N for a download, -N for a
+ * local deletion) in `SourceControlItemView.loadDiffStat` via
+ * `addedContentStat`/`deletedContentStat`.
  *
  * Concurrent requests for the same remote blob (a background stat loader
  * racing a user-opened diff) are coalesced onto one `readBlob` call by an

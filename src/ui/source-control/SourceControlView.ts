@@ -121,8 +121,8 @@ export class SourceControlView {
     private readonly collapsedFolders = new Set<string>();
     /** Collapsed section regions ("Sync Queue" / "Repository Changes"), persisted across rerenders like collapsed folders. */
     private readonly collapsedSections = new Set<'checkedChanges' | 'changes'>();
-    /** Mobile-only: the Sync Queue starts collapsed (header bar only) so it doesn't push the repository tree off-screen; tapping the header expands it. */
-    private mobileQueueExpanded = false;
+    /** Mobile-only: the Sync Queue starts expanded (matching desktop) so queued changes are directly visible; tapping the header collapses it. */
+    private mobileQueueCollapsed = false;
     private selectedChangeId: ChangeId | null = null;
     /** Owns the +/- diff-stat cache + background bounded loading + invalidation, isolating that data concern from rendering. */
     private readonly diffStat: DiffStatProvider;
@@ -345,7 +345,7 @@ export class SourceControlView {
         if (!this.collapsedSections.has('changes')) this.diffStat.loadVisible(unchecked);
         // Same scoping for the queue region: desktop collapsed sections and
         // the mobile collapsed queue render no row lists.
-        const queueRendered = isMobile ? this.mobileQueueExpanded : !this.collapsedSections.has('checkedChanges');
+        const queueRendered = isMobile ? !this.mobileQueueCollapsed : !this.collapsedSections.has('checkedChanges');
         if (queueRendered) this.diffStat.loadVisible(state.syncQueue);
 
         if (isMobile) this.renderMobileSyncBar(container, state.counts['ready-to-push'], state.syncQueue);
@@ -467,9 +467,11 @@ export class SourceControlView {
      * single-source `syncQueue` projection (same definition as the Sync
      * button count), so the section and the button can never drift.
      *
-     * On mobile the queue starts collapsed to a header bar (the bottom sync
-     * bar still carries the count) so a tall queue doesn't push the
-     * repository tree off-screen; tapping the header expands it.
+     * On mobile the queue renders expanded by default (same as desktop) so
+     * the upcoming changes are directly visible without an extra tap; the
+     * repository tree's own scroll region absorbs the height. Tapping the
+     * header collapses it to a header bar (the bottom sync bar still carries
+     * the count).
      */
     private renderSelectedSection(
         container: HTMLElement,
@@ -478,7 +480,7 @@ export class SourceControlView {
     ): void {
         if (syncQueue.length === 0) return;
         const isMobile = Platform.isMobile;
-        const collapsed = isMobile ? !this.mobileQueueExpanded : this.collapsedSections.has('checkedChanges');
+        const collapsed = isMobile ? this.mobileQueueCollapsed : this.collapsedSections.has('checkedChanges');
         const section = container.createDiv({ cls: 'scv-selected-section' });
         const header = section.createDiv({ cls: 'scv-selected-section-header scv-collapsible-header' });
         header.setAttr('role', 'button');
@@ -494,7 +496,7 @@ export class SourceControlView {
         setTooltip(clearBtn, t('sourceControl.section.clearSelection.tooltip'));
         clearBtn.addEventListener('click', (evt) => { evt.stopPropagation(); this.clearSelection(syncQueue); });
         header.addEventListener('click', () => {
-            if (isMobile) { this.mobileQueueExpanded = !this.mobileQueueExpanded; this.rerender(); }
+            if (isMobile) { this.mobileQueueCollapsed = !this.mobileQueueCollapsed; this.rerender(); }
             else this.toggleSection('checkedChanges');
         });
 

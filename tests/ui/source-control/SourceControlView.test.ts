@@ -1146,7 +1146,7 @@ describe('SourceControlView', () => {
             expect(container.querySelectorAll('.scv-filter-option')).toHaveLength(0);
         });
 
-        it('starts the Sync Queue collapsed to a header bar on mobile, expanding on tap', () => {
+        it('starts the Sync Queue expanded on mobile so queued rows are visible on first render', () => {
             Platform.isMobile = true;
             const { view, selection } = buildView([
                 { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
@@ -1155,18 +1155,81 @@ describe('SourceControlView', () => {
             selection.selectForSync(toChangeId('c-1'));
             view.render(container);
 
-            // Collapsed by default: header present, but no rows / subtitle.
+            // Expanded by default: header + rows + subtitle all render immediately.
             const header = container.querySelector('.scv-selected-section-header') as HTMLElement;
             expect(header).not.toBeNull();
-            expect(header.getAttribute('aria-expanded')).toBe('false');
+            expect(header.getAttribute('aria-expanded')).toBe('true');
+            expect(container.querySelector('.scv-selected-section .scv-change-item')).not.toBeNull();
+            expect(container.querySelector('.scv-selected-section-subtitle')?.textContent).toBe('1 files selected');
+        });
+
+        it('collapses the queue when the mobile header is tapped, then expands it on a second tap', () => {
+            Platform.isMobile = true;
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+            ]);
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            const header = () => container.querySelector('.scv-selected-section-header') as HTMLElement;
+            header().click();
+            expect(header().getAttribute('aria-expanded')).toBe('false');
             expect(container.querySelector('.scv-selected-section .scv-change-item')).toBeNull();
             expect(container.querySelector('.scv-selected-section-subtitle')).toBeNull();
 
-            // Tapping the header expands the queue.
-            header.click();
-            expect(container.querySelector('.scv-selected-section-header')?.getAttribute('aria-expanded')).toBe('true');
+            header().click();
+            expect(header().getAttribute('aria-expanded')).toBe('true');
             expect(container.querySelector('.scv-selected-section .scv-change-item')).not.toBeNull();
-            expect(container.querySelector('.scv-selected-section-subtitle')?.textContent).toBe('1 files selected');
+            expect(container.querySelector('.scv-selected-section-subtitle')).not.toBeNull();
+        });
+
+        it('a collapsed mobile queue renders no rows and background-loads no diff stats for them', async () => {
+            Platform.isMobile = true;
+            const loadDiffStat = vi.fn().mockResolvedValue({ status: 'unavailable' });
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+            ], { loadDiffStat });
+            // The queue's stat is cached from the initial expanded render...
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+            await Promise.resolve();
+            view.invalidateDiffStat(toChangeId('c-1'));
+            loadDiffStat.mockClear();
+
+            // ...then collapsing the queue must not re-fetch it.
+            (container.querySelector('.scv-selected-section-header') as HTMLElement).click();
+            await Promise.resolve();
+
+            const loadedIds = loadDiffStat.mock.calls.map(call => (call[0] as { id: string }).id);
+            expect(loadedIds).not.toContain('c-1');
+
+            // Expanding the queue loads its rows' stats.
+            (container.querySelector('.scv-selected-section-header') as HTMLElement).click();
+            await Promise.resolve();
+            expect(loadDiffStat.mock.calls.map(call => (call[0] as { id: string }).id)).toContain('c-1');
+        });
+
+        it('preserves the mobile queue collapsed state across open diff → Back', () => {
+            Platform.isMobile = true;
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+            ], { loadDiffContent: vi.fn().mockResolvedValue({ remote: 'r', local: 'l' }) });
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            (container.querySelector('.scv-selected-section-header') as HTMLElement).click();
+            expect(container.querySelector('.scv-selected-section-header')?.getAttribute('aria-expanded')).toBe('false');
+
+            // Open a repository row's diff and come back; the queue stays collapsed.
+            const repoRow = container.querySelector('.scv-changes-tree .scv-change-item[data-change-id="c-2"]') as HTMLElement;
+            repoRow.click();
+            expect(container.querySelector('.scv-detail')).not.toBeNull();
+            (container.querySelector('.scv-detail-back') as HTMLButtonElement).click();
+
+            expect(container.querySelector('.scv-selected-section-header')?.getAttribute('aria-expanded')).toBe('false');
+            expect(container.querySelector('.scv-selected-section .scv-change-item')).toBeNull();
         });
 
         it('hides the header push button and shows a sticky bottom sync bar on mobile when there is a selection', () => {
