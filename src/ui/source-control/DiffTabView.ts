@@ -1,7 +1,6 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 import { t } from '../../i18n';
-import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
-import { renderDiffPanel } from '../components/DiffPanel';
+import { renderDiffViewer, currentDiffLayout, rememberDiffLayout } from '../components/DiffViewer';
 
 export const SOURCE_CONTROL_DIFF_VIEW_TYPE = 'source-control-diff-view';
 
@@ -21,8 +20,6 @@ export interface DiffTabContent {
 export class DiffTabView extends ItemView {
     private path: string | null = null;
     private content: DiffTabContent | null = null;
-    /** Toggled explicitly via the layout button rather than by tab width, so split and unified never both take up space. */
-    private layout: DiffLayout = 'split';
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
@@ -62,6 +59,7 @@ export class DiffTabView extends ItemView {
 
         container.empty();
         container.addClass('scv-diff-tab');
+        container.addClass('gfs-diff-surface');
 
         if (!this.path || !this.content) {
             container.createDiv({ cls: 'scv-diff-empty', text: t('diffView.empty') });
@@ -70,13 +68,14 @@ export class DiffTabView extends ItemView {
 
         const header = container.createDiv({ cls: 'scv-diff-tab-header' });
         header.createDiv({ cls: 'scv-diff-tab-path', text: this.path });
+        const toggleSlot = header.createDiv({ cls: 'scv-diff-tab-header-toggle' });
 
-        renderDiffLayoutToggle(header, this.layout, (next) => {
-            this.layout = next;
-            this.render();
+        renderDiffViewer(container, {
+            remote: this.content.remote,
+            local: this.content.local,
+            layout: currentDiffLayout(),
+            toggleHost: toggleSlot,
+            onLayoutChange: rememberDiffLayout,
         });
-
-        const body = container.createDiv({ cls: `scv-diff-tab-body scv-diff-layout-${this.layout}` });
-        renderDiffPanel(body, this.content.remote, this.content.local);
     }
 }

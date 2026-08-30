@@ -5,7 +5,7 @@ import { SourceControlViewModel, type SourceControlItem } from '../../logic/sour
 import type { ChangeId } from '../../logic/source-control/types';
 import { defaultSyncAction } from '../../logic/source-control/ChangeActionPolicy';
 import { ICONS } from '../components/icons';
-import { renderDiffLayoutToggle, type DiffLayout } from '../components/DiffLayoutToggle';
+import { renderDiffViewer, currentDiffLayout, rememberDiffLayout } from '../components/DiffViewer';
 import { renderDiffPanel } from '../components/DiffPanel';
 import { renderChangeTree, renderChangeList, type ChangeTreeCallbacks } from './ChangeTree';
 import { renderChangeItem } from './ChangeItem';
@@ -126,8 +126,6 @@ export class SourceControlView {
     private selectedChangeId: ChangeId | null = null;
     /** Owns the +/- diff-stat cache + background bounded loading + invalidation, isolating that data concern from rendering. */
     private readonly diffStat: DiffStatProvider<ChangeId, SourceControlItem>;
-    /** Mobile detail view only: which layout the diff renders in, toggled explicitly rather than by container width, so only one ever takes up space. */
-    private mobileDiffLayout: DiffLayout = 'unified';
     /**
      * Navigation scroll state for the mobile list → detail transition. It is
      * captured only when navigating INTO a diff and consumed exactly once by
@@ -167,6 +165,7 @@ export class SourceControlView {
         this.container = container;
         container.empty();
         container.addClass('scv-root');
+        container.addClass('gfs-diff-surface');
 
         const isMobile = Platform.isMobile;
         container.toggleClass('scv-mobile', isMobile);
@@ -564,12 +563,30 @@ export class SourceControlView {
             this.rerender();
         });
 
-        renderDiffLayoutToggle(bar, this.mobileDiffLayout, (next) => {
-            this.mobileDiffLayout = next;
-            this.rerender();
+        // The toggle re-renders into a dedicated slot: renderDiffViewer
+        // empties its host on every switch, so passing the bar itself would
+        // wipe the Back button.
+        const toggleSlot = bar.createDiv({ cls: 'scv-detail-bar-toggle' });
+
+        // Shared DiffViewer renders an empty placeholder body; the async
+        // load below fills it (stale-guarded) once the diff content is ready.
+        // The viewer appends the body directly to `detail`, so the legacy
+        // .scv-detail-diff wrapper's CSS is kept by styling the body itself.
+        renderDiffViewer(detail, {
+            remote: '',
+            local: '',
+            layout: currentDiffLayout(),
+            toggleHost: toggleSlot,
+            onLayoutChange: (next) => {
+                rememberDiffLayout(next);
+                this.rerender();
+            },
         });
-        const diffContainer = detail.createDiv({ cls: `scv-detail-diff scv-diff-layout-${this.mobileDiffLayout}` });
-        if (this.selectedChangeId) void this.loadAndRenderDiff(diffContainer, this.selectedChangeId);
+        const diffBody = detail.querySelector<HTMLElement>('.scv-diff-tab-body');
+        diffBody?.addClass('scv-detail-diff');
+        if (diffBody && this.selectedChangeId) {
+            void this.loadAndRenderDiff(diffBody, this.selectedChangeId);
+        }
     }
 
     private async loadAndRenderDiff(container: HTMLElement, changeId: ChangeId): Promise<void> {

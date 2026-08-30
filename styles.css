@@ -4,11 +4,9 @@
    (desktop DiffTabView, mobile detail, conflict modals; split + unified).
    Components only ever consume these -- never raw Obsidian theme vars --
    so contrast tweaks happen in exactly one place.
-   Every diff-rendering root must be listed here. */
-.scv-root,
-.scv-diff-tab,
-.sync-conflict-modal,
-.batch-conflict-modal {
+   Any diff-rendering root adds .gfs-diff-surface, so a new surface never
+   needs a selector added here. */
+.gfs-diff-surface {
     --scv-diff-added-bg:
         color-mix(in srgb, var(--color-green) 16%, var(--background-primary));
     --scv-diff-added-emphasis: var(--color-green);
@@ -25,10 +23,7 @@
 }
 
 /* Same mix percentage reads weaker on dark backgrounds; raise the tint. */
-.theme-dark .scv-root,
-.theme-dark .scv-diff-tab,
-.theme-dark .sync-conflict-modal,
-.theme-dark .batch-conflict-modal {
+.theme-dark .gfs-diff-surface {
     --scv-diff-added-bg:
         color-mix(in srgb, var(--color-green) 22%, var(--background-primary));
     --scv-diff-removed-bg:
@@ -1137,23 +1132,43 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 }
 
 /* ── Conflict Modal ─────────────────────────────────────────────── */
-.sync-conflict-modal.modal,
-.batch-conflict-modal.modal {
-    width: min(1600px, 96vw);
-    max-width: 96vw;
-    height: auto;
-    max-height: 92vh;
+/* Shell shared by single + batch; variants only override what differs.
+   Widths differ by purpose: the single modal shows an inline diff and
+   genuinely needs the room; the batch modal is a resolution checklist,
+   and a 1600px width strands rows' scan distance. */
+.gfs-conflict-modal.modal {
     display: flex;
     flex-direction: column;
+    height: auto;
+    max-height: 92vh;
 }
 
-.sync-conflict-modal .modal-content,
-.batch-conflict-modal .modal-content {
+.gfs-conflict-modal--single.modal {
+    width: min(1600px, 96vw);
+    max-width: 96vw;
+}
+
+.gfs-conflict-modal--batch.modal {
+    width: min(1100px, 94vw);
+    max-width: 94vw;
+}
+
+.gfs-conflict-modal .modal-content {
     display: flex;
     flex-direction: column;
     min-height: 0;
     max-height: inherit;
     overflow: hidden;
+}
+
+/* Fixed top region of the single-file conflict modal: title, description,
+   and the "Differences + layout toggle" view controls. Layout (not
+   position:sticky) keeps it visible — only the diff below scrolls. */
+.gfs-conflict-modal .conflict-header,
+.gfs-conflict-modal .conflict-diff-header,
+.gfs-conflict-modal .conflict-description,
+.gfs-conflict-modal h2 {
+    flex-shrink: 0;
 }
 
 .conflict-description {
@@ -1163,10 +1178,19 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     flex-shrink: 0;
 }
 
+/* The ONLY scroll region of the conflict modal: the diff lines. The header
+   (title + view controls) and footer (resolution buttons) are flex-fixed. */
 .conflict-content-area {
     flex: 1 1 auto;
     overflow-y: auto;
     min-height: 0;
+}
+
+/* Fixed bottom region: resolution actions never scroll away with a long
+   diff. Opaque background so scrolled diff lines can't show through the
+   border seam. */
+.gfs-conflict-modal .conflict-buttons {
+    background: var(--background-primary);
 }
 
 .conflict-diff-header {
@@ -1175,6 +1199,14 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 8px;
+}
+
+/* Diff lines inside the modal's ONLY scroll region fill it: the modal
+   provides the viewport chrome, so the old inner max-height scroll boxes
+   would nest scrolling inside scrolling. */
+.gfs-conflict-modal .scv-diff-tab-body .ssv-diff-grid,
+.gfs-conflict-modal .scv-diff-tab-body .ssv-diff-unified {
+    max-height: none;
 }
 
 .conflict-diff-header h3 {
@@ -1205,7 +1237,7 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 @media (max-width: 480px) {
     .conflict-buttons { justify-content: stretch; }
     .conflict-buttons .setting-item-control { flex: 1; display: flex; flex-direction: column; gap: 8px; }
-    .sync-conflict-modal .conflict-buttons button { width: 100%; margin: 0; }
+    .gfs-conflict-modal .conflict-buttons button { width: 100%; margin: 0; }
 }
 
 .conflict-buttons .setting-item {
@@ -1219,6 +1251,9 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 }
 
 /* ── Batch Conflict Resolution Modal ────────────────────────────── */
+/* Review-list, not card gallery: identity column on the left, actions on
+   the right. Default (tablet/phone) is stacked; ≥900px collapses each row
+   into a dense ~52px list entry so 40 conflicts still skim in one viewport. */
 .batch-conflict-bulk-actions {
     display: flex;
     gap: 8px;
@@ -1227,13 +1262,15 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     flex-shrink: 0;
 }
 
+/* The ONLY scroll region of the batch modal; header/bulk actions/footer
+   stay fixed. Grows while short a conflict list exists and caps at the
+   modal's remaining height while long. */
 .batch-conflict-row-list {
     flex: 0 1 auto;
     overflow-y: auto;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 8px;
 }
 
 .batch-conflict-row {
@@ -1245,7 +1282,8 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     border-radius: 6px;
 }
 
-/* Top block: identity — filename + diff stat on one line, parent dir below. */
+/* Left block: identity — filename + diff stat on one line, parent dir
+   below. Allowed to shrink; the actions column keeps its natural width. */
 .batch-conflict-row-info {
     display: flex;
     flex-direction: column;
@@ -1253,13 +1291,15 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     min-width: 0;
 }
 
-/* Filename + stat share the first line: name left, +/- stat pushed right.
-   The name never truncates; wide rows read "file .......... +3 -1". */
+/* Filename + its +/- stat read as one information group: stat sits right
+   next to the name (gap 10px), not pushed to the far edge of a wide modal
+   — a 1000px gap makes them look like unrelated columns. The name stays
+   untruncated; a long name still can't push the stat out of view. */
 .batch-conflict-row-name-line {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
+    justify-content: flex-start;
+    gap: 10px;
     min-width: 0;
 }
 
@@ -1298,13 +1338,14 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     white-space: nowrap;
 }
 
-/* Bottom block: actions — View Diff + the three radios. Never competes
-   with the filename for horizontal space. */
+/* Actions — View Diff + the three radios as one group. Base is
+   left-aligned stacked-below-identity (tablet/phone); desktop grid puts
+   it in the right column. */
 .batch-conflict-row-actions {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    justify-content: flex-start;
+    gap: 16px;
     flex-wrap: wrap;
 }
 
@@ -1337,7 +1378,53 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     margin-top: 12px;
 }
 
+/* Desktop: a review table, not a card stack. Identity (filename+stat,
+   dir) holds the left column; View Diff + radios hold the right. One row
+   ≈ 52px instead of ~90px, so a 40-conflict batch still skims — the wide
+   modal earns its width by using it horizontally. Divider list replaces
+   individual cards (no card padding/gap/rounding per row). */
+@media (min-width: 900px) {
+    .batch-conflict-row-list {
+        border-top: 1px solid var(--background-modifier-border);
+    }
+
+    .batch-conflict-row {
+        display: grid;
+        grid-template-columns: minmax(300px, 1fr) auto;
+        align-items: center;
+        column-gap: 24px;
+        padding: 7px 12px;
+        background: none;
+        border-radius: 0;
+        border-bottom: 1px solid var(--background-modifier-border);
+    }
+
+    .batch-conflict-row-actions {
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+        gap: 14px;
+    }
+}
+
+/* Tablet: two stacked lines (identity, actions) with comfortable touch
+   targets; no card chrome either — density still matters at 40 rows. */
+@media (max-width: 899px) {
+    .batch-conflict-row {
+        gap: 6px;
+        padding: 8px 12px;
+        background: none;
+        border-radius: 0;
+        border-bottom: 1px solid var(--background-modifier-border);
+    }
+}
+
+/* Phone < 700px: full stacking — radios drop under actions so they never
+   squeeze horizontally; names/dirs wrap instead of clipping. */
 @media (max-width: 700px) {
+    .batch-conflict-row {
+        gap: 8px;
+        padding: 10px 12px;
+    }
     .batch-conflict-row-actions {
         flex-direction: column;
         align-items: stretch;

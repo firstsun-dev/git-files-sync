@@ -1,8 +1,7 @@
 import { App, Modal, Setting } from 'obsidian';
 import { t } from '../i18n';
 import { isBinaryPath } from '../utils/path';
-import { renderDiffLayoutToggle, type DiffLayout } from './components/DiffLayoutToggle';
-import { renderDiffPanel } from './components/DiffPanel';
+import { renderDiffViewer, currentDiffLayout, rememberDiffLayout } from './components/DiffViewer';
 
 /**
  * Apply the "destructive" button style, but only when the running Obsidian
@@ -37,21 +36,35 @@ export class SyncConflictModal extends Modal {
 
     onOpen() {
         const { contentEl, modalEl } = this;
-        modalEl.addClass('sync-conflict-modal');
+        modalEl.addClass('gfs-conflict-modal');
+        modalEl.addClass('gfs-conflict-modal--single');
+        modalEl.addClass('gfs-diff-surface');
 
-        contentEl.createEl('h2', { text: t('syncConflictModal.title', { fileName: this.fileName }) });
-        contentEl.createEl('p', {
+        // Fixed header: identity + view controls (Differences / layout
+        // toggle). flex-shrink: 0 in CSS — scrolls away never.
+        const header = contentEl.createDiv({ cls: 'conflict-header' });
+        header.createEl('h2', { text: t('syncConflictModal.title', { fileName: this.fileName }) });
+        header.createEl('p', {
             text: t('syncConflictModal.description'),
             cls: 'conflict-description'
         });
 
+        // Fixed footer FIRST in the flex column's content plan is not needed
+        // — order below is header, scroller, footer; footer is after the
+        // scroll area in the DOM too, pinned by flex-shrink: 0.
+
         if (this.isBinary) {
-            contentEl.createDiv({ cls: 'conflict-content-area' })
-                .createEl('p', { text: t('syncConflictModal.binaryChanged'), cls: 'conflict-binary-notice' });
-        } else {
-            this.renderTextComparison(contentEl);
+            const scroll = contentEl.createDiv({ cls: 'conflict-content-area' });
+            scroll.createEl('p', { text: t('syncConflictModal.binaryChanged'), cls: 'conflict-binary-notice' });
+            this.renderButtons(contentEl);
+            return;
         }
 
+        this.renderTextComparison(contentEl);
+        this.renderButtons(contentEl);
+    }
+
+    private renderButtons(contentEl: HTMLElement): void {
         const buttonContainer = contentEl.createDiv({ cls: 'conflict-buttons' });
 
         new Setting(buttonContainer)
@@ -87,37 +100,27 @@ export class SyncConflictModal extends Modal {
         const localContent = this.localContent as string;
         const remoteContent = this.remoteContent as string;
 
-        const contentArea = contentEl.createDiv({ cls: 'conflict-content-area' });
-        const diffSection = contentArea.createDiv({ cls: 'conflict-diff-section' });
-        this.renderDiffTab(diffSection, remoteContent, localContent);
-    }
-
-    /**
-     * Renders the "Diff" tab via the shared `renderDiffPanel` (same component
-     * as the Source Control diff views) instead of a bespoke line-diff, with
-     * a button to switch between split (two-column) and unified (one-column)
-     * layout -- defaulting to unified so the modal doesn't open unnecessarily
-     * wide. Only one layout is ever visible at a time (see the
-     * `scv-diff-layout-*` CSS rules shared with the other diff views).
-     */
-    private renderDiffTab(container: HTMLElement, remoteContent: string, localContent: string): void {
-        const header = container.createDiv({ cls: 'conflict-diff-header' });
+        // "Differences + layout toggle" is a VIEW control: it stays in the
+        // fixed header region (outside the scroll container) so it remains
+        // reachable while a long diff scrolls below it. Only diff lines and
+        // the binary notice live inside the scroller.
+        const header = contentEl.createDiv({ cls: 'conflict-diff-header' });
         header.createEl('h3', { text: t('syncConflictModal.differences') });
         const toggleSlot = header.createDiv({ cls: 'conflict-diff-header-toggle' });
 
-        const body = container.createDiv({ cls: 'scv-diff-tab-body' });
-        renderDiffPanel(body, remoteContent, localContent);
+        const scrollArea = contentEl.createDiv({ cls: 'conflict-content-area' });
+        const diffSection = scrollArea.createDiv({ cls: 'conflict-diff-section' });
 
-        let layout: DiffLayout = 'unified';
-        const applyLayout = (): void => {
-            body.className = `scv-diff-tab-body scv-diff-layout-${layout}`;
-            toggleSlot.empty();
-            renderDiffLayoutToggle(toggleSlot, layout, (next) => {
-                layout = next;
-                applyLayout();
-            });
-        };
-        applyLayout();
+        // One shared default/policy for all surfaces (see DiffViewer):
+        // split on wide desktop viewport, unified on phones — and whatever
+        // layout the user last picked anywhere in the session.
+        renderDiffViewer(diffSection, {
+            remote: remoteContent,
+            local: localContent,
+            layout: currentDiffLayout(),
+            toggleHost: toggleSlot,
+            onLayoutChange: rememberDiffLayout,
+        });
     }
 
     onClose() {

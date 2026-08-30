@@ -17,14 +17,17 @@ function statItemOf(conflict: BatchPushConflict): StatRow {
 
 /**
  * Resolves every conflict from one batch push in a single screen — never one
- * modal per conflicted file. Bulk actions (Keep Local/Remote/Skip for All)
- * and per-row radios only mutate each conflict's `resolution` in place;
- * nothing is written anywhere until the caller applies the resolved plan
- * after this modal's Continue button. "View Diff" reuses the existing
- * single-file `SyncConflictModal` for the detailed comparison, fetching that
- * row's remote content lazily (only when actually inspected) via
- * `getBlob(remoteSha, repoPath)` so resolving a large batch of conflicts
- * via bulk actions never has to download content nobody looks at.
+ * modal per conflicted file. Header states only what drives the decision
+ * (how many conflicts, how many other files are riding along) — the push
+ * total is redundant listing arithmetic. Bulk actions (Keep Local/Remote/
+ * Skip for All) and per-row radios only mutate each conflict's `resolution`
+ * in place; nothing is written anywhere until the caller applies the
+ * resolved plan after this modal's Continue button. "View Diff" reuses the
+ * existing single-file `SyncConflictModal` for the detailed comparison,
+ * fetching that row's remote content lazily (only when actually inspected)
+ * via `getBlob(remoteSha, repoPath)` so resolving a large batch of
+ * conflicts via bulk actions never has to download content nobody looks
+ * at.
  *
  * Each row may also show a progressive +/- diff stat when a
  * `ConflictDiffStatLoader` was supplied: the modal opens immediately, stats
@@ -35,7 +38,6 @@ function statItemOf(conflict: BatchPushConflict): StatRow {
 export class BatchConflictResolutionModal extends Modal {
     private readonly gitService: GitServiceInterface;
     private readonly conflicts: BatchPushConflict[];
-    private readonly totalFiles: number;
     private readonly safeCount: number;
     private readonly onResolve: () => void;
     private readonly onCancel: () => void;
@@ -51,7 +53,6 @@ export class BatchConflictResolutionModal extends Modal {
         app: App,
         gitService: GitServiceInterface,
         conflicts: BatchPushConflict[],
-        totalFiles: number,
         safeCount: number,
         onResolve: () => void,
         onCancel: () => void,
@@ -60,7 +61,6 @@ export class BatchConflictResolutionModal extends Modal {
         super(app);
         this.gitService = gitService;
         this.conflicts = conflicts;
-        this.totalFiles = totalFiles;
         this.safeCount = safeCount;
         this.onResolve = onResolve;
         this.onCancel = onCancel;
@@ -72,19 +72,21 @@ export class BatchConflictResolutionModal extends Modal {
     onOpen() {
         const { contentEl, modalEl } = this;
 
-        modalEl.addClass('sync-conflict-modal');
-        modalEl.addClass('batch-conflict-modal');
+        modalEl.addClass('gfs-conflict-modal');
+        modalEl.addClass('gfs-conflict-modal--batch');
+        modalEl.addClass('gfs-diff-surface');
 
         contentEl.createEl('h2', {
-            text: t('batchConflictModal.title', { count: this.conflicts.length, total: this.totalFiles })
+            text: t('batchConflictModal.title', { count: this.conflicts.length })
         });
-        contentEl.createEl('p', {
-            cls: 'conflict-description',
-            text: t('batchConflictModal.description', {
-                safeCount: this.safeCount,
-                conflictCount: this.conflicts.length,
-            }),
-        });
+        // Safe-count line is omitted when zero: "0 other files are ready"
+        // is noise on top of the conflict list itself.
+        if (this.safeCount > 0) {
+            contentEl.createEl('p', {
+                cls: 'conflict-description',
+                text: t('batchConflictModal.description', { safeCount: this.safeCount }),
+            });
+        }
 
         const bulkActions = contentEl.createDiv({ cls: 'batch-conflict-bulk-actions' });
         new ButtonComponent(bulkActions)
