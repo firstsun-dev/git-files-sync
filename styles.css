@@ -1,5 +1,44 @@
 /* ── VaultBridge – Source Control View ────────────────────────────── */
 
+/* Semantic diff tokens: shared by every surface that renders a diff
+   (desktop DiffTabView, mobile detail, conflict modals; split + unified).
+   Components only ever consume these -- never raw Obsidian theme vars --
+   so contrast tweaks happen in exactly one place.
+   Every diff-rendering root must be listed here. */
+.scv-root,
+.scv-diff-tab,
+.sync-conflict-modal,
+.batch-conflict-modal {
+    --scv-diff-added-bg:
+        color-mix(in srgb, var(--color-green) 16%, var(--background-primary));
+    --scv-diff-added-emphasis: var(--color-green);
+    --scv-diff-removed-bg:
+        color-mix(in srgb, var(--color-red) 15%, var(--background-primary));
+    --scv-diff-removed-emphasis: var(--color-red);
+    --scv-diff-unified-added-bg:
+        color-mix(in srgb, var(--color-green) 18%, var(--background-primary));
+    --scv-diff-unified-removed-bg:
+        color-mix(in srgb, var(--color-red) 18%, var(--background-primary));
+    --scv-diff-empty-bg: var(--background-secondary);
+    --scv-diff-border: var(--background-modifier-border);
+    --scv-diff-line-number: var(--text-muted);
+}
+
+/* Same mix percentage reads weaker on dark backgrounds; raise the tint. */
+.theme-dark .scv-root,
+.theme-dark .scv-diff-tab,
+.theme-dark .sync-conflict-modal,
+.theme-dark .batch-conflict-modal {
+    --scv-diff-added-bg:
+        color-mix(in srgb, var(--color-green) 22%, var(--background-primary));
+    --scv-diff-removed-bg:
+        color-mix(in srgb, var(--color-red) 20%, var(--background-primary));
+    --scv-diff-unified-added-bg:
+        color-mix(in srgb, var(--color-green) 26%, var(--background-primary));
+    --scv-diff-unified-removed-bg:
+        color-mix(in srgb, var(--color-red) 24%, var(--background-primary));
+}
+
 .scv-root {
     display: flex;
     flex-direction: column;
@@ -891,7 +930,7 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 
 /* Right column of each row gets a left separator */
 .ssv-diff-cell:nth-child(even) {
-    border-left: 1px solid var(--background-modifier-border);
+    border-left: 1px solid var(--scv-diff-border);
 }
 
 /* Row separator (every pair of cells) */
@@ -900,13 +939,21 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     background-color: transparent;
 }
 
-.ssv-diff-cell.removed   { background: rgba(var(--color-red-rgb), 0.12); }
-.ssv-diff-cell.added     { background: rgba(var(--color-green-rgb), 0.12); }
+.ssv-diff-cell.removed {
+    background: var(--scv-diff-removed-bg);
+    box-shadow: inset 2px 0 0 var(--scv-diff-removed-emphasis);
+}
+
+.ssv-diff-cell.added {
+    background: var(--scv-diff-added-bg);
+    box-shadow: inset 2px 0 0 var(--scv-diff-added-emphasis);
+}
+
 .ssv-diff-cell.unchanged { background: transparent; }
-.ssv-diff-cell.empty     { background: var(--background-secondary); opacity: 0.6; }
+.ssv-diff-cell.empty     { background: var(--scv-diff-empty-bg); }
 
 .ssv-diff-ln {
-    color: var(--text-muted);
+    color: var(--scv-diff-line-number);
     min-width: 22px;
     text-align: right;
     flex-shrink: 0;
@@ -943,8 +990,13 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     border-radius: 2px;
 }
 
-.ssv-u-line.removed   { background: rgba(var(--color-red-rgb), 0.18); }
-.ssv-u-line.added     { background: rgba(var(--color-green-rgb), 0.18); }
+.ssv-u-line.removed {
+    background: var(--scv-diff-unified-removed-bg);
+}
+
+.ssv-u-line.added {
+    background: var(--scv-diff-unified-added-bg);
+}
 .ssv-u-line.unchanged { color: var(--text-muted); }
 
 /* Container query: switch layout based on the diff panel's own width */

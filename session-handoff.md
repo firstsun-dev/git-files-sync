@@ -2,26 +2,26 @@
 
 **Date:** 2026-08-30
 **Branch / PR:** `claude/source-control-foundation` / PR #129
-**Latest commits (all pushed):** `acd2046` fix(ci): serialize branch validation workflows → `78a78e8` fix(source-control): track diff stat requests by generation token → `49f3033` fix(sync-status): preserve refreshed state across live modifications → `fbe0787` fix(source-control): correct one-sided diff stat direction
+**Latest commits (NOT YET PUSHED):** `2591e05` fix(source-control): apply keep-remote-only batch plans and harden resolution tests → `cd8c31c` test(source-control): cover keep-remote end-to-end semantics → `c73c9cc` fix(source-control): make keep-remote resolution authoritative (all on top of `17d241c`).
 
 ## Completed (this round)
 
-Final 4-fix round from the merge-gate review (no scope expansion):
+Keep Remote resolution made authoritative — executed with two parallel subagents (worktree-isolated from `44c17ba`), then integrated:
 
-1. **CI whole-run concurrency** — `concurrency:` moved to workflow level in `.github/workflows/ci.yml`: group `ci-<head_ref|ref_name>` for push/pull_request (one whole CI DAG per branch survives; the split per-provider winners race is gone), `format('{0}-{1}', event_name, run_id)` for workflow_dispatch/schedule so manual/scheduled runs never cancel (or get cancelled by) branch CI. Per-job `concurrency:` blocks on `provider-e2e` and `gitea-e2e` removed. Contract tests updated + added in `tests/ci-workflow.test.ts`: independent dispatch/schedule identity, workflow-level serialization (no `group: e2e-` left, `ci-` group present), dispatch/schedule never cancel branch CI.
-2. **DiffStatProvider request tokens** — `active` changed from `Set<ChangeId>` to `Map<ChangeId, ActiveDiffStatRequest>` (`token` from a monotonic counter + the two generation values). A request's finally deletes only its own marker (`active.get(id)?.token === request.token`). New `physicalInFlight` counter (incremented on dispatch, decremented in `finish`) gates the MAX_CONCURRENT=4 pump — never `active.size`; `invalidate`/`clear` may drop the row's marker immediately but abandoned physical calls still count until they settle. Regressions added: old-finally-cannot-clear-newer-marker, stale+current-in-flight-no-duplicate, rapid-invalidate burst peak ≤ 4.
-3. **SyncStatusRefreshService modify vs full refresh** — `handleFileModified` no longer writes back its pre-await `existing` snapshot. Two-phase: bump revision, read content, bail if revision superseded; then re-read `this.statuses.get(path)` and bail if the row is gone or `file` changed; classification uses `current` (including `current.remoteSha`); final write spreads `{ ...current, status, localContent }`. Full-refresh state (remoteSha A→B, remoteContent, isSymlink, movedFrom) now survives a pending modify read; a delete during pending read stays `local-deleted` without content; a rename-away old path is not written back. Tests +3.
-4. **One-sided diff stat direction** — the pane's FileDiff sides (local='' for ↓/D) are download-oriented and must not define the row stat. `ChangePresentation` gains `addedContentStat(content)` (+N) and `deletedContentStat(content)` (−N); `SourceControlItemView.loadDiffStat` routes `remote-only` → additions(remote content), `local-deleted` → deletions(remote content), everything else keeps `computeDiffStat`. `SyncDiffService` doc updated to note DTO-vs-stat semantics split. Tests assert the RENDERED stat: remote-only 2 lines → `+2`, local-deleted 2 lines → `−2` (plus helper unit tests).
+1. **Agent A (production, `c73c9cc`)** — `PullExecutor.write` now resolves plain `{path,name}` targets via `vault.getFileByPath`: existing TFile → `vault.modify`/`modifyBinary` (the iPad regression: batch Keep Remote was previously writing through `adapter.write`); missing → `adapter.write`/`writeBinary`. An already-resolved TFile is used as-is (orchestrator spec; Agent A initially re-looked-up TFiles too — fixed in `2591e05`). New boundary `SyncManager.acceptRemoteConflict(path)`: reads `status.get(path).remoteSha` (the REVIEWED sha), throws `Cannot accept remote version because the reviewed remote revision is unavailable.` when absent (no HEAD fallback), `getBlob(remoteSha, repoPath)`, silent pull. No planner, no second conflict modal, no `pullOne`. `SyncExecutionResult` gains required `acceptedRemote` + i18n keys (`sourceControl.notice.sync.acceptedRemote`: en "Accepted remote {count}", zh-tw "採用遠端版本 {count}", zh-cn "采用远程版本 {count}"). `resolveConflict()` now notifies exactly once (local→updated:1, remote→acceptedRemote:1, failure→failed:1). `addRemoteResult()` counts keepRemote minus failed paths as acceptedRemote (NOT resolvedConflicts).
+2. **Agent B (tests, `cd8c31c`)** — PullExecutor 4-path regression; ConflictResolver reviewed-SHA (getFile never called) + getBlob-failure counting; batch acceptedRemote full/partial with exact call-count assertions; single-conflict contract tests; new integration test `tests/integration/sync/SyncWorkspace.keep-remote.test.ts` asserting observable final state (vault content == reviewed blob, metadata == reviewed sha, status synced, remote HEAD untouched, no reopen).
+3. **Integration (`2591e05`) — found a genuine production bug during the merge run:** `SourceControlActionService.sync()` only invoked `commitResolvedBatch` when `pushes/moves/deletions` were non-empty, so a **pure Keep Remote batch was silently dropped** (plan confirmed, nothing applied, no notification). Gate now includes `keepRemote`/`keepLocal`. Also: test-side path-aware `getFileByPath` mock in sync-manager tests (stale sticky mocks from the old bare-TFile default leaked into the pull test); keep-remote batch test asserts `vault.modify` semantics; `acceptedRemote` added to existing notifier fixtures + new positive-count test.
 
 ## Verification
 
-- `npx eslint .` — 0 errors (full repo, after all 4 commits)
-- `npx vitest run` — 66 files / 804 tests passed
-- `npm run build` (+ Obsidian 1.11 compat typecheck) — passed via husky pre-commit on each of the 4 commits
-- **CI (whole-run concurrency verified in production):** push `9eb3713..17d241c`. For head `17d241c`, push run `33274606265` was cancelled by the new workflow-level group and pull_request run `33274607880` survived with ALL nine groups green: Lint ✅ Build ✅ Unit 22 ✅ Unit 24 ✅ GitHub E2E ✅ GitLab E2E ✅ Gitea E2E ✅ Required Checks ✅ Package ✅ (Publish skipped: non-main). One whole DAG per branch — no split winners.
+- `npx eslint .` — 0 errors
+- `npx vitest run` — 67 files / 820 tests passed (all 11 pre-merge contract failures green after integration)
+- `npm run build` (+ Obsidian 1.11.0 compat typecheck) — passed
+- Agent branches cherry-picked clean (zero conflicts) and deleted; worktrees removed.
+- **CI NOT yet run for these 3 commits — they are local only.**
 
-## Next Step (final merge gate)
+## Next Step
 
-1. ~~Watch CI for `fbe0787`~~ DONE: pull_request run `33274607880` @ `17d241c` is the whole-run winner (the push run cancelled as designed); ALL groups green — Lint, Build, Unit 22, Unit 24, GitHub E2E, GitLab E2E, Gitea E2E, Required Checks, Package. The split-winner defect is fixed and verified in production.
-2. `npm run deploy` a fresh build, then run the iPad manual matrix from the review's merge gate (80+ row scroll stability, M-diff Back restore, Back+scroll no re-anchor, A +N on content arrival, M auto +N/−N, rapid edit latest-wins, remote-only +N, local delete −N, collapsed sections do zero background stat fetches).
+1. **Push `17d241c..2591e05`** and watch CI (all nine groups: Lint, Build, Unit 22/24, GitHub/GitLab/Gitea E2E, Required Checks, Package).
+2. `npm run deploy` fresh build → iPad manual regression checklist from the merge-gate review (Keep Remote on the iPad is exactly what this round fixed: existing file must hit `vault.modify`, one "Sync complete — Accepted remote N" notice, conflict row clears).
 3. Final merge-ready review of PR #129 → merge.
