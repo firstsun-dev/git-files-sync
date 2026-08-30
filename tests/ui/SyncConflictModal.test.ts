@@ -46,18 +46,21 @@ describe('SyncConflictModal', () => {
 	});
 
 	describe('diff layout toggle', () => {
-		it('renders the shared diff panel defaulting to the unified (single-column) layout', () => {
+		// Desktop (vitest Node env is not mobile): opens in split, matching
+		// the desktop diff tab's default — the wide modal exists to show
+		// side-by-side.
+		it('renders the shared diff panel defaulting to the split layout on desktop', () => {
 			const modal = new SyncConflictModal(new App(), 'note.md', 'local', 'remote', vi.fn());
 			modal.contentEl = createContainer();
 
 			modal.onOpen();
 
 			const body = modal.contentEl.querySelector('.scv-diff-tab-body');
-			expect(body?.classList.contains('scv-diff-layout-unified')).toBe(true);
+			expect(body?.classList.contains('scv-diff-layout-split')).toBe(true);
 			expect(modal.contentEl.querySelector('.ssv-diff-split')).not.toBeNull();
 		});
 
-		it('switches to the split layout when the toggle button is clicked, never showing both at once', () => {
+		it('switches to the unified layout when the toggle button is clicked, never showing both at once', () => {
 			const modal = new SyncConflictModal(new App(), 'note.md', 'local', 'remote', vi.fn());
 			modal.contentEl = createContainer();
 
@@ -65,8 +68,8 @@ describe('SyncConflictModal', () => {
 			(modal.contentEl.querySelector('.scv-diff-layout-toggle') as HTMLButtonElement).click();
 
 			const body = modal.contentEl.querySelector('.scv-diff-tab-body');
-			expect(body?.classList.contains('scv-diff-layout-split')).toBe(true);
-			expect(body?.classList.contains('scv-diff-layout-unified')).toBe(false);
+			expect(body?.classList.contains('scv-diff-layout-unified')).toBe(true);
+			expect(body?.classList.contains('scv-diff-layout-split')).toBe(false);
 		});
 	});
 });

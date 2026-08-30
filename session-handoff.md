@@ -2,29 +2,46 @@
 
 **Date:** 2026-08-30
 **Branch / PR:** `claude/source-control-foundation` / PR #129
-**Latest commits (NOT YET PUSHED / COMMITTED):** uncommitted working tree on top of `2591e05` — conflict modal UX + modalEl class-placement fixes + progressive diff stat.
+**Latest commits:** `ac2bd2a` + uncommitted working tree on top — refactor round + `totalFiles` removal + dense desktop batch list (this session).
 
-## Completed (this round)
+## Completed (this session, three rounds)
 
-Three UX rounds on the conflict modals, all verified green at the end:
+### Round A — refactor boundary
+1. **[1] SyncDiffService owns conflict stat data** — `getConflictStat()` (binary/text, remote blob memoization, `computeDiffStat`); `main.ts` wires one shared instance to diff tab + `setConflictDiffStatLoader`. Production-wiring test computes a real +1/-2 stat.
+2. **[2] `DiffViewer`** (`src/ui/components/DiffViewer.ts`) — `renderDiffViewer(container, {remote, local, layout, toggleHost?, onLayoutChange?})`. Toggle host is emptied/re-rendered in place; body class swapped, diff body NOT rebuilt. **Gotcha: `toggleHost` must be a dedicated slot (DiffTabView passes `scv-diff-tab-header-toggle`) — passing a container with other children gets them emptied.** Migrated DiffTabView + SyncConflictModal. New `tests/ui/components/DiffViewer.test.ts`.
+3. **[3] `.gfs-conflict-modal`** shell + `--single` (1600px) / `--batch` (1100px) modifiers replace `.sync-conflict-modal`/`.batch-conflict-modal` selectors. Classes on `modalEl` (+ tests/setup.ts Modal mock nests modalEl).
+4. **[4] `.gfs-diff-surface`** — `--scv-diff-*` token block (light + dark) targets only this class; added in SourceControlView (with `scv-root`), DiffTabView, both conflict modals.
 
-1. **modalEl class placement bug (both modals)** — `BatchConflictResolutionModal` and `SyncConflictModal` were adding `sync-conflict-modal` / `batch-conflict-modal` to `contentEl` (`.modal-content`), but the CSS targets `.batch-conflict-modal.modal` (the `.modal` element) — nothing matched, so `width: min(1600px, 96vw)` and the flex column layout never applied. Fixed: classes now go on `modalEl`; `tests/setup.ts` Modal mock gained a nested `modalEl` mirroring Obsidian's DOM.
-2. **Row information architecture + content-driven height** — removed the redundant `Local changed · Remote changed` badge (key `batchConflictModal.row.badge` deleted from en/zh-tw/zh-cn); rows became filename-first (`conflict.name` bold, never truncated; parent dir via `parentDirOf()` muted, ellipsize-allowed); modal height changed from fixed `min(1000px, 92vh)` to `height: auto; max-height: 92vh` with `.batch-conflict-row-list` at `flex: 0 1 auto` — 2 conflicts = short modal, 20 conflicts = list scrolls at 92vh with footer pinned.
-3. **Progressive +N/-N diff stat on batch conflict rows** — shared-infrastructure reuse, no new cache architecture:
-   - `DiffStatProvider` generalized to `DiffStatProvider<TId, TItem extends DiffStatItem<TId>>` with an injected `isPriority` callback (was hardcoded `kind === 'local-only'`). Bounded queue (max 4), generation guards, settle batching, error policy untouched.
-   - New `ConflictDiffStatLoader` type on `SyncInteractionPort` (shape: `{path, localContent, remoteSha, repoPath} → DiffStatLoadResult`); `SyncManager.setConflictDiffStatLoader()` + optional 5th param through `resolveBatchConflicts` → `ObsidianSyncInteraction` → modal. Loader is optional; absent ⇒ rows render statless.
-   - `BatchConflictResolutionModal` owns its own provider instance (rows keyed by path via `statItemOf`); `onOpen` renders fully first, THEN `loadVisible(...)` — modal never waits on provider fetches. Stat lands in a per-row slot (`paintStat`) without re-rendering (radio state safe). `openDiff` also `lazyLoad`s the row.
-   - Stat rendering reuses `renderDiffStat` / `.scv-diff-stat-add/del` — zero new color definitions. Row layout is now two blocks: info line (name + right-aligned stat, dir below) and actions line (View Diff + radios).
+### Round B — desktop polish part 1
+5. `+N/-N` beside filename (`.batch-conflict-row-name-line`: flex-start, gap 10px), not pushed to far edge.
+6. **Inline pluralization in `t()`**: `{count|conflict|conflicts}` → value + branch (`1 conflict` / `3 conflicts`), resolved per variable. `.one`-variant key approach was tried and reverted (can't handle count=1/total=3 independence). zh locales unaffected (no inflection).
+
+### Round C — 40-conflict density + compact header + modal split default (latest)
+7. **Desktop ≥900px dense list**: `.batch-conflict-row` becomes `grid-template-columns: minmax(300px,1fr) auto` — identity left (name+stat / dir), actions right (View Diff + radios, `nowrap`, flex-end). Card chrome removed: no per-row bg/rounding/gap; divider list (`border-bottom` + list `border-top`). Row ≈ 52px → target 12-15 rows/viewport. Modal width **stays 1100px** — the width was never the problem; the rows now use it.
+8. **Tablet 700-899px**: stacked but divider-listed (no card chrome), padding 8px.
+9. **Phone <700px**: full stacking, radios wrap below, names/dirs wrap (`break-all`), unchanged from before otherwise.
+10. **Compact header**: `Resolve {count|conflict|conflicts}` (was "Resolve N conflict(s) before pushing M file(s)") + single description line `{safeCount} other {safeCount|file|files}: ready to sync, pushed with this batch.`; description omitted entirely when `safeCount === 0`. **`totalFiles` parameter removed through the whole chain**: `SyncInteractionPort.resolveBatchConflicts(gitService, conflicts, safeCount, diffStatLoader?)` → `ObsidianSyncInteraction` → modal (constructor lost `totalFiles`) → `PushCoordinatorDependencies.resolveConflicts(conflicts, safeCount)` → `SyncManager` adapter. PushCoordinator's `resolvePlanConflicts` lost its `totalFiles` param (it was only threaded to the modal).
+11. **Conflict modal diff opens in split on desktop** (was hardcoded unified): `Platform.isMobile ? 'unified' : 'split'` in `SyncConflictModal.renderTextComparison` — the 1600px desktop modal now matches the diff tab's default; phones keep unified. Tests updated for the desktop default.
+12. **Layout state unified across all surfaces** — `DiffViewer` module now owns both the policy and the memory: `defaultDiffLayout()` (`Platform.isMobile ? 'unified' : 'split'`), `currentDiffLayout()` / `rememberDiffLayout()` (session-wide, not persisted). DiffTabView, SyncConflictModal, and SourceControlView's mobile detail all read `currentDiffLayout()` and write through `rememberDiffLayout` on toggle — switch unified in the modal and the next diff tab/detail opens unified. Mobile detail migrated off its own `mobileDiffLayout` field + raw toggle/panel assembly onto `renderDiffViewer` (empty placeholder body, async `loadAndRenderDiff` fills it; body gets `scv-detail-diff` class to keep the legacy wrapper CSS; dedicated `scv-detail-bar-toggle` slot for the toggle — the viewer empties its host on switch).
 
 ## Verification
 
 - `npx eslint .` — 0 errors
-- `npx vitest run` — 67 files / 823 tests passed (DiffStatProvider priority test updated for injected `isPriority`)
+- `npx vitest run` — 68 files / 832 tests passed
 - `npm run build` (+ Obsidian 1.11.0 compat typecheck) — passed
-- NOT yet done: manual Obsidian verification of width/height/stat behavior; wired diffStatLoader data source (currently optional-wired only, rows show no stat until `main.ts` supplies a loader — cheap path can reuse `SourceControlItemView.loadDiffStat` style: sync.status in-memory + computeDiffStat, remote only via getBlob).
+- e2e fixtures (`e2e/suites/sync-manager.e2e.test.ts`, `e2e/support/sync-manager-fixture.ts`) mock-implementation signatures updated to the new 6-arg constructor; e2e NOT run (real-provider suite, separate command).
+- NOT yet done: manual Obsidian verification (see below).
+
+## Gotchas for the next session
+
+- Modal mock constructor arity changed (7 args): loader is mock `calls[0][6]`, conflicts `calls[0][2]`.
+- **Diff layout default + memory live in `src/ui/components/DiffViewer.ts`**: `currentDiffLayout()` / `rememberDiffLayout()` are session-wide and shared by all three surfaces. `resetDiffLayoutMemoryForTests()` exists if a test needs an isolated default. `renderDiffViewer` empties its `toggleHost` on every switch — always pass a dedicated toggle slot, never a container with other children (bit both DiffTabView's header and the mobile detail bar).
+- Batch row CSS has three media tiers: `min-width:900px` grid / `max-width:899px` stacked / `max-width:700px` phone. The base (unscoped) `.batch-conflict-row` is still the old card style — any viewport ≥900 uses the grid override; the base background/radius only shows if a media query ever fails to match (shouldn't happen; kept as safe fallback).
+- en + zh-tw + zh-cn `batchConflictModal.title/.description` all rewritten; keys unchanged, only template bodies.
 
 ## Next Steps
 
-1. Decide whether to wire `setConflictDiffStatLoader` in `main.ts` now (reuse the cheap in-memory stat path; remote-backed via `getBlob(remoteSha, repoPath)`) or defer behind a new GitHub issue.
-2. Manual verification in Obsidian: 1600px width applies, 2-conflict modal is short, large batch scrolls list only, +N -N appears progressively (desktop + iPad widths).
-3. Commit this working tree (suggest `fix(conflict-modal): ...` + `feat(conflict-modal): progressive diff stat ...` split), push `17d241c..` and watch CI, then the existing push/CI → iPad regression → merge plan.
+1. Manual verification in Obsidian (desktop ≥900px + iPad + phone): dense grid rows (~52px), dividers not cards, header "Resolve N conflicts", fixed header/bulk/footer with only the list scrolling, `+N -N` still beside filename, dark-theme diff tokens.
+2. Commit working tree — suggested: `refactor(diff): DiffViewer composition + gfs-conflict-modal shell + gfs-diff-surface tokens`, `feat(batch-conflict): dense desktop list + compact header + inline plural copy`, `refactor(sync): drop totalFiles from the batch-conflict interaction port` (or fold the last into #2).
+3. Push → CI → iPad regression → merge plan (standing flow).
+4. Follow-up candidates: CSS source-partials split; pluralize remaining `(s)` keys (`main.confirm.pushAll/pullAll`, `syncPlanModal.deletionWarning`, `sourceControl.push.tooltip`).

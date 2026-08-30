@@ -51,4 +51,33 @@ describe('i18n', () => {
         // zh-tw hasn't translated it yet, rather than throwing or returning undefined.
         expect(typeof t('confirmModal.title')).toBe('string');
     });
+
+    describe('inline plural forms ({name|singular|plural})', () => {
+        it('renders the singular branch when the value is exactly 1 and plural otherwise', () => {
+            setMomentLocale(undefined);
+            expect(t('batchConflictModal.title', { count: 1 }))
+                .toBe('Resolve 1 conflict');
+            expect(t('batchConflictModal.title', { count: 3 }))
+                .toBe('Resolve 3 conflicts');
+        });
+
+        it('picks the branch per variable in the header description', () => {
+            setMomentLocale(undefined);
+            expect(t('batchConflictModal.description', { safeCount: 1 }))
+                .toBe('other 1 file: ready to sync, pushed with this batch.');
+            expect(t('batchConflictModal.description', { safeCount: 32 }))
+                .toBe('other 32 files: ready to sync, pushed with this batch.');
+        });
+
+        it('leaves locales without |-branches untouched (zh inflection-free)', () => {
+            setMomentLocale('zh-tw');
+            expect(t('batchConflictModal.title', { count: 3 }))
+                .toBe('先解決 3 個衝突');
+        });
+
+        it('still interpolates plain {name} variables', () => {
+            setMomentLocale(undefined);
+            expect(t('settings.testConnection.success', { service: 'GitHub' })).toBe('GitHub connection successful!');
+        });
+    });
 });
