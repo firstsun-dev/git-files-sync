@@ -247,6 +247,7 @@ const en = {
 	'sourceControl.notice.sync.moved': '{count} moved',
 	'sourceControl.notice.sync.deleted': '{count} deleted',
 	'sourceControl.notice.sync.downloaded': '{count} downloaded',
+	'sourceControl.notice.sync.acceptedRemote': 'Accepted remote {count}',
 	'sourceControl.notice.sync.failedCount': '{count} failed',
 	'sourceControl.notice.sync.conflicts': '{count} conflicts',
 	'sourceControl.notice.sync.skippedConflicts': '{count} skipped conflicts',

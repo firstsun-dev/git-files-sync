@@ -35,6 +35,8 @@ export interface SyncWorkspace {
     push(paths: readonly string[], onProgress?: SyncProgress): Promise<PushResults>;
     pull(paths: readonly string[], onProgress?: SyncProgress): Promise<SyncResult>;
     pullOne(path: string): Promise<void>;
+    /** Applies the reviewed remote version of a conflicted path without re-running the planner (no second conflict modal). */
+    acceptRemoteConflict(path: string): Promise<void>;
     deleteRemote(paths: readonly string[], onProgress?: RemoteDeleteProgress): Promise<RemoteDeleteResult>;
     deleteLocal(path: string): Promise<void>;
     moveLocal(path: string, target: string): Promise<void>;
@@ -121,6 +123,10 @@ export class SyncManagerWorkspace implements SyncWorkspace {
 
     async pullOne(path: string): Promise<void> {
         await this.dependencies.manager().pullFile(path);
+    }
+
+    acceptRemoteConflict(path: string): Promise<void> {
+        return this.dependencies.manager().acceptRemoteConflict(path);
     }
 
     async deleteRemote(paths: readonly string[], onProgress?: RemoteDeleteProgress): Promise<RemoteDeleteResult> {
@@ -240,6 +246,7 @@ export class BoundarySyncWorkspace implements SyncWorkspace {
     push(paths: readonly string[]): Promise<PushResults> { return this.getManager().pushFiles([...paths]); }
     pull(paths: readonly string[]): Promise<SyncResult> { return this.getManager().pullAllFiles([...paths]); }
     pullOne(path: string): Promise<void> { return this.getManager().pullFile(path); }
+    acceptRemoteConflict(path: string): Promise<void> { return this.getManager().acceptRemoteConflict(path); }
     deleteRemote(paths: readonly string[]): Promise<RemoteDeleteResult> { return this.boundaries.deleteRemote(paths); }
     async deleteLocal(path: string): Promise<void> { await this.getManager().clearMetadata(path); }
     moveLocal(path: string, target: string): Promise<void> { return this.getManager().trackRename(target, path); }

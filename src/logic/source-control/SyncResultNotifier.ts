@@ -7,6 +7,7 @@ const COUNT_KEYS = {
     moved: 'sourceControl.notice.sync.moved',
     deleted: 'sourceControl.notice.sync.deleted',
     downloaded: 'sourceControl.notice.sync.downloaded',
+    acceptedRemote: 'sourceControl.notice.sync.acceptedRemote',
     failed: 'sourceControl.notice.sync.failedCount',
     conflicts: 'sourceControl.notice.sync.conflicts',
     skippedConflicts: 'sourceControl.notice.sync.skippedConflicts',
@@ -18,6 +19,7 @@ export interface SyncExecutionResult {
     moved: number;
     deleted: number;
     downloaded: number;
+    acceptedRemote: number;
     failed: number;
     conflicts: number;
     skippedConflicts: number;
@@ -46,7 +48,7 @@ export class SyncResultNotifier implements SyncResultNotificationPort {
     }
 
     private hasSuccessfulWork(result: SyncExecutionResult): boolean {
-        return result.added + result.updated + result.moved + result.deleted + result.downloaded > 0;
+        return result.added + result.updated + result.moved + result.deleted + result.downloaded + result.acceptedRemote > 0;
     }
 
     private summary(result: SyncExecutionResult): string {
@@ -56,6 +58,7 @@ export class SyncResultNotifier implements SyncResultNotificationPort {
             this.count(result.moved, 'moved'),
             this.count(result.deleted, 'deleted'),
             this.count(result.downloaded, 'downloaded'),
+            this.count(result.acceptedRemote, 'acceptedRemote'),
             this.count(result.failed, 'failed'),
             this.count(result.conflicts, 'conflicts'),
             this.count(result.skippedConflicts, 'skippedConflicts'),
@@ -63,7 +66,7 @@ export class SyncResultNotifier implements SyncResultNotificationPort {
         return parts.join(', ');
     }
 
-    private count(value: number, kind: 'added' | 'updated' | 'moved' | 'deleted' | 'downloaded' | 'failed' | 'conflicts' | 'skippedConflicts'): string | undefined {
+    private count(value: number, kind: 'added' | 'updated' | 'moved' | 'deleted' | 'downloaded' | 'acceptedRemote' | 'failed' | 'conflicts' | 'skippedConflicts'): string | undefined {
         if (value === 0) return undefined;
         return t(COUNT_KEYS[kind], { count: value });
     }

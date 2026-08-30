@@ -201,7 +201,7 @@ export class SourceControlActionService {
     }
 
     private static emptyExecutionResult(): SyncExecutionResult {
-        return { added: 0, updated: 0, moved: 0, deleted: 0, downloaded: 0, failed: 0, conflicts: 0, skippedConflicts: 0, errors: [] };
+        return { added: 0, updated: 0, moved: 0, deleted: 0, downloaded: 0, acceptedRemote: 0, failed: 0, conflicts: 0, skippedConflicts: 0, errors: [] };
     }
 
     private addRemoteResult(
@@ -215,6 +215,9 @@ export class SourceControlActionService {
         summary.updated += planned.pushes.filter(entry => entry.existingSha && !failedPaths.has(entry.path)).length + planned.immediate.updated;
         summary.moved += planned.moves.filter(entry => !failedPaths.has(entry.path)).length;
         summary.deleted += deletions.filter(entry => !failedPaths.has(entry.path)).length;
+        summary.acceptedRemote += planned.keepRemote
+            .filter(conflict => !failedPaths.has(conflict.path))
+            .length;
         summary.failed += results.failed;
         summary.conflicts += results.conflicts;
         summary.skippedConflicts += results.skippedConflicts;
@@ -237,9 +240,10 @@ export class SourceControlActionService {
 
     /**
      * Resolves a single change in the 'conflict' state by pushing the local
-     * copy (local wins) or pulling the remote copy (remote wins) — the same
-     * two primitives every other action uses, so no separate conflict-apply
-     * pathway is introduced.
+     * copy (local wins) or pulling the reviewed remote copy (remote wins).
+     * Remote resolution goes through the explicit acceptRemoteConflict
+     * boundary, which applies the reviewed remote blob without re-running the
+     * planner — so no second conflict modal can appear.
      */
     async resolveConflict(changeId: ChangeId, resolution: ConflictResolution): Promise<void> {
         const change = this.changes.getById(changeId);
@@ -249,12 +253,15 @@ export class SourceControlActionService {
         try {
             if (resolution === 'local') {
                 await this.workspace.push([change.path]);
+                this.syncResultNotifier.notify({ ...SourceControlActionService.emptyExecutionResult(), updated: 1 });
             } else {
-                await this.workspace.pullOne(change.path);
+                await this.workspace.acceptRemoteConflict(change.path);
+                this.syncResultNotifier.notify({ ...SourceControlActionService.emptyExecutionResult(), acceptedRemote: 1 });
             }
             this.operations.succeed(changeId);
         } catch {
             this.operations.fail(changeId);
+            this.syncResultNotifier.notify({ ...SourceControlActionService.emptyExecutionResult(), failed: 1 });
         }
     }
 

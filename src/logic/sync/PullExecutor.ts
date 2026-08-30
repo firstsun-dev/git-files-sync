@@ -45,7 +45,8 @@ export class PullExecutor {
         if (!silent) this.notify(`Pulled ${file.name} from ${this.getServiceName()}`);
     }
 
-    private async write(file: TFile | PullFileTarget, content: string | ArrayBuffer): Promise<void> {
+    private async write(target: TFile | PullFileTarget, content: string | ArrayBuffer): Promise<void> {
+        const file = this.app.vault.getFileByPath(target.path) ?? target;
         if (typeof content !== 'string') {
             if (file instanceof TFile) await this.app.vault.modifyBinary(file, content);
             else await this.app.vault.adapter.writeBinary(file.path, content);

@@ -249,6 +249,7 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.notice.sync.moved': '移動 {count} 個',
 	'sourceControl.notice.sync.deleted': '刪除 {count} 個',
 	'sourceControl.notice.sync.downloaded': '下載 {count} 個',
+	'sourceControl.notice.sync.acceptedRemote': '採用遠端版本 {count}',
 	'sourceControl.notice.sync.failedCount': '失敗 {count} 個',
 	'sourceControl.notice.sync.conflicts': '{count} 個衝突',
 	'sourceControl.notice.sync.skippedConflicts': '略過 {count} 個衝突',

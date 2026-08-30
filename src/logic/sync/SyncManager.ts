@@ -251,6 +251,21 @@ export class SyncManager {
         await this.executor.pull.pull(file, remoteContent, remoteSha, silent, symlinkTarget);
     }
 
+    /**
+     * Applies the reviewed remote version of a conflicted path directly: no
+     * planner re-run (which would re-open a conflict modal), no fallback to
+     * latest remote HEAD — the exact reviewed blob is fetched by SHA.
+     */
+    public async acceptRemoteConflict(path: string): Promise<void> {
+        const { path: vaultPath, name } = this.getFileInfo(path);
+        const repoPath = this.getNormalizedPath(vaultPath);
+        const remoteSha = this.status.get(vaultPath)?.remoteSha;
+        if (!remoteSha) throw new Error('Cannot accept remote version because the reviewed remote revision is unavailable.');
+        const blob = await this.gitService.getBlob(remoteSha, repoPath);
+        const fileRep = this.app.vault.getFileByPath(vaultPath) ?? { path: vaultPath, name };
+        await this.performPull(fileRep, blob.content, blob.sha, true, blob.isSymlink ? blob.symlinkTarget ?? '' : undefined);
+    }
+
     private async saveSettings() {
         if (this.onSaveSettings) {
             await this.onSaveSettings();

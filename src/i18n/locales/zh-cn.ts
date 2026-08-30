@@ -249,6 +249,7 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'sourceControl.notice.sync.moved': '移动 {count} 个',
 	'sourceControl.notice.sync.deleted': '删除 {count} 个',
 	'sourceControl.notice.sync.downloaded': '下载 {count} 个',
+	'sourceControl.notice.sync.acceptedRemote': '采用远程版本 {count}',
 	'sourceControl.notice.sync.failedCount': '失败 {count} 个',
 	'sourceControl.notice.sync.conflicts': '{count} 个冲突',
 	'sourceControl.notice.sync.skippedConflicts': '跳过 {count} 个冲突',
