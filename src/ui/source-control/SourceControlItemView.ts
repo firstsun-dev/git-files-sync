@@ -82,6 +82,7 @@ export class SourceControlItemView extends ItemView {
             this.lastStatusSnapshots.set(path, statusDiffStatSnapshot(status));
             if (previous !== undefined && hasDiffStatBackingChanged(previous, status)) {
                 this.view.invalidateDiffStat(toChangeId(path));
+                this.refreshOpenDiffTab(path);
             }
         }
         // Statuses removed from the map (bulk replace / republish): drop
@@ -89,9 +90,46 @@ export class SourceControlItemView extends ItemView {
         // pre-removal data.
         if (this.lastStatusSnapshots.size > statuses.size) {
             for (const path of this.lastStatusSnapshots.keys()) {
-                if (!statuses.has(path)) this.lastStatusSnapshots.delete(path);
+                if (!statuses.has(path)) {
+                    this.lastStatusSnapshots.delete(path);
+                    this.refreshOpenDiffTab(path);
+                }
             }
         }
+    }
+
+    /**
+     * Refreshes the open desktop diff tab when the statuses it was rendered
+     * from changed underneath it (e.g. after a Keep Remote resolution the
+     * pane must show the new synced parity instead of the stale conflict
+     * sides). Mobile's in-panel diff re-renders through the debounced status
+     * subscription; this covers the main-area tab, which nothing else
+     * re-renders. Re-runs the same loaded-content pipeline as the initial
+     * open, preserving its stale-response guard; a null result (binary gone,
+     * row gone) clears the pane rather than leaving contradictory sides up.
+     */
+    private refreshOpenDiffTab(path: string): void {
+        const openPath = this.plugin.diffTabPath?.();
+        if (!openPath || openPath !== path) return;
+        const requestId = ++this.diffTabRequestSeq;
+        void (async () => {
+            // Project the repository row into the full item shape the diff
+            // loader consumes; the repo row dropped means the change is gone
+            // and the pane clears rather than showing contradictory sides.
+            const change = this.plugin.changeRepository.getById(toChangeId(path));
+            if (!change) {
+                await this.plugin.openDiffTab(path, null);
+                return;
+            }
+            const item: SourceControlItem = {
+                ...change,
+                isSelectedForSync: false,
+                operationStatus: 'idle',
+            };
+            const content = await this.plugin.sourceControlActions.loadDiffContent(item);
+            if (requestId !== this.diffTabRequestSeq) return;
+            await this.plugin.openDiffTab(path, content);
+        })();
     }
 
     private async openDesktopDiffTab(item: SourceControlItem): Promise<void> {

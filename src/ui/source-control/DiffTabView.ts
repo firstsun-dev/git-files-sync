@@ -39,10 +39,15 @@ export class DiffTabView extends ItemView {
     getPath(): string | null { return this.path; }
 
     setDiff(path: string, content: DiffTabContent | null): void {
+        const pathChanged = this.path !== path;
         this.path = path;
         this.content = content;
-        // Obsidian reads the tab title from getDisplayText(); nudge it to re-read.
-        this.leaf.setViewState({ type: SOURCE_CONTROL_DIFF_VIEW_TYPE, active: true }).catch(() => { /* title only */ });
+        // Nudge the tab title to re-read only when the path actually changed —
+        // a same-path background refresh (leading title text is the path) must
+        // not re-activate the leaf and yank workspace focus.
+        if (pathChanged) {
+            this.leaf.setViewState({ type: SOURCE_CONTROL_DIFF_VIEW_TYPE, active: true }).catch(() => { /* title only */ });
+        }
         this.render();
     }
 

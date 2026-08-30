@@ -28,6 +28,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
     const openDiffTab = vi.fn().mockResolvedValue(undefined);
     const getRemoteFileUrl = vi.fn().mockReturnValue('https://github.com/owner/repo/blob/main/a.md');
     const status = new SyncStatusService();
+    const diffTabPath = vi.fn().mockReturnValue(null);
 
     const plugin = {
         changeRepository: repository,
@@ -40,9 +41,10 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
         settings: { syncMetadata: {} },
         refreshState,
         openDiffTab,
+        diffTabPath,
     } as unknown as GitLabFilesPush;
 
-    return { plugin, repository, selection, sync, push, pull, deleteRemote, loadDiffContent, openDiffTab, getRemoteFileUrl, status };
+    return { plugin, repository, selection, sync, push, pull, deleteRemote, loadDiffContent, openDiffTab, getRemoteFileUrl, status, diffTabPath };
 }
 
 function buildLeaf() {
@@ -289,5 +291,75 @@ describe('SourceControlItemView', () => {
 
         const container = view.containerEl.children[1] as HTMLElement;
         expect(container.querySelector('.scv-change-item[data-change-id="a.md"] .scv-diff-stat')?.textContent).toBe('-2');
+    });
+
+    // ---------------------------------------------------------------
+    // Open-diff-tab refresh after a live status change (Keep Remote)
+    // ---------------------------------------------------------------
+
+    it('refreshes the open desktop diff tab when its path\'s status backing changes', async () => {
+        const { plugin, openDiffTab, diffTabPath } = buildPlugin('local-modified');
+        (diffTabPath as ReturnType<typeof vi.fn>).mockReturnValue('a.md');
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+
+        const status = (plugin as unknown as { sync: { status: SyncStatusService } }).sync.status;
+        // First publish is treated as initial data (no previous fingerprint);
+        // the SECOND publish with changed backing content triggers the refresh.
+        status.set({ path: 'a.md', status: 'modified', localContent: 'local', remoteContent: 'remote' });
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+        expect(openDiffTab).not.toHaveBeenCalled();
+
+        status.set({ path: 'a.md', status: 'synced', localContent: 'remote', remoteContent: 'remote', remoteSha: 'new-sha' });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(openDiffTab).toHaveBeenCalledWith('a.md', { remote: 'remote text', local: 'local text' });
+    });
+
+    it('does not refresh the diff tab when a different path changed', async () => {
+        const { plugin, repository, openDiffTab, diffTabPath } = buildPlugin('local-modified');
+        repository.replace([
+            { id: toChangeId('a.md'), path: 'a.md', kind: 'local-modified' },
+            { id: toChangeId('b.md'), path: 'b.md', kind: 'local-modified' },
+        ]);
+        (diffTabPath as ReturnType<typeof vi.fn>).mockReturnValue('a.md');
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+
+        const status = (plugin as unknown as { sync: { status: SyncStatusService } }).sync.status;
+        status.set({ path: 'a.md', status: 'modified', localContent: 'local', remoteContent: 'remote' });
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+        openDiffTab.mockClear();
+
+        status.set({ path: 'b.md', status: 'synced', localContent: 'synced', remoteContent: 'synced', remoteSha: 'sha' });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(openDiffTab).not.toHaveBeenCalled();
+    });
+
+    it('clears the open diff tab when its path drops out of the status map and repository entirely', async () => {
+        const { plugin, repository, openDiffTab, diffTabPath } = buildPlugin('local-modified');
+        repository.replace([{ id: toChangeId('a.md'), path: 'a.md', kind: 'local-modified' }]);
+        (diffTabPath as ReturnType<typeof vi.fn>).mockReturnValue('a.md');
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+
+        const status = (plugin as unknown as { sync: { status: SyncStatusService } }).sync.status;
+        status.set({ path: 'a.md', status: 'modified', localContent: 'local', remoteContent: 'remote' });
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+        openDiffTab.mockClear();
+
+        // The change fully disappears (resolved + row dropped by the next
+        // repository replace): the pane must show its empty state rather
+        // than contradictory pre-resolution sides.
+        repository.replace([]);
+        status.delete('a.md');
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(openDiffTab).toHaveBeenCalledWith('a.md', null);
     });
 });

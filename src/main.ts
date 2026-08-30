@@ -535,6 +535,14 @@ export default class GitLabFilesPush extends Plugin {
 		await workspace.revealLeaf(leaf);
 	}
 
+	/** The path whose diff the main-area diff tab currently shows, or null. */
+	diffTabPath(): string | null {
+		return this.app.workspace.getLeavesOfType(SOURCE_CONTROL_DIFF_VIEW_TYPE)
+			.map(leaf => leaf.view)
+			.find((view): view is DiffTabView => view instanceof DiffTabView)
+			?.getPath() ?? null;
+	}
+
 	async pushAllFiles(): Promise<void> {
 		await this.runAllFiles('push');
 	}
