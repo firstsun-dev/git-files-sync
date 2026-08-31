@@ -52,6 +52,8 @@ export interface SyncManagerFixture {
     newManager(vault: FakeVault, settings: GitLabFilesPushSettings): SyncManager;
     /** Steers how the auto-confirming conflict modal resolves each conflict. */
     setConflictResolver(resolver: (conflict: BatchPushConflict) => ConflictResolution): void;
+    /** Reads the currently installed conflict resolver (for multi-client scenario wiring). */
+    conflictResolver(): (conflict: BatchPushConflict) => ConflictResolution;
 }
 
 export async function createSyncManagerFixture(): Promise<SyncManagerFixture> {
@@ -78,7 +80,6 @@ export async function createSyncManagerFixture(): Promise<SyncManagerFixture> {
     vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
         this: BatchConflictResolutionModal,
         _app: unknown,
-        _gitService: unknown,
         conflicts: BatchPushConflict[],
         _safeCount: number,
         onResolve: () => void,
@@ -134,6 +135,7 @@ export async function createSyncManagerFixture(): Promise<SyncManagerFixture> {
         createVault,
         newManager,
         setConflictResolver: (resolver) => { conflictResolver = resolver; },
+        conflictResolver: () => conflictResolver,
     };
 }
 

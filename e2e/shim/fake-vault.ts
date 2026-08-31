@@ -50,6 +50,16 @@ export class FakeVault {
         return new this.TFile(path);
     }
 
+    /** All paths currently in this vault (the local tree, for convergence assertions). */
+    paths(): string[] {
+        return [...this.files.keys()];
+    }
+
+    /** Mirrors `vault.getFiles()` for the Source Control refresh pipeline. */
+    getFiles(): TFileLike[] {
+        return [...this.files.keys()].map(path => this.fileAt(path));
+    }
+
     readonly adapter = {
         exists: async (path: string): Promise<boolean> => this.files.has(path),
         read: async (path: string): Promise<string> => {
@@ -71,6 +81,17 @@ export class FakeVault {
         // ensureParentDirs (src/utils/vault-path.ts) tolerates mkdir failures;
         // there are no real directories to create in an in-memory map.
         mkdir: async (): Promise<void> => {},
+        // SyncStatusRefreshService.discoverHiddenLocalFiles/recursiveScan list
+        // directories directly; an in-memory map has no directories, so the
+        // listing is just the root's files (its try/catch tolerates absence).
+        list: async (path: string): Promise<{ files: string[]; folders: string[] }> => (
+            path === '' || path === '/'
+                ? { files: this.paths(), folders: [] }
+                : { files: [], folders: [] }
+        ),
+        stat: async (path: string): Promise<{ type: 'file' } | null> => (
+            this.files.has(path) ? { type: 'file' } : null
+        ),
     };
 
     readonly vault = {
@@ -82,7 +103,9 @@ export class FakeVault {
         modifyBinary: async (file: TFileLike, content: ArrayBuffer): Promise<void> => {
             this.files.set(file.path, content);
         },
+        getFiles: (): TFileLike[] => this.getFiles(),
         getFileByPath: (path: string): TFileLike | null => (this.files.has(path) ? this.fileAt(path) : null),
+        getAbstractFileByPath: (path: string): TFileLike | null => (this.files.has(path) ? this.fileAt(path) : null),
         adapter: this.adapter,
     };
 }

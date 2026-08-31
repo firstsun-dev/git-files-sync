@@ -8,3 +8,4 @@
 e2e/suites/${provider}.e2e.test.ts
 e2e/suites/sync-manager.e2e.test.ts
 e2e/suites/source-control-flows.e2e.test.ts
+e2e/suites/two-client-sync.e2e.test.ts

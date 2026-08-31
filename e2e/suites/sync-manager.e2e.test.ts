@@ -81,7 +81,6 @@ describe('SyncManager E2E', () => {
         vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
             this: BatchConflictResolutionModal,
             _app: unknown,
-            _gitService: unknown,
             conflicts: BatchPushConflict[],
             _safeCount: number,
             onResolve: () => void,
