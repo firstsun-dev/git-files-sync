@@ -27,6 +27,12 @@ import { SourceControlViewModel } from './logic/source-control/SourceControlView
 import { SourceControlActionService } from './logic/source-control/SourceControlActionService';
 import { SyncResultNotifier } from './logic/source-control/SyncResultNotifier';
 import { toSyncChanges } from './logic/source-control/FileStatusAdapter';
+import {
+	filterFilesByVaultFolder as scopeFilterFiles,
+	filterPathByVaultFolder as scopeFilterPath,
+	getNormalizedVaultPath,
+	getVaultPathFromNormalized,
+} from './logic/sync/vault-folder-scope';
 
 export type ConnectionStatusState = 'checking' | 'connected' | 'disconnected';
 
@@ -626,34 +632,19 @@ export default class GitLabFilesPush extends Plugin {
 	}
 
 	filterFilesByVaultFolder(files: TFile[]): TFile[] {
-		if (!this.settings.vaultFolder) {
-			return files;
-		}
-
-		const folderPath = this.settings.vaultFolder + '/';
-		return files.filter(file => file.path.startsWith(folderPath) || file.path === this.settings.vaultFolder);
+		return scopeFilterFiles(files, this.settings.vaultFolder);
 	}
 
 	filterPathByVaultFolder(path: string): boolean {
-		if (!this.settings.vaultFolder) return true;
-		const folderPath = this.settings.vaultFolder + '/';
-		return path.startsWith(folderPath) || path === this.settings.vaultFolder;
+		return scopeFilterPath(path, this.settings.vaultFolder);
 	}
 
 	getNormalizedPath(path: string): string {
-		if (!this.settings.vaultFolder) return path;
-		const folderPath = this.settings.vaultFolder + '/';
-		if (path.startsWith(folderPath)) {
-			return path.substring(folderPath.length);
-		}
-		if (path === this.settings.vaultFolder) return '';
-		return path;
+		return getNormalizedVaultPath(path, this.settings.vaultFolder);
 	}
 
 	getVaultPath(normalizedPath: string): string {
-		if (!this.settings.vaultFolder) return normalizedPath;
-		if (!normalizedPath) return this.settings.vaultFolder;
-		return this.settings.vaultFolder + '/' + normalizedPath;
+		return getVaultPathFromNormalized(normalizedPath, this.settings.vaultFolder);
 	}
 
 	initializeGitService(): void {

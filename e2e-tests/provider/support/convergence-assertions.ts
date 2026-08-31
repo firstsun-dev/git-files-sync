@@ -1,6 +1,7 @@
 import { expect } from 'vitest';
 import type { GitVerifier } from './git-verifier';
 import type { TwoClient } from './two-client-sync-scenario';
+import { timed } from './timing-diagnostics';
 
 /**
  * Multi-client safety invariants, expressed once so every two-client test
@@ -35,35 +36,64 @@ export async function trackedPaths(context: ConvergenceContext): Promise<string[
     return [...paths].sort((a, b) => a.localeCompare(b));
 }
 
+/** A file's remote content/sha, or `null` if it doesn't exist remotely. */
+export type RemoteFile = { content: string; sha: string } | null;
+
+/**
+ * One read of "everything a convergence check needs from the remote", so
+ * `expectConverged` + `expectMetadataConsistent` don't each independently
+ * re-fetch the same files — every extra round trip is real wall-clock time
+ * against the real provider API.
+ */
+export interface RemoteSnapshot {
+    /** Tracked path -> remote file (or null if absent), one fetch per path. */
+    files: Map<string, RemoteFile>;
+    /** All remote paths under this run's namespace, one `listFiles` call. */
+    remotePaths: string[];
+}
+
+export async function captureRemoteSnapshot(context: ConvergenceContext, paths?: string[]): Promise<RemoteSnapshot> {
+    return timed('remote snapshot (verifier)', async () => {
+        const trackedPathList = paths ?? (await trackedPaths(context));
+        const files = new Map<string, RemoteFile>();
+        for (const path of trackedPathList) {
+            files.set(path, await context.verifier.getFile(path, context.branch));
+        }
+        const remotePaths = (await context.verifier.listFiles(context.branch))
+            .filter(path => path.startsWith(context.runPrefix))
+            .sort((a, b) => a.localeCompare(b));
+        return { files, remotePaths };
+    });
+}
+
 /**
  * Invariant A — Convergence: after a complete sync cycle,
  * A local tree == B local tree == remote tree for every tracked path
- * (existence, content, and absence all agree).
+ * (existence, content, and absence all agree). Reuses `snapshot` if given
+ * (see `captureRemoteSnapshot`) instead of re-fetching from the remote.
  */
-export async function expectConverged(context: ConvergenceContext): Promise<void> {
+export async function expectConverged(context: ConvergenceContext, snapshot?: RemoteSnapshot): Promise<void> {
     const [clientA, clientB] = context.clients;
     const paths = await trackedPaths(context);
+    const remote = snapshot ?? await captureRemoteSnapshot(context, paths);
     for (const path of paths) {
-        const remote = await context.verifier.getFile(path, context.branch);
+        const remoteFile = remote.files.get(path) ?? null;
         const aHas = clientA.exists(path);
         const bHas = clientB.exists(path);
         expect(aHas, `convergence: ${path} existence A vs B (${aHas} vs ${bHas})`).toBe(bHas);
         const expectedMessage = `convergence: ${path} local vs remote`;
         if (!aHas) {
-            expect(remote, expectedMessage).toBeNull();
+            expect(remoteFile, expectedMessage).toBeNull();
             continue;
         }
-        expect(remote, expectedMessage).not.toBeNull();
+        expect(remoteFile, expectedMessage).not.toBeNull();
         expect(await clientA.read(path), `convergence: ${path} A vs B`).toBe(await clientB.read(path));
-        expect(await clientA.read(path), `convergence: ${path} A vs remote`).toBe(remote!.content);
+        expect(await clientA.read(path), `convergence: ${path} A vs remote`).toBe(remoteFile!.content);
     }
     // Nothing in the run's remote namespace should exist without existing in
     // both local vaults either (catches remote-only surprises like a dropped
     // rename source that left a stale blob behind).
-    const remoteFiles = (await context.verifier.listFiles(context.branch))
-        .filter(path => path.startsWith(context.runPrefix))
-        .sort((a, b) => a.localeCompare(b));
-    expect(remoteFiles).toEqual(paths.filter(path => clientA.exists(path)));
+    expect(remote.remotePaths).toEqual(paths.filter(path => clientA.exists(path)));
 }
 
 /**
@@ -71,17 +101,18 @@ export async function expectConverged(context: ConvergenceContext): Promise<void
  * client (i.e. was synced, not deliberately local-only) must carry a
  * lastSyncedSha equal to the current remote blob sha — on BOTH clients.
  * Catches "file looks identical but baselines diverged" — the source of the
- * next false conflict or silent overwrite.
+ * next false conflict or silent overwrite. Reuses `snapshot` if given.
  */
-export async function expectMetadataConsistent(context: ConvergenceContext): Promise<void> {
+export async function expectMetadataConsistent(context: ConvergenceContext, snapshot?: RemoteSnapshot): Promise<void> {
     const paths = await trackedPaths(context);
+    const remote = snapshot ?? await captureRemoteSnapshot(context, paths);
     for (const path of paths) {
-        const remote = await context.verifier.getFile(path, context.branch);
-        if (!remote) continue;
+        const remoteFile = remote.files.get(path);
+        if (!remoteFile) continue;
         for (const client of context.clients) {
             if (!client.exists(path)) continue;
             const meta = client.metadata(path);
-            expect(meta?.lastSyncedSha, `metadata: ${client.name} ${path} lastSyncedSha vs remote blob sha`).toBe(remote.sha);
+            expect(meta?.lastSyncedSha, `metadata: ${client.name} ${path} lastSyncedSha vs remote blob sha`).toBe(remoteFile.sha);
         }
     }
 }
@@ -140,8 +171,10 @@ export async function expectNoSilentDataLoss(
 
 /** Full post-sync convergence gate used by the P0 suite: A + B + remote together. */
 export async function expectTwoClientConvergence(context: ConvergenceContext): Promise<void> {
-    await expectConverged(context);
-    await expectMetadataConsistent(context);
+    const paths = await trackedPaths(context);
+    const snapshot = await captureRemoteSnapshot(context, paths);
+    await expectConverged(context, snapshot);
+    await expectMetadataConsistent(context, snapshot);
     expectClean(...context.clients);
 }
 
