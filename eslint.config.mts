@@ -126,16 +126,30 @@ export default tseslint.config(
 		},
 	},
 	{
-		// E2E harness glue runs under Node (vitest, `environment: 'node'`), not
-		// Obsidian's Electron renderer — needs `process`, same as scripts/. Unlike
-		// scripts/, it deliberately keeps fetch/globalThis/node:* built-ins out
-		// (see docs/testing/real-provider-e2e.md), so it does NOT get the same
-		// import/no-nodejs-modules / no-restricted-globals exemptions.
-		files: ["e2e/**/*.ts", "vitest.e2e.config.ts"],
+		// e2e-tests/** is Node test tooling (vitest, `environment: 'node'`) that
+		// drives real GitHub/GitLab/Gitea sandboxes via the production provider
+		// code path — not shipping Obsidian plugin runtime, so it gets the same
+		// Node-tooling exemptions as scripts/ below. The real `requestUrl` shim
+		// and the git-CLI verifier genuinely need fetch/node:child_process.
+		// NOTE: an earlier committed-`.ts` version of this harness (see
+		// docs/obsidian-scanner-audit.md) was flagged by the Obsidian
+		// community-plugin scanner for these same APIs; that audit's own
+		// finding was that the scanner's grep is not scoped to what ships in
+		// main.js. Committing them again here under a new directory name is
+		// unverified against the actual scanner until it's re-run — see the
+		// "Known gaps" note this PR adds to docs/testing/real-provider-e2e.md.
+		files: ["e2e-tests/**/*.ts", "vitest.e2e.config.ts"],
 		languageOptions: {
 			globals: {
 				...globals.node,
 			},
+		},
+		rules: {
+			"import/no-nodejs-modules": "off",
+			"no-restricted-globals": "off",
+			"obsidianmd/rule-custom-message": "off",
+			"obsidianmd/no-nodejs-modules": "off",
+			"obsidianmd/no-global-this": "off",
 		},
 	},
 	globalIgnores([

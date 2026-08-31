@@ -89,7 +89,7 @@ if [ "$manifest_has_dynamic" -ne 1 ]; then
     exit 1
 fi
 
-SUITES=("e2e/suites/${provider}.e2e.test.ts" "${SHARED_SUITES[@]}")
+SUITES=("e2e-tests/provider/suites/${provider}.e2e.test.ts" "${SHARED_SUITES[@]}")
 
 # Forward check: every manifest entry (after ${provider} expansion) must
 # exist on disk -- catches a typo'd or deleted suite path in the manifest.
@@ -100,7 +100,7 @@ for suite in "${SUITES[@]}"; do
     fi
 done
 
-# Reverse check: every e2e/suites/*.e2e.test.ts file on disk must be either a
+# Reverse check: every e2e-tests/provider/suites/*.e2e.test.ts file on disk must be either a
 # known provider suite (github/gitlab/gitea -- covered by the ${provider}
 # line regardless of which provider this run targets) or a shared suite
 # explicitly registered in the manifest. Catches a new suite file added
@@ -114,7 +114,7 @@ is_shared_suite() {
     return 1
 }
 unregistered=()
-for file in e2e/suites/*.e2e.test.ts; do
+for file in e2e-tests/provider/suites/*.e2e.test.ts; do
     [ -e "$file" ] || continue
     base="$(basename "$file" .e2e.test.ts)"
     is_known_provider=0
@@ -133,7 +133,7 @@ fi
 echo "[run-e2e] tier=$E2E_TIER provider=$E2E_PROVIDER" >&2
 echo "[run-e2e] running suites: ${SUITES[*]}" >&2
 
-# vitest.e2e.config.ts's `include` matches every e2e/suites/*.e2e.test.ts, so
+# vitest.e2e.config.ts's `include` matches every e2e-tests/provider/suites/*.e2e.test.ts, so
 # the other two providers' suites would also try to run (and fail on missing
 # credentials) if not explicitly limited to this list. source-control-flows
 # gates its Extended scenarios to GitHub only (and 1000-file stress to

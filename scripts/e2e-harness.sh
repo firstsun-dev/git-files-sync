@@ -6,8 +6,7 @@
 #
 # Subcommands:
 #   provision         create/resolve the isolated test branch (or, for gitea,
-#                      the whole disposable container+repo) and generate the
-#                      Node-only vitest runtime adapters under $E2E_RUNTIME_DIR
+#                      the whole disposable container+repo)
 #   seed               write deterministic baseline fixtures to the branch
 #   verify             independent post-run sanity check (branch exists, has
 #                      the expected number of commits) — the fine-grained,
@@ -54,8 +53,7 @@ fi
 # local dev falls back to a provider-namespaced (not random) tmp dir so
 # sequential `npm run test:e2e` steps in the same shell session share it too.
 workdir="${E2E_WORKDIR:-${TMPDIR:-/tmp}/gfs-e2e-${provider}}"
-runtime_dir="${E2E_RUNTIME_DIR:-$workdir/runtime}"
-mkdir -p "$workdir" "$runtime_dir"
+mkdir -p "$workdir"
 
 keep_branch=0
 case "${E2E_KEEP_BRANCH:-}" in
@@ -182,7 +180,6 @@ cmd_provision() {
         git -C "$dir" push origin "${base_sha}:refs/heads/${E2E_TEST_BRANCH}"
     fi
 
-    generate_runtime
     write_env_file
 }
 
@@ -235,159 +232,6 @@ cmd_cleanup() {
     local dir; dir=$(clone_dir)
     log "Deleting isolated branch $E2E_TEST_BRANCH"
     git -C "$dir" push origin ":refs/heads/${E2E_TEST_BRANCH}" || true
-}
-
-# --- generated vitest runtime (never committed) -----------------------------
-
-# Everything under here is Node-only glue (fetch/globalThis/node:child_process)
-# equivalent to what used to live in e2e/shim + e2e/verifier as committed
-# .ts files -- generated fresh per run instead, so the checked-in suites stay
-# free of the APIs the Obsidian scanner flags. See section 6/7 of the task
-# and docs/testing/real-provider-e2e.md.
-generate_runtime() {
-    mkdir -p "$runtime_dir/verifier"
-
-    cat >"$runtime_dir/obsidian-request-url.ts" <<'EOF'
-import type { RequestUrlParam, RequestUrlResponse } from 'obsidian';
-
-export async function requestUrl(request: RequestUrlParam | string): Promise<RequestUrlResponse> {
-    const params: RequestUrlParam = typeof request === 'string' ? { url: request } : request;
-    const shouldThrow = params.throw ?? true;
-    const headers: Record<string, string> = { ...params.headers };
-    if (params.contentType && !headers['Content-Type']) headers['Content-Type'] = params.contentType;
-    const res = await fetch(params.url, { method: params.method ?? 'GET', headers, body: params.body });
-    const arrayBuffer = await res.arrayBuffer();
-    const text = new TextDecoder().decode(arrayBuffer);
-    let json: unknown;
-    try { json = text ? JSON.parse(text) : undefined; } catch { json = undefined; }
-    const response: RequestUrlResponse = { status: res.status, headers: Object.fromEntries(res.headers.entries()), arrayBuffer, text, json };
-    if (shouldThrow && res.status >= 400) {
-        const error = new Error(`Request failed, status ${res.status}`);
-        (error as Error & { status: number }).status = res.status;
-        throw error;
-    }
-    return response;
-}
-
-export class Modal {
-    app: unknown;
-    constructor(app?: unknown) { this.app = app; }
-    open(): void {}
-    close(): void {}
-}
-export class PluginSettingTab { constructor(_app?: unknown, _plugin?: unknown) {} }
-export class TextComponent {}
-export class AbstractInputSuggest<_T> { constructor(_app: unknown, _inputEl: unknown) {} }
-export class TFolder { path: string; constructor(path: string) { this.path = path; } }
-export class Setting { constructor(_containerEl?: unknown) {} }
-export class TFile {
-    path: string;
-    name: string;
-    constructor(path: string) { this.path = path; this.name = path.split('/').pop() ?? path; }
-}
-export class Notice {
-    constructor(_message?: string, _timeout?: number) {}
-    setMessage(): this { return this; }
-    hide(): void {}
-}
-export const Platform = { isDesktopApp: false, isMobile: false };
-export class FileSystemAdapter { getBasePath(): string { return '/e2e/fake-vault'; } }
-EOF
-
-    cat >"$runtime_dir/window-timers.ts" <<'EOF'
-if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
-    (globalThis as unknown as { window: typeof globalThis }).window = globalThis;
-}
-EOF
-
-    local repo_dir; repo_dir=$(clone_dir)
-    cat >"$runtime_dir/verifier/git-verifier.ts" <<EOF
-import { execFileSync } from 'node:child_process';
-
-/**
- * Independent verifier backed by plain git CLI against the isolated clone
- * this harness already checked out -- never the service under test reading
- * back its own writes. Generated per-run by scripts/e2e-harness.sh, not
- * committed (see docs/testing/real-provider-e2e.md).
- */
-export class GitVerifier {
-    constructor(private readonly repoDir: string = ${repo_dir@Q}) {}
-
-    private git(args: string[]): string {
-        try {
-            return execFileSync('git', ['-C', this.repoDir, ...args], {
-                encoding: 'utf-8',
-                // Pipe stderr so an *expected* missing path (getFile's
-                // try/catch -> null) stays silent instead of spamming the log
-                // with "fatal: path does not exist". A genuine, unexpected git
-                // failure still surfaces: callers without their own try/catch
-                // re-throw below with the captured stderr attached.
-                stdio: ['pipe', 'pipe', 'pipe'],
-            });
-        } catch (error) {
-            const stderr = error && typeof error === 'object' && 'stderr' in error
-                ? String((error as { stderr: unknown }).stderr).trim()
-                : '';
-            throw new Error(
-                \`git \${args.join(' ')} failed\` + (stderr ? \`:\\n\${stderr}\` : ''),
-            );
-        }
-    }
-
-    private fetch(ref: string): void {
-        this.git(['fetch', 'origin', ref]);
-    }
-
-    async getFile(path: string, ref: string): Promise<{ content: string; sha: string } | null> {
-        this.fetch(ref);
-        try {
-            const sha = this.git(['rev-parse', \`origin/\${ref}:\${path}\`]).trim();
-            const content = this.git(['show', \`origin/\${ref}:\${path}\`]);
-            return { content, sha };
-        } catch {
-            return null;
-        }
-    }
-
-    async listFiles(ref: string): Promise<string[]> {
-        this.fetch(ref);
-        return this.git(['ls-tree', '-r', '--name-only', \`origin/\${ref}\`])
-            .split('\\n')
-            .filter(Boolean);
-    }
-
-    async fileMissing(path: string, ref: string): Promise<boolean> {
-        return (await this.getFile(path, ref)) === null;
-    }
-
-    async listCommitShas(ref: string, perPage = 30): Promise<string[]> {
-        this.fetch(ref);
-        return this.git(['log', '--format=%H', '-n', String(perPage), \`origin/\${ref}\`])
-            .split('\\n')
-            .filter(Boolean);
-    }
-
-    /** Git tree mode at path (e.g. "120000" for a symlink). */
-    async getBlobMode(path: string, ref: string): Promise<string | null> {
-        this.fetch(ref);
-        const line = this.git(['ls-tree', \`origin/\${ref}\`, '--', path]).trim();
-        if (!line) return null;
-        return line.split(/\\s+/)[0] ?? null;
-    }
-
-    async getCommitMessage(sha: string): Promise<string> {
-        return this.git(['log', '-1', '--format=%B', sha]).trim();
-    }
-
-    /** Last commit sha that touched path -- GitLab's optimistic-locking "revision". */
-    async getRevision(path: string, ref: string): Promise<string | null> {
-        this.fetch(ref);
-        const sha = this.git(['log', '-1', '--format=%H', \`origin/\${ref}\`, '--', path]).trim();
-        return sha || null;
-    }
-}
-EOF
-    log "Generated vitest runtime adapters under $runtime_dir"
 }
 
 # --- gitea container lifecycle (shell/docker, never node:child_process) -----
@@ -492,12 +336,11 @@ write_env_file() {
         echo "E2E_BASE_BRANCH=$E2E_BASE_BRANCH"
         echo "E2E_TEST_BRANCH=$E2E_TEST_BRANCH"
         echo "E2E_WORKDIR=$workdir"
-        echo "E2E_RUNTIME_DIR=$runtime_dir"
         # Not a credential itself -- the token lives only in the mode-700
         # askpass file on disk at this path (still present for later steps
         # in the same job, since it's written under $RUNNER_TEMP). Every git
-        # call the generated verifier makes (used by the vitest step, which
-        # never runs this script) needs these two set to authenticate.
+        # call the committed GitVerifier makes (used by the vitest step,
+        # which never runs this script) needs these two set to authenticate.
         echo "GIT_ASKPASS=$GIT_ASKPASS"
         echo "GIT_TERMINAL_PROMPT=0"
     } >"$env_file"

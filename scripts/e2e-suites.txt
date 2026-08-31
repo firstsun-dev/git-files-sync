@@ -2,10 +2,10 @@
 # per provider. scripts/run-e2e.sh reads this, expands ${provider}, and runs
 # them; CI calls run-e2e.sh so this list is never duplicated in the workflow.
 # scripts/run-e2e.sh's own forward/reverse checks enforce that every
-# e2e/suites/*.e2e.test.ts is registered here: the ${provider} line covers the
+# e2e-tests/provider/suites/*.e2e.test.ts is registered here: the ${provider} line covers the
 # provider-specific suites (github/gitlab/gitea); every other shared suite
 # must be listed explicitly, or the run fails.
-e2e/suites/${provider}.e2e.test.ts
-e2e/suites/sync-manager.e2e.test.ts
-e2e/suites/source-control-flows.e2e.test.ts
-e2e/suites/two-client-sync.e2e.test.ts
+e2e-tests/provider/suites/${provider}.e2e.test.ts
+e2e-tests/provider/suites/sync-manager.e2e.test.ts
+e2e-tests/provider/suites/source-control-flows.e2e.test.ts
+e2e-tests/provider/suites/two-client-sync.e2e.test.ts

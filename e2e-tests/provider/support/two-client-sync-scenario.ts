@@ -1,21 +1,21 @@
 import { expect } from 'vitest';
 import type { TFile } from 'obsidian';
-import type { GitServiceInterface } from '../../src/services/git-service-interface';
-import type { GitLabFilesPushSettings } from '../../src/settings';
-import type { BatchPushConflict, ConflictResolution, PushResults } from '../../src/logic/sync/types';
-import type { SyncManager } from '../../src/logic/sync-manager';
-import type { FileStatus } from '../../src/logic/sync-status-service';
-import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
+import type { GitServiceInterface } from '../../../src/services/git-service-interface';
+import type { GitLabFilesPushSettings } from '../../../src/settings';
+import type { BatchPushConflict, ConflictResolution, PushResults } from '../../../src/logic/sync/types';
+import type { SyncManager } from '../../../src/logic/sync-manager';
+import type { FileStatus } from '../../../src/logic/sync-status-service';
+import type { GitVerifier } from './git-verifier';
 import type { FakeVault, TFileLike, TFileCtor } from '../shim/fake-vault';
 import { fakeApp } from '../shim/fake-vault';
-import { SyncStatusRefreshService } from '../../src/logic/sync/SyncStatusRefreshService';
-import { SyncStatusService } from '../../src/logic/sync-status-service';
-import { GitignoreManager } from '../../src/logic/gitignore-manager';
-import { ensureSyncWorkspaceRuntime } from '../../src/logic/sync/SyncWorkspace';
-import { ChangeRepository } from '../../src/logic/source-control/ChangeRepository';
-import { OperationState } from '../../src/logic/source-control/OperationState';
-import { SourceControlActionService } from '../../src/logic/source-control/SourceControlActionService';
-import { toSyncChanges } from '../../src/logic/source-control/FileStatusAdapter';
+import { SyncStatusRefreshService } from '../../../src/logic/sync/SyncStatusRefreshService';
+import { SyncStatusService } from '../../../src/logic/sync-status-service';
+import { GitignoreManager } from '../../../src/logic/gitignore-manager';
+import { ensureSyncWorkspaceRuntime } from '../../../src/logic/sync/SyncWorkspace';
+import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
+import { OperationState } from '../../../src/logic/source-control/OperationState';
+import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
+import { toSyncChanges } from '../../../src/logic/source-control/FileStatusAdapter';
 
 /**
  * The provider-level fixtures the two-client scenario shares across clients.
@@ -25,7 +25,7 @@ import { toSyncChanges } from '../../src/logic/source-control/FileStatusAdapter'
 export interface TwoClientFixture {
     readonly service: GitServiceInterface;
     readonly branch: string;
-    readonly verifier: GitVerifierType;
+    readonly verifier: GitVerifier;
     readonly TFile: TFileCtor;
     /** Namespaced run id, so each test's remote paths stay apart. */
     readonly runId: string;
@@ -274,7 +274,7 @@ export class TwoClientSyncScenario {
         return tip!;
     }
 
-    private get verifier(): GitVerifierType {
+    private get verifier(): GitVerifier {
         return this.fixture.verifier;
     }
 }

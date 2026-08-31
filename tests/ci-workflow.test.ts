@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
 const harness = readFileSync('scripts/e2e-harness.sh', 'utf8');
 const runner = readFileSync('scripts/run-e2e.sh', 'utf8');
+const vitestE2eConfig = readFileSync('vitest.e2e.config.ts', 'utf8');
+const eslintConfig = readFileSync('eslint.config.mts', 'utf8');
 
 describe('CI workflow contracts', () => {
     it('retries transient provider failures three times', () => {
@@ -87,5 +89,46 @@ describe('local Gitea harness contracts', () => {
     it('allocates an isolated default workdir for concurrent local runs', () => {
         expect(runner).toContain('mktemp -d "${TMPDIR:-/tmp}/gfs-e2e-${provider}.XXXXXX"');
         expect(runner).toContain('created_workdir=1');
+    });
+});
+
+describe('E2E scanner-boundary contracts (e2e-tests/provider, no runtime generation)', () => {
+    it('triggers E2E on the e2e-tests/** boundary, not the old e2e/** path', () => {
+        expect(workflow).toContain("- 'e2e-tests/**'");
+        expect(workflow).not.toContain("- 'e2e/**'");
+    });
+
+    it('triggers E2E when the suite manifest or the E2E vitest config changes', () => {
+        expect(workflow).toContain("- 'scripts/e2e-suites.txt'");
+        expect(workflow).toContain("- 'vitest.e2e.config.ts'");
+    });
+
+    it('triggers E2E on the real sync/ and source-control/ logic directories, not just the sync-manager.ts compat shim', () => {
+        expect(workflow).toContain("- 'src/logic/sync/**'");
+        expect(workflow).toContain("- 'src/logic/source-control/**'");
+    });
+
+    it('runs suites from e2e-tests/provider/suites, not the old e2e/suites path', () => {
+        expect(runner).toContain('e2e-tests/provider/suites');
+        expect(runner).not.toContain('e2e/suites');
+    });
+
+    it('does not generate scanner-workaround runtime adapters at provision time', () => {
+        expect(harness).not.toContain('generate_runtime');
+        expect(harness).not.toContain('E2E_RUNTIME_DIR');
+        expect(harness).not.toMatch(/runtime_dir/);
+    });
+
+    it('points vitest.e2e.config.ts at committed static runtime files, not an E2E_RUNTIME_DIR alias', () => {
+        expect(vitestE2eConfig).not.toContain('E2E_RUNTIME_DIR');
+        expect(vitestE2eConfig).not.toContain('@e2e-runtime');
+        expect(vitestE2eConfig).toContain('./e2e-tests/provider/runtime/obsidian-request-url.ts');
+        expect(vitestE2eConfig).toContain('./e2e-tests/provider/runtime/window-timers.ts');
+        expect(vitestE2eConfig).toContain("include: ['e2e-tests/provider/suites/**/*.e2e.test.ts']");
+    });
+
+    it('scopes e2e-tests/** Node-tooling lint exemptions to that directory, not the whole repo', () => {
+        expect(eslintConfig).toContain('"e2e-tests/**/*.ts"');
+        expect(eslintConfig).not.toContain('"e2e/**/*.ts"');
     });
 });

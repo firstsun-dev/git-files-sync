@@ -8,9 +8,9 @@ import { timeouts } from '../config/env';
 // receives the mocked modules and installs their mockImplementation. Pull-side
 // SyncConflictModal stays the bare automock default (does nothing, matching
 // production: pullFile returns before the conflict modal resolves).
-vi.mock('../../src/ui/SyncPlanModal');
-vi.mock('../../src/ui/SyncConflictModal');
-vi.mock('../../src/ui/BatchConflictResolutionModal');
+vi.mock('../../../src/ui/SyncPlanModal');
+vi.mock('../../../src/ui/SyncConflictModal');
+vi.mock('../../../src/ui/BatchConflictResolutionModal');
 
 // Provider matrix: Core scenarios run on every provider; Extended scenarios
 // (rename chains, unicode, batch-scale, etc.) exercise SyncManager/model

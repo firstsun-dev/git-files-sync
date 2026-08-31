@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describePushResult } from '../../e2e/support/push-result-diagnostic';
+import { describePushResult } from '../../e2e-tests/provider/support/push-result-diagnostic';
 
 describe('describePushResult', () => {
     it('includes provider errors in a failed push assertion', () => {
