@@ -100,7 +100,6 @@ describe('SyncManager', () => {
         vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
             this: BatchConflictResolutionModal,
             _app: unknown,
-            _gitService: unknown,
             conflicts: BatchPushConflict[],
             _safeCount: number,
             onResolve: () => void,
@@ -239,10 +238,13 @@ describe('SyncManager', () => {
         vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'test.md', sha: 'new-remote-sha', symlink: false }]);
 
         // Mirror main.ts composition: SyncManager gets a conflict diff-stat
-        // loader built on the shared SyncDiffService. Without this wiring the
-        // modal renders stat slots that stay empty forever (:empty display).
+        // loader AND the "View Diff" loader, both built on the shared
+        // SyncDiffService. Without this wiring the modal renders stat slots
+        // that stay empty forever (:empty display) and View Diff would have
+        // no data path.
         const diffService = new SyncDiffService(manager.status, (sha, path) => mockGitLab.getBlob(sha, path));
         manager.setConflictDiffStatLoader(conflict => diffService.getConflictStat(conflict));
+        manager.setConflictDiffLoader(conflict => diffService.getConflictDiff(conflict));
         vi.spyOn(mockGitLab, 'getBlob').mockResolvedValue({ content: 'remote content\nmore', sha: 'new-remote-sha' });
 
         const modalMock = vi.mocked(BatchConflictResolutionModal);
@@ -253,14 +255,22 @@ describe('SyncManager', () => {
         // The mock's 7th constructor arg is the optional diffStatLoader.
         const loader = modalMock.mock.calls[0]![6];
         expect(loader).toBeTypeOf('function');
+        // The 6th is the shared diff-service-backed "View Diff" loader.
+        const diffLoader = modalMock.mock.calls[0]![5];
+        expect(diffLoader).toBeTypeOf('function');
 
         // The loader is a live data path: resolving a text conflict yields a ready stat from the reviewed blob.
-        const conflicts = modalMock.mock.calls[0]![2];
+        const conflicts = modalMock.mock.calls[0]![1];
         // 'remote content\nmore' vs 'local content': the LCS turns
         // "remote content"→"local content" into one removed + one added
         // line, plus the extra remote line removed → +1 / -2.
         const result = await loader!({ path: conflicts[0]!.path, localContent: conflicts[0]!.localContent, remoteSha: conflicts[0]!.remoteSha, repoPath: conflicts[0]!.repoPath });
         expect(result).toEqual({ status: 'ready', stat: { additions: 1, deletions: 2 } });
+
+        // The diff loader is the same single data path: one shared fetch
+        // serves both stat and View Diff for the same blob.
+        const diff = await diffLoader!({ path: conflicts[0]!.path, localContent: conflicts[0]!.localContent, remoteSha: conflicts[0]!.remoteSha, repoPath: conflicts[0]!.repoPath });
+        expect(diff).toEqual({ localContent: 'local content', remoteContent: 'remote content\nmore' });
     });
 
     it('should handle conflict by choosing local', async () => {

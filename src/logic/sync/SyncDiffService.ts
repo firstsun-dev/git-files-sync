@@ -67,15 +67,46 @@ export class SyncDiffService {
     }
 
     /**
+     * Resolves both sides of one batch-conflict row for the user-opened
+     * diff: the reviewed remote blob and the (already in-memory) local
+     * content. This is the single data path for the batch modal's "View
+     * Diff" — the modal never calls `getBlob` itself, so a background
+     * summary stat and a user-opened diff race onto the SAME in-flight
+     * memoization (`remoteSha:path`) and share one round-trip.
+     *
+     * Binary conflicts (by path or non-string local content) resolve as
+     * `undefined` — the caller shows its binary presentation instead of a
+     * text comparison, and no remote fetch is attempted.
+     */
+    async getConflictDiff(conflict: {
+        path: string;
+        localContent: string | ArrayBuffer;
+        remoteSha: string;
+        repoPath: string;
+    }): Promise<{ localContent: string | ArrayBuffer; remoteContent: string | ArrayBuffer } | undefined> {
+        if (isBinaryPath(conflict.path) || typeof conflict.localContent !== 'string') {
+            return undefined;
+        }
+        const remoteContent = await this.resolveRemoteContent({
+            path: conflict.path,
+            status: 'conflict',
+            remoteSha: conflict.remoteSha,
+            movedFrom: conflict.repoPath,
+        });
+        if (remoteContent === undefined) return undefined;
+        return { localContent: conflict.localContent, remoteContent };
+    }
+
+    /**
      * Resolves the +/- diff stat for one batch-conflict row — the data side
      * of the conflict modal's `ConflictDiffStatLoader` (the modal itself
      * stays presentation-only; SyncDiffService owns remote/local diff data).
      *
-     * Binary (by path or by actual `ArrayBuffer` content) files have no
-     * line diff and are terminally `unavailable`; non-string content ditto.
-     * Text conflicts fetch the reviewed remote blob by SHA (sharing the
-     * in-flight memoization with `getDiff`, so a stat racing a user-opened
-     * diff is one round-trip) and count additions/deletions with the same
+     * Built on {@link getConflictDiff}: binary files have no line diff and
+     * are terminally `unavailable`; text conflicts fetch the reviewed
+     * remote blob by SHA (sharing the in-flight memoization with `getDiff`
+     * and `getConflictDiff`, so a stat racing a user-opened diff is one
+     * round-trip) and count additions/deletions with the same
      * `computeDiffStat` the Source Control rows use.
      */
     async getConflictStat(conflict: {
@@ -87,16 +118,11 @@ export class SyncDiffService {
         if (isBinaryPath(conflict.path) || typeof conflict.localContent !== 'string') {
             return { status: 'unavailable' };
         }
-        const remoteContent = await this.resolveRemoteContent({
-            path: conflict.path,
-            status: 'conflict',
-            remoteSha: conflict.remoteSha,
-            movedFrom: conflict.repoPath,
-        });
-        if (typeof remoteContent !== 'string') {
+        const diff = await this.getConflictDiff(conflict);
+        if (!diff || typeof diff.remoteContent !== 'string' || typeof diff.localContent !== 'string') {
             return { status: 'unavailable' };
         }
-        return { status: 'ready', stat: computeDiffStat(remoteContent, conflict.localContent) };
+        return { status: 'ready', stat: computeDiffStat(diff.remoteContent, diff.localContent) };
     }
 
     /** Fetches the remote blob once per `remoteSha:path`, coalescing concurrent consumers. */

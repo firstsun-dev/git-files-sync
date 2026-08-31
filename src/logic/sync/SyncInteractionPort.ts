@@ -1,5 +1,4 @@
 import type { DiffStatLoadResult } from '../../ui/source-control/DiffStatProvider';
-import type { GitServiceInterface } from '../../services/git-service-interface';
 import type { BatchPushConflict, SyncPlan } from './types';
 
 export type SyncPlanDirection = 'push' | 'pull' | 'delete' | 'sync';
@@ -19,6 +18,18 @@ export type ConflictDiffStatLoader = (conflict: {
     repoPath: string;
 }) => Promise<DiffStatLoadResult>;
 
+/**
+ * Loads both sides of one conflict for the batch modal's "View Diff",
+ * with remote content served (fetched/cached/deduped) by the shared diff
+ * service. `undefined` means the row has no viewable text diff (binary).
+ */
+export type ConflictDiffLoader = (conflict: {
+    path: string;
+    localContent: string | ArrayBuffer;
+    remoteSha: string;
+    repoPath: string;
+}) => Promise<{ localContent: string | ArrayBuffer; remoteContent: string | ArrayBuffer } | undefined>;
+
 /** User interaction required by sync workflows, supplied by the composition layer. */
 export interface SyncInteractionPort {
     confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean>;
@@ -29,9 +40,13 @@ export interface SyncInteractionPort {
         onChoose: (choice: SingleConflictChoice) => void,
     ): void;
     resolveBatchConflicts(
-        gitService: GitServiceInterface,
         conflicts: BatchPushConflict[],
         safeCount: number,
+        /**
+         * Optional lazy data source for a row's "View Diff". Omit to make
+         * the detailed comparison unavailable (radios still work).
+         */
+        loadConflictDiff?: ConflictDiffLoader,
         /**
          * Optional progressive +/- diff-stat source for the batch conflict
          * modal's rows. Omit to render rows without stats. Must not block

@@ -106,11 +106,13 @@ export default class GitLabFilesPush extends Plugin {
 			getNormalizedPath: path => this.getNormalizedPath(path),
 			getVaultPath: path => this.getVaultPath(path),
 		}, this.sync.status);
-		// One diff data service shared by the sync workspace (diff pane) and
-		// the batch conflict modal's progressive +/- stat — the modal never
-		// grows its own getBlob/cache path (see SyncDiffService.getConflictStat).
+		// One diff data service shared by the sync workspace (diff pane),
+		// the batch conflict modal's progressive +/- stat, and its "View
+		// Diff" — the modal never grows its own getBlob/cache path (see
+		// SyncDiffService.getConflictDiff).
 		this.syncDiffService = new SyncDiffService(this.sync.status, (sha, path) => this.gitService.getBlob(sha, path));
 		this.sync.setConflictDiffStatLoader(conflict => this.syncDiffService.getConflictStat(conflict));
+		this.sync.setConflictDiffLoader(conflict => this.syncDiffService.getConflictDiff(conflict));
 		this.syncWorkspace = new SyncManagerWorkspace({
 			manager: () => this.sync,
 			gitService: () => this.gitService,

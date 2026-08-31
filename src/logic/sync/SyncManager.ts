@@ -24,6 +24,7 @@ import { PushCoordinator } from './PushCoordinator';
 import { SyncPlanner } from './SyncPlanner';
 import {
     HeadlessSyncInteraction,
+    type ConflictDiffLoader,
     type ConflictDiffStatLoader,
     type SyncInteractionPort,
     type SyncPlanDirection,
@@ -44,6 +45,8 @@ export class SyncManager {
     private readonly interaction: SyncInteractionPort;
     /** Optional progressive +/- diff-stat source handed to the batch conflict modal. */
     private diffStatLoader?: ConflictDiffStatLoader;
+    /** Optional lazy diff data source for the batch conflict modal's "View Diff". */
+    private conflictDiffLoader?: ConflictDiffLoader;
     readonly status: SyncStatusService;
 
     constructor(
@@ -109,7 +112,7 @@ export class SyncManager {
             isPathIgnored: path => this.isPathIgnored(path),
             confirmPlan: plan => this.confirmPlan(plan, 'push'),
             resolveConflicts: (conflicts, safeCount) => (
-                this.interaction.resolveBatchConflicts(this.gitService, conflicts, safeCount, this.diffStatLoader)
+                this.interaction.resolveBatchConflicts(conflicts, safeCount, this.conflictDiffLoader, this.diffStatLoader)
             ),
             updateMetadata: (path, sha) => this.updateMetadata(path, sha),
             migrateBaseline: (path, repoPath, entry) => this.migrateGitLabLegacyBaseline(path, repoPath, entry),
@@ -159,6 +162,11 @@ export class SyncManager {
     /** Wires the composition layer's progressive diff-stat source into the batch conflict modal. */
     setConflictDiffStatLoader(loader: ConflictDiffStatLoader | undefined): void {
         this.diffStatLoader = loader;
+    }
+
+    /** Wires the shared diff-service-backed loader for the batch modal's "View Diff". */
+    setConflictDiffLoader(loader: ConflictDiffLoader | undefined): void {
+        this.conflictDiffLoader = loader;
     }
 
     /** A plan with exactly one entry, for a single-file push/pull's confirm step. */

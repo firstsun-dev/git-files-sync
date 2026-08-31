@@ -1,5 +1,4 @@
 import { type App, Notice } from 'obsidian';
-import type { GitServiceInterface } from '../services/git-service-interface';
 import { BatchConflictResolutionModal } from './BatchConflictResolutionModal';
 import { SyncConflictModal } from './SyncConflictModal';
 import { SyncPlanModal } from './SyncPlanModal';
@@ -10,6 +9,7 @@ import type {
     SyncPlanDirection,
 } from '../logic/sync/SyncInteractionPort';
 import type { BatchPushConflict, SyncPlan } from '../logic/sync/types';
+import type { ConflictDiffLoader } from './BatchConflictResolutionModal';
 
 /** Obsidian implementation of the domain's user-interaction boundary. */
 export class ObsidianSyncInteraction implements SyncInteractionPort {
@@ -31,19 +31,19 @@ export class ObsidianSyncInteraction implements SyncInteractionPort {
     }
 
     resolveBatchConflicts(
-        gitService: GitServiceInterface,
         conflicts: BatchPushConflict[],
         safeCount: number,
+        loadConflictDiff?: ConflictDiffLoader,
         diffStatLoader?: ConflictDiffStatLoader,
     ): Promise<boolean> {
         return new Promise(resolve => {
             new BatchConflictResolutionModal(
                 this.app,
-                gitService,
                 conflicts,
                 safeCount,
                 () => resolve(true),
                 () => resolve(false),
+                loadConflictDiff,
                 diffStatLoader,
             ).open();
         });

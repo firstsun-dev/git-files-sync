@@ -138,4 +138,64 @@ describe('SyncDiffService', () => {
         await expect(service.getDiff('a.md')).resolves.toMatchObject({ remoteContent: 'remote' });
         expect(getBlob).toHaveBeenCalledTimes(2);
     });
+
+    // -------------------------------------------------------------------
+    // Batch-conflict stats (getConflictStat / getConflictDiff)
+    // -------------------------------------------------------------------
+
+    it('getConflictStat: remote = OLD, local = NEW + extra line → expected +N/-N', async () => {
+        const remote = 'line1\nline2';
+        const local = 'line1\nline2\nline3';
+        const getBlob = vi.fn().mockResolvedValue({ content: remote });
+        const service = new SyncDiffService(new SyncStatusService(), getBlob);
+
+        await expect(service.getConflictStat({
+            path: 'a.md', localContent: local, remoteSha: 'sha-1', repoPath: 'a.md',
+        })).resolves.toEqual({ status: 'ready', stat: { additions: 1, deletions: 0 } });
+        expect(getBlob).toHaveBeenCalledWith('sha-1', 'a.md');
+    });
+
+    it('getConflictDiff returns both sides for a text conflict and builds directly on resolveRemoteContent', async () => {
+        const getBlob = vi.fn().mockResolvedValue({ content: 'remote\ncontent' });
+        const service = new SyncDiffService(new SyncStatusService(), getBlob);
+
+        await expect(service.getConflictDiff({
+            path: 'a.md', localContent: 'local text', remoteSha: 'sha-1', repoPath: 'a.md',
+        })).resolves.toEqual({ localContent: 'local text', remoteContent: 'remote\ncontent' });
+    });
+
+    it('binary conflicts are terminally unavailable with zero remote fetches (stat and diff)', async () => {
+        const getBlob = vi.fn();
+        const service = new SyncDiffService(new SyncStatusService(), getBlob);
+        const conflict = { path: 'image.png', localContent: new ArrayBuffer(3), remoteSha: 'sha-1', repoPath: 'img' };
+
+        await expect(service.getConflictStat(conflict)).resolves.toEqual({ status: 'unavailable' });
+        await expect(service.getConflictDiff(conflict)).resolves.toBeUndefined();
+        expect(getBlob).not.toHaveBeenCalled();
+    });
+
+    it('two concurrent getConflictStat calls for the same conflict share one blob fetch', async () => {
+        let release!: (value: { content: string }) => void;
+        const getBlob = vi.fn().mockImplementation(() => new Promise<{ content: string }>(resolve => { release = resolve; }));
+        const service = new SyncDiffService(new SyncStatusService(), getBlob);
+
+        const conflict = { path: 'a.md', localContent: 'local', remoteSha: 'sha-1', repoPath: 'a.md' };
+        const first = service.getConflictStat(conflict);
+        const second = service.getConflictStat(conflict);
+        release({ content: 'remote' });
+
+        await Promise.all([first, second]);
+        expect(getBlob).toHaveBeenCalledTimes(1);
+    });
+
+    it('a background stat racing a user View Diff on the same blob is one round-trip', async () => {
+        const getBlob = vi.fn().mockResolvedValue({ content: 'remote' });
+        const service = new SyncDiffService(new SyncStatusService(), getBlob);
+        const conflict = { path: 'a.md', localContent: 'local', remoteSha: 'sha-1', repoPath: 'a.md' };
+
+        const [stat, diff] = await Promise.all([service.getConflictStat(conflict), service.getConflictDiff(conflict)]);
+        expect(stat).toEqual({ status: 'ready', stat: { additions: 1, deletions: 1 } });
+        expect(diff).toEqual({ localContent: 'local', remoteContent: 'remote' });
+        expect(getBlob).toHaveBeenCalledTimes(1);
+    });
 });

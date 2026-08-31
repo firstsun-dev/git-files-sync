@@ -1,6 +1,5 @@
 import { App, Modal, ButtonComponent } from 'obsidian';
 import { t } from '../i18n';
-import { GitServiceInterface } from '../services/git-service-interface';
 import type { BatchPushConflict, ConflictResolution } from '../logic/sync-manager';
 import type { ConflictDiffStatLoader } from '../logic/sync/SyncInteractionPort';
 import { isBinaryPath } from '../utils/path';
@@ -16,6 +15,19 @@ function statItemOf(conflict: BatchPushConflict): StatRow {
 }
 
 /**
+ * Loads both sides of one conflict's detailed comparison, with remote
+ * content fetched/cached/coalesced by the shared {@link SyncDiffService}
+ * — the modal never touches a blob reader itself, so a background summary
+ * stat and a user-opened diff share one remote round-trip.
+ */
+export type ConflictDiffLoader = (conflict: {
+    path: string;
+    localContent: string | ArrayBuffer;
+    remoteSha: string;
+    repoPath: string;
+}) => Promise<{ localContent: string | ArrayBuffer; remoteContent: string | ArrayBuffer } | undefined>;
+
+/**
  * Resolves every conflict from one batch push in a single screen — never one
  * modal per conflicted file. Header states only what drives the decision
  * (how many conflicts, how many other files are riding along) — the push
@@ -25,7 +37,7 @@ function statItemOf(conflict: BatchPushConflict): StatRow {
  * resolved plan after this modal's Continue button. "View Diff" reuses the
  * existing single-file `SyncConflictModal` for the detailed comparison,
  * fetching that row's remote content lazily (only when actually inspected)
- * via `getBlob(remoteSha, repoPath)` so resolving a large batch of
+ * through the shared `ConflictDiffLoader` so resolving a large batch of
  * conflicts via bulk actions never has to download content nobody looks
  * at.
  *
@@ -34,9 +46,10 @@ function statItemOf(conflict: BatchPushConflict): StatRow {
  * land in the background through the shared bounded `DiffStatProvider`
  * (max 4 concurrent loads) and fill in as they arrive. A row with no data
  * simply shows no stat — opening the modal never waits on provider fetches.
+ * Closing the modal disposes the provider: queued stats are dropped and
+ * in-flight ones may not commit.
  */
 export class BatchConflictResolutionModal extends Modal {
-    private readonly gitService: GitServiceInterface;
     private readonly conflicts: BatchPushConflict[];
     private readonly safeCount: number;
     private readonly onResolve: () => void;
@@ -46,20 +59,20 @@ export class BatchConflictResolutionModal extends Modal {
     /** Stat span per conflict path so an async-landing stat can fill in without a full re-render. */
     private statSlots = new Map<string, HTMLElement>();
     private continueBtn?: ButtonComponent;
-    private remoteContentCache = new Map<string, string | ArrayBuffer>();
+    /** Per-row in-flight diff loads so double-clicks don't stack two modals/fetches. */
+    private readonly diffLoaders = new Map<string, Promise<void>>();
     private readonly diffStat?: DiffStatProvider<string, StatRow>;
 
     constructor(
         app: App,
-        gitService: GitServiceInterface,
         conflicts: BatchPushConflict[],
         safeCount: number,
         onResolve: () => void,
         onCancel: () => void,
+        private readonly loadConflictDiff?: ConflictDiffLoader,
         diffStatLoader?: ConflictDiffStatLoader,
     ) {
         super(app);
-        this.gitService = gitService;
         this.conflicts = conflicts;
         this.safeCount = safeCount;
         this.onResolve = onResolve;
@@ -133,6 +146,9 @@ export class BatchConflictResolutionModal extends Modal {
 
     private renderRow(container: HTMLElement, conflict: BatchPushConflict): void {
         const row = container.createDiv({ cls: 'batch-conflict-row' });
+        // A dense-grid row ellipsizes long filenames; the full path stays
+        // reachable via native tooltip.
+        row.setAttribute('title', conflict.path);
 
         const info = row.createDiv({ cls: 'batch-conflict-row-info' });
         const nameLine = info.createDiv({ cls: 'batch-conflict-row-name-line' });
@@ -192,6 +208,7 @@ export class BatchConflictResolutionModal extends Modal {
         }
     }
 
+
     private setAllResolutions(resolution: ConflictResolution): void {
         for (const conflict of this.conflicts) {
             conflict.resolution = resolution;
@@ -213,36 +230,57 @@ export class BatchConflictResolutionModal extends Modal {
         this.continueBtn.setDisabled(!this.allResolved());
     }
 
-    /** Lazily fetches this row's remote content (cached once fetched) and opens the reusable single-file conflict viewer for a detailed look, wiring its choice back into this row's resolution. */
+    /**
+     * Lazily resolves both sides through the shared `ConflictDiffLoader`
+     * (SyncDiffService — cached and in-flight-deduped there) and opens the
+     * reusable single-file conflict viewer, wiring its choice back into
+     * this row's resolution.
+     */
     private async openDiff(conflict: BatchPushConflict): Promise<void> {
-        let remoteContent = this.remoteContentCache.get(conflict.path);
-        if (remoteContent === undefined) {
-            try {
-                const blob = await this.gitService.getBlob(conflict.remoteSha, conflict.repoPath);
-                remoteContent = blob.content;
-            } catch {
-                return;
-            }
-            this.remoteContentCache.set(conflict.path, remoteContent);
+        const existing = this.diffLoaders.get(conflict.path);
+        if (existing) {
+            await existing.catch(() => {});
+            return;
         }
-        // Fire-and-forget: lazyLoad already swallows loader rejections
-        // internally; the empty catch only satisfies the lint rule.
-        this.diffStat?.lazyLoad(statItemOf(conflict)).catch(() => {});
+        const load = (async () => {
+            if (!this.loadConflictDiff) return;
+            const diff = await this.loadConflictDiff({
+                path: conflict.path,
+                localContent: conflict.localContent,
+                remoteSha: conflict.remoteSha,
+                repoPath: conflict.repoPath,
+            }).catch(() => undefined);
+            if (!diff) return;
+            // Fire-and-forget: lazyLoad already swallows loader rejections
+            // internally; the empty catch only satisfies the lint rule.
+            void this.diffStat?.lazyLoad(statItemOf(conflict)).catch(() => {});
 
-        new SyncConflictModal(this.app, conflict.name, conflict.localContent, remoteContent, (choice) => {
-            conflict.resolution = choice === 'local' ? 'keep-local' : 'keep-remote';
-            const radios = this.rowRadios.get(conflict.path);
-            if (radios) {
-                (Object.keys(radios) as ConflictResolution[]).forEach(key => {
-                    radios[key].checked = key === conflict.resolution;
-                });
-            }
-            this.updateContinueState();
-        }).open();
+            new SyncConflictModal(this.app, conflict.name, diff.localContent, diff.remoteContent, (choice) => {
+                conflict.resolution = choice === 'local' ? 'keep-local' : 'keep-remote';
+                const radios = this.rowRadios.get(conflict.path);
+                if (radios) {
+                    (Object.keys(radios) as ConflictResolution[]).forEach(key => {
+                        radios[key].checked = key === conflict.resolution;
+                    });
+                }
+                this.updateContinueState();
+            }).open();
+        })();
+        this.diffLoaders.set(conflict.path, load);
+        try {
+            await load;
+        } finally {
+            this.diffLoaders.delete(conflict.path);
+        }
     }
 
     onClose() {
         const { contentEl } = this;
+        // Stop all queued/progressive stat work the moment the modal is
+        // gone: no more pumps, and any still-running background load's
+        // result is generation-invalidated (in-flight calls are simply
+        // abandoned, not aborted — they can't commit into a dead cache).
+        this.diffStat?.dispose();
         contentEl.empty();
         this.rowRadios.clear();
         this.statSlots.clear();
