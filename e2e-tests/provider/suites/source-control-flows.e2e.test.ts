@@ -65,8 +65,7 @@ describe('Source Control Flows E2E', () => {
             const oldB = path('multi-rename/folder/b.md');
             const newA = path('multi-rename/archive/a.md');
             const newB = path('multi-rename/archive/b.md');
-            await s.baseline(oldA, 'a-v1');
-            await s.baseline(oldB, 'b-v1');
+            await s.baselineBatch([{ path: oldA, content: 'a-v1' }, { path: oldB, content: 'b-v1' }]);
 
             s.renameLocal(oldA, newA);
             s.writeLocal(newA, 'a-v2');
@@ -95,8 +94,7 @@ describe('Source Control Flows E2E', () => {
             const oldNested = path('nested-move/folder/nested/b.md');
             const newFlat = path('nested-move/archive/a.md');
             const newNested = path('nested-move/archive/nested/b.md');
-            await s.baseline(oldFlat, 'flat');
-            await s.baseline(oldNested, 'nested');
+            await s.baselineBatch([{ path: oldFlat, content: 'flat' }, { path: oldNested, content: 'nested' }]);
 
             s.renameLocal(oldFlat, newFlat);
             s.renameLocal(oldNested, newNested);
@@ -182,8 +180,7 @@ describe('Source Control Flows E2E', () => {
             const s = scenario();
             const gone = path('conflict-delete-modify/a.md');
             const other = path('conflict-delete-modify/b.md');
-            await s.baseline(gone, 'baseline');
-            await s.baseline(other, 'other-baseline');
+            await s.baselineBatch([{ path: gone, content: 'baseline' }, { path: other, content: 'other-baseline' }]);
             const baselineSha = s.metadataSha(gone);
 
             s.deleteLocal(gone);
@@ -352,8 +349,7 @@ describe('Source Control Flows E2E', () => {
             const modify = path('mixed-cmr/modify.md');
             const oldMove = path('mixed-cmr/old.md');
             const newMove = path('mixed-cmr/moved.md');
-            await s.baseline(modify, 'm-v1');
-            await s.baseline(oldMove, 'move-me');
+            await s.baselineBatch([{ path: modify, content: 'm-v1' }, { path: oldMove, content: 'move-me' }]);
 
             s.writeLocal(create, 'create content');
             s.writeLocal(modify, 'm-v2');
@@ -380,9 +376,11 @@ describe('Source Control Flows E2E', () => {
             const renameNew = path('mixed-lifecycle/rename-new.md');
             const moveOld = path('mixed-lifecycle/move-old.md');
             const moveNew = path('mixed-lifecycle/move-new.md');
-            await s.baseline(modify, 'm-v1');
-            await s.baseline(renameOld, 'r-v1');
-            await s.baseline(moveOld, 'mv-v1');
+            await s.baselineBatch([
+                { path: modify, content: 'm-v1' },
+                { path: renameOld, content: 'r-v1' },
+                { path: moveOld, content: 'mv-v1' },
+            ]);
 
             s.writeLocal(create, 'create content');
             s.writeLocal(modify, 'm-v2');
@@ -411,8 +409,7 @@ describe('Source Control Flows E2E', () => {
             const safe = path('mixed-safe-conflict/a.md');
             const conflict = path('mixed-safe-conflict/b.md');
             const created = path('mixed-safe-conflict/c.md');
-            await s.baseline(safe, 'a-v1');
-            await s.baseline(conflict, 'b-v1');
+            await s.baselineBatch([{ path: safe, content: 'a-v1' }, { path: conflict, content: 'b-v1' }]);
 
             s.writeLocal(safe, 'a-v2');
             s.writeLocal(conflict, 'b-local');
@@ -450,9 +447,9 @@ describe('Source Control Flows E2E', () => {
             const a = path('subset/a.md');
             const b = path('subset/b.md');
             const c = path('subset/c.md');
-            await s.baseline(a, 'a-v1');
-            await s.baseline(b, 'b-v1');
-            await s.baseline(c, 'c-v1');
+            await s.baselineBatch([
+                { path: a, content: 'a-v1' }, { path: b, content: 'b-v1' }, { path: c, content: 'c-v1' },
+            ]);
             s.writeLocal(a, 'a-v2');
             s.writeLocal(b, 'b-v2');
             s.writeLocal(c, 'c-v2');
@@ -486,9 +483,9 @@ describe('Source Control Flows E2E', () => {
             const a = path('subset-then-rest/a.md');
             const b = path('subset-then-rest/b.md');
             const c = path('subset-then-rest/c.md');
-            await s.baseline(a, 'a-v1');
-            await s.baseline(b, 'b-v1');
-            await s.baseline(c, 'c-v1');
+            await s.baselineBatch([
+                { path: a, content: 'a-v1' }, { path: b, content: 'b-v1' }, { path: c, content: 'c-v1' },
+            ]);
             s.writeLocal(a, 'a-v2');
             s.writeLocal(b, 'b-v2');
             s.writeLocal(c, 'c-v2');
@@ -606,8 +603,9 @@ describe('Source Control Flows E2E', () => {
             const s = scenario();
             const modifyPath = path('unified-sync/modify.md');
             const deletePath = path('unified-sync/delete.md');
-            await s.baseline(modifyPath, 'original content');
-            await s.baseline(deletePath, 'to be removed');
+            await s.baselineBatch([
+                { path: modifyPath, content: 'original content' }, { path: deletePath, content: 'to be removed' },
+            ]);
 
             s.writeLocal(modifyPath, 'updated content');
             s.deleteLocal(deletePath);
@@ -665,8 +663,7 @@ describe('Source Control Flows E2E', () => {
             const s = scenario();
             const a = path('coexist/a.md');
             const b = path('coexist/b.md');
-            await s.baseline(a, 'A');
-            await s.baseline(b, 'B');
+            await s.baselineBatch([{ path: a, content: 'A' }, { path: b, content: 'B' }]);
 
             await s.modifyRemote(a, 'A-remote');
             s.writeLocal(b, 'B-local');
@@ -708,9 +705,9 @@ describe('Source Control Flows E2E', () => {
             const a = path('noop-batch/a.md');
             const b = path('noop-batch/b.md');
             const c = path('noop-batch/c.md');
-            await s.baseline(a, 'a');
-            await s.baseline(b, 'b');
-            await s.baseline(c, 'c');
+            await s.baselineBatch([
+                { path: a, content: 'a' }, { path: b, content: 'b' }, { path: c, content: 'c' },
+            ]);
 
             const headBefore = await s.head();
             const result = await s.push([a, b, c]);
@@ -846,8 +843,10 @@ describe('Source Control Flows E2E', () => {
             const renameOld = Array.from({ length: 30 }, (_, i) => path(`mixed-100/rename-old/${i}.md`));
             const renameNew = Array.from({ length: 30 }, (_, i) => path(`mixed-100/rename-new/${i}.md`));
 
-            for (const p of modifyPaths) await s.baseline(p, 'v1');
-            for (const p of renameOld) await s.baseline(p, 'r-v1');
+            await s.baselineBatch([
+                ...modifyPaths.map(path => ({ path, content: 'v1' })),
+                ...renameOld.map(path => ({ path, content: 'r-v1' })),
+            ]);
             for (const p of modifyPaths) s.writeLocal(p, 'v2');
             for (const p of createPaths) s.writeLocal(p, 'new');
             for (let i = 0; i < renameOld.length; i++) {

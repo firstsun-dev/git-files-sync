@@ -41,12 +41,11 @@ export type RemoteFile = { content: string; sha: string } | null;
 
 /**
  * One read of "everything a convergence check needs from the remote", so
- * `expectConverged` + `expectMetadataConsistent` don't each independently
- * re-fetch the same files — every extra round trip is real wall-clock time
- * against the real provider API.
+ * `expectConverged` + `expectMetadataConsistent` share one fetch-once git
+ * snapshot rather than independently re-fetching every path.
  */
 export interface RemoteSnapshot {
-    /** Tracked path -> remote file (or null if absent), one fetch per path. */
+    /** Tracked path -> remote file (or null if absent), all from one fetch. */
     files: Map<string, RemoteFile>;
     /** All remote paths under this run's namespace, one `listFiles` call. */
     remotePaths: string[];
@@ -55,11 +54,12 @@ export interface RemoteSnapshot {
 export async function captureRemoteSnapshot(context: ConvergenceContext, paths?: string[]): Promise<RemoteSnapshot> {
     return timed('remote snapshot (verifier)', async () => {
         const trackedPathList = paths ?? (await trackedPaths(context));
+        const snapshot = await context.verifier.snapshot(context.branch);
         const files = new Map<string, RemoteFile>();
         for (const path of trackedPathList) {
-            files.set(path, await context.verifier.getFile(path, context.branch));
+            files.set(path, snapshot.getFile(path));
         }
-        const remotePaths = (await context.verifier.listFiles(context.branch))
+        const remotePaths = snapshot.listFiles()
             .filter(path => path.startsWith(context.runPrefix))
             .sort((a, b) => a.localeCompare(b));
         return { files, remotePaths };

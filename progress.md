@@ -5,21 +5,31 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-08-31
-**Active Feature:** Issue #142 — move real-provider E2E from `e2e/` to `e2e-tests/provider/` and replace `E2E_RUNTIME_DIR` per-run generation with committed static runtime files. Working tree changes complete, uncommitted.
-**Branch / PR:** `refactor/e2e-tests-scanner-boundary`, branched off `claude/source-control-foundation` (PR #129, still open). Intended to retarget/rebase onto `main` once #129 merges — see #142 for the full plan.
+**Active Feature:** Issue #143 — reduce redundant real-provider E2E round trips. Working tree changes complete, uncommitted.
+**Branch / PR:** Current working branch; no commit or push created in this session.
 
-**Open risk, not yet resolved**: this PR's core premise — that a directory rename from `e2e/` to `e2e-tests/` makes committing `fetch`/`node:child_process` `.ts` files scanner-safe — is unverified against the actual Obsidian community-plugin scanner, and contradicts this repo's own prior audit (`docs/obsidian-scanner-audit.md`), which found the scanner flagged those exact APIs while committed under `e2e/` regardless of directory. Proceeded on explicit user instruction; flagged in `docs/testing/real-provider-e2e.md`'s "Known gaps" and `docs/obsidian-scanner-audit.md`'s Phase 2 section. **A real scanner rescan is required before trusting this.**
+**Scope:** E2E fixtures, verifier helpers, and tests only; production `SyncManager` and provider batching behavior remain unchanged.
 
 Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation` — not superseded by this entry.
 
 ## Outstanding Items
 
-1. Run the new two-client e2e suite on a Linux/CI shell (local macOS system bash 3.2 can't run `scripts/e2e-harness.sh provision` — pre-existing `${var@Q}` bash-4-ism, not this session's change): `npm run test:e2e -- --provider gitea` exercises `e2e/suites/two-client-sync.e2e.test.ts` (now registered in `scripts/e2e-suites.txt`).
-2. Manual Obsidian verification of the prior UI rounds (see handoff); commit working tree; push → CI → merge flow.
-3. P0-4 (delete/modify) and P0-5 (rename/modify) are written as SAFETY INVARIANTS, not semantics: if production's current behavior silently loses content, the test goes RED — file `fix(sync): prevent silent data loss on divergent operations` follow-up in that case (per plan, likely a separate PR).
-4. Next phases (not started): Phase 4 divergence matrix (add/add, rename/rename, reverse delete/modify, mixed batch), Phase 5 offline/restart, Phase 6 failure/recovery, Phase 7 stress (scheduled/manual only).
+1. Run `npm run test:e2e -- --provider github`, `gitlab`, and `gitea` with provisioned credentials; verify mixed-100 remains under 120s (target <30s) and the provider matrix passes.
+2. Commit and push the current working tree, then monitor the CI provider matrix.
 
 ## Verification Evidence
+
+This session (Issue #143 — reduce redundant real-provider E2E round trips):
+
+- `SyncManagerFixture.makeSettings()` and the standalone SyncManager E2E settings now use the selected provider identity, instead of hard-coding Gitea.
+- Added `baselineBatch()` to the single- and two-client scenarios. Multi-file flows now establish one baseline commit; P0-2 uses the two-client batch helper and mixed-100 seeds all 70 pre-existing files in one push.
+- Added `GitVerifier.snapshot()` / `GitSnapshot`: a captured `origin/<branch>` state supports file, missing-file, tree, commit, blob-mode, and revision assertions without repeated fetches. Scenario mutations invalidate their shared snapshot; convergence now captures once for all paths.
+- GitHub batch and rename/delete assertions poll only branch-head movement, then assert from a single snapshot. GitLab/Gitea batch tests now lock the one-commit contract too.
+- `npx eslint .` — 0 errors, 0 warnings.
+- `npx vitest run` — 68 files / 862 tests passed.
+- `npx vitest -c vitest.e2e.config.ts run e2e-tests/provider/suites/git-verifier.e2e.test.ts` — 1 file / 1 test passed (local git-only fetch-once regression test).
+- `npm run build` — passed (tsc + Obsidian 1.11.0 compat typecheck + esbuild).
+- **Not verified locally:** real provider matrix and mixed-100 timing require provisioned credentials/CI.
 
 This session (follow-up round on the same PR — `test(e2e): isolate and streamline two-client sync scenarios`):
 

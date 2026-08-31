@@ -6,7 +6,7 @@ import type { BatchPushConflict, ConflictResolution, PushResults } from '../../.
 import type { GitLabFilesPushSettings } from '../../../src/settings';
 import type { FakeVault, TFileLike } from '../shim/fake-vault';
 import type { SyncManagerFixture } from './sync-manager-fixture';
-import type { GitVerifier } from './git-verifier';
+import type { GitSnapshot, GitVerifier } from './git-verifier';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
@@ -37,37 +37,22 @@ export class SourceControlScenario {
     private readonly service: GitServiceInterface;
     private readonly verifier: GitVerifier;
     private readonly branch: string;
-    /**
-     * Memoizes remote reads (each of which is a real `git fetch` round trip)
-     * between remote mutations. Invalidated by `invalidatingProxy` below
-     * whenever `manager.pushFiles`/`pullFile`/`commitResolvedBatch` or
-     * `service.pushFile`/`deleteFile` is called on the wrapped instances this
-     * scenario hands out — including indirectly, e.g. via the selection
-     * stack's `actionService.push`, which calls `manager.pushFiles` through
-     * `BoundarySyncWorkspace` rather than through this class's own `push()`,
-     * and `actionService.sync`, which commits pushes/moves/deletions through
-     * `manager.commitResolvedBatch` instead of `pushFiles`. Wrapping the
-     * instances themselves (instead of only this class's wrapper methods) is
-     * what makes those indirect paths safe to cache too.
-     */
-    private readonly remoteCache = new Map<string, unknown>();
+    /** A fetch-once remote state, invalidated after every remote mutation. */
+    private remoteSnapshot: GitSnapshot | undefined;
 
     constructor(fixture: SyncManagerFixture) {
         this.vault = fixture.createVault();
         this.settings = fixture.makeSettings();
-        const invalidate = (): void => this.remoteCache.clear();
+        const invalidate = (): void => { this.remoteSnapshot = undefined; };
         this.manager = invalidatingProxy(fixture.newManager(this.vault, this.settings), ['pushFiles', 'pullFile', 'commitResolvedBatch'], invalidate);
         this.service = invalidatingProxy(fixture.service, ['pushFile', 'deleteFile'], invalidate);
         this.verifier = fixture.verifier;
         this.branch = fixture.branch;
     }
 
-    /** Runs `fn` once and memoizes it under `key` until the next remote mutation. */
-    private async cachedRemote<T>(key: string, fn: () => Promise<T>): Promise<T> {
-        if (this.remoteCache.has(key)) return this.remoteCache.get(key) as T;
-        const value = await fn();
-        this.remoteCache.set(key, value);
-        return value;
+    private async snapshot(): Promise<GitSnapshot> {
+        if (!this.remoteSnapshot) this.remoteSnapshot = await this.verifier.snapshot(this.branch);
+        return this.remoteSnapshot;
     }
 
     // --- local vault ops -------------------------------------------------
@@ -122,6 +107,18 @@ export class SourceControlScenario {
         return this.manager.pushFiles([path]);
     }
 
+    /** Establishes multiple synced files with one real manager batch push. */
+    async baselineBatch(entries: Array<{ path: string; content: string | ArrayBuffer }>): Promise<PushResults> {
+        for (const entry of entries) this.writeLocal(entry.path, entry.content);
+        const result = await this.manager.pushFiles(entries.map(entry => entry.path));
+        expect(result.success, 'batch baseline must sync every entry').toBe(entries.length);
+        expect(result.failed, 'batch baseline must not fail').toBe(0);
+        for (const entry of entries) {
+            expect(this.metadataSha(entry.path), `baseline metadata for ${entry.path}`).toBeTruthy();
+        }
+        return result;
+    }
+
     // --- sync actions ----------------------------------------------------
 
     /** Pushes via the real manager. Accepts TFile handles (for rename detection) or plain paths. */
@@ -136,40 +133,36 @@ export class SourceControlScenario {
     // --- independent remote assertions (via the git-CLI verifier) --------
 
     async remoteContent(path: string): Promise<{ content: string; sha: string } | null> {
-        return this.cachedRemote(`file:${path}`, () => this.verifier.getFile(path, this.branch));
+        return (await this.snapshot()).getFile(path);
     }
 
     async expectRemoteContent(path: string, expected: string): Promise<void> {
-        const remote = await this.cachedRemote(`file:${path}`, () => this.verifier.getFile(path, this.branch));
+        const remote = (await this.snapshot()).getFile(path);
         expect(remote?.content, `remote content for ${path}`).toBe(expected);
     }
 
     async expectRemoteMissing(path: string): Promise<void> {
-        expect(await this.cachedRemote(`missing:${path}`, () => this.verifier.fileMissing(path, this.branch)), `expected ${path} missing on remote`).toBe(true);
+        expect((await this.snapshot()).fileMissing(path), `expected ${path} missing on remote`).toBe(true);
     }
 
     async expectRemoteExists(path: string): Promise<void> {
-        expect(await this.cachedRemote(`missing:${path}`, () => this.verifier.fileMissing(path, this.branch)), `expected ${path} present on remote`).toBe(false);
+        expect((await this.snapshot()).fileMissing(path), `expected ${path} present on remote`).toBe(false);
     }
 
     /** Current branch tip sha. */
     async head(): Promise<string> {
-        const [tip] = await this.cachedRemote('shas:2', () => this.verifier.listCommitShas(this.branch, 2));
+        const [tip] = (await this.snapshot()).listCommitShas(2);
         return tip!;
     }
 
     /** Newest-first commit shas on the branch (independent of the service). */
     async listCommitShas(count: number): Promise<string[]> {
-        if (count <= 2) {
-            const shas = await this.cachedRemote('shas:2', () => this.verifier.listCommitShas(this.branch, 2));
-            return shas.slice(0, count);
-        }
-        return this.verifier.listCommitShas(this.branch, count);
+        return (await this.snapshot()).listCommitShas(count);
     }
 
     /** Asserts exactly one new commit landed since `headBefore` (the new commit's parent is `headBefore`). */
     async expectSingleCommitSince(headBefore: string): Promise<void> {
-        const [headAfter, headAfterParent] = await this.cachedRemote('shas:2', () => this.verifier.listCommitShas(this.branch, 2));
+        const [headAfter, headAfterParent] = (await this.snapshot()).listCommitShas(2);
         expect(headAfter, 'expected a new commit on the branch').not.toBe(headBefore);
         expect(headAfterParent, 'expected exactly one new commit since baseline').toBe(headBefore);
     }

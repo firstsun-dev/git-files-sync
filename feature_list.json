@@ -1,14 +1,22 @@
 {
   "_note": "GitHub Issues (firstsun-dev/git-files-sync, Project #6) is the source of truth for the full backlog and priority/estimate fields. This file mirrors only the active feature and the next few candidates so an agent session has a local, offline checkpoint — sync it against `gh issue list --repo firstsun-dev/git-files-sync --state open` at the start of a session rather than treating it as authoritative.",
-  "_lastSync": "2026-08-27: Synced against open GitHub issues; issue #139 is active on PR #140.",
+  "_lastSync": "2026-08-31: Synced against open GitHub issues; issue #143 is active locally, while #139 awaits review on PR #140.",
   "features": [
     {
       "id": "feat-027",
       "name": "test(e2e): run disposable Gitea safely in local and CI environments (issue #139)",
       "description": "Keep local Gitea runs parallel-safe, move the secretless Gitea PR gate to GitHub-hosted runners, and prevent fork code from reaching credentialed self-hosted runners.",
       "dependencies": [],
-      "status": "in-progress",
+      "status": "in-review",
       "evidence": "Commits 920adee/18de6e0/b5884fc on PR #140: local serial/parallel Gitea and targeted real CI run 33048613679 are green; awaiting review/merge."
+    },
+    {
+      "id": "feat-028",
+      "name": "test(e2e): reduce real-provider API pressure (issue #143)",
+      "description": "Remove redundant E2E baseline commits and verifier fetches without changing production sync behavior.",
+      "dependencies": [],
+      "status": "in-progress",
+      "evidence": "Working tree: provider identity, baseline batching, fetch-once verifier snapshots, and GitHub batch assertions implemented; real-provider matrix pending."
     },
     {
       "id": "feat-004",

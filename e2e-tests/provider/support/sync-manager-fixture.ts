@@ -116,7 +116,7 @@ export async function createSyncManagerFixture(options: SyncManagerFixtureOption
 
     function makeSettings(branchOverride?: string): GitLabFilesPushSettings {
         return {
-            serviceType: 'gitea',
+            serviceType: provider,
             gitlabToken: '', gitlabBaseUrl: '', projectId: '',
             githubToken: '', githubOwner: '', githubRepo: '',
             giteaToken: '', giteaBaseUrl: '', giteaOwner: '', giteaRepo: '',

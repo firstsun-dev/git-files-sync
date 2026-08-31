@@ -28,7 +28,7 @@ vi.mock('../../../src/ui/BatchConflictResolutionModal');
 
 function makeSettings(branch: string): GitLabFilesPushSettings {
     return {
-        serviceType: 'gitea',
+        serviceType: currentProvider(),
         gitlabToken: '', gitlabBaseUrl: '', projectId: '',
         githubToken: '', githubOwner: '', githubRepo: '',
         giteaToken: '', giteaBaseUrl: '', giteaOwner: '', giteaRepo: '',

@@ -97,8 +97,10 @@ describe('Two-client sync E2E', () => {
         const fileB = s.path('p0-2/b.md');
         const ctx: ConvergenceContext = convergenceContext([s.a, s.b], fixture.verifier, fixture.branch, `e2e-tc-${fixture.runId}/p0-2/`);
 
-        await s.baseline(fileA, 'a-v1');
-        await s.baseline(fileB, 'b-v1');
+        await s.baselineBatch([
+            { path: fileA, content: 'a-v1' },
+            { path: fileB, content: 'b-v1' },
+        ]);
 
         // Both clients diverge on unrelated files while stale on the other's.
         s.a.write(fileA, 'a-v2 by A');

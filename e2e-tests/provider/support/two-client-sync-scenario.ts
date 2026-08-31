@@ -266,19 +266,29 @@ export class TwoClientSyncScenario {
      * identical pushes.
      */
     async baseline(path: string, content: string): Promise<void> {
-        this.a.write(path, content);
-        const result = await timed('baseline', () => this.a.manager.pushFiles([path]));
-        expect(result.success, `baseline push of ${path} failed: ${JSON.stringify(result.errors)}`).toBe(1);
-        const pushedSha = result.syncedPaths.find(entry => entry.path === path)?.sha;
-        if (!pushedSha) throw new Error(`baseline push of ${path} did not report a sha`);
-        const remote = await this.verifier.getFile(path, this.branch);
-        expect(remote?.sha, 'verifier blob sha must match the pushed blob sha for baseline mirroring').toBe(pushedSha);
-        this.b.vault.writeLocal(path, content);
-        this.b.settings.syncMetadata[path] = {
-            lastSyncedSha: pushedSha,
-            lastSyncedAt: Date.now(),
-            lastKnownPath: path,
-        };
+        await this.baselineBatch([{ path, content }]);
+    }
+
+    /** Establishes a common multi-file baseline with one remote commit. */
+    async baselineBatch(entries: Array<{ path: string; content: string }>): Promise<void> {
+        for (const entry of entries) this.a.write(entry.path, entry.content);
+        const result = await timed('baseline batch', () => this.a.manager.pushFiles(entries.map(entry => entry.path)));
+        expect(result.success, `batch baseline failed: ${JSON.stringify(result.errors)}`).toBe(entries.length);
+        expect(result.failed, 'batch baseline must not fail').toBe(0);
+
+        const snapshot = await this.verifier.snapshot(this.branch);
+        for (const entry of entries) {
+            const pushedSha = result.syncedPaths.find(resultEntry => resultEntry.path === entry.path)?.sha;
+            if (!pushedSha) throw new Error(`batch baseline did not report a sha for ${entry.path}`);
+            const remote = snapshot.getFile(entry.path);
+            expect(remote?.sha, `verifier blob sha for ${entry.path} must match the pushed blob sha`).toBe(pushedSha);
+            this.b.vault.writeLocal(entry.path, entry.content);
+            this.b.settings.syncMetadata[entry.path] = {
+                lastSyncedSha: pushedSha,
+                lastSyncedAt: Date.now(),
+                lastKnownPath: entry.path,
+            };
+        }
     }
 
     // --- independent remote assertions (via the git-CLI verifier) ----------

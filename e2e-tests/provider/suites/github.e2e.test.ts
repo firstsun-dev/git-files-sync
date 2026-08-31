@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { GitVerifier } from '../support/git-verifier';
+import type { GitSnapshot } from '../support/git-verifier';
 import { githubContext } from '../config/env';
 import type { GitServiceInterface } from '../../../src/services/git-service-interface';
 
@@ -15,10 +16,7 @@ describe('GitHubService E2E', () => {
     const runId = Math.random().toString(36).slice(2, 10);
     const path = (name: string) => `e2e-${runId}/${name}`;
 
-    /**
-     * GitHub's Contents API can briefly lag a just-completed write or delete;
-     * poll instead of asserting on a single read.
-     */
+    /** Polls only branch visibility, then assertions read one stable git snapshot. */
     async function waitFor<T>(getter: () => Promise<T>, satisfied: (value: T) => boolean, attempts = 6, delayMs = 500): Promise<T> {
         let last: T;
         for (let i = 0; i < attempts; i++) {
@@ -29,11 +27,10 @@ describe('GitHubService E2E', () => {
         return last!;
     }
 
-    const waitForContent = (getter: () => Promise<{ content: string; sha: string } | null>, expectedContent: string) =>
-        waitFor(getter, value => value?.content === expectedContent);
-
-    const waitForMissing = (path_: string, branch_: string) =>
-        waitFor(() => verifier.fileMissing(path_, branch_), missing => missing === true);
+    async function snapshotAfterHeadChange(previousHead: string): Promise<GitSnapshot> {
+        await waitFor(() => verifier.listCommitShas(branch, 1), shas => shas[0] !== previousHead);
+        return verifier.snapshot(branch);
+    }
 
     beforeAll(async () => {
         const ctx = githubContext();
@@ -49,25 +46,22 @@ describe('GitHubService E2E', () => {
 
     it('creates a file via createCommitOnBranch, verified independently of the service', async () => {
         const filePath = path('created.md');
-        const commitsBeforePush = await verifier.listCommitShas(branch, 1);
+        const [headBefore] = await verifier.listCommitShas(branch, 1);
 
         const result = await service.pushFile(filePath, '# hello e2e', branch, 'e2e: create file');
 
         expect(result.sha).toBeUndefined(); // GitHubService's GraphQL path doesn't report a blob sha
-        const remote = await waitForContent(() => verifier.getFile(filePath, branch), '# hello e2e');
+        const snapshot = await snapshotAfterHeadChange(headBefore!);
+        const remote = snapshot.getFile(filePath);
         expect(remote?.content).toBe('# hello e2e');
-
-        const newTip = await waitFor(
-            () => verifier.listCommitShas(branch, 1),
-            shas => shas[0] !== commitsBeforePush[0]
-        );
-        expect(await verifier.getCommitMessage(newTip[0]!)).toContain('e2e: create file');
+        expect(await verifier.getCommitMessage(snapshot.listCommitShas(1)[0]!)).toContain('e2e: create file');
     });
 
     it('reads a file whose content was independently established', async () => {
         const filePath = path('to-read.md');
+        const [headBefore] = await verifier.listCommitShas(branch, 1);
         await service.pushFile(filePath, 'known content', branch, 'e2e: create file for read test');
-        const groundTruth = await waitForContent(() => verifier.getFile(filePath, branch), 'known content');
+        const groundTruth = (await snapshotAfterHeadChange(headBefore!)).getFile(filePath);
         expect(groundTruth?.content).toBe('known content');
 
         const read = await service.getFile(filePath, branch);
@@ -77,25 +71,28 @@ describe('GitHubService E2E', () => {
 
     it('updates a file, verified independently of the service', async () => {
         const filePath = path('to-update.md');
+        const [headBeforeCreate] = await verifier.listCommitShas(branch, 1);
         await service.pushFile(filePath, 'v1', branch, 'e2e: create file for update test');
-        const beforeUpdate = await verifier.getFile(filePath, branch);
+        const beforeUpdate = (await snapshotAfterHeadChange(headBeforeCreate!)).getFile(filePath);
         expect(beforeUpdate).not.toBeNull();
 
+        const headBeforeUpdate = (await verifier.snapshot(branch)).listCommitShas(1)[0]!;
         await service.pushFile(filePath, 'v2', branch, 'e2e: update file', beforeUpdate?.sha);
-
-        const afterUpdate = await waitForContent(() => verifier.getFile(filePath, branch), 'v2');
+        const afterUpdate = (await snapshotAfterHeadChange(headBeforeUpdate)).getFile(filePath);
         expect(afterUpdate?.content).toBe('v2');
         expect(afterUpdate?.sha).not.toBe(beforeUpdate?.sha);
     });
 
     it('deletes a file, verified independently of the service', async () => {
         const filePath = path('to-delete.md');
+        const [headBeforeCreate] = await verifier.listCommitShas(branch, 1);
         await service.pushFile(filePath, 'delete me', branch, 'e2e: create file for delete test');
-        expect(await waitFor(() => verifier.fileMissing(filePath, branch), missing => missing === false)).toBe(false);
+        const beforeDelete = await snapshotAfterHeadChange(headBeforeCreate!);
+        expect(beforeDelete.fileMissing(filePath)).toBe(false);
 
+        const headBeforeDelete = beforeDelete.listCommitShas(1)[0]!;
         await service.deleteFile(filePath, branch, 'e2e: delete file');
-
-        expect(await waitForMissing(filePath, branch)).toBe(true);
+        expect((await snapshotAfterHeadChange(headBeforeDelete)).fileMissing(filePath)).toBe(true);
     });
 
     it('pushes a batch of files as exactly one commit, verified independently of the service', async () => {
@@ -105,30 +102,35 @@ describe('GitHubService E2E', () => {
             { path: path('batch/c.md'), content: 'batch c' },
         ];
 
-        const commitsBefore = await verifier.listCommitShas(branch, 1);
+        const [headBefore] = await verifier.listCommitShas(branch, 1);
         const results = await service.pushBatch!(items, branch, 'e2e: batch push');
         expect(results).toHaveLength(3);
 
+        const snapshot = await snapshotAfterHeadChange(headBefore!);
         for (const item of items) {
-            const remote = await waitForContent(() => verifier.getFile(item.path, branch), item.content);
+            const remote = snapshot.getFile(item.path);
             expect(remote?.content).toBe(item.content);
         }
 
-        const commitsAfter = await verifier.listCommitShas(branch, 2);
-        expect(commitsAfter[1]).toBe(commitsBefore[0]);
+        const commitsAfter = snapshot.listCommitShas(2);
+        expect(commitsAfter[1]).toBe(headBefore);
         expect(await verifier.getCommitMessage(commitsAfter[0]!)).toContain('e2e: batch push');
     });
 
     it('renames/moves a file in one commit, verified independently of the service', async () => {
         const oldPath = path('rename/old-name.md');
         const newPath = path('rename/new-name.md');
+        const [headBeforeCreate] = await verifier.listCommitShas(branch, 1);
         await service.pushFile(oldPath, 'rename me', branch, 'e2e: create file for rename test');
-        expect(await waitFor(() => verifier.fileMissing(oldPath, branch), missing => missing === false)).toBe(false);
+        const beforeMove = await snapshotAfterHeadChange(headBeforeCreate!);
+        expect(beforeMove.fileMissing(oldPath)).toBe(false);
 
+        const headBeforeMove = beforeMove.listCommitShas(1)[0]!;
         await service.commitBatch!({ writes: [], moves: [{ oldPath, newPath, content: 'rename me' }], deletions: [] }, branch, 'e2e: rename file');
 
-        expect(await waitForMissing(oldPath, branch)).toBe(true);
-        const remote = await waitForContent(() => verifier.getFile(newPath, branch), 'rename me');
+        const afterMove = await snapshotAfterHeadChange(headBeforeMove);
+        expect(afterMove.fileMissing(oldPath)).toBe(true);
+        const remote = afterMove.getFile(newPath);
         expect(remote?.content).toBe('rename me');
     });
 
@@ -178,8 +180,9 @@ describe('GitHubService E2E', () => {
                 items.map(item => service.pushFile(item.filePath, item.content, branch, `e2e: concurrent push ${item.filePath}`))
             );
 
+            const snapshot = await verifier.snapshot(branch);
             for (const item of items) {
-                const remote = await waitForContent(() => verifier.getFile(item.filePath, branch), item.content);
+                const remote = snapshot.getFile(item.filePath);
                 expect(remote?.content).toBe(item.content);
             }
         });

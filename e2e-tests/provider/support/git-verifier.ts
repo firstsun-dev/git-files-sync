@@ -37,6 +37,16 @@ export class GitVerifier {
         this.git(['fetch', 'origin', ref]);
     }
 
+    /**
+     * Captures one consistent remote branch state. All reads made through the
+     * returned snapshot use the fetched `origin/<ref>` without another network
+     * round trip.
+     */
+    async snapshot(ref: string): Promise<GitSnapshot> {
+        this.fetch(ref);
+        return new GitSnapshot(this.git.bind(this), `origin/${ref}`);
+    }
+
     async getFile(path: string, ref: string): Promise<{ content: string; sha: string } | null> {
         this.fetch(ref);
         try {
@@ -82,6 +92,53 @@ export class GitVerifier {
     async getRevision(path: string, ref: string): Promise<string | null> {
         this.fetch(ref);
         const sha = this.git(['log', '-1', '--format=%H', `origin/${ref}`, '--', path]).trim();
+        return sha || null;
+    }
+}
+
+/** A fetch-once view of one remote branch tip. */
+export class GitSnapshot {
+    constructor(
+        private readonly git: (args: string[]) => string,
+        private readonly ref: string,
+    ) {}
+
+    getFile(path: string): { content: string; sha: string } | null {
+        try {
+            const sha = this.git(['rev-parse', `${this.ref}:${path}`]).trim();
+            const content = this.git(['show', `${this.ref}:${path}`]);
+            return { content, sha };
+        } catch {
+            return null;
+        }
+    }
+
+    fileMissing(path: string): boolean {
+        return this.getFile(path) === null;
+    }
+
+    listFiles(): string[] {
+        return this.git(['ls-tree', '-r', '--name-only', this.ref])
+            .split('\n')
+            .filter(Boolean);
+    }
+
+    listCommitShas(perPage = 30): string[] {
+        return this.git(['log', '--format=%H', '-n', String(perPage), this.ref])
+            .split('\n')
+            .filter(Boolean);
+    }
+
+    /** Git tree mode at path (e.g. "120000" for a symlink). */
+    getBlobMode(path: string): string | null {
+        const line = this.git(['ls-tree', this.ref, '--', path]).trim();
+        if (!line) return null;
+        return line.split(/\s+/)[0] ?? null;
+    }
+
+    /** Last commit sha that touched path -- GitLab's optimistic-locking "revision". */
+    getRevision(path: string): string | null {
+        const sha = this.git(['log', '-1', '--format=%H', this.ref, '--', path]).trim();
         return sha || null;
     }
 }

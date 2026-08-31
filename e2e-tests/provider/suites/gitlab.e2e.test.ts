@@ -77,13 +77,18 @@ describe('GitLabService E2E', () => {
             { path: path('batch/c.md'), content: 'batch c' },
         ];
 
+        const [headBefore] = await verifier.listCommitShas(branch, 1);
         const results = await service.pushBatch!(items, branch, 'e2e: batch push');
         expect(results).toHaveLength(3);
 
+        const snapshot = await verifier.snapshot(branch);
         for (const item of items) {
-            const remote = await verifier.getFile(item.path, branch);
+            const remote = snapshot.getFile(item.path);
             expect(remote?.content).toBe(item.content);
         }
+        const [headAfter, parent] = snapshot.listCommitShas(2);
+        expect(headAfter).not.toBe(headBefore);
+        expect(parent).toBe(headBefore);
     });
 
     it('renames/moves a file in one commit, verified independently of the service', async () => {
