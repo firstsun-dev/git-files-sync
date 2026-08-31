@@ -4,12 +4,23 @@
 // tests/setup.ts installs for unit tests is deliberately not used here.
 import type { RequestUrlParam, RequestUrlResponse } from 'obsidian';
 
+// A stalled TCP connection on a flaky runner otherwise hangs `fetch` forever,
+// which surfaces as a silent test timeout (no error, no log) at whatever the
+// suite's own testTimeout happens to be — indistinguishable from a real
+// deadlock. Bound every request so a stall fails fast with a clear cause.
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export async function requestUrl(request: RequestUrlParam | string): Promise<RequestUrlResponse> {
     const params: RequestUrlParam = typeof request === 'string' ? { url: request } : request;
     const shouldThrow = params.throw ?? true;
     const headers: Record<string, string> = { ...params.headers };
     if (params.contentType && !headers['Content-Type']) headers['Content-Type'] = params.contentType;
-    const res = await fetch(params.url, { method: params.method ?? 'GET', headers, body: params.body });
+    const res = await fetch(params.url, {
+        method: params.method ?? 'GET',
+        headers,
+        body: params.body,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     const arrayBuffer = await res.arrayBuffer();
     const text = new TextDecoder().decode(arrayBuffer);
     let json: unknown;
