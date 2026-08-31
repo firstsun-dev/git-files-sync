@@ -42,7 +42,7 @@ export class Modal {
 }
 export class PluginSettingTab { constructor(_app?: unknown, _plugin?: unknown) {} }
 export class TextComponent {}
-export class AbstractInputSuggest<_T> { constructor(_app: unknown, _inputEl: unknown) {} }
+export class AbstractInputSuggest { constructor(_app: unknown, _inputEl: unknown) {} }
 export class TFolder { path: string; constructor(path: string) { this.path = path; } }
 export class Setting { constructor(_containerEl?: unknown) {} }
 export class TFile {

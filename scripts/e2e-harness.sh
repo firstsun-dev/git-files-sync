@@ -62,6 +62,29 @@ esac
 
 log() { echo "[e2e-harness:$provider] $*" >&2; }
 
+git_network() {
+    local args=("$@")
+    local start_ms
+    start_ms=$(date +%s%3N 2>/dev/null || echo $(($(date +%s) * 1000)))
+    local desc="${args[*]}"
+    log "git $desc ... (45s timeout)"
+    local ret=0
+    if command -v timeout >/dev/null 2>&1; then
+        timeout --kill-after=5s 45s git "${args[@]}" || ret=$?
+    else
+        git -c http.lowSpeedLimit=1024 -c http.lowSpeedTime=30 "${args[@]}" || ret=$?
+    fi
+    local end_ms
+    end_ms=$(date +%s%3N 2>/dev/null || echo $(($(date +%s) * 1000)))
+    local elapsed_ms=$((end_ms - start_ms))
+    if [ "$ret" -eq 0 ]; then
+        log "git $desc completed in ${elapsed_ms}ms"
+    else
+        log "git $desc failed after ${elapsed_ms}ms (exit $ret)"
+        return "$ret"
+    fi
+}
+
 # --- credential-sensitive helpers -------------------------------------------
 
 # Generates a throwaway GIT_ASKPASS helper under $RUNNER_TEMP (falls back to
@@ -156,9 +179,10 @@ ensure_clone() {
     local dir; dir=$(clone_dir)
     if [ ! -d "$dir/.git" ]; then
         log "Cloning $E2E_TEST_REPO_URL"
-        git clone --no-tags --filter=blob:none "$E2E_TEST_REPO_URL" "$dir"
+        git_network clone --no-tags --filter=blob:none "$E2E_TEST_REPO_URL" "$dir"
     else
-        git -C "$dir" fetch origin --prune
+        log "Fetching existing clone"
+        git_network -C "$dir" fetch origin --prune
     fi
 }
 
@@ -177,7 +201,7 @@ cmd_provision() {
         base_sha=$(git -C "$dir" rev-parse "origin/${E2E_BASE_BRANCH}")
         export E2E_TEST_BRANCH="${E2E_TEST_BRANCH:-$(namespace)}"
         log "Creating isolated branch $E2E_TEST_BRANCH off ${E2E_BASE_BRANCH} (${base_sha})"
-        git -C "$dir" push origin "${base_sha}:refs/heads/${E2E_TEST_BRANCH}"
+        git_network -C "$dir" push origin "${base_sha}:refs/heads/${E2E_TEST_BRANCH}"
     fi
 
     write_env_file
@@ -200,7 +224,8 @@ EOF
     if ! git -C "$dir" diff --cached --quiet; then
         git -C "$dir" -c user.email="e2e@git-files-sync.local" -c user.name="git-files-sync E2E" \
             commit -m "chore(e2e): seed baseline fixture for ${E2E_TEST_BRANCH}"
-        git -C "$dir" push origin "HEAD:refs/heads/${E2E_TEST_BRANCH}"
+        log "Seeding commit to $E2E_TEST_BRANCH"
+        git_network -C "$dir" push origin "HEAD:refs/heads/${E2E_TEST_BRANCH}"
     fi
 }
 
@@ -208,7 +233,8 @@ cmd_verify() {
     load_env_file
     setup_askpass
     local dir; dir=$(clone_dir)
-    git -C "$dir" fetch origin "$E2E_TEST_BRANCH"
+    log "Fetching $E2E_TEST_BRANCH for verification"
+    git_network -C "$dir" fetch origin "$E2E_TEST_BRANCH"
     local head; head=$(git -C "$dir" rev-parse "origin/$E2E_TEST_BRANCH")
     log "Branch $E2E_TEST_BRANCH exists at $head"
 }
@@ -231,7 +257,7 @@ cmd_cleanup() {
     fi
     local dir; dir=$(clone_dir)
     log "Deleting isolated branch $E2E_TEST_BRANCH"
-    git -C "$dir" push origin ":refs/heads/${E2E_TEST_BRANCH}" || true
+    git_network -C "$dir" push origin ":refs/heads/${E2E_TEST_BRANCH}" || true
 }
 
 # --- gitea container lifecycle (shell/docker, never node:child_process) -----

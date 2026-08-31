@@ -51,13 +51,21 @@ cleanup() {
     scripts/e2e-harness.sh cleanup || true
     if [ "$created_workdir" -eq 1 ] \
         && [[ ! "${E2E_KEEP_BRANCH:-}" =~ ^(1|true)$ ]]; then
-        # Only remove the exact mktemp directory this invocation created.
         case "$E2E_WORKDIR" in
             "${TMPDIR:-/tmp}/gfs-e2e-${provider}."*) rm -rf -- "$E2E_WORKDIR" ;;
         esac
     fi
 }
 trap cleanup EXIT
+
+reset_retry_state() {
+    local repo_dir="$E2E_WORKDIR/repo"
+    rm -rf -- "$repo_dir"
+    rm -f -- "$E2E_WORKDIR/e2e.env" "$E2E_WORKDIR/e2e.secrets.env"
+    echo "[run-e2e] Reset local state for retry attempt" >&2
+}
+
+reset_retry_state
 
 scripts/e2e-harness.sh provision
 # Credentials/run-state provision resolved (E2E_TEST_BRANCH, E2E_RUNTIME_DIR,

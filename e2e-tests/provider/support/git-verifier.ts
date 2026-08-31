@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 
+const GIT_TIMEOUT_MS = 30_000;
+
 /**
  * Independent verifier backed by plain git CLI against the isolated clone
  * `scripts/e2e-harness.sh` already checked out at `$E2E_WORKDIR/repo` --
@@ -14,23 +16,20 @@ export class GitVerifier {
     constructor(private readonly repoDir: string = defaultRepoDir()) {}
 
     private git(args: string[]): string {
+        const command = `git ${args.join(' ')}`;
         try {
             return execFileSync('git', ['-C', this.repoDir, ...args], {
                 encoding: 'utf-8',
-                // Pipe stderr so an *expected* missing path (getFile's
-                // try/catch -> null) stays silent instead of spamming the log
-                // with "fatal: path does not exist". A genuine, unexpected git
-                // failure still surfaces: callers without their own try/catch
-                // re-throw below with the captured stderr attached.
                 stdio: ['pipe', 'pipe', 'pipe'],
+                timeout: GIT_TIMEOUT_MS,
+                killSignal: 'SIGTERM',
             });
         } catch (error) {
             const stderr = error && typeof error === 'object' && 'stderr' in error
                 ? String(error.stderr).trim()
                 : '';
-            throw new Error(
-                `git ${args.join(' ')} failed` + (stderr ? `:\n${stderr}` : ''),
-            );
+            const message = stderr || String(error);
+            throw new Error(`${command} timed out after ${GIT_TIMEOUT_MS}ms: ${message}`);
         }
     }
 
