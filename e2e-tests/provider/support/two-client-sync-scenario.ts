@@ -16,6 +16,7 @@ import { ChangeRepository } from '../../../src/logic/source-control/ChangeReposi
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
 import { toSyncChanges } from '../../../src/logic/source-control/FileStatusAdapter';
+import { timed } from './timing-diagnostics';
 
 /**
  * The provider-level fixtures the two-client scenario shares across clients.
@@ -83,12 +84,37 @@ export class TwoClient {
                 gitService: () => fixture.service,
                 gitignoreManager: () => gitignoreManager,
                 syncManager: () => this.manager,
-                filterFilesByVaultFolder: files => files,
-                filterPathByVaultFolder: () => true,
-                // vaultFolder/rootPath are empty in e2e settings; vault-relative
-                // path === repo-relative path.
-                getNormalizedPath: path => path,
-                getVaultPath: path => path,
+                // Real production vaultFolder scoping (src/main.ts's
+                // filterFilesByVaultFolder/filterPathByVaultFolder/
+                // getNormalizedPath/getVaultPath) — this fixture's settings
+                // set vaultFolder to this run's own `e2e-tc-<runId>`
+                // namespace, so this scopes local discovery to this client's
+                // own files exactly like a real vault subfolder mount would.
+                filterFilesByVaultFolder: files => {
+                    const folder = this.settings.vaultFolder;
+                    if (!folder) return files;
+                    const prefix = `${folder}/`;
+                    return files.filter(file => file.path.startsWith(prefix) || file.path === folder);
+                },
+                filterPathByVaultFolder: path => {
+                    const folder = this.settings.vaultFolder;
+                    if (!folder) return true;
+                    const prefix = `${folder}/`;
+                    return path.startsWith(prefix) || path === folder;
+                },
+                getNormalizedPath: path => {
+                    const folder = this.settings.vaultFolder;
+                    if (!folder) return path;
+                    const prefix = `${folder}/`;
+                    if (path.startsWith(prefix)) return path.substring(prefix.length);
+                    return path === folder ? '' : path;
+                },
+                getVaultPath: normalizedPath => {
+                    const folder = this.settings.vaultFolder;
+                    if (!folder) return normalizedPath;
+                    if (!normalizedPath) return folder;
+                    return `${folder}/${normalizedPath}`;
+                },
             },
             this.statuses,
         );
@@ -141,8 +167,25 @@ export class TwoClient {
 
     /** Runs the real Source Control refresh: live local scan + remote tree + per-file classification. */
     async refresh(): Promise<void> {
-        await this.refreshService.refresh();
+        await timed(`refresh ${this.name}`, () => this.refreshService.refresh());
         this.repository.replace(toSyncChanges([...this.statuses.values()]));
+        this.assertScopeIsolation();
+    }
+
+    /**
+     * Fail-fast guard: every change refresh() surfaces must belong to this
+     * run's own `e2e-tc-<runId>` namespace. If fixture/rootPath scoping ever
+     * regresses, this throws immediately instead of the suite timing out
+     * (or, worse, silently asserting on another suite's leaked remote files).
+     */
+    private assertScopeIsolation(): void {
+        const prefix = `e2e-tc-${this.fixture.runId}/`;
+        for (const change of this.repository.getAll()) {
+            expect(
+                change.path.startsWith(prefix),
+                `client ${this.name} refresh() surfaced an out-of-scope change: ${change.path} (expected prefix ${prefix})`,
+            ).toBe(true);
+        }
     }
 
     /** Status rows from the last refresh — the "Repository Changes" view model. */
@@ -162,7 +205,7 @@ export class TwoClient {
     async sync(): Promise<void> {
         await this.refresh();
         const changeIds = this.repository.getAll().map(change => change.id);
-        await this.actionService.sync(changeIds);
+        await timed(`sync ${this.name}`, () => this.actionService.sync(changeIds));
     }
 
     /** Push-only path (the per-row Sync/Push on one or more changes). */
@@ -239,7 +282,7 @@ export class TwoClientSyncScenario {
      */
     async baseline(path: string, content: string): Promise<void> {
         this.a.write(path, content);
-        const result = await this.a.manager.pushFiles([path]);
+        const result = await timed('baseline', () => this.a.manager.pushFiles([path]));
         expect(result.success, `baseline push of ${path} failed: ${JSON.stringify(result.errors)}`).toBe(1);
         const pushedSha = result.syncedPaths.find(entry => entry.path === path)?.sha;
         if (!pushedSha) throw new Error(`baseline push of ${path} did not report a sha`);

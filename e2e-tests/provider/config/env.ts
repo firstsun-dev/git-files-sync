@@ -60,21 +60,21 @@ export interface ProviderContext {
     branch: string;
 }
 
-export function githubContext(): ProviderContext {
+export function githubContext(rootPath = ''): ProviderContext {
     const owner = requiredEnv('E2E_GITHUB_OWNER');
     const repo = requiredEnv('E2E_GITHUB_REPO');
     const token = requiredEnv('E2E_GITHUB_TOKEN');
     const service = new GitHubService();
-    service.updateConfig(token, owner, repo, '');
+    service.updateConfig(token, owner, repo, rootPath);
     return { service, branch: testBranch() };
 }
 
-export function gitlabContext(): ProviderContext {
+export function gitlabContext(rootPath = ''): ProviderContext {
     const baseUrl = process.env.E2E_GITLAB_BASE_URL ?? 'https://gitlab.com';
     const projectId = requiredEnv('E2E_GITLAB_PROJECT_ID');
     const token = requiredEnv('E2E_GITLAB_TOKEN');
     const service = new GitLabService();
-    service.updateConfig(baseUrl, token, projectId, '');
+    service.updateConfig(baseUrl, token, projectId, rootPath);
     return { service, branch: testBranch() };
 }
 
@@ -84,7 +84,7 @@ export function gitlabContext(): ProviderContext {
  * URL/credentials generically (E2E_TEST_REPO_URL/E2E_GIT_USERNAME/
  * E2E_GIT_TOKEN), since there's no stable owner/repo pair to name ahead of time.
  */
-export function giteaContext(): ProviderContext {
+export function giteaContext(rootPath = ''): ProviderContext {
     const repoUrl = new URL(requiredEnv('E2E_TEST_REPO_URL'));
     const token = requiredEnv('E2E_GIT_TOKEN');
     const [owner, repoWithGit] = repoUrl.pathname.replace(/^\//, '').split('/');
@@ -94,12 +94,19 @@ export function giteaContext(): ProviderContext {
     }
     const baseUrl = `${repoUrl.protocol}//${repoUrl.host}`;
     const service = new GiteaService();
-    service.updateConfig(baseUrl, token, owner, repo, '');
+    service.updateConfig(baseUrl, token, owner, repo, rootPath);
     return { service, branch: testBranch() };
 }
 
-export function contextFor(provider: E2EProvider): ProviderContext {
-    if (provider === 'github') return githubContext();
-    if (provider === 'gitlab') return gitlabContext();
-    return giteaContext();
+/**
+ * `rootPath` scopes the service's own remote-tree listing to a repo
+ * subfolder — the real production mechanism, not a test-only filter. Suites
+ * that share one branch across several fixtures (e.g. multi-client E2E) pass
+ * their run's namespace here so each fixture's service only ever sees its own
+ * files, instead of every suite's files sharing one unscoped listing.
+ */
+export function contextFor(provider: E2EProvider, rootPath = ''): ProviderContext {
+    if (provider === 'github') return githubContext(rootPath);
+    if (provider === 'gitlab') return gitlabContext(rootPath);
+    return giteaContext(rootPath);
 }

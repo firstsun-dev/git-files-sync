@@ -38,7 +38,7 @@ describe('Two-client sync E2E', () => {
     let setResolver: (resolution: ConflictResolution) => void;
 
     beforeAll(async () => {
-        fixture = await createSyncManagerFixture();
+        fixture = await createSyncManagerFixture({ scoped: true });
         setResolver = (resolution: ConflictResolution): void => {
             fixture.setConflictResolver(() => resolution);
         };
