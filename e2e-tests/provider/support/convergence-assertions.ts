@@ -19,11 +19,18 @@ export interface ConvergenceContext {
     runPrefix: string;
 }
 
-/** The union of local paths across both clients (the paths that must converge). */
+/**
+ * The union of local paths across both clients (the paths that must
+ * converge), scoped to this run's namespace. A real sync pulls the whole
+ * remote tree, so an unscoped union would also pick up every other suite's
+ * fixtures on the shared disposable-provider branch.
+ */
 export async function trackedPaths(context: ConvergenceContext): Promise<string[]> {
     const paths = new Set<string>();
     for (const client of context.clients) {
-        for (const path of client.vault.paths()) paths.add(path);
+        for (const path of client.vault.paths()) {
+            if (path.startsWith(context.runPrefix)) paths.add(path);
+        }
     }
     return [...paths].sort((a, b) => a.localeCompare(b));
 }

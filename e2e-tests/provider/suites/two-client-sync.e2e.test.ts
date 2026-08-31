@@ -9,7 +9,7 @@ import {
     expectNoSilentDataLoss,
     type ConvergenceContext,
 } from '../support/convergence-assertions';
-import type { BatchPushConflict, ConflictResolution } from '../../../src/logic/sync/types';
+import type { ConflictResolution } from '../../../src/logic/sync/types';
 import { timeouts } from '../config/env';
 
 // Same modal auto-confirm pattern as the other e2e suites: plan-review and
@@ -137,7 +137,7 @@ describe('Two-client sync E2E', () => {
         // The conflict modal must actually have been shown to B.
         expect(vi.mocked(BatchConflictResolutionModal).mock.calls.length).toBeGreaterThanOrEqual(1);
         const lastConflictCall = vi.mocked(BatchConflictResolutionModal).mock.calls[vi.mocked(BatchConflictResolutionModal).mock.calls.length - 1];
-        const conflictedPaths = (lastConflictCall?.[2] as BatchPushConflict[] | undefined)?.map(conflict => conflict.path) ?? [];
+        const conflictedPaths = lastConflictCall?.[1]?.map(conflict => conflict.path) ?? [];
         expect(conflictedPaths).toContain(file);
 
         // Safety contract under 'skip': remote untouched, B keeps its local
