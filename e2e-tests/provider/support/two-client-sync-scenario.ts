@@ -51,7 +51,14 @@ export class TwoClient {
     readonly vault: FakeVault;
     readonly settings: GitLabFilesPushSettings;
     readonly manager: SyncManager;
-    private readonly statuses = new SyncStatusService();
+    /**
+     * The SAME `SyncStatusService` instance `manager` pushes/pulls through
+     * (mirroring `main.ts`'s `this.sync.status` wiring), not a separate one —
+     * a push's `SyncMetadataStore.update` calls `status.markSynced(path, sha)`
+     * on the manager's own instance, so a status map built from a different
+     * instance would never see a row flip to `synced` after its own push.
+     */
+    private readonly statuses: SyncStatusService;
     private readonly repository = new ChangeRepository();
     private readonly operations = new OperationState();
     private readonly refreshService: SyncStatusRefreshService;
@@ -65,6 +72,7 @@ export class TwoClient {
         this.settings = fixture.newSettings();
         const app = fakeApp(this.vault);
         this.manager = fixture.newManager(this.vault, this.settings);
+        this.statuses = this.manager.status;
         const gitignoreManager = new GitignoreManager(
             app, fixture.service, this.settings.branch, this.settings.rootPath, this.settings.vaultFolder, this.settings.ignorePatterns,
         );
