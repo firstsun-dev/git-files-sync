@@ -4,9 +4,13 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-08-30
-**Active Feature:** PR #129 (`claude/source-control-foundation`) — Multi-client Sync E2E Hardening Phase 1–3 complete in working tree (uncommitted, on top of prior refactor rounds).
-**Branch / PR:** `claude/source-control-foundation` / PR #129.
+**Last Updated:** 2026-08-31
+**Active Feature:** Issue #142 — move real-provider E2E from `e2e/` to `e2e-tests/provider/` and replace `E2E_RUNTIME_DIR` per-run generation with committed static runtime files. Working tree changes complete, uncommitted.
+**Branch / PR:** `refactor/e2e-tests-scanner-boundary`, branched off `claude/source-control-foundation` (PR #129, still open). Intended to retarget/rebase onto `main` once #129 merges — see #142 for the full plan.
+
+**Open risk, not yet resolved**: this PR's core premise — that a directory rename from `e2e/` to `e2e-tests/` makes committing `fetch`/`node:child_process` `.ts` files scanner-safe — is unverified against the actual Obsidian community-plugin scanner, and contradicts this repo's own prior audit (`docs/obsidian-scanner-audit.md`), which found the scanner flagged those exact APIs while committed under `e2e/` regardless of directory. Proceeded on explicit user instruction; flagged in `docs/testing/real-provider-e2e.md`'s "Known gaps" and `docs/obsidian-scanner-audit.md`'s Phase 2 section. **A real scanner rescan is required before trusting this.**
+
+Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation` — not superseded by this entry.
 
 ## Outstanding Items
 
@@ -16,6 +20,20 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 4. Next phases (not started): Phase 4 divergence matrix (add/add, rename/rename, reverse delete/modify, mixed batch), Phase 5 offline/restart, Phase 6 failure/recovery, Phase 7 stress (scheduled/manual only).
 
 ## Verification Evidence
+
+This session (#142 — e2e/ → e2e-tests/provider/ scanner-boundary move, static runtime files):
+
+- Moved `e2e/{config,shim,suites,support}` → `e2e-tests/provider/{config,shim,suites,support}` (git mv, history preserved); deleted `e2e/runtime-modules.d.ts` and `e2e/verifier-runtime-types.ts`.
+- Replaced `scripts/e2e-harness.sh`'s `generate_runtime()` (which wrote `obsidian-request-url.ts`/`window-timers.ts`/`git-verifier.ts` per-run into `$E2E_RUNTIME_DIR`) with committed static files at `e2e-tests/provider/runtime/{obsidian-request-url,window-timers}.ts` and `e2e-tests/provider/support/git-verifier.ts`. `GitVerifier` now reads its clone path from `process.env.E2E_WORKDIR` at call time instead of a shell-baked constructor default — verified directly against a throwaway local git repo (`listFiles`/`getFile`/`listCommitShas` all correct).
+- Side effect: removing `generate_runtime()` also removed the file's only `${var@Q}` bash-4-ism, which previously blocked `scripts/e2e-harness.sh provision` under macOS system bash 3.2 (see "Outstanding Items" #1 below — that specific blocker no longer applies, though a live run still needs Docker, which this sandbox doesn't have running).
+- Updated `scripts/run-e2e.sh`, `scripts/e2e-suites.txt`, `vitest.e2e.config.ts`, `tsconfig.json`, `eslint.config.mts`, `.github/workflows/ci.yml` (`e2e-relevant` filter: `e2e/**` → `e2e-tests/**`, added `scripts/e2e-suites.txt`/`vitest.e2e.config.ts`, added `src/logic/sync/**`/`src/logic/source-control/**` — these were exercised by the E2E suites but not previously watched by the path filter) for the new layout.
+- Extended `tests/ci-workflow.test.ts` with contract assertions for the new paths and for the absence of `E2E_RUNTIME_DIR`/`generate_runtime`/`@e2e-runtime`.
+- Manually replayed `scripts/run-e2e.sh`'s forward/reverse suite-manifest checks against the new paths (bash snippet, no Docker needed) — both pass.
+- `npx eslint .` — 0 errors, 1 pre-existing-shape warning (unused `_T` generic in the committed `AbstractInputSuggest<_T>` stand-in, matches obsidian's real generic shape).
+- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
+- `npx vitest run` — 68 files / 857 tests passed.
+- **Not verified in this environment**: an actual local Gitea E2E run (`npm run test:e2e -- --provider gitea`) — Docker is installed but its daemon isn't reachable/running in this sandbox. The suite-manifest and `GitVerifier` logic were validated by other means above, but the full provision→seed→vitest→cleanup path was not exercised end-to-end here.
+- Filed #143 (`test: reduce real-provider API pressure`) as a separate follow-up for CI retry/tiering — out of scope for this PR, not touched here.
 
 This session (Source Control error-handling fixes, code-review follow-up + small cleanups):
 

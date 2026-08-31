@@ -1,20 +1,19 @@
 import { vi } from 'vitest';
-import { SyncManager } from '../../src/logic/sync-manager';
-import type { BatchPushConflict, ConflictResolution, PushResults } from '../../src/logic/sync/types';
-import { SyncPlanModal, type SyncPlanDirection } from '../../src/ui/SyncPlanModal';
-import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
-import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
+import { SyncManager } from '../../../src/logic/sync-manager';
+import type { BatchPushConflict, ConflictResolution, PushResults } from '../../../src/logic/sync/types';
+import { SyncPlanModal, type SyncPlanDirection } from '../../../src/ui/SyncPlanModal';
+import { BatchConflictResolutionModal } from '../../../src/ui/BatchConflictResolutionModal';
+import { ObsidianSyncInteraction } from '../../../src/ui/ObsidianSyncInteraction';
 // `import type` deliberately: settings.ts re-exports the settings-tab UI
 // (GitLabSyncSettingTab -> FolderSuggest -> AbstractInputSuggest) which pulls
-// in far more of `obsidian` than this suite's generated shim provides. A
+// in far more of `obsidian` than this suite's runtime shim provides. A
 // type-only import is erased entirely, so none of that module ever loads.
-import type { GitLabFilesPushSettings } from '../../src/settings';
+import type { GitLabFilesPushSettings } from '../../../src/settings';
 import { TFile as ObsidianTFile } from 'obsidian';
-import { GitVerifier } from '@e2e-runtime/git-verifier';
+import { GitVerifier } from './git-verifier';
 import { FakeVault, fakeApp, type TFileCtor } from '../shim/fake-vault';
 import { currentProvider, contextFor } from '../config/env';
-import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
-import type { GitServiceInterface } from '../../src/services/git-service-interface';
+import type { GitServiceInterface } from '../../../src/services/git-service-interface';
 
 const TFile: TFileCtor = ObsidianTFile;
 
@@ -22,12 +21,13 @@ const TFile: TFileCtor = ObsidianTFile;
  * Reusable real-provider E2E fixture for SyncManager workflows. Owns the
  * once-per-suite wiring the old `e2e/suites/sync-manager.e2e.test.ts` kept in
  * its `beforeAll`: resolving the real production provider service + isolated
- * branch, loading the generated git-CLI verifier + TFile shim, and installing
+ * branch, loading the git-CLI verifier + TFile shim, and installing
  * plan-review/conflict modals that auto-confirm (so a push can proceed without
  * a human clicking through). Per-test conflict outcomes are steered through
  * {@link setConflictResolver}.
  *
- * Only the Obsidian filesystem boundary is faked (e2e/shim/fake-vault.ts);
+ * Only the Obsidian filesystem boundary is faked
+ * (e2e-tests/provider/shim/fake-vault.ts);
  * everything else — SyncManager, PushCoordinator, the provider service — is
  * the real production code path against a real Git server.
  */
@@ -36,8 +36,8 @@ export interface SyncManagerFixture {
     readonly service: GitServiceInterface;
     /** Isolated branch `scripts/e2e-harness.sh provision` created for this run. */
     readonly branch: string;
-    /** Independent git-CLI verifier (generated at runtime, never committed). */
-    readonly verifier: GitVerifierType;
+    /** Independent git-CLI verifier (e2e-tests/provider/support/git-verifier.ts). */
+    readonly verifier: GitVerifier;
     /** The exact TFile class the vitest-runtime `obsidian` alias resolves to. */
     readonly TFile: TFileCtor;
     /** Per-suite run id, so every test's remote paths are namespaced apart. */
@@ -62,7 +62,7 @@ export async function createSyncManagerFixture(): Promise<SyncManagerFixture> {
     const service = ctx.service;
     const branch = ctx.branch;
 
-    const verifier: GitVerifierType = new GitVerifier();
+    const verifier: GitVerifier = new GitVerifier();
 
     let conflictResolver: (conflict: BatchPushConflict) => ConflictResolution = () => 'skip';
 

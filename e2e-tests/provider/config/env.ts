@@ -8,10 +8,10 @@
  * GitServiceInterface implementation against whatever that step already
  * resolved, via the env vars it exports (see docs/testing/real-provider-e2e.md).
  */
-import { GitHubService } from '../../src/services/github-service';
-import { GitLabService } from '../../src/services/gitlab-service';
-import { GiteaService } from '../../src/services/gitea-service';
-import type { GitServiceInterface } from '../../src/services/git-service-interface';
+import { GitHubService } from '../../../src/services/github-service';
+import { GitLabService } from '../../../src/services/gitlab-service';
+import { GiteaService } from '../../../src/services/gitea-service';
+import type { GitServiceInterface } from '../../../src/services/git-service-interface';
 
 export const SUPPORTED_PROVIDERS = ['gitea', 'gitlab', 'github'] as const;
 export type E2EProvider = typeof SUPPORTED_PROVIDERS[number];

@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { GitVerifier } from '@e2e-runtime/git-verifier';
+import { GitVerifier } from '../support/git-verifier';
 import { gitlabContext } from '../config/env';
-import type { GitServiceInterface } from '../../src/services/git-service-interface';
-import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
+import type { GitServiceInterface } from '../../../src/services/git-service-interface';
 
 // Real GitLabService against a dedicated real GitLab sandbox project, on the
 // isolated branch `scripts/e2e-harness.sh provision` already created. Every
@@ -11,7 +10,7 @@ import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
 describe('GitLabService E2E', () => {
     let service: GitServiceInterface;
     let branch: string;
-    let verifier: GitVerifierType;
+    let verifier: GitVerifier;
     const runId = Math.random().toString(36).slice(2, 10);
     const path = (name: string) => `e2e-${runId}/${name}`;
 

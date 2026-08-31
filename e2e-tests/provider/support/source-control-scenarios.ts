@@ -1,22 +1,22 @@
 import { expect } from 'vitest';
 import type { TFile } from 'obsidian';
-import type { GitServiceInterface } from '../../src/services/git-service-interface';
-import type { SyncManager } from '../../src/logic/sync-manager';
-import type { BatchPushConflict, ConflictResolution, PushResults } from '../../src/logic/sync/types';
-import type { GitLabFilesPushSettings } from '../../src/settings';
+import type { GitServiceInterface } from '../../../src/services/git-service-interface';
+import type { SyncManager } from '../../../src/logic/sync-manager';
+import type { BatchPushConflict, ConflictResolution, PushResults } from '../../../src/logic/sync/types';
+import type { GitLabFilesPushSettings } from '../../../src/settings';
 import type { FakeVault, TFileLike } from '../shim/fake-vault';
 import type { SyncManagerFixture } from './sync-manager-fixture';
-import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
-import { ChangeRepository } from '../../src/logic/source-control/ChangeRepository';
-import { OperationState } from '../../src/logic/source-control/OperationState';
-import { SyncSelectionStore } from '../../src/logic/source-control/SyncSelectionStore';
-import { SourceControlActionService } from '../../src/logic/source-control/SourceControlActionService';
-import { BoundarySyncWorkspace } from '../../src/logic/sync/SyncWorkspace';
-import { toChangeId, type SyncChange } from '../../src/logic/source-control/types';
-import type { SyncStatusRefreshResult } from '../../src/logic/sync/SyncStatusRefreshService';
-import type { RemoteDeleteResult } from '../../src/logic/sync/RemoteDeleteExecutor';
-import type { FileDiff } from '../../src/logic/sync/types';
-import type { GitTreeEntry } from '../../src/services/git-service-interface';
+import type { GitVerifier } from './git-verifier';
+import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
+import { OperationState } from '../../../src/logic/source-control/OperationState';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
+import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
+import { BoundarySyncWorkspace } from '../../../src/logic/sync/SyncWorkspace';
+import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
+import type { SyncStatusRefreshResult } from '../../../src/logic/sync/SyncStatusRefreshService';
+import type { RemoteDeleteResult } from '../../../src/logic/sync/RemoteDeleteExecutor';
+import type { FileDiff } from '../../../src/logic/sync/types';
+import type { GitTreeEntry } from '../../../src/services/git-service-interface';
 
 /**
  * High-level scenario wrapper around a {@link SyncManagerFixture}: owns one
@@ -35,7 +35,7 @@ export class SourceControlScenario {
     readonly settings: GitLabFilesPushSettings;
     readonly manager: SyncManager;
     private readonly service: GitServiceInterface;
-    private readonly verifier: GitVerifierType;
+    private readonly verifier: GitVerifier;
     private readonly branch: string;
     /**
      * Memoizes remote reads (each of which is a real `git fetch` round trip)

@@ -1,18 +1,17 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { GitVerifier } from '@e2e-runtime/git-verifier';
+import { GitVerifier } from '../support/git-verifier';
 import { githubContext } from '../config/env';
-import type { GitServiceInterface } from '../../src/services/git-service-interface';
-import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
+import type { GitServiceInterface } from '../../../src/services/git-service-interface';
 
 // Real GitHubService against a real GitHub sandbox repository, on the
 // isolated branch `scripts/e2e-harness.sh provision` already created (see
 // docs/testing/real-provider-e2e.md). Every remote assertion below goes
-// through `verifier` (plain git CLI against an independent clone, generated
-// by the harness) rather than asking `service` to read back its own writes.
+// through `verifier` (plain git CLI against an independent clone the harness
+// checked out) rather than asking `service` to read back its own writes.
 describe('GitHubService E2E', () => {
     let service: GitServiceInterface;
     let branch: string;
-    let verifier: GitVerifierType;
+    let verifier: GitVerifier;
     const runId = Math.random().toString(36).slice(2, 10);
     const path = (name: string) => `e2e-${runId}/${name}`;
 

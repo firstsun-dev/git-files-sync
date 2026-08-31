@@ -1,5 +1,5 @@
 import { expect } from 'vitest';
-import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
+import type { GitVerifier } from './git-verifier';
 import type { TwoClient } from './two-client-sync-scenario';
 
 /**
@@ -14,7 +14,7 @@ import type { TwoClient } from './two-client-sync-scenario';
 export interface ConvergenceContext {
     clients: [TwoClient, TwoClient];
     branch: string;
-    verifier: GitVerifierType;
+    verifier: GitVerifier;
     /** Only paths under this run's namespace. */
     runPrefix: string;
 }
@@ -141,7 +141,7 @@ export async function expectTwoClientConvergence(context: ConvergenceContext): P
 /** Convenience: builds the assertion context from a scenario + run prefix. */
 export function convergenceContext(
     clients: [TwoClient, TwoClient],
-    verifier: GitVerifierType,
+    verifier: GitVerifier,
     branch: string,
     runPrefix: string,
 ): ConvergenceContext {

@@ -1,20 +1,19 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { SyncManager, BatchPushConflict, ConflictResolution } from '../../src/logic/sync-manager';
-import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
-import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
-import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
+import { SyncManager, BatchPushConflict, ConflictResolution } from '../../../src/logic/sync-manager';
+import { SyncPlanModal, SyncPlanDirection } from '../../../src/ui/SyncPlanModal';
+import { BatchConflictResolutionModal } from '../../../src/ui/BatchConflictResolutionModal';
+import { ObsidianSyncInteraction } from '../../../src/ui/ObsidianSyncInteraction';
 import { describePushResult } from '../support/push-result-diagnostic';
 // `import type` deliberately, not a value import: src/settings.ts also
 // exports settings-tab UI (GitLabSyncSettingTab -> FolderSuggest ->
 // AbstractInputSuggest etc.) which pulls in far more of `obsidian` than this
-// suite's minimal generated shim provides. A type-only import is erased
+// suite's minimal runtime shim provides. A type-only import is erased
 // entirely, so none of that module ever loads.
-import type { GitLabFilesPushSettings } from '../../src/settings';
+import type { GitLabFilesPushSettings } from '../../../src/settings';
 import { TFile as ObsidianTFile } from 'obsidian';
-import { GitVerifier } from '@e2e-runtime/git-verifier';
+import { GitVerifier } from '../support/git-verifier';
 import { FakeVault, fakeApp, type TFileLike, type TFileCtor } from '../shim/fake-vault';
 import { currentProvider, timeouts, contextFor } from '../config/env';
-import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
 
 // Every push/pull SyncManager does shows a plan-review modal first, and any
 // push-side content conflict now goes through BatchConflictResolutionModal
@@ -23,9 +22,9 @@ import type { GitVerifier as GitVerifierType } from '../verifier-runtime-types';
 // for unit tests. Pull-side conflicts still go through SyncConflictModal,
 // left as the bare automock default (does nothing, matching production:
 // pullFile returns before the conflict modal resolves).
-vi.mock('../../src/ui/SyncPlanModal');
-vi.mock('../../src/ui/SyncConflictModal');
-vi.mock('../../src/ui/BatchConflictResolutionModal');
+vi.mock('../../../src/ui/SyncPlanModal');
+vi.mock('../../../src/ui/SyncConflictModal');
+vi.mock('../../../src/ui/BatchConflictResolutionModal');
 
 function makeSettings(branch: string): GitLabFilesPushSettings {
     return {
@@ -48,17 +47,17 @@ function makeSettings(branch: string): GitLabFilesPushSettings {
 
 /**
  * Real SyncManager + real production provider service (see
- * e2e/config/env.ts), driven against whichever provider `E2E_PROVIDER`
+ * e2e-tests/provider/config/env.ts), driven against whichever provider `E2E_PROVIDER`
  * selects -- the same branch/verifier the contract suites use, so this suite
  * adds no provider-specific logic of its own. Only the Obsidian filesystem
- * boundary is faked (e2e/shim/fake-vault.ts); everything else is the real
+ * boundary is faked (e2e-tests/provider/shim/fake-vault.ts); everything else is the real
  * code path.
  */
 describe('SyncManager E2E', () => {
     const provider = currentProvider();
     let service: ReturnType<typeof contextFor>['service'];
     let branch: string;
-    let verifier: GitVerifierType;
+    let verifier: GitVerifier;
     let TFile: TFileCtor;
     let conflictResolver: (conflict: BatchPushConflict) => ConflictResolution;
     const runId = Math.random().toString(36).slice(2, 10);

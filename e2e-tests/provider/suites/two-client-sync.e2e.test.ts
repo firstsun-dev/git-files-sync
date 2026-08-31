@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
+import { BatchConflictResolutionModal } from '../../../src/ui/BatchConflictResolutionModal';
 import { createSyncManagerFixture, type SyncManagerFixture } from '../support/sync-manager-fixture';
 import { TwoClientSyncScenario } from '../support/two-client-sync-scenario';
 import {
@@ -9,7 +9,7 @@ import {
     expectNoSilentDataLoss,
     type ConvergenceContext,
 } from '../support/convergence-assertions';
-import type { BatchPushConflict, ConflictResolution } from '../../src/logic/sync/types';
+import type { BatchPushConflict, ConflictResolution } from '../../../src/logic/sync/types';
 import { timeouts } from '../config/env';
 
 // Same modal auto-confirm pattern as the other e2e suites: plan-review and
@@ -17,9 +17,9 @@ import { timeouts } from '../config/env';
 // fixture.setConflictResolver. Pull-side SyncConflictModal stays the bare
 // automock (does nothing — matching production: pullFile returns before the
 // modal resolves).
-vi.mock('../../src/ui/SyncPlanModal');
-vi.mock('../../src/ui/SyncConflictModal');
-vi.mock('../../src/ui/BatchConflictResolutionModal');
+vi.mock('../../../src/ui/SyncPlanModal');
+vi.mock('../../../src/ui/SyncConflictModal');
+vi.mock('../../../src/ui/BatchConflictResolutionModal');
 
 /**
  * Multi-client Sync E2E — two fully independent clients (A/B: separate

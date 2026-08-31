@@ -28,7 +28,7 @@
 		"src/**/*.ts",
 		"tests/**/*.ts",
 		"vitest.config.ts",
-		"e2e/**/*.ts",
+		"e2e-tests/**/*.ts",
 		"vitest.e2e.config.ts"
 	]
 }
