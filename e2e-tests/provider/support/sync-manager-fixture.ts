@@ -56,9 +56,29 @@ export interface SyncManagerFixture {
     conflictResolver(): (conflict: BatchPushConflict) => ConflictResolution;
 }
 
-export async function createSyncManagerFixture(): Promise<SyncManagerFixture> {
+export interface SyncManagerFixtureOptions {
+    /**
+     * Scopes both the service's remote-tree listing (`rootPath`) and local
+     * vault discovery (`vaultFolder`) to this fixture's own `e2e-tc-<runId>`
+     * namespace, via the real production rootPath/vaultFolder model. Needed
+     * by multi-client suites where several independent fixtures/clients share
+     * one branch and must never see each other's remote files — unscoped
+     * (the default) is fine for single-fixture suites, where extra remote
+     * entries from other suites are harmless (they never match a local file).
+     */
+    readonly scoped?: boolean;
+}
+
+export async function createSyncManagerFixture(options: SyncManagerFixtureOptions = {}): Promise<SyncManagerFixture> {
     const provider = currentProvider();
-    const ctx = contextFor(provider);
+
+    // Test-only namespace disambiguator (avoids path collisions between
+    // concurrent e2e runs against the same shared remote) — no security
+    // context, so a non-cryptographic PRNG is intentional here.
+    const runId = Math.random().toString(36).slice(2, 10); // NOSONAR typescript:S2245
+    const scopePath = options.scoped ? `e2e-tc-${runId}` : '';
+
+    const ctx = contextFor(provider, scopePath);
     const service = ctx.service;
     const branch = ctx.branch;
 
@@ -90,13 +110,8 @@ export async function createSyncManagerFixture(): Promise<SyncManagerFixture> {
         return this;
     });
 
-    // Test-only namespace disambiguator (avoids path collisions between
-    // concurrent e2e runs against the same shared remote) — no security
-    // context, so a non-cryptographic PRNG is intentional here.
-    const runId = Math.random().toString(36).slice(2, 10); // NOSONAR typescript:S2245
-
     function path(name: string): string {
-        return `e2e-sc-${runId}/${name}`;
+        return scopePath ? `${scopePath}/${name}` : `e2e-sc-${runId}/${name}`;
     }
 
     function makeSettings(branchOverride?: string): GitLabFilesPushSettings {
@@ -107,8 +122,8 @@ export async function createSyncManagerFixture(): Promise<SyncManagerFixture> {
             giteaToken: '', giteaBaseUrl: '', giteaOwner: '', giteaRepo: '',
             branch: branchOverride ?? branch,
             syncMetadata: {},
-            rootPath: '',
-            vaultFolder: '',
+            rootPath: scopePath,
+            vaultFolder: scopePath,
             symlinkHandling: 'skip',
             ignorePatterns: '',
             lastSeenVersion: '',
