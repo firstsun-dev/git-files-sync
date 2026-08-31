@@ -11,6 +11,7 @@
 3. Added fetch-once `GitVerifier.snapshot()` / `GitSnapshot`; `SourceControlScenario` invalidates and recreates a shared snapshot after remote mutations, and convergence assertions use one snapshot for all files/tree reads.
 4. GitHub batch/rename/delete checks poll only branch-head movement, then verify one snapshot. GitLab and Gitea batch tests also assert exactly one new commit.
 5. Added `e2e-tests/provider/suites/git-verifier.e2e.test.ts`, a local-git regression test proving all snapshot reads run after one fetch.
+6. Registered that suite in `scripts/e2e-suites.txt`; the first CI run rejected it as unregistered before executing provider tests.
 
 ## Verification
 

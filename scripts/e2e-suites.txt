@@ -6,6 +6,7 @@
 # provider-specific suites (github/gitlab/gitea); every other shared suite
 # must be listed explicitly, or the run fails.
 e2e-tests/provider/suites/${provider}.e2e.test.ts
+e2e-tests/provider/suites/git-verifier.e2e.test.ts
 e2e-tests/provider/suites/sync-manager.e2e.test.ts
 e2e-tests/provider/suites/source-control-flows.e2e.test.ts
 e2e-tests/provider/suites/two-client-sync.e2e.test.ts

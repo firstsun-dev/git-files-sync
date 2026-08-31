@@ -25,6 +25,7 @@ This session (Issue #143 — reduce redundant real-provider E2E round trips):
 - Added `baselineBatch()` to the single- and two-client scenarios. Multi-file flows now establish one baseline commit; P0-2 uses the two-client batch helper and mixed-100 seeds all 70 pre-existing files in one push.
 - Added `GitVerifier.snapshot()` / `GitSnapshot`: a captured `origin/<branch>` state supports file, missing-file, tree, commit, blob-mode, and revision assertions without repeated fetches. Scenario mutations invalidate their shared snapshot; convergence now captures once for all paths.
 - GitHub batch and rename/delete assertions poll only branch-head movement, then assert from a single snapshot. GitLab/Gitea batch tests now lock the one-commit contract too.
+- Registered the local git-only verifier suite in `scripts/e2e-suites.txt`; this fixes the provider-matrix manifest guard that rejected the initial commit before any provider test ran.
 - `npx eslint .` — 0 errors, 0 warnings.
 - `npx vitest run` — 68 files / 862 tests passed.
 - `npx vitest -c vitest.e2e.config.ts run e2e-tests/provider/suites/git-verifier.e2e.test.ts` — 1 file / 1 test passed (local git-only fetch-once regression test).
