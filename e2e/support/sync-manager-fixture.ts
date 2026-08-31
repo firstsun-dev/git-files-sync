@@ -90,7 +90,10 @@ export async function createSyncManagerFixture(): Promise<SyncManagerFixture> {
         return this;
     });
 
-    const runId = Math.random().toString(36).slice(2, 10);
+    // Test-only namespace disambiguator (avoids path collisions between
+    // concurrent e2e runs against the same shared remote) — no security
+    // context, so a non-cryptographic PRNG is intentional here.
+    const runId = Math.random().toString(36).slice(2, 10); // NOSONAR typescript:S2245
 
     function path(name: string): string {
         return `e2e-sc-${runId}/${name}`;

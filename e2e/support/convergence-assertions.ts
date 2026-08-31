@@ -25,7 +25,7 @@ export async function trackedPaths(context: ConvergenceContext): Promise<string[
     for (const client of context.clients) {
         for (const path of client.vault.paths()) paths.add(path);
     }
-    return [...paths].sort();
+    return [...paths].sort((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -55,7 +55,7 @@ export async function expectConverged(context: ConvergenceContext): Promise<void
     // rename source that left a stale blob behind).
     const remoteFiles = (await context.verifier.listFiles(context.branch))
         .filter(path => path.startsWith(context.runPrefix))
-        .sort();
+        .sort((a, b) => a.localeCompare(b));
     expect(remoteFiles).toEqual(paths.filter(path => clientA.exists(path)));
 }
 
