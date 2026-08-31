@@ -12,9 +12,10 @@ export interface ChangeItemCallbacks {
     onOpenDiff: (item: SourceControlItem) => void;
     /**
      * Pulls a single change into the local vault. Invoked for rows where
-     * {@link canDownload} is true — `remote-only` (add it locally) and
-     * `local-deleted` (restore it locally) — the Download button renders
-     * only for those kinds, so the callback never has to re-classify.
+     * {@link canDownload} is true — `remote-only` (add it locally),
+     * `remote-modified` (overwrite the local copy), and `local-deleted`
+     * (restore it locally) — the Download button renders only for those
+     * kinds, so the callback never has to re-classify.
      */
     onDownload?: (item: SourceControlItem) => void;
     /** Looks up a cached diff stat for a row, if one has been computed. */
@@ -88,10 +89,11 @@ export function renderChangeItem(
     renderDiffStat(row, callbacks.getDiffStat?.(item.id));
 
     // A change with something to pull from remote (remote-only: add it
-    // locally; local-deleted: restore it locally) carries a direct Download
-    // action so the user can pull it without first adding it to the Sync
-    // Queue. The button stops propagation so clicking it doesn't also
-    // trigger the row's open-diff/open-remote behavior.
+    // locally; remote-modified: overwrite the local copy; local-deleted:
+    // restore it locally) carries a direct Download action so the user can
+    // pull it without first adding it to the Sync Queue. The button stops
+    // propagation so clicking it doesn't also trigger the row's
+    // open-diff/open-remote behavior.
     if (canDownload(item.kind) && callbacks.onDownload) {
         renderDownloadAction(row, item, callbacks.onDownload);
     }

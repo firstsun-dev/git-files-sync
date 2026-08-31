@@ -8,6 +8,7 @@ describe('toSyncChanges', () => {
         const statuses: FileStatus[] = [
             { path: 'synced.md', status: 'synced' },
             { path: 'modified.md', status: 'modified' },
+            { path: 'remote-modified.md', status: 'remote-modified' },
             { path: 'unsynced.md', status: 'unsynced' },
             { path: 'remote.md', status: 'remote-only' },
             { path: 'gone.md', status: 'local-deleted' },
@@ -17,6 +18,7 @@ describe('toSyncChanges', () => {
         expect(toSyncChanges(statuses)).toEqual([
             { id: toChangeId('synced.md'), path: 'synced.md', previousPath: undefined, kind: 'synced' },
             { id: toChangeId('modified.md'), path: 'modified.md', previousPath: undefined, kind: 'local-modified' },
+            { id: toChangeId('remote-modified.md'), path: 'remote-modified.md', previousPath: undefined, kind: 'remote-modified' },
             { id: toChangeId('unsynced.md'), path: 'unsynced.md', previousPath: undefined, kind: 'local-only' },
             { id: toChangeId('remote.md'), path: 'remote.md', previousPath: undefined, kind: 'remote-only' },
             { id: toChangeId('gone.md'), path: 'gone.md', previousPath: undefined, kind: 'local-deleted' },

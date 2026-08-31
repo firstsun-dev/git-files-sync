@@ -12,7 +12,7 @@ import type { TFile } from 'obsidian';
  * "Deleted locally" and the other as "Remote available" instead of conflating
  * the two under a single `remote-only` state.
  */
-export type SyncStatus = 'synced' | 'modified' | 'unsynced' | 'remote-only' | 'local-deleted' | 'moved';
+export type SyncStatus = 'synced' | 'modified' | 'remote-modified' | 'unsynced' | 'remote-only' | 'local-deleted' | 'moved';
 
 /** The complete status record presented by a sync-status view. */
 export interface FileStatus {
@@ -35,12 +35,18 @@ export interface FileStatus {
  * file was previously synced locally (sync metadata exists for the path) and
  * has since been removed, so it classifies as `local-deleted` rather than
  * `remote-only`.
+ *
+ * When both sides exist and differ, `localChanged`/`remoteChanged` (each
+ * relative to the last-synced baseline sha) let `classify` tell "only the
+ * remote side moved" apart from "the local side moved" or "both did" —
+ * without them (no baseline on record) the two-sided diff falls back to the
+ * direction-blind `modified`.
  */
 export type SyncStatusFacts =
     | { movedFrom: string }
     | { localExists: true; remoteExists: false }
     | { localExists: false; remoteExists: true; wasTracked?: boolean }
-    | { localExists: true; remoteExists: true; contentsEqual: boolean };
+    | { localExists: true; remoteExists: true; contentsEqual: boolean; localChanged?: boolean; remoteChanged?: boolean };
 
 /** Resolves sync facts into the one status the UI may present for a file. */
 export class SyncStatusService {
@@ -51,7 +57,9 @@ export class SyncStatusService {
         if ('movedFrom' in facts) return 'moved';
         if (facts.localExists && !facts.remoteExists) return 'unsynced';
         if (!facts.localExists && facts.remoteExists) return facts.wasTracked ? 'local-deleted' : 'remote-only';
-        return facts.contentsEqual ? 'synced' : 'modified';
+        if (facts.contentsEqual) return 'synced';
+        if (facts.localChanged === false && facts.remoteChanged === true) return 'remote-modified';
+        return 'modified';
     }
 
     get size(): number { return this.statuses.size; }

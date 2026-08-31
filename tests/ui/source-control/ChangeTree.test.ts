@@ -67,12 +67,15 @@ describe('renderChangeTree', () => {
         expect(callbacks.onDownload).toHaveBeenCalledWith(items[0]);
     });
 
-    it('does not render a Download button on a remote-modified row', () => {
+    it('renders an inline Download button on a remote-modified row when onDownload is wired', () => {
         const items = [item({ id: toChangeId('c-1'), path: 'both.md', kind: 'remote-modified' })];
         callbacks.onDownload = vi.fn();
         renderChangeTree(container, items, new Set(), callbacks);
 
-        expect(container.querySelector('.scv-change-download')).toBeNull();
+        const btn = container.querySelector('.scv-change-download') as HTMLButtonElement;
+        expect(btn).toBeTruthy();
+        btn.click();
+        expect(callbacks.onDownload).toHaveBeenCalledWith(items[0]);
     });
 
     it('does not render an inline status subtitle (the kind label lives on the badge tooltip)', () => {

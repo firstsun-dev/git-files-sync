@@ -11,7 +11,10 @@ describe('SyncStatusService', () => {
         ['a previously-tracked file removed locally', { localExists: false, remoteExists: true, wasTracked: true }, 'local-deleted'],
         ['a never-tracked remote file with wasTracked false', { localExists: false, remoteExists: true, wasTracked: false }, 'remote-only'],
         ['matching local and remote content', { localExists: true, remoteExists: true, contentsEqual: true }, 'synced'],
-        ['different local and remote content', { localExists: true, remoteExists: true, contentsEqual: false }, 'modified'],
+        ['different content with no baseline on record', { localExists: true, remoteExists: true, contentsEqual: false }, 'modified'],
+        ['only the local side changed since baseline', { localExists: true, remoteExists: true, contentsEqual: false, localChanged: true, remoteChanged: false }, 'modified'],
+        ['only the remote side changed since baseline', { localExists: true, remoteExists: true, contentsEqual: false, localChanged: false, remoteChanged: true }, 'remote-modified'],
+        ['both sides changed since baseline', { localExists: true, remoteExists: true, contentsEqual: false, localChanged: true, remoteChanged: true }, 'modified'],
     ])('classifies %s as %s', (_description, facts, expected) => {
         expect(service.classify(facts)).toBe(expected);
     });
