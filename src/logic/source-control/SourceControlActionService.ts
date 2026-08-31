@@ -114,13 +114,41 @@ export class SourceControlActionService {
             else pushTargets.push(target);
         }
 
+        let plan: { planned: PlannedPushBatch; confirmed: boolean } | null;
+        try {
+            plan = await this.planSync(pushTargets, pullTargets, deleteTargets);
+        } catch {
+            this.failAll(targets);
+            this.syncResultNotifier.notify({ ...SourceControlActionService.emptyExecutionResult(), failed: targets.length });
+            return;
+        }
+        if (!plan || !plan.confirmed) return;
+        const { planned } = plan;
+
+        this.startAll(targets);
+        const summary = SourceControlActionService.emptyExecutionResult();
+        if (planned.pushes.length > 0 || planned.moves.length > 0 || planned.keepRemote.length > 0 || planned.keepLocal.length > 0 || deleteTargets.length > 0) {
+            await this.commitRemoteBucket(planned, pushTargets, deleteTargets, summary);
+        }
+        if (pullTargets.length > 0) {
+            await this.applyPullBucket(pullTargets, summary);
+        }
+        this.syncResultNotifier.notify(summary);
+    }
+
+    /** Builds and confirms the merged Sync Plan; returns null if there's nothing to do or the user cancelled. */
+    private async planSync(
+        pushTargets: readonly SyncChange[],
+        pullTargets: readonly SyncChange[],
+        deleteTargets: readonly SyncChange[],
+    ): Promise<{ planned: PlannedPushBatch; confirmed: boolean } | null> {
         const planned = pushTargets.length > 0
             ? await this.workspace.planPush(pushTargets.map(target => target.path))
             : SourceControlActionService.emptyPlannedBatch();
         // A cancelled batch-conflict resolution is a separate interactive
         // step that happens before the merged plan is even shown; honor it
         // the same way pushFiles() does, without touching anything.
-        if (planned.cancelled) return;
+        if (planned.cancelled) return null;
 
         const pullPlan = pullTargets.length > 0
             ? await this.workspace.planPull(pullTargets.map(target => target.path))
@@ -136,49 +164,59 @@ export class SourceControlActionService {
             acceptedRemote: planned.reviewPlan.acceptedRemote,
             skippedConflicts: planned.reviewPlan.skippedConflicts,
         };
+        if (isSyncPlanEmpty(mergedPlan)) return null;
 
-        if (isSyncPlanEmpty(mergedPlan)) return;
-        if (!await this.workspace.confirmPlan(mergedPlan, 'sync')) return;
+        const confirmed = await this.workspace.confirmPlan(mergedPlan, 'sync');
+        return { planned, confirmed };
+    }
 
-        this.startAll(targets);
-        const summary = SourceControlActionService.emptyExecutionResult();
+    /** Commits the merged push/move/delete-remote bucket; a failure here only fails that bucket, not any already-applied pull. */
+    private async commitRemoteBucket(
+        planned: PlannedPushBatch,
+        pushTargets: readonly SyncChange[],
+        deleteTargets: readonly SyncChange[],
+        summary: SyncExecutionResult,
+    ): Promise<void> {
         try {
-            if (planned.pushes.length > 0 || planned.moves.length > 0 || planned.keepRemote.length > 0 || planned.keepLocal.length > 0 || deleteTargets.length > 0) {
-                const deleteEntries: DeleteQueueEntry[] = deleteTargets.map(target => ({
-                    path: target.path,
-                    name: basename(target.path),
-                    repoPath: this.workspace.toRepoPath(target.path),
-                }));
-                const results: PushResults = {
-                    success: planned.immediate.success,
-                    added: 0,
-                    updated: planned.immediate.updated,
-                    failed: planned.immediate.failed,
-                    conflicts: 0,
-                    resolvedConflicts: 0,
-                    skippedConflicts: 0,
-                    errors: [...planned.immediate.errors],
-                    syncedPaths: [...planned.immediate.syncedPaths],
-                };
-                await this.workspace.commitResolvedBatch(planned.pushes, planned.moves, deleteEntries, planned.keepRemote, planned.keepLocal, results);
-                const failed = new Set(results.errors.map(error => error.file));
-                this.finishAll([...pushTargets, ...deleteTargets], path => (failed.has(path) ? 'failed' : 'success'));
-                this.addRemoteResult(summary, planned, deleteEntries, results);
-            }
-            if (pullTargets.length > 0) {
-                const pullResults = await this.workspace.applyPull(pullTargets.map(target => target.path), { notify: false });
-                const failed = new Set(pullResults.errors.map(error => error.file));
-                this.finishAll(pullTargets, path => (failed.has(path) ? 'failed' : 'success'));
-                summary.downloaded += pullResults.added + pullResults.updated;
-                summary.failed += pullResults.failed;
-                summary.conflicts += pullResults.conflicts;
-                summary.errors.push(...pullResults.errors);
-            }
-            this.syncResultNotifier.notify(summary);
+            const deleteEntries: DeleteQueueEntry[] = deleteTargets.map(target => ({
+                path: target.path,
+                name: basename(target.path),
+                repoPath: this.workspace.toRepoPath(target.path),
+            }));
+            const results: PushResults = {
+                success: planned.immediate.success,
+                added: 0,
+                updated: planned.immediate.updated,
+                failed: planned.immediate.failed,
+                conflicts: 0,
+                resolvedConflicts: 0,
+                skippedConflicts: 0,
+                errors: [...planned.immediate.errors],
+                syncedPaths: [...planned.immediate.syncedPaths],
+            };
+            await this.workspace.commitResolvedBatch(planned.pushes, planned.moves, deleteEntries, planned.keepRemote, planned.keepLocal, results);
+            const failed = new Set(results.errors.map(error => error.file));
+            this.finishAll([...pushTargets, ...deleteTargets], path => (failed.has(path) ? 'failed' : 'success'));
+            this.addRemoteResult(summary, planned, deleteEntries, results);
         } catch {
-            this.failAll(targets);
-            summary.failed = Math.max(summary.failed, targets.length);
-            this.syncResultNotifier.notify(summary);
+            this.failAll([...pushTargets, ...deleteTargets]);
+            summary.failed += pushTargets.length + deleteTargets.length;
+        }
+    }
+
+    /** Applies the zero-commit pull bucket; a failure here only fails the pull targets, not any already-committed remote bucket. */
+    private async applyPullBucket(pullTargets: readonly SyncChange[], summary: SyncExecutionResult): Promise<void> {
+        try {
+            const pullResults = await this.workspace.applyPull(pullTargets.map(target => target.path), { notify: false });
+            const failed = new Set(pullResults.errors.map(error => error.file));
+            this.finishAll(pullTargets, path => (failed.has(path) ? 'failed' : 'success'));
+            summary.downloaded += pullResults.added + pullResults.updated;
+            summary.failed += pullResults.failed;
+            summary.conflicts += pullResults.conflicts;
+            summary.errors.push(...pullResults.errors);
+        } catch {
+            this.failAll(pullTargets);
+            summary.failed += pullTargets.length;
         }
     }
 
@@ -252,13 +290,15 @@ export class SourceControlActionService {
         this.operations.start(changeId);
         try {
             if (resolution === 'local') {
-                await this.workspace.push([change.path]);
+                const results = await this.workspace.push([change.path]);
+                if (results.errors.length > 0) throw new Error(results.errors.map(error => error.error).join('; '));
+                this.operations.succeed(changeId);
                 this.syncResultNotifier.notify({ ...SourceControlActionService.emptyExecutionResult(), updated: 1 });
             } else {
                 await this.workspace.acceptRemoteConflict(change.path);
+                this.operations.succeed(changeId);
                 this.syncResultNotifier.notify({ ...SourceControlActionService.emptyExecutionResult(), acceptedRemote: 1 });
             }
-            this.operations.succeed(changeId);
         } catch {
             this.operations.fail(changeId);
             this.syncResultNotifier.notify({ ...SourceControlActionService.emptyExecutionResult(), failed: 1 });

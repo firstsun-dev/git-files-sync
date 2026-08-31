@@ -94,6 +94,7 @@ export class DiffStatProvider<TId extends string, TItem extends DiffStatItem<TId
      */
     private physicalInFlight = 0;
     private nextRequestToken = 0;
+    private disposed = false;
     /** Bumped by `clear()`; any in-flight request carrying an older value is stale. */
     private globalGeneration = 0;
     /** Bumped per row by `invalidate()`; an in-flight request for that row carrying an older value is stale. */
@@ -124,6 +125,20 @@ export class DiffStatProvider<TId extends string, TItem extends DiffStatItem<TId
     }
 
     /**
+     * Tears the provider down permanently (its owning view/modal closed):
+     * empties the cache AND the background queue, and bumps the global
+     * generation so every in-flight request's result is denied a cache
+     * write. Nothing more is pumped — queued work simply never starts, and
+     * abandonend physical calls release their slots without re-populating
+     * anything. Unlike {@link clear}, the provider is not expected to be
+     * reused afterwards.
+     */
+    dispose(): void {
+        this.clear();
+        this.disposed = true;
+    }
+
+    /**
      * Empties the cache so all rows reload after a refresh or sync. Bumps
      * the global generation so results from every in-flight request are
      * rejected — none of them may repopulate the emptied cache. Queued and
@@ -135,6 +150,11 @@ export class DiffStatProvider<TId extends string, TItem extends DiffStatItem<TId
         this.cache.clear();
         this.queued.clear();
         this.active.clear();
+        // Per-row generations are superseded by the global bump above (any
+        // in-flight request is already stale via `isStale`'s globalGeneration
+        // check), so dropping them here just reclaims the memory instead of
+        // growing this map forever across refreshes.
+        this.generations.clear();
         // `physicalInFlight` is deliberately NOT zeroed: the abandoned calls
         // still occupy real loader/HTTP capacity until they settle.
     }
@@ -166,7 +186,7 @@ export class DiffStatProvider<TId extends string, TItem extends DiffStatItem<TId
      * the next pass.
      */
     loadVisible(items: readonly TItem[]): void {
-        if (!this.loadDiffStat) return;
+        if (!this.loadDiffStat || this.disposed) return;
         for (const item of items) {
             if (this.cache.has(item.id) || this.active.has(item.id) || this.queued.has(item.id)) continue;
             this.queued.set(item.id, item);
@@ -184,7 +204,7 @@ export class DiffStatProvider<TId extends string, TItem extends DiffStatItem<TId
      * row simply stays retryable.
      */
     async lazyLoad(item: TItem): Promise<void> {
-        if (!this.loadDiffStat || this.cache.has(item.id) || this.active.has(item.id)) return;
+        if (!this.loadDiffStat || this.disposed || this.cache.has(item.id) || this.active.has(item.id)) return;
         const request: ActiveDiffStatRequest = {
             token: ++this.nextRequestToken,
             globalGeneration: this.globalGeneration,
@@ -205,6 +225,7 @@ export class DiffStatProvider<TId extends string, TItem extends DiffStatItem<TId
     }
 
     private pump(): void {
+        if (this.disposed) return;
         while (this.physicalInFlight < DiffStatProvider.MAX_CONCURRENT && this.queued.size > 0) {
             const item = this.takeNext();
             if (!item) break;
@@ -272,6 +293,7 @@ export class DiffStatProvider<TId extends string, TItem extends DiffStatItem<TId
 
     /** Commits a still-fresh load result to the cache. */
     private commit(id: TId, result: DiffStatLoadResult): void {
+        if (this.disposed) return;
         if (result.status === 'ready') {
             this.cache.set(id, { state: 'ready', stat: result.stat });
             this.settleOnce();

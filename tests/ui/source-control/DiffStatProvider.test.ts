@@ -169,6 +169,20 @@ describe('DiffStatProvider', () => {
         expect(loadDiffStat).toHaveBeenCalledTimes(2);
     });
 
+    it('clear() reclaims the per-row generation counters instead of accumulating them forever', async () => {
+        const loadDiffStat = vi.fn().mockResolvedValue(ready({ additions: 1, deletions: 0 }));
+        const provider = new DiffStatProvider(loadDiffStat, vi.fn());
+        const generations = (provider as unknown as { generations: Map<unknown, number> }).generations;
+
+        provider.invalidate(toChangeId('c-1'));
+        provider.invalidate(toChangeId('c-2'));
+        expect(generations.size).toBe(2);
+
+        provider.clear();
+
+        expect(generations.size).toBe(0);
+    });
+
     it('lazyLoad loads a single uncached item outside the queue and caches it', async () => {
         const stat: ChangeStat = { additions: 1, deletions: 4 };
         const loadDiffStat = vi.fn().mockResolvedValue(ready(stat));

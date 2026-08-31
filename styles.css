@@ -1134,8 +1134,8 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 /* ── Conflict Modal ─────────────────────────────────────────────── */
 /* Shell shared by single + batch; variants only override what differs.
    Widths differ by purpose: the single modal shows an inline diff and
-   genuinely needs the room; the batch modal is a resolution checklist,
-   and a 1600px width strands rows' scan distance. */
+   genuinely needs the room; the batch modal is a resolution checklist —
+   its width trades against row density (see the container query below). */
 .gfs-conflict-modal.modal {
     display: flex;
     flex-direction: column;
@@ -1148,9 +1148,20 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     max-width: 96vw;
 }
 
+/* Width ladder: Single Diff 1600 > Batch Review 1400 > Sync Plan 640.
+   40-conflict batches skim better dense — the grid turns width into
+   fewer, shorter rows. */
 .gfs-conflict-modal--batch.modal {
-    width: min(1100px, 94vw);
-    max-width: 94vw;
+    width: min(1400px, 96vw);
+    max-width: 96vw;
+}
+
+/* The modal content is the container the batch rows measure themselves
+   against — not the viewport. A narrow desktop window gets the stacked
+   layout its real space demands; a wide iPad's modal gets the dense grid
+   (density itself is gated by the platform class below). */
+.gfs-conflict-modal--batch .modal-content {
+    container-type: inline-size;
 }
 
 .gfs-conflict-modal .modal-content {
@@ -1252,8 +1263,10 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 
 /* ── Batch Conflict Resolution Modal ────────────────────────────── */
 /* Review-list, not card gallery: identity column on the left, actions on
-   the right. Default (tablet/phone) is stacked; ≥900px collapses each row
-   into a dense ~52px list entry so 40 conflicts still skim in one viewport. */
+   the right. Default (narrow container / touch) is stacked; a wide
+   container collapses each row into a dense ~52px list entry so 40
+   conflicts still skim in one viewport. Width decides density via
+   @container; the platform class (is-mobile) decides touch targets. */
 .batch-conflict-bulk-actions {
     display: flex;
     gap: 8px;
@@ -1303,12 +1316,18 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     min-width: 0;
 }
 
+/* The name is allowed to shrink so a very long filename can never push
+   the +/- stat (or, in the desktop grid, the actions column) out of its
+   identity column; it ellipsizes and the full path lives on the row's
+   title tooltip (set in TS). */
 .batch-conflict-row-name {
     font-family: var(--font-monospace);
     font-size: 0.9em;
     font-weight: 600;
     white-space: nowrap;
-    flex-shrink: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Fills with the shared .scv-diff-stat spans when a stat lands; empty (no
@@ -1378,12 +1397,14 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     margin-top: 12px;
 }
 
-/* Desktop: a review table, not a card stack. Identity (filename+stat,
-   dir) holds the left column; View Diff + radios hold the right. One row
-   ≈ 52px instead of ~90px, so a 40-conflict batch still skims — the wide
-   modal earns its width by using it horizontally. Divider list replaces
-   individual cards (no card padding/gap/rounding per row). */
-@media (min-width: 900px) {
+/* Desktop dense grid, decided by the MODAL's width, not the viewport:
+   Obsidian with a narrow sidebar setup must not be denied the dense grid
+   just because the window is < 900px, and a wide iPad should not get
+   mouse-density chrome just because the viewport is > 900. The 760px
+   threshold is the point where identity (300px min) + actions fit side
+   by side with breathing room. Touch density is separately guarded by
+   the body.is-mobile override below. */
+@container (min-width: 760px) {
     .batch-conflict-row-list {
         border-top: 1px solid var(--background-modifier-border);
     }
@@ -1392,7 +1413,7 @@ body.is-mobile .scv-view-toggle-label { display: none; }
         display: grid;
         grid-template-columns: minmax(300px, 1fr) auto;
         align-items: center;
-        column-gap: 24px;
+        gap: 24px;
         padding: 7px 12px;
         background: none;
         border-radius: 0;
@@ -1404,11 +1425,39 @@ body.is-mobile .scv-view-toggle-label { display: none; }
         flex-wrap: nowrap;
         gap: 14px;
     }
+
+    .batch-conflict-row-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .batch-conflict-row-dir {
+        max-width: 100%;
+    }
+}
+
+/* Touch platforms keep comfortable tap targets and stacked actions even
+   on a wide iPad: container width says space exists; platform says
+   density must stay touch-shaped. */
+body.is-mobile .gfs-conflict-modal--batch .batch-conflict-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px;
+}
+
+body.is-mobile .gfs-conflict-modal--batch .batch-conflict-row-actions {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
 /* Tablet: two stacked lines (identity, actions) with comfortable touch
    targets; no card chrome either — density still matters at 40 rows. */
-@media (max-width: 899px) {
+@container (max-width: 759px) {
     .batch-conflict-row {
         gap: 6px;
         padding: 8px 12px;
@@ -1420,7 +1469,7 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 
 /* Phone < 700px: full stacking — radios drop under actions so they never
    squeeze horizontally; names/dirs wrap instead of clipping. */
-@media (max-width: 700px) {
+@container (max-width: 700px) {
     .batch-conflict-row {
         gap: 8px;
         padding: 10px 12px;

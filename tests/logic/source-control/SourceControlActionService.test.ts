@@ -269,6 +269,69 @@ describe('SourceControlActionService', () => {
             expect(notify).toHaveBeenCalledWith(expect.objectContaining({ failed: 1 }));
         });
 
+        it('fails every target and notifies instead of rejecting when planPush throws', async () => {
+            const notify = vi.fn();
+            const planPush = vi.fn().mockRejectedValue(new Error('remote unreachable'));
+            const { service, operations } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                fakeWorkspace({ planPush }),
+                { notify },
+            );
+
+            await expect(service.sync([toChangeId('c-1')])).resolves.toBeUndefined();
+
+            expect(operations.get(toChangeId('c-1'))).toBe('failed');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({ failed: 1 }));
+        });
+
+        it('fails every target and notifies instead of rejecting when confirmPlan throws', async () => {
+            const notify = vi.fn();
+            const confirmPlan = vi.fn().mockRejectedValue(new Error('modal host gone'));
+            const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                reviewPlan: emptySyncPlan({ modifications: [{ path: 'a.md', name: 'a.md' }] }),
+                pushes: [{ path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'updated' }],
+            }));
+            const { service, operations } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                fakeWorkspace({ planPush, confirmPlan }),
+                { notify },
+            );
+
+            await expect(service.sync([toChangeId('c-1')])).resolves.toBeUndefined();
+
+            expect(operations.get(toChangeId('c-1'))).toBe('failed');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({ failed: 1 }));
+        });
+
+        it('does not clobber an already-committed remote bucket when the pull bucket throws', async () => {
+            const notify = vi.fn();
+            const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+            const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                reviewPlan: emptySyncPlan({ modifications: [{ path: 'a.md', name: 'a.md' }] }),
+                pushes: [{ path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'updated', existingSha: 'sha-a' }],
+            }));
+            const planPull = vi.fn().mockResolvedValue(emptySyncPlan({ additions: [{ path: 'remote.md', name: 'remote.md' }] }));
+            const applyPull = vi.fn().mockRejectedValue(new Error('pull failed'));
+            const { service, operations } = buildService(
+                [
+                    { id: toChangeId('push'), path: 'a.md', kind: 'local-modified' },
+                    { id: toChangeId('pull'), path: 'remote.md', kind: 'remote-only' },
+                ],
+                fakeWorkspace({ planPush, planPull, applyPull, commitResolvedBatch }),
+                { notify },
+            );
+
+            await service.sync([toChangeId('push'), toChangeId('pull')]);
+
+            expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
+            expect(operations.get(toChangeId('push'))).toBe('success');
+            expect(operations.get(toChangeId('pull'))).toBe('failed');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({ updated: 1, failed: 1 }));
+        });
+
         it('does not commit or mark anything when the merged plan is cancelled at confirm', async () => {
             const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
             const confirmPlan = vi.fn().mockResolvedValue(false);
@@ -498,6 +561,22 @@ describe('SourceControlActionService', () => {
                 failed: 1,
                 acceptedRemote: 0,
             }));
+        });
+
+        it('marks the change failed when the local push resolves with per-file errors instead of throwing', async () => {
+            const notify = vi.fn();
+            const push = vi.fn().mockResolvedValue(emptyPushResults({ failed: 1, errors: [{ file: 'a.md', error: 'conflict remains' }] }));
+            const { service, operations } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'conflict' }],
+                fakeWorkspace({ push }),
+                { notify },
+            );
+
+            await service.resolveConflict(toChangeId('c-1'), 'local');
+
+            expect(operations.get(toChangeId('c-1'))).toBe('failed');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith(expect.objectContaining({ failed: 1, updated: 0 }));
         });
 
         it('keeps the push path for "local" resolution and never touches acceptRemoteConflict', async () => {

@@ -43,7 +43,7 @@ export class PushExecutor {
             existingRevision,
         );
         const sha = result.sha ?? await gitBlobSha(content);
-        await this.updateMetadata(file.path, sha);
+        await this.persistMetadata(file.path, sha, `Pushed ${file.name} to ${this.getServiceName()}`);
         if (!silent) this.notify(`Pushed ${file.name} to ${this.getServiceName()}`);
         return sha;
     }
@@ -67,7 +67,7 @@ export class PushExecutor {
             this.getBranch(),
             `Update ${file.name} from Obsidian`,
         );
-        if (result.sha) await this.updateMetadata(file.path, result.sha);
+        if (result.sha) await this.persistMetadata(file.path, result.sha, `Pushed symlink ${file.name} to ${this.getServiceName()}`);
         if (!silent) this.notify(`Pushed symlink ${file.name} to ${this.getServiceName()}`);
         return { handled: true, synced: true, sha: result.sha };
     }
@@ -132,7 +132,7 @@ export class PushExecutor {
                 await service.deleteFile(
                     entry.oldRepoPath, this.getBranch(), `Remove ${entry.oldRepoPath} (moved to ${entry.repoPath})`,
                 );
-                await this.updateMetadata(entry.path, sha);
+                await this.persistMetadata(entry.path, sha, `Moved ${entry.oldRepoPath} to ${entry.repoPath}`);
                 this.clearMovedSource(entry.oldPath);
                 this.recordSuccess(entry.path, sha, results, true);
             } catch (error) {
@@ -146,7 +146,7 @@ export class PushExecutor {
         for (const entry of entries) {
             try {
                 await service.deleteFile(entry.repoPath, this.getBranch(), `Delete ${entry.repoPath} from Obsidian`);
-                await this.clearMetadata(entry.path);
+                await this.persistMetadataClear(entry.path, `Deleted ${entry.repoPath} from ${this.getServiceName()}`);
                 results.success += 1;
                 results.syncedPaths.push({ path: entry.path });
             } catch (error) {
@@ -170,7 +170,7 @@ export class PushExecutor {
             const shaByPath = new Map(batchResults.map(result => [result.path, result.sha]));
             for (const entry of entries) {
                 const sha = shaByPath.get(entry.repoPath) ?? await gitBlobSha(entry.content);
-                await this.updateMetadata(entry.path, sha);
+                await this.persistMetadata(entry.path, sha, `Pushed ${entry.name} to ${this.getServiceName()}`);
                 this.recordSuccess(entry.path, sha, results, !!entry.existingSha);
             }
         } catch (error) {
@@ -212,7 +212,7 @@ export class PushExecutor {
     }
 
     private async recordCommittedDeletion(entry: DeleteQueueEntry, results: PushResults): Promise<void> {
-        await this.clearMetadata(entry.path);
+        await this.persistMetadataClear(entry.path, `Deleted ${entry.repoPath} from ${this.getServiceName()}`);
         results.success += 1;
         results.syncedPaths.push({ path: entry.path });
     }
@@ -224,8 +224,31 @@ export class PushExecutor {
         isUpdate: boolean,
     ): Promise<void> {
         const sha = shaByPath.get(entry.repoPath) ?? await gitBlobSha(entry.content);
-        await this.updateMetadata(entry.path, sha);
+        await this.persistMetadata(entry.path, sha, `Pushed ${entry.name} to ${this.getServiceName()}`);
         this.recordSuccess(entry.path, sha, results, isUpdate);
+    }
+
+    /**
+     * The remote mutation (commit/push/delete) already succeeded by the time
+     * this runs; a failure here is local bookkeeping only (the sha cache used
+     * to skip redundant pushes next time), not a sync failure — the file must
+     * still count as synced, or a retry would re-push a file the remote
+     * already has and could produce a spurious conflict.
+     */
+    private async persistMetadata(path: string, sha: string, successContext: string): Promise<void> {
+        try {
+            await this.updateMetadata(path, sha);
+        } catch (error) {
+            this.notify(`${successContext}, but failed to save local sync state: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    private async persistMetadataClear(path: string, successContext: string): Promise<void> {
+        try {
+            await this.clearMetadata(path);
+        } catch (error) {
+            this.notify(`${successContext}, but failed to clear local sync state: ${error instanceof Error ? error.message : String(error)}`);
+        }
     }
 
     private combinedCommitMessage(pushCount: number, moveCount: number, deleteCount: number = 0): string {
