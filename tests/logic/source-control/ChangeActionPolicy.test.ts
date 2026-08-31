@@ -52,10 +52,13 @@ describe('canDownload', () => {
         expect(canDownload('local-deleted')).toBe(true);
     });
 
+    it('allows download for remote-modified (overwrite the local copy)', () => {
+        expect(canDownload('remote-modified')).toBe(true);
+    });
+
     it('disallows download for kinds with no separate remote-restore action', () => {
         expect(canDownload('local-only')).toBe(false);
         expect(canDownload('local-modified')).toBe(false);
-        expect(canDownload('remote-modified')).toBe(false);
         expect(canDownload('moved')).toBe(false);
         expect(canDownload('conflict')).toBe(false);
         expect(canDownload('synced')).toBe(false);

@@ -36,10 +36,11 @@ export function defaultSyncAction(kind: SyncChangeKind): DefaultSyncAction {
 
 /**
  * Whether a change kind has something on the remote it can pull/restore —
- * `remote-only` (never existed locally) and `local-deleted` (tracked file
- * removed locally, still present on remote) both do. Drives whether a row
- * renders the inline Download button.
+ * `remote-only` (never existed locally), `remote-modified` (tracked file
+ * changed only on the remote), and `local-deleted` (tracked file removed
+ * locally, still present on remote) all do. Drives whether a row renders the
+ * inline Download button.
  */
 export function canDownload(kind: SyncChangeKind): boolean {
-    return kind === 'remote-only' || kind === 'local-deleted';
+    return kind === 'remote-only' || kind === 'remote-modified' || kind === 'local-deleted';
 }

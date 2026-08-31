@@ -4,6 +4,7 @@ import { toChangeId, type SyncChange, type SyncChangeKind } from './types';
 const KIND_BY_STATUS: Record<SyncStatus, SyncChangeKind> = {
     synced: 'synced',
     modified: 'local-modified',
+    'remote-modified': 'remote-modified',
     unsynced: 'local-only',
     'remote-only': 'remote-only',
     'local-deleted': 'local-deleted',
@@ -16,14 +17,9 @@ const KIND_BY_STATUS: Record<SyncStatus, SyncChangeKind> = {
  * Source Control `ChangeRepository` / `SourceControlViewModel` layer added in
  * Phase 1.
  *
- * Two known gaps versus the full `SyncChangeKind` model, both pre-existing
- * limits of `FileStatus` rather than anything introduced here:
+ * One known gap versus the full `SyncChangeKind` model, a pre-existing limit
+ * of `FileStatus` rather than anything introduced here:
  *
- * - `FileStatus.status` never distinguishes which side changed for a
- *   two-sided diff (`SyncStatusService.classify` collapses both directions
- *   into `'modified'`), so `'modified'` maps to `'local-modified'` as a
- *   best-effort approximation: the row therefore offers both push and pull
- *   regardless of which side actually changed.
  * - No `FileStatus` value ever produces `'conflict'`: conflicts are only
  *   detected during `SyncManager.pushFiles` (via `SyncPlanner.classify`
  *   against a stored base sha) and resolved interactively through

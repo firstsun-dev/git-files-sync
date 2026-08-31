@@ -210,6 +210,24 @@ export class SyncStatusRefreshService {
         return isSyncMetadataAtPath(pathMetadata, vaultPath) && !pathMetadata.renamedFrom;
     }
 
+    /** The last-synced blob sha on record for `path`, or undefined if never tracked there. */
+    private baseShaFor(path: string): string | undefined {
+        const metadata = this.dependencies.settings().syncMetadata;
+        const pathMetadata = metadata ? metadata[path] : undefined;
+        return isSyncMetadataAtPath(pathMetadata, path) ? pathMetadata.lastSyncedSha : undefined;
+    }
+
+    /**
+     * Direction facts for a two-sided diff, relative to the last-synced
+     * baseline: undefined for both when there is no baseline on record (the
+     * two-sided diff then falls back to the direction-blind `modified`).
+     */
+    private diffDirection(path: string, localSha: string, remoteSha: string): { localChanged?: boolean; remoteChanged?: boolean } {
+        const baseSha = this.baseShaFor(path);
+        if (baseSha === undefined) return {};
+        return { localChanged: localSha !== baseSha, remoteChanged: remoteSha !== baseSha };
+    }
+
     async reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void> {
         const orphansBySha = this.orphanedMoveSourcesBySha(remoteMap);
         if (orphansBySha.size === 0) return;
@@ -322,13 +340,18 @@ export class SyncStatusRefreshService {
         if (!current || current.file !== file) return true;
         let status: FileStatus['status'] = current.status;
         if (current.status !== 'moved') {
-            status = current.remoteSha === undefined
-                ? this.statuses.classify({ localExists: true, remoteExists: false })
-                : this.statuses.classify({
+            const remoteSha = current.remoteSha;
+            if (remoteSha === undefined) {
+                status = this.statuses.classify({ localExists: true, remoteExists: false });
+            } else {
+                const localSha = await gitBlobSha(localContent);
+                status = this.statuses.classify({
                     localExists: true,
                     remoteExists: true,
-                    contentsEqual: await gitBlobSha(localContent) === current.remoteSha,
+                    contentsEqual: localSha === remoteSha,
+                    ...this.diffDirection(file.path, localSha, remoteSha),
                 });
+            }
         }
         this.statuses.set(file.path, { ...current, status, localContent });
         return true;
@@ -430,10 +453,13 @@ export class SyncStatusRefreshService {
         const binary = isBinaryPath(path);
         const symlinkMode = getEffectiveSymlinkHandling(this.dependencies.settings());
         const localContent = await this.readLocalContentForSha(fileOrPath, isStringPath, binary, remoteEntry.symlink, symlinkMode);
+        const localSha = await gitBlobSha(localContent);
+        const remoteSha = remoteEntry.sha;
         const status = this.statuses.classify({
             localExists: true,
             remoteExists: true,
-            contentsEqual: await gitBlobSha(localContent) === remoteEntry.sha,
+            contentsEqual: localSha === remoteSha,
+            ...(remoteSha !== undefined ? this.diffDirection(path, localSha, remoteSha) : {}),
         });
         if (status === 'synced' && remoteEntry.sha) {
             await this.dependencies.syncManager().updateMetadata(path, remoteEntry.sha);
@@ -457,13 +483,18 @@ export class SyncStatusRefreshService {
             this.dependencies.getNormalizedPath(path),
             this.dependencies.settings().branch,
         );
-        const status = remote.sha
-            ? this.statuses.classify({
+        let status: FileStatus['status'];
+        if (!remote.sha) {
+            status = this.statuses.classify({ localExists: true, remoteExists: false });
+        } else {
+            const equal = contentsEqual(localContent, remote.content);
+            status = this.statuses.classify({
                 localExists: true,
                 remoteExists: true,
-                contentsEqual: contentsEqual(localContent, remote.content),
-            })
-            : this.statuses.classify({ localExists: true, remoteExists: false });
+                contentsEqual: equal,
+                ...(equal ? {} : this.diffDirection(path, await gitBlobSha(localContent), remote.sha)),
+            });
+        }
         if (status === 'synced' && remote.sha) {
             await this.dependencies.syncManager().updateMetadata(path, remote.sha);
         }

@@ -15,7 +15,7 @@ import type { SourceControlCounts } from '../../logic/source-control/SourceContr
  *   bucket in the view (see `SourceControlView`) rather than via a domain
  *   change. Surfaced as an opt-in overview; the default stays on Needs Sync
  *   so a quiet workspace stays quiet.
- * - **Remote / Conflict / Synced** — the matching domain filters.
+ * - **Incoming / Conflict / Synced** — the matching domain filters (chip id stays `remote`; the label reads "Incoming" — a file only on the remote, or changed only on the remote, is something coming *in*).
  *
  * "Local" (domain `changes`) is intentionally not a chip: Needs Sync already
  * covers local-side changes, and a standalone local-only view added a
@@ -56,7 +56,7 @@ export interface FilterMenuOptions {
 
 /**
  * Renders the Source Control filter row: five chips — All / Needs Sync /
- * Remote / Conflict / Synced. On mobile a single `<select>` dropdown
+ * Incoming / Conflict / Synced. On mobile a single `<select>` dropdown
  * replaces the chips (same chip ids, counts inline as "Label (N)").
  *
  * Per-filter counts come straight from the ViewModel's single-source counts

@@ -3,6 +3,7 @@ import { TFile } from 'obsidian';
 import { SyncStatusRefreshService } from '../../../src/logic/sync/SyncStatusRefreshService';
 import { SyncStatusService } from '../../../src/logic/sync-status-service';
 import type { SyncStatusRefreshDependencies } from '../../../src/logic/sync/SyncStatusRefreshService';
+import { gitBlobSha } from '../../../src/utils/git-blob-sha';
 
 vi.mock('obsidian');
 
@@ -346,6 +347,35 @@ describe('SyncStatusRefreshService local-change handlers', () => {
             await modifyPromise;
 
             expect(statuses.has('note.md')).toBe(false);
+        });
+
+        it('classifies remote-modified, not modified, when the local content still matches the last-synced baseline but the remote sha has moved (regression: was silently routed to push)', async () => {
+            const statuses = new SyncStatusService();
+            const file = makeFile('note.md');
+            const baselineContent = 'baseline content';
+            const baselineSha = await gitBlobSha(baselineContent);
+            const service = buildService(statuses, {
+                app: {
+                    vault: {
+                        read: vi.fn().mockResolvedValue(baselineContent),
+                        readBinary: vi.fn(),
+                        adapter: { stat: vi.fn().mockResolvedValue(null), read: vi.fn() },
+                    },
+                } as never,
+                settings: () => ({
+                    syncMetadata: { 'note.md': { lastSyncedSha: baselineSha, lastSyncedAt: 1 } },
+                    vaultFolder: '',
+                    rootPath: '',
+                }) as never,
+            });
+
+            // Row tracked at a remote sha that has since moved away from the
+            // baseline, while the local content read back is unchanged.
+            statuses.set({ file, path: 'note.md', status: 'synced', remoteSha: 'b'.repeat(40) });
+
+            await service.handleFileModified(file);
+
+            expect(statuses.get('note.md')?.status).toBe('remote-modified');
         });
     });
 
