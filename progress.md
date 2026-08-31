@@ -21,6 +21,20 @@ Below that: the previous "Outstanding Items"/"Verification Evidence" entries tra
 
 ## Verification Evidence
 
+This session (follow-up round on the same PR — `test(e2e): isolate and streamline two-client sync scenarios`):
+
+- Phase 1 (correctness, requested follow-up to the prior round): extracted the vaultFolder path-mapping rules (`filterPathByVaultFolder`/`filterFilesByVaultFolder`/`getNormalizedVaultPath`/`getVaultPathFromNormalized`) into a new pure module `src/logic/sync/vault-folder-scope.ts`, shared by `src/main.ts` (delegates now, behavior unchanged), `SyncScanner.toRepoPath` (delegates now, behavior unchanged), and `two-client-sync-scenario.ts`'s `TwoClient` wiring (now imports the same functions instead of a hand-copied duplicate) — so production and the E2E fixture can never silently drift apart on this logic again.
+- Phase 2 (remove redundant work):
+  - P0-1: dropped the second `s.baseline(other, ...)` — `other` was baselined then immediately treated as "A creates a new file", which was actually exercising modify, not create. `other` is now a genuine create (never baselined), one fewer real provider push + verifier read, and the test now actually covers the create→remote→pull path its comment claims.
+  - P0-2: dropped its trailing `expectIdempotent(ctx)` + second `expectTwoClientConvergence(ctx)` — idempotency-under-repeated-sync is already covered by P0-1's own `expectIdempotent`; P0-2's contract is "concurrent edits on different files both survive", which the first `expectTwoClientConvergence` + explicit remote-content checks already prove. Removes 3 extra full sync rounds (`A.sync/B.sync/A.sync`) worth of provider round trips per run.
+  - `convergence-assertions.ts`: added `captureRemoteSnapshot`/`RemoteSnapshot` — one `getFile` per tracked path + one `listFiles`, captured once — and `expectConverged`/`expectMetadataConsistent` now accept an optional snapshot instead of each independently re-fetching the same remote files. `expectTwoClientConvergence` captures one snapshot and passes it to both, roughly halving the verifier calls per convergence check.
+- Phase 3 (measurement): `captureRemoteSnapshot` is now wrapped in the existing opt-in `timed()` helper (`E2E_TIMING_DEBUG=1`) as `"remote snapshot (verifier)"`, alongside the prior round's `refresh`/`sync`/`baseline` timings — covers the plan's tree-listing/refresh/push/pull/verifier attribution list. Per-test total duration is already reported natively by vitest's own output; not hand-rolled separately.
+- Explicitly NOT done this round (per plan): no GitLab-provider-side server-side `rootPath` tree-listing optimization, no timeout/retry changes, no production sync **semantics** changes — `main.ts`/`SyncScanner.ts` changes here are a pure logic-preserving extraction only.
+- `npx eslint .` — 0 errors, 1 pre-existing unrelated warning (`obsidian-request-url.ts`'s unused `_T` generic).
+- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
+- `npx vitest run` — 68 files / 862 tests passed (same count as before this round — the extraction is behavior-preserving, no new/removed unit tests).
+- **Not verified in this environment**: a real multi-suite E2E run proving the new P0-1/P0-2 timings land in the plan's target ranges (35–50s / 25–40s) and that GitLab stops hitting 120s — needs `scripts/run-e2e.sh --provider gitlab|github|gitea` against a real provisioned branch/CI (no Docker daemon / provider credentials in this environment).
+
 This session (test(e2e): isolate two-client sync scope — follow-up to the CI-run-33358507732 triage):
 
 - Root cause of the P0-1..P0-5 slowness/timeout risk: `two-client-sync.e2e.test.ts`'s fixture (`createSyncManagerFixture()`) built settings with `rootPath: ''`/`vaultFolder: ''`, and `TwoClient`'s `SyncStatusRefreshService` wiring bypassed vault-folder filtering entirely (`filterFilesByVaultFolder: files => files`, `filterPathByVaultFolder: () => true`). Every `refresh()` therefore listed and classified the WHOLE shared branch's remote tree — every other suite's `e2e-sc-*` fixtures included — not just this run's `e2e-tc-<runId>/` namespace.

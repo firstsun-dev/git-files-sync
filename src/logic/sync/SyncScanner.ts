@@ -2,6 +2,7 @@ import { TFile, type App } from 'obsidian';
 import type { GitLabFilesPushSettings } from '../../settings';
 import { logger } from '../../utils/logger';
 import { isBinaryPath } from '../../utils/path';
+import { getNormalizedVaultPath } from './vault-folder-scope';
 
 export interface ScannedFileInfo {
     path: string;
@@ -24,10 +25,7 @@ export class SyncScanner {
     }
 
     toRepoPath(path: string): string {
-        if (!this.settings.vaultFolder) return path;
-        const folderPath = `${this.settings.vaultFolder}/`;
-        if (path.startsWith(folderPath)) return path.substring(folderPath.length);
-        return path === this.settings.vaultFolder ? '' : path;
+        return getNormalizedVaultPath(path, this.settings.vaultFolder);
     }
 
     toTreePath(repoPath: string): string {

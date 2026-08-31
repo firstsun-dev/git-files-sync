@@ -16,6 +16,12 @@ import { ChangeRepository } from '../../../src/logic/source-control/ChangeReposi
 import { OperationState } from '../../../src/logic/source-control/OperationState';
 import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
 import { toSyncChanges } from '../../../src/logic/source-control/FileStatusAdapter';
+import {
+    filterFilesByVaultFolder,
+    filterPathByVaultFolder,
+    getNormalizedVaultPath,
+    getVaultPathFromNormalized,
+} from '../../../src/logic/sync/vault-folder-scope';
 import { timed } from './timing-diagnostics';
 
 /**
@@ -84,37 +90,16 @@ export class TwoClient {
                 gitService: () => fixture.service,
                 gitignoreManager: () => gitignoreManager,
                 syncManager: () => this.manager,
-                // Real production vaultFolder scoping (src/main.ts's
-                // filterFilesByVaultFolder/filterPathByVaultFolder/
-                // getNormalizedPath/getVaultPath) — this fixture's settings
-                // set vaultFolder to this run's own `e2e-tc-<runId>`
-                // namespace, so this scopes local discovery to this client's
-                // own files exactly like a real vault subfolder mount would.
-                filterFilesByVaultFolder: files => {
-                    const folder = this.settings.vaultFolder;
-                    if (!folder) return files;
-                    const prefix = `${folder}/`;
-                    return files.filter(file => file.path.startsWith(prefix) || file.path === folder);
-                },
-                filterPathByVaultFolder: path => {
-                    const folder = this.settings.vaultFolder;
-                    if (!folder) return true;
-                    const prefix = `${folder}/`;
-                    return path.startsWith(prefix) || path === folder;
-                },
-                getNormalizedPath: path => {
-                    const folder = this.settings.vaultFolder;
-                    if (!folder) return path;
-                    const prefix = `${folder}/`;
-                    if (path.startsWith(prefix)) return path.substring(prefix.length);
-                    return path === folder ? '' : path;
-                },
-                getVaultPath: normalizedPath => {
-                    const folder = this.settings.vaultFolder;
-                    if (!folder) return normalizedPath;
-                    if (!normalizedPath) return folder;
-                    return `${folder}/${normalizedPath}`;
-                },
+                // Real production vaultFolder scoping (shared with src/main.ts
+                // and SyncScanner via src/logic/sync/vault-folder-scope) —
+                // this fixture's settings set vaultFolder to this run's own
+                // `e2e-tc-<runId>` namespace, so this scopes local discovery
+                // to this client's own files exactly like a real vault
+                // subfolder mount would.
+                filterFilesByVaultFolder: files => filterFilesByVaultFolder(files, this.settings.vaultFolder),
+                filterPathByVaultFolder: path => filterPathByVaultFolder(path, this.settings.vaultFolder),
+                getNormalizedPath: path => getNormalizedVaultPath(path, this.settings.vaultFolder),
+                getVaultPath: normalizedPath => getVaultPathFromNormalized(normalizedPath, this.settings.vaultFolder),
             },
             this.statuses,
         );

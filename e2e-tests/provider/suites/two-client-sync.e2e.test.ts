@@ -66,7 +66,6 @@ describe('Two-client sync E2E', () => {
         const ctx: ConvergenceContext = convergenceContext([s.a, s.b], fixture.verifier, fixture.branch, `e2e-tc-${fixture.runId}/p0-1/`);
 
         await s.baseline(file, 'v1');
-        await s.baseline(other, 'other-v1');
 
         // A edits and syncs; B then pulls.
         s.a.write(file, 'A edit v2');
@@ -109,11 +108,12 @@ describe('Two-client sync E2E', () => {
         await s.b.sync();
         await s.a.sync();
 
+        // Idempotency under repeated syncs of converged state is already
+        // covered by P0-1's expectIdempotent — P0-2's own contract is that
+        // concurrent edits on different files both survive the merge.
         await expectTwoClientConvergence(ctx);
         await s.expectRemoteContent(fileA, 'a-v2 by A');
         await s.expectRemoteContent(fileB, 'b-v2 by B');
-        await expectIdempotent(ctx);
-        await expectTwoClientConvergence(ctx);
     });
 
     // --- P0-3: same-file modify/modify conflict ----------------------------
