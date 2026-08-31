@@ -25,14 +25,54 @@ on:
     # Weekly API-drift check: same real-provider suites, no code change required to trigger them.
     - cron: '0 6 * * 1'
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CI DAG overview
+#
+#   changes ──► gitea-e2e ─────┐
+#           └─► provider-e2e ───┤
+#   lint ───────────────────────┤
+#   unit-test ──────────────────┤──► required-checks ──► package
+#   build ──────────────────────┤                  └────► publish (main only)
+#
+# All five validation jobs start in parallel right after the push; only the E2E
+# jobs wait on `changes` for their
+# path gate. No validation waits on E2E any more -- a lint/unit/build error now
+# surfaces in <1-2 min instead of after the real-provider matrix. The single
+# `required-checks` job is the only status branch protection needs to watch.
+# Release (package/publish) runs only after that gate passes, so a real
+# provider regression still blocks the release instead of shipping and being
+# caught after the fact.
+#
+# Whole-run concurrency (workflow level, NOT per job): a `push` to a branch
+# with an open PR fires both a `push` and a `pull_request` run for the same
+# commit. Keying concurrency per provider job (an earlier design) let the two
+# runs pick *different* winners per provider -- push cancels the PR run's
+# GitHub/GitLab legs, the PR run cancels the push run's Gitea leg -- so no
+# single run ever had all providers green and the required-checks DAG could
+# wedge. Keying at workflow level by source branch alone
+# (github.head_ref || github.ref_name) means only ONE whole CI DAG per branch
+# survives: the newest run supersedes the older one entirely. Manual
+# (workflow_dispatch) and scheduled runs are keyed by event_name+run_id, so
+# they get unique groups and never cancel -- or get cancelled by -- branch CI.
+# ─────────────────────────────────────────────────────────────────────────────
+
+concurrency:
+  group: >-
+    ci-${{
+      (github.event_name == 'push' || github.event_name == 'pull_request')
+      && (github.head_ref || github.ref_name)
+      || format('{0}-{1}', github.event_name, github.run_id)
+    }}
+  cancel-in-progress: true
+
 jobs:
   # `on.push.paths`/`on.pull_request.paths` would gate this *whole* workflow
-  # file by path -- including the release-critical `CI` job below, which must
-  # keep running for every push/PR regardless of path. This job instead
-  # computes a per-job boolean so only `provider-e2e` skips on irrelevant
-  # changes, while `CI`/`build-artifact` are unaffected.
+  # file by path -- including the always-must-run validation/release jobs
+  # below. This job instead computes a per-job boolean so only `provider-e2e`
+  # skips on irrelevant changes, while `lint`/`unit-test`/`build`/release are
+  # unaffected (they run on every push/PR regardless of path).
   changes:
-    name: Detect sync/provider-relevant changes
+    name: CI / Detect Changes
     runs-on: ubuntu-latest
     outputs:
       e2e-relevant: ${{ steps.filter.outputs.e2e-relevant }}
@@ -45,23 +85,140 @@ jobs:
             e2e-relevant:
               - 'src/services/**'
               - 'src/logic/sync-manager.ts'
+              - 'src/logic/sync/**'
+              - 'src/logic/source-control/**'
               - 'src/utils/git-blob-sha.ts'
               - 'src/utils/path.ts'
               - 'src/utils/symlink.ts'
-              - 'e2e/**'
+              - 'e2e-tests/**'
+              - 'vitest.e2e.config.ts'
               - 'scripts/e2e-harness.sh'
               - 'scripts/e2e-namespace.sh'
               - 'scripts/e2e-namespace-cleanup.sh'
+              - 'scripts/e2e-suites.txt'
               - 'scripts/run-e2e.sh'
               - 'package.json'
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
 
-  # Real-provider E2E: one matrix job covering GitHub, GitLab, and Gitea (see
-  # docs/testing/real-provider-e2e.md).
-  provider-e2e:
-    name: E2E / ${{ matrix.provider }}
+  # ── Fast checks (parallel, no E2E dependency) ──────────────────────────────
+
+  # Gitea is secretless and disposable, so it runs on a fresh GitHub-hosted
+  # VM. This is the only E2E job allowed to execute fork PR code; untrusted
+  # code must never reach the privileged self-hosted fleet below.
+  gitea-e2e:
+    name: CI / Provider E2E / gitea
     needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    if: >-
+      (needs.changes.outputs.e2e-relevant == 'true' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      github.ref == 'refs/heads/main') &&
+      (github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.provider == 'all' ||
+      github.event.inputs.provider == 'gitea')
+    env:
+      E2E_KEEP_BRANCH: ${{ github.event.inputs.keep_branch }}
+      E2E_PR_NUMBER: ${{ github.event.pull_request.number }}
+      E2E_SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
+    steps:
+      - name: Compute run-scoped workdir
+        run: echo "E2E_WORKDIR=$RUNNER_TEMP/git-files-sync-e2e/${{ github.run_id }}/${{ github.run_attempt }}/gitea" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Run disposable Gitea E2E
+        run: scripts/run-e2e.sh --provider gitea
+
+  lint:
+    name: CI / Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+
+  unit-test:
+    name: CI / Unit Test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Build (compatibility check)
+        run: npm run build
+      - name: Run tests with coverage
+        run: npm run test -- --coverage
+      - name: Upload coverage
+        if: matrix.node-version == 22
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-report
+          path: coverage/
+          overwrite: true
+
+  build:
+    name: CI / Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      # Upload the raw built artifacts (main.js/manifest/styles.css) for ad-hoc
+      # PR install testing on non-main branches. `npm run build` already ran
+      # above as the validation (tsc -noEmit + Obsidian 1.11.0 compat typecheck +
+      # esbuild), so this upload is in the *same* job -- never a separate
+      # upload-artifact job that could drift out of sync with the build state.
+      - name: Set artifact name
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
+        id: artifact
+        run: |
+          BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "name=plugin-${BRANCH}-${SHA}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: |
+            main.js
+            manifest.json
+            styles.css
+          retention-days: 7
+
+  # ── Integration check: real-provider E2E ────────────────────────────────────
+
+  # Credentialed provider E2E: GitHub and GitLab remain on the self-hosted
+  # fleet. Fork PRs are rejected at job level before one can claim a runner.
+  # docs/testing/real-provider-e2e.md). It starts as soon as `changes` resolves
+  # (no preflight/E2E-gate dependency any more), then provider legs run in
+  # parallel. `fail-fast: false` so one provider failure doesn't cancel the
+  # others.
+  provider-e2e:
+    name: CI / Provider E2E / ${{ matrix.provider }}
+    needs: [changes]
     runs-on: [self-hosted, linux, x64, 32gb-ram]
     # Runs when sync/provider-relevant paths changed, or unconditionally on
     # workflow_dispatch/schedule/a push to main (main always gets the full
@@ -73,35 +230,30 @@ jobs:
     # `if:` can see it. That part is done by the "Determine whether this
     # provider leg should run" step below instead, gating every later step.
     if: >-
-      needs.changes.outputs.e2e-relevant == 'true' ||
+      (needs.changes.outputs.e2e-relevant == 'true' ||
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'schedule' ||
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main') &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.provider == 'all' ||
+      github.event.inputs.provider == 'github' ||
+      github.event.inputs.provider == 'gitlab')
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 2
       matrix:
-        provider: [github, gitlab, gitea]
-    # One group per source branch/provider -- keyed by branch name alone
-    # (github.head_ref || github.ref_name, same expression E2E_SOURCE_BRANCH
-    # below uses), deliberately NOT split by event type. A `push` to a branch
-    # with an open PR fires both a `push` and a `pull_request` run for the
-    # same commit; keying by event type (PR number vs branch name, as an
-    # earlier version of this did) put those two runs in different groups,
-    # so they ran fully concurrently against the same shared provider
-    # sandbox and starved each other (observed as real GitLab API timeouts
-    # under that double load -- see docs/testing/real-provider-e2e.md).
-    # Keying by branch name alone means the later of the two cancels the
-    # earlier instead, same as a repeated push or a workflow rerun. This is
-    # NOT a cleanup mechanism (see scripts/e2e-harness.sh's per-run branch
-    # naming): a cancelled run's branch can still be mid-delete when the
-    # next one starts, which is exactly why every run gets its own unique
-    # branch regardless of cancellation. `concurrency:` at job level *does*
-    # support the `matrix` context (unlike job-level `if:`, see the comment
-    # below), so each matrix leg still gets its own group.
-    concurrency:
-      group: e2e-${{ github.head_ref || github.ref_name }}-${{ matrix.provider }}
-      cancel-in-progress: true
+        provider: [github, gitlab]
+    # Concurrency is handled at WORKFLOW level (see the header comment on the
+    # `concurrency:` block above): one whole CI DAG per source branch, so a
+    # push + pull_request race for the same commit can never split provider
+    # winners across two runs. Per-provider job groups were removed for that
+    # reason -- they let each provider pick a different surviving run.
+    # This is NOT a cleanup mechanism (see scripts/e2e-harness.sh's per-run
+    # branch naming): a cancelled run's branch can still be mid-delete when
+    # the next one starts, which is exactly why every run gets its own unique
+    # branch regardless of cancellation.
     env:
       E2E_GITHUB_OWNER: ${{ vars.E2E_GITHUB_OWNER }}
       E2E_GITHUB_REPO: ${{ vars.E2E_GITHUB_REPO }}
@@ -145,23 +297,6 @@ jobs:
         id: gate
         run: |
           run=true
-          # TODO(e2e): gitea temporarily disabled in CI -- container
-          # provisioning against this runner fleet's Docker topology needs
-          # more investigation (bridge-IP reachability, health-check timing)
-          # than is safe to iterate on inside the shared matrix. Suite/harness
-          # code is untouched and passes locally (`npm run test:e2e --
-          # --provider gitea`); re-enable by deleting this block once the CI
-          # runner behavior is confirmed. NOTE: gitea is also what normally
-          # covers fork PRs (no secrets needed) -- while this is disabled,
-          # fork PRs get no E2E coverage at all.
-          if [ "${{ matrix.provider }}" = "gitea" ]; then
-            run=false
-          fi
-          if [ "${{ github.event_name }}" = "pull_request" ] \
-            && [ "${{ matrix.provider }}" != "gitea" ] \
-            && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
-            run=false
-          fi
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
             && [ "${{ github.event.inputs.provider }}" != "all" ] \
             && [ "${{ github.event.inputs.provider }}" != "${{ matrix.provider }}" ]; then
@@ -184,29 +319,24 @@ jobs:
       - run: npm ci --ignore-scripts
         if: steps.gate.outputs.run == 'true'
 
-      # Arrange/Assert/cleanup are Shell + Git (scripts/e2e-harness.sh); Act
-      # stays production TypeScript (npx vitest). E2E_WORKDIR/E2E_PR_NUMBER/
-      # E2E_SOURCE_BRANCH are set once at job level (see the job `env:`
-      # above) so all steps below share the same run state/identity.
-      - name: Provision isolated branch/container
-        if: steps.gate.outputs.run == 'true'
-        env:
-          E2E_PROVIDER: ${{ matrix.provider }}
-        run: scripts/e2e-harness.sh provision
-
-      - name: Seed baseline fixture
-        if: steps.gate.outputs.run == 'true'
-        env:
-          E2E_PROVIDER: ${{ matrix.provider }}
-        run: scripts/e2e-harness.sh seed
-
+      # One entry point for the whole real-provider E2E flow: scripts/run-e2e.sh
+      # provisions the isolated branch/container, seeds the baseline fixture,
+      # runs the suites listed in scripts/e2e-suites.txt (the single source of
+      # truth — CI and local run the same command, so the suite list is never
+      # duplicated here), and cleans up via its EXIT trap. New suites are added
+      # in scripts/e2e-suites.txt only; run-e2e.sh's own forward/reverse checks
+      # fail the run if a suite file isn't registered (or vice versa).
+      # E2E_WORKDIR is set by the "Compute run-scoped workdir" step above; the
+      # job `env:` supplies the provider secrets and run identity
+      # (E2E_PR_NUMBER/E2E_SOURCE_BRANCH) that run-e2e.sh/e2e-harness.sh consume.
+      #
       # Retried (not just run once): observed failures against the real
       # providers include transient runner-network blips unrelated to the
       # suite/product code (e.g. a bare `getaddrinfo ENOTFOUND gitlab.com`
       # mid-test on 2026-08-14, run 31770197590) that a same-attempt rerun
-      # simply doesn't reproduce. Safe to retry the whole step from scratch:
-      # each suite's `runId`/branch paths are randomized per vitest process
-      # (see e.g. e2e/suites/sync-manager.e2e.test.ts), so a failed
+      # simply doesn't reproduce. Safe to retry from scratch: run-e2e.sh
+      # re-provisions a fresh isolated branch each attempt and every suite's
+      # runId/branch paths are randomized per vitest process, so a failed
       # attempt's partial remote state never collides with the retry -- a
       # genuine product/test bug still fails identically every attempt and
       # exhausts the retries.
@@ -219,19 +349,7 @@ jobs:
           timeout_minutes: 15
           max_attempts: 3
           retry_wait_seconds: 15
-          command: |
-            set -a
-            # shellcheck disable=SC1091
-            source "$E2E_WORKDIR/e2e.env"
-            [ -f "$E2E_WORKDIR/e2e.secrets.env" ] && source "$E2E_WORKDIR/e2e.secrets.env"
-            set +a
-            npx vitest run -c vitest.e2e.config.ts "e2e/suites/${{ matrix.provider }}.e2e.test.ts" e2e/suites/sync-manager.e2e.test.ts
-
-      - name: Independent verification
-        if: steps.gate.outputs.run == 'true'
-        env:
-          E2E_PROVIDER: ${{ matrix.provider }}
-        run: scripts/e2e-harness.sh verify
+          command: scripts/run-e2e.sh --provider "${{ matrix.provider }}"
 
       # `if: always()` -- cleanup is best-effort, never a prerequisite for
       # the next run (see scripts/e2e-harness.sh's cmd_cleanup and
@@ -244,78 +362,110 @@ jobs:
           E2E_PROVIDER: ${{ matrix.provider }}
         run: scripts/e2e-harness.sh cleanup
 
-  # Aggregates the matrix into a single required status so branch protection
-  # only has to reference one check name (see docs/testing/real-provider-e2e.md
-  # for the "Gitea required, GitHub/GitLab not required at branch-protection
-  # level" split -- required-vs-optional per *provider* still comes from the
-  # "Determine whether this provider leg should run" step above; this gate
-  # only asks "did whatever ran, pass?"). A gated-off leg's steps are all
-  # skipped without failing the job, so it still reports "success" here.
-  # `if: always()` so a real provider-e2e failure is caught here and blocks
-  # CI/release. A cancelled matrix means a newer run in the same branch/provider
-  # concurrency group replaced this duplicate run; report that as neutral and
-  # do not start another copy of downstream CI.
-  e2e-gate:
-    name: E2E gate
-    needs: provider-e2e
+  # ── Final gate ──────────────────────────────────────────────────────────────
+
+  # Single required status check. Branch protection only has to reference
+  # this one job name (see docs/testing/real-provider-e2e.md's note on the
+  # `CI / gitea` required-status split). `if: always()` so a real validation
+  # failure is caught here and blocks merge/release; a cancelled matrix leg
+  # (a newer run in the same branch/provider concurrency group replaced this
+  # duplicate) is treated as a failure here too -- the surviving run is the
+  # one whose gate result GitHub uses for the latest commit, so blocking the
+  # cancelled duplicate's gate is correct, not a wedged red.
+  required-checks:
+    name: CI / Required Checks
+    needs: [lint, unit-test, build, gitea-e2e, provider-e2e]
     if: always()
     runs-on: ubuntu-latest
-    outputs:
-      run-ci: ${{ steps.check.outputs.run-ci }}
     steps:
-      - name: Check provider-e2e result
-        id: check
+      - name: Aggregate validation results
         run: |
-          result="${{ needs.provider-e2e.result }}"
-          echo "provider-e2e result: $result"
-          echo "run-ci=true" >> "$GITHUB_OUTPUT"
-          if [ "$result" = "cancelled" ]; then
-            echo "run-ci=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::provider-e2e was replaced by a newer run in the same concurrency group."
-            exit 0
-          fi
-          if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
-            echo "::error::provider-e2e failed ($result) -- blocking CI/release."
-            exit 1
-          fi
+          fail=0
+          for r in "${{ needs.lint.result }}" "${{ needs.unit-test.result }}" "${{ needs.build.result }}" "${{ needs.gitea-e2e.result }}" "${{ needs.provider-e2e.result }}"; do
+            echo "result: $r"
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::validation job reported '$r' -- blocking merge/release."; fail=1 ;;
+            esac
+          done
+          exit "$fail"
 
-  CI:
-    needs: e2e-gate
-    if: needs.e2e-gate.outputs.run-ci == 'true'
-    uses: firstsun-dev/.github/.github/workflows/obsidian-plugin-ci.yml@v1
-    with:
-      plugin-id: "git-file-sync"
-    secrets:
-      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+  # ── Release (gated on required-checks) ──────────────────────────────────────
 
-  build-artifact:
-    name: Upload build artifact
+  package:
+    name: Release / Package
+    needs: [required-checks]
+    if: needs.required-checks.result == 'success'
     runs-on: ubuntu-latest
-    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
-          cache: 'npm'
-
-      - run: npm ci
-
+          cache: npm
+      - run: npm ci --ignore-scripts
       - run: npm run build
-
-      - name: Set artifact name
-        id: artifact
+      - name: Create plugin package
         run: |
-          BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
-          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "name=plugin-${BRANCH}-${SHA}" >> $GITHUB_OUTPUT
-
-      - uses: actions/upload-artifact@v5
+          VERSION=$(node -p "require('./manifest.json').version")
+          BRANCH_NAME=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
+          BRANCH_NAME_SAFE=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          ZIP_NAME="git-file-sync-${VERSION}-${BRANCH_NAME_SAFE}.zip"
+          zip -j "$ZIP_NAME" main.js manifest.json styles.css || zip -j "$ZIP_NAME" main.js manifest.json
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+          echo "PLUGIN_VERSION=$VERSION" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ steps.artifact.outputs.name }}
-          path: |
-            main.js
-            manifest.json
-            styles.css
+          name: plugin-build-artifact-${{ github.sha }}
+          path: ${{ env.ZIP_NAME }}
           retention-days: 7
+      - name: Annotate build summary
+        run: |
+          echo "::notice title=Obsidian Plugin Build::git-file-sync v${{ env.PLUGIN_VERSION }} built (${{ env.ZIP_NAME }})"
+          {
+            echo "### Obsidian Plugin Build"
+            echo ""
+            echo "- Plugin: \`git-file-sync\`"
+            echo "- Version: \`${{ env.PLUGIN_VERSION }}\`"
+            echo "- Artifact: \`${{ env.ZIP_NAME }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Release / Publish
+    needs: [required-checks]
+    # semantic-release only releases on main/master (see .releaserc.json's
+    # `branches`); gating the whole job on those refs skips the build/attest
+    # work on every PR run.
+    if: >-
+      needs.required-checks.result == 'success' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Attest main.js
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: main.js
+      - name: Attest styles.css
+        if: hashFiles('styles.css') != ''
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: styles.css
+      - env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: npx semantic-release

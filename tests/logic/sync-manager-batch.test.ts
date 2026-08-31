@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/unbound-method */
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn() mocks intentionally reference methods unbound; safe under Vitest's mocking model */
 import { describe, it, expect, vi, beforeEach, Mocked } from 'vitest';
 import { SyncManager, BatchPushConflict, ConflictResolution } from '../../src/logic/sync-manager';
 import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
@@ -8,6 +8,7 @@ import { GitServiceInterface } from '../../src/services/git-service-interface';
 import { gitBlobSha } from '../../src/utils/git-blob-sha';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
 import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResolutionModal';
+import type { SyncInteractionPort } from '../../src/logic/sync/SyncInteractionPort';
 
 vi.mock('obsidian');
 // Every push/pull-all now shows a plan for review before applying;
@@ -31,13 +32,11 @@ describe('SyncManager Batch Operations', () => {
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
         vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
             this: BatchConflictResolutionModal,
             _app: unknown,
-            _gitService: unknown,
             conflicts: BatchPushConflict[],
-            _totalFiles: number,
             _safeCount: number,
             onResolve: () => void,
             _onCancel: () => void,
@@ -45,7 +44,7 @@ describe('SyncManager Batch Operations', () => {
             for (const conflict of conflicts) conflict.resolution = conflictResolver(conflict);
             onResolve();
             return this;
-        } as never);
+        });
 
         const mockAdapter = {
             exists: vi.fn(),
@@ -78,7 +77,7 @@ describe('SyncManager Batch Operations', () => {
             deleteFile: vi.fn(),
             getRepoGitignores: vi.fn(),
             updateConfig: vi.fn(),
-        } as unknown as Mocked<GitServiceInterface>;
+        };
 
         mockSettings = {
             serviceType: 'github',
@@ -111,7 +110,25 @@ describe('SyncManager Batch Operations', () => {
             const results = await manager.pushFiles(files);
 
             expect(results.success).toBe(2);
+            expect(results.added).toBe(2);
+            expect(results.updated).toBe(0);
             expect(vi.mocked(mockGitService.pushFile)).toHaveBeenCalledTimes(2);
+        });
+
+        it('classifies a file already present in the remote tree as an update, not an addition', async () => {
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(true);
+            vi.mocked(adapter.read).mockResolvedValue('new content');
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path: 'file1.md', symlink: false, sha: await gitBlobSha('old content') },
+            ]);
+            vi.mocked(mockGitService.pushFile).mockResolvedValue({ path: 'file1.md', sha: 'new-sha' });
+
+            const results = await manager.pushFiles(['file1.md']);
+
+            expect(results.success).toBe(1);
+            expect(results.added).toBe(0);
+            expect(results.updated).toBe(1);
         });
 
         it('should handle failures during batch push', async () => {
@@ -162,7 +179,7 @@ describe('SyncManager Batch Operations', () => {
             ]);
             // syncedPaths lets the caller mark these files synced directly, without
             // a follow-up remote read that could race a provider's eventual
-            // consistency window (see SyncStatusView's use of this field).
+            // consistency window.
             expect(results.syncedPaths).toEqual([
                 { path: 'a.md', sha: 'sha-a' },
                 { path: 'b.md', sha: 'sha-b' },
@@ -320,6 +337,26 @@ describe('SyncManager Batch Operations', () => {
             expect(vi.mocked(mockApp.vault.modify)).toHaveBeenCalledWith(mockFile, 'remote content');
         });
 
+        it('suppresses the nested completion notification for a unified-sync pull', async () => {
+            const path = 'remote.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            const notify = vi.fn();
+            const interaction: SyncInteractionPort = {
+                confirmPlan: vi.fn().mockResolvedValue(true),
+                openConflict: vi.fn(),
+                resolveBatchConflicts: vi.fn().mockResolvedValue(true),
+                notify,
+            };
+            const silentManager = new SyncManager(mockApp, mockGitService, mockSettings, undefined, undefined, undefined, interaction);
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([{ path, symlink: false }]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+
+            await silentManager.applyPullBatch([path], undefined, undefined, { notify: false });
+
+            expect(notify).not.toHaveBeenCalled();
+        });
+
         it('skips downloading a file whose tree sha already matches the local content', async () => {
             // An in-sync "pull all" used to fetch every file's content just to
             // discover nothing changed — one request per file, whole vault.
@@ -377,7 +414,7 @@ describe('SyncManager Batch Operations', () => {
 
             const results = await manager.pullAllFiles([path]);
 
-            expect(results).toMatchObject({ success: 1, conflicts: 0 });
+            expect(results).toMatchObject({ success: 1, added: 0, updated: 1, conflicts: 0 });
             expect(adapter.write).toHaveBeenCalledWith(path, 'remote edit');
         });
 
@@ -434,6 +471,20 @@ describe('SyncManager Batch Operations', () => {
 
             expect(results.success).toBe(1);
             expect(mockGitService.getFile).toHaveBeenCalledWith(path, 'main');
+        });
+
+        it('classifies a remote file with no local copy as an addition', async () => {
+            const path = 'new-remote.md';
+            const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
+            vi.mocked(adapter.exists).mockResolvedValue(false);
+            vi.mocked(mockGitService.listFilesDetailed).mockResolvedValue([
+                { path, symlink: false, sha: 'remote-sha' }
+            ]);
+            vi.mocked(mockGitService.getFile).mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
+
+            const results = await manager.pullAllFiles([path]);
+
+            expect(results).toMatchObject({ success: 1, added: 1, updated: 0, conflicts: 0 });
         });
 
         it('should handle missing remote files during batch pull', async () => {
@@ -701,12 +752,12 @@ describe('SyncManager Batch Operations', () => {
 
             vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
                 this: BatchConflictResolutionModal,
-                _app: unknown, _git: unknown, _conflicts: unknown, _total: unknown, _safe: unknown,
+                _app: unknown, _conflicts: unknown, _safe: unknown,
                 _onResolve: () => void, onCancel: () => void
             ) {
                 onCancel();
                 return this;
-            } as never);
+            });
 
             const results = await manager.pushFiles([path]);
 
@@ -738,7 +789,7 @@ describe('SyncManager Batch Operations', () => {
             ) {
                 onCancel?.();
                 return this;
-            } as never);
+            });
 
             const results = await manager.pushFiles([path]);
 
@@ -1010,7 +1061,7 @@ describe('SyncManager Batch Operations', () => {
             ) {
                 onCancel?.();
                 return this;
-            } as never);
+            });
 
             const adapter = mockApp.vault.adapter as Mocked<DataAdapter>;
             vi.mocked(adapter.exists).mockResolvedValue(true);
@@ -1041,3 +1092,5 @@ describe('SyncManager Batch Operations', () => {
         });
     });
 });
+
+/* eslint-enable @typescript-eslint/unbound-method -- re-enable after the whole-file exemption above */

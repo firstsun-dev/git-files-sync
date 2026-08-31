@@ -3,6 +3,8 @@ import { GitServiceInterface, GitTreeEntry } from '../../services/git-service-in
 import { GitLabFilesPushSettings, getServiceName } from '../../settings';
 import {
     type PushResults,
+    type PullExecutionOptions,
+    type SyncResult,
     SyncPlan,
     SyncPlanEntry,
     isSyncPlanEmpty,
@@ -22,6 +24,8 @@ import { PushCoordinator } from './PushCoordinator';
 import { SyncPlanner } from './SyncPlanner';
 import {
     HeadlessSyncInteraction,
+    type ConflictDiffLoader,
+    type ConflictDiffStatLoader,
     type SyncInteractionPort,
     type SyncPlanDirection,
 } from './SyncInteractionPort';
@@ -39,6 +43,10 @@ export class SyncManager {
     private readonly pushCoordinator: PushCoordinator;
     private readonly planner = new SyncPlanner();
     private readonly interaction: SyncInteractionPort;
+    /** Optional progressive +/- diff-stat source handed to the batch conflict modal. */
+    private diffStatLoader?: ConflictDiffStatLoader;
+    /** Optional lazy diff data source for the batch conflict modal's "View Diff". */
+    private conflictDiffLoader?: ConflictDiffLoader;
     readonly status: SyncStatusService;
 
     constructor(
@@ -67,6 +75,7 @@ export class SyncManager {
             () => this.serviceName,
             message => this.interaction.notify(message),
             oldPath => { delete this.settings.syncMetadata[oldPath]; },
+            path => this.clearMetadata(path),
         );
         const pullExecutor = new PullExecutor(
             this.app,
@@ -102,8 +111,8 @@ export class SyncManager {
             conflicts: conflictResolver,
             isPathIgnored: path => this.isPathIgnored(path),
             confirmPlan: plan => this.confirmPlan(plan, 'push'),
-            resolveConflicts: (conflicts, totalFiles, safeCount) => (
-                this.interaction.resolveBatchConflicts(this.gitService, conflicts, totalFiles, safeCount)
+            resolveConflicts: (conflicts, safeCount) => (
+                this.interaction.resolveBatchConflicts(conflicts, safeCount, this.conflictDiffLoader, this.diffStatLoader)
             ),
             updateMetadata: (path, sha) => this.updateMetadata(path, sha),
             migrateBaseline: (path, repoPath, entry) => this.migrateGitLabLegacyBaseline(path, repoPath, entry),
@@ -150,6 +159,16 @@ export class SyncManager {
         this.gitService = gitService;
     }
 
+    /** Wires the composition layer's progressive diff-stat source into the batch conflict modal. */
+    setConflictDiffStatLoader(loader: ConflictDiffStatLoader | undefined): void {
+        this.diffStatLoader = loader;
+    }
+
+    /** Wires the shared diff-service-backed loader for the batch modal's "View Diff". */
+    setConflictDiffLoader(loader: ConflictDiffLoader | undefined): void {
+        this.conflictDiffLoader = loader;
+    }
+
     /** A plan with exactly one entry, for a single-file push/pull's confirm step. */
     private singleEntryPlan(kind: 'addition' | 'modification', path: string, name: string): SyncPlan {
         const plan: SyncPlan = { additions: [], modifications: [], deletions: [], moves: [] };
@@ -164,7 +183,8 @@ export class SyncManager {
      * already in sync or skipped as a conflict) resolves immediately without
      * showing anything — there is nothing to review.
      */
-    private confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean> {
+    /** Public per docs/source-control-refactor: a unified Sync Plan orchestrator confirms the whole merged plan through this one call rather than through push/pull's own internal confirm. */
+    confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean> {
         if (isSyncPlanEmpty(plan)) return Promise.resolve(true);
         return this.interaction.confirmPlan(plan, direction);
     }
@@ -247,6 +267,21 @@ export class SyncManager {
         await this.executor.pull.pull(file, remoteContent, remoteSha, silent, symlinkTarget);
     }
 
+    /**
+     * Applies the reviewed remote version of a conflicted path directly: no
+     * planner re-run (which would re-open a conflict modal), no fallback to
+     * latest remote HEAD — the exact reviewed blob is fetched by SHA.
+     */
+    public async acceptRemoteConflict(path: string): Promise<void> {
+        const { path: vaultPath, name } = this.getFileInfo(path);
+        const repoPath = this.getNormalizedPath(vaultPath);
+        const remoteSha = this.status.get(vaultPath)?.remoteSha;
+        if (!remoteSha) throw new Error('Cannot accept remote version because the reviewed remote revision is unavailable.');
+        const blob = await this.gitService.getBlob(remoteSha, repoPath);
+        const fileRep = this.app.vault.getFileByPath(vaultPath) ?? { path: vaultPath, name };
+        await this.performPull(fileRep, blob.content, blob.sha, true, blob.isSymlink ? blob.symlinkTarget ?? '' : undefined);
+    }
+
     private async saveSettings() {
         if (this.onSaveSettings) {
             await this.onSaveSettings();
@@ -271,13 +306,37 @@ export class SyncManager {
         files: (TFile | string)[],
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[]
-    ): Promise<{ success: number; failed: number; conflicts: number; errors: Array<{ file: string; error: string }> }> {
+    ): Promise<SyncResult> {
         return this.pullCoordinator.pullAllFiles(files, onProgress, remoteTree);
     }
 
     /** Computes what a pull-all would do, without writing anything, for the plan-review modal. */
     async planPullBatch(files: (TFile | string)[], remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
         return this.pullCoordinator.planPullBatch(files, remoteTree);
+    }
+
+    /** Applies an already-confirmed pull batch without showing its own confirm modal. */
+    async applyPullBatch(
+        files: (TFile | string)[],
+        onProgress?: (current: number, total: number, fileName: string) => void,
+        remoteTree?: GitTreeEntry[],
+        options?: PullExecutionOptions,
+    ): Promise<SyncResult> {
+        return this.pullCoordinator.applyPullBatch(files, onProgress, remoteTree, options);
+    }
+
+    /** Classifies and conflict-resolves a push batch without confirming or committing, for a unified Sync Plan orchestrator. */
+    planSyncBatch(
+        files: (TFile | string)[],
+        onProgress?: (current: number, total: number, fileName: string) => void,
+        remoteTree?: GitTreeEntry[],
+    ): ReturnType<PushCoordinator['planSyncBatch']> {
+        return this.pushCoordinator.planSyncBatch(files, onProgress, remoteTree);
+    }
+
+    /** Commits already-planned pushes/moves/deletions as one provider mutation set. */
+    commitResolvedBatch(...args: Parameters<PushCoordinator['commitResolvedBatch']>): ReturnType<PushCoordinator['commitResolvedBatch']> {
+        return this.pushCoordinator.commitResolvedBatch(...args);
     }
 
     /** Migrates a legacy GitLab last_commit_id baseline only when the current

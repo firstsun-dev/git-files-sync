@@ -1,117 +1,163 @@
-# Git File Sync 使用說明書
+# Git File Sync 使用指南
 
 [![CI](https://img.shields.io/github/actions/workflow/status/firstsun-dev/git-files-sync/ci.yml?branch=main&style=for-the-badge)](https://github.com/firstsun-dev/git-files-sync/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/firstsun-dev/git-files-sync?style=for-the-badge&color=2ea44f)](https://github.com/firstsun-dev/git-files-sync/releases)
 [![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&query=%24%5B%22git-file-sync%22%5D.downloads&label=downloads&style=for-the-badge&color=007acc)](https://obsidian.md/plugins?id=git-file-sync)
 [![License](https://img.shields.io/github/license/firstsun-dev/git-files-sync?style=for-the-badge)](LICENSE)
 
-<video src="https://blog-assets.firstsun.org/obsidian/plugins/git-file-sync/git-file-sync-zh.webm" width="100%" controls autoplay loop muted playsinline></video>
-
-本指南將引導您如何使用 Git File Sync 外掛，在行動裝置與桌面電腦之間，透過 GitLab、GitHub 或自架的 Gitea 選擇性同步筆記。
-
 **[English](README.md)** · **[简体中文](USAGE_zh-cn.md)** · **[版本紀錄](CHANGELOG.md)**
 
----
+Git File Sync 讓你透過 GitHub、GitLab 或自架 Gitea，在桌面版與行動版 Obsidian 中**選擇性同步檔案**，不需要把整個 vault 都交給同一套同步服務。
+
+你可以先檢查變更、選擇這次真正要同步的項目，再從「同步佇列」一次確認與套用。外掛直接透過 Git 服務 API 操作，不需要安裝 Git CLI，也不需要在 vault 中建立本機 `.git` 儲存庫。
+
+## 新版操作模型
+
+Git File Sync 的版本控制流程可以記成：
+
+**檢查變更 → 加入同步佇列 → 同步**
+
+1. **檢查「儲存庫變更」** — 在同一個畫面查看本機變更、遠端變更、重新命名、刪除與衝突。
+2. **建立「同步佇列」** — 勾選這次真正要處理的項目。
+3. **檢查並同步** — 在套用前先查看完整同步計畫，再執行上傳、下載與刪除。
+
+被選取的項目會從「儲存庫變更」移到「同步佇列」，同一筆變更不會同時出現在兩個區域。
+
+## 主要功能
+
+- **只同步你選擇的檔案** — 私人筆記或無關檔案可以留在本機。
+- **統一的版本控制畫面** — 集中查看本機、遠端、移動、刪除與衝突狀態。
+- **一個同步佇列** — 同一次操作可以包含上傳、下載與遠端刪除。
+- **套用前先檢查** — 新增、修改、移動、下載與刪除都會先出現在同步計畫中。
+- **內建差異比對** — 支援單欄與並排 Diff，比對本機與遠端版本。
+- **明確處理衝突** — 由你決定保留本機或遠端，不會靜默覆蓋。
+- **多平台與多服務** — 支援 GitHub、GitLab、Gitea，以及桌面版與行動版 Obsidian。
+- **三種介面語言** — English、繁體中文、简体中文。
+
+## 快速開始
+
+1. 從 Obsidian 社群外掛安裝 Git File Sync。
+2. 在 **設定 → Git File Sync** 中設定 GitHub、GitLab 或 Gitea。
+3. 從側邊功能列或指令面板開啟 **版本控制（Source Control）**。
+4. 檢查 **儲存庫變更**。
+5. 勾選要同步的項目，項目會移到 **同步佇列**。
+6. 點擊 **同步**，檢查同步計畫後按 **套用**。
+
+## 版本控制畫面
+
+### 儲存庫變更
+
+顯示目前需要處理、但尚未加入下一次同步的項目。可以使用搜尋、篩選器與樹狀／清單檢視快速縮小範圍。
+
+### 同步佇列
+
+顯示下一次「同步」會實際處理的項目。每一筆都會標示預計執行的動作：
+
+- **上傳** — 將本機版本套用到遠端儲存庫。
+- **下載** — 將遠端版本帶回目前 vault。
+- **刪除** — 將本機已刪除的追蹤檔案同步刪除遠端版本。
+
+按下 **同步** 後會先產生一份合併的同步計畫。遠端的新增、修改、移動與刪除會一起提交；下載則在確認後套用到本機。
+
+### 檔案狀態
+
+| 狀態 | 意義 |
+|---|---|
+| `A` | 本機新增 |
+| `M` | 本機已修改 |
+| `D` | 本機已刪除 |
+| `R` | 已重新命名或移動 |
+| `↓` | 遠端可下載 |
+| `↕` | 遠端已修改 |
+| `!` | 衝突 |
+| `S` | 已同步 |
+
+> **本機已刪除：** 將 `D` 項目加入同步佇列後，預設會同步刪除遠端的追蹤檔案。如果你是誤刪，請改用 **下載**，將遠端版本還原回本機。
+
+## 常見操作
+
+| 情況 | 操作結果 |
+|---|---|
+| 本機新增檔案 | `A` → 同步佇列 → **上傳** |
+| 本機修改檔案 | `M` → 同步佇列 → **上傳** |
+| 檔案只存在遠端 | `↓` → 同步佇列 → **下載** |
+| 遠端版本已修改 | `↕` → 同步佇列 → **下載** |
+| 本機刪除追蹤檔案 | `D` → 同步佇列 → **刪除**遠端 |
+| 本機誤刪 | `D` → **下載** → 還原本機 |
+| 重新命名／移動 | `R` → 同步佇列 → 以移動方式**上傳** |
+| 本機與遠端都修改 | `!` → 檢查衝突 → **保留本機**或**採用遠端** |
+
+## 差異比對與衝突
+
+選擇有變更的檔案後，可以在同步前查看本機與遠端內容差異。Diff 支援單欄與並排版面，並在可用時顯示新增／刪除行數。
+
+![conflict](imgs/git-diff.png)
+*同步前先檢查本機與遠端的差異，再決定要保留哪一側。*
+
+如果本機與遠端都修改過同一個檔案，Git File Sync 會保留明確的衝突狀態：
+
+- **Keep Local／保留本機** — 使用本機內容覆蓋遠端。
+- **Keep Remote／採用遠端** — 接受遠端版本並覆蓋本機。
 
 ## 支援的 Git 服務
 
-<img src="https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub" height="28"> &nbsp;
-<img src="https://img.shields.io/badge/GitLab-FC6D26?style=for-the-badge&logo=gitlab&logoColor=white" alt="GitLab" height="28"> &nbsp;
-<img src="https://img.shields.io/badge/Gitea-609926?style=for-the-badge&logo=gitea&logoColor=white" alt="Gitea" height="28">
+| 服務 | 適用情境 | 最低版本 |
+|---|---|---|
+| **GitHub** | github.com／GitHub Enterprise | — |
+| **GitLab** | gitlab.com／自架 | GitLab 13.0+ |
+| **Gitea** | 自架 Git 伺服器 | Gitea 1.12+ |
 
-| | 服務 | 適用情境 | 最低版本 |
-| :---: | :--- | :--- | :--- |
-| <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub"> | **GitHub** | 公開 / 私人儲存庫 | — |
-| <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab"> | **GitLab** | gitlab.com 或自架 | GitLab 13.0+ |
-| <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea"> | **Gitea** | 自架 Git 伺服器 | Gitea 1.12+ |
-
----
-
-## 1. 初始設定
-
-在開始同步之前，請確保您已完成以下設定：
+## 初始設定
 
 ![Plugin Settings](imgs/plugin-settings.png)
-*在設定面板選擇您的 Git 服務並填入對應的憑證與路徑。*
+*在設定面板選擇 Git 服務並設定儲存庫。*
 
-1. **選擇服務**：在 `設定` > `Git File Sync` 中選擇 GitLab、GitHub 或 Gitea。
-2. **填寫憑證**：
+| 服務 | 必要資訊 | 建議權限 |
+|---|---|---|
+| **GitHub** | Token、owner、repository | Fine-grained token：**Contents: Read and write** |
+| **GitLab** | Token、project ID、base URL | `read_repository`、`write_repository` |
+| **Gitea** | Token、owner、repository、base URL | Gitea 1.19+：`write:repository` |
 
-   > **安全性提示：** 請將每個權杖的範圍縮到最小：只允許需要同步的儲存庫、只授予必要權限，並設定較短的有效期限。權杖只應儲存在此外掛的設定中，不要貼到會被同步的筆記。如果權杖可能外洩，請立即撤銷並重新建立；不再使用的權杖也應直接撤銷。
+其他設定包含語言、同步分支、儲存庫 Root Path、vault folder 範圍、啟動時重新整理、忽略規則，以及 symbolic link 處理方式。Symbolic link 詳細行為請參考 [Symbolic link handling](docs/symlink-handling.md)。
 
-   - **GitHub**：建議建立 [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)，而不是 classic token。在 **Repository access** 選擇 *Only select repositories*，只指定要同步的儲存庫；設定 **Expiration**（建議 90 天以內），並只授予 **Contents: Read and write**。若必須使用 classic token，則使用 `repo` scope，並為此用途設定到期日。
-   - **GitLab**：建議優先使用 [project access token](https://docs.gitlab.com/user/project/settings/project_access_tokens/)（`Project` > `Settings` > `Access tokens`），而不是個人存取權杖，讓權限限制在單一專案，也能獨立撤銷。外掛只會呼叫 repository tree、blob、commit 與 branch 相關 API，因此只需要 `read_repository` 與 `write_repository`，**不需要** `api`。若要推送到非 protected branch，最低角色需為 **Developer**。請設定到期日；伺服器網址預設為 `https://gitlab.com`，自架環境請改成您的實例網址。
-   - **Gitea**：在 `使用者設定` > `應用程式` > `存取權杖` 建立權杖。外掛只會操作儲存庫內容、分支與 Git data；Gitea 1.19+ 支援 scoped token，請只選 **`write:repository`**（已包含讀取權限），不要選擇全部權限。較舊版本（最低支援至 1.12）沒有 scoped token，權杖預設為帳號層級；這種情況建議使用只具備目標儲存庫權限的專用 bot / service account，而不是個人帳號。若實例支援到期日也請設定，並將伺服器網址指向您的 Gitea 實例（例如 `https://gitea.example.com`）。
+> **安全性建議：** 權杖只授予必要的儲存庫與最低權限，能設定到期日就設定；不要把權杖寫進可能被同步的筆記。若懷疑外洩，立即撤銷並重新簽發。
 
-   三種服務都可以從各自的設定頁立即撤銷權杖。如果權杖可能外洩，請先撤銷，再簽發新的權杖。
-3. **儲存庫路徑**：如果您想將筆記存放在儲存庫的特定資料夾（例如 `notes/`），請在 `Root Path` 中設定。
-4. **語言與自動重新整理**：可選擇跟隨系統、English、繁體中文或简体中文；「Obsidian 啟動時自動重新整理同步狀態」預設開啟，亦可在設定中關閉。
+## 行動裝置
 
----
+行動版使用相同的版本控制模型。同步佇列預設保持精簡，避免把「儲存庫變更」推離畫面；選擇檔案後則進入適合手機操作的詳細／Diff 畫面。
 
-## 2. 核心操作流程
+跨裝置工作時，建議先重新整理遠端狀態，再開始修改；完成後只把真正要同步的項目加入同步佇列。
 
-### 💡 檢查同步狀態
-每次開始工作或切換裝置時，建議先檢查狀態：
-1. 點擊側邊欄的 **清單圖示** 或使用指令面板 (`Ctrl/Cmd + P`) 輸入 `Open sync status view`。
-2. 同步狀態會在 Obsidian 啟動後自動重新整理；需要時仍可點擊 **Refresh status**。
-3. 使用狀態分頁、路徑搜尋，或選擇性的樹狀檢視來瀏覽檔案。樹狀檢視支援展開資料夾與三態勾選框，可一次選取整個資料夾。
-4. 您會看到檔案清單，標示為：
-   - **Synced**：已同步（與雲端一致）。
-   - **Modified**：本機已修改（需要 Push）。
-   - **Remote only**：雲端有新檔案（需要 Pull）。
-   - **Moved**：檔案或資料夾已重新命名／移動，尚待同步；可 Push 或還原移動。
+## 安裝
 
-![sync-status](imgs/sync-status.png)
-*同步狀態面板讓您可以一目了然地確認哪些檔案已經修改，並進行上傳或下載。*
+### 從社群外掛安裝（建議）
 
----
+1. 打開 **設定 → 社群外掛**，必要時關閉限制模式。
+2. 點擊 **瀏覽**，搜尋 **Git File Sync**。
+3. 點擊 **安裝**，完成後 **啟用**。
 
-### ⬆️ 如何上傳（Push）
-當您寫完筆記，想備份到雲端時：
-- **單一檔案**：
-  - 點擊左側功能列的 **雲端上傳圖示**。
-  - 或者在檔案列表點擊右鍵，選擇 `Push to GitLab/GitHub/Gitea`。
-- **批量上傳**：
-  - 在同步面板勾選多個檔案，點擊下方的 **Push selected**。
-- **確認計畫**：每次 Push 前會先列出新增、修改、移動與刪除項目；確認後點擊 **Apply**。重新命名檔案或移動資料夾會作為真正的移動同步，不會在遠端留下重複檔案。
+### 手動安裝
 
----
+1. 從 [最新 Release](https://github.com/firstsun-dev/git-files-sync/releases/latest) 下載 `main.js`、`manifest.json`、`styles.css`。
+2. 建立 `<vault>/.obsidian/plugins/git-file-sync/`。
+3. 將三個檔案放入該目錄。
+4. 重新載入 Obsidian，並在 **設定 → 社群外掛** 啟用 Git File Sync。
 
-### ⬇️ 如何下載（Pull）
-當您在另一台裝置更新了筆記，想同步回目前裝置時：
-1. 打開同步面板，點擊 **Refresh status**。
-2. 找到顯示為 **Remote only** 或 **Modified**（雲端版本較新）的檔案。
-3. 勾選後點擊 **Pull selected**。
-4. 先確認即將套用的同步計畫，再點擊 **Apply**。
-5. **注意**：Pull 會覆蓋掉您本機的內容。如果有衝突，會自動開啟衝突解決視窗。
+## 隱私與安全
 
----
+- **Token 僅存本機** — 存取權杖儲存在 vault 內的外掛資料中，只會傳送給你設定的 Git 服務。
+- **無遙測** — 外掛不收集使用分析或個人資料。
+- **選擇性同步** — 未選入同步流程的檔案不會因新版版本控制流程而自動上傳。
 
-## 3. 衝突處理 (Conflict Resolution)
+## 系統需求
 
-如果同一個檔案在本機和雲端都被修改過，同步時會跳出衝突視窗：
-1. 左側為 **本機版本**，右側為 **雲端版本**。
-2. 您可以查看差異處。
-3. 選擇 **Keep Local**（保留本機）或 **Keep Remote**（採用雲端版本）。
-4. 選擇後系統會自動更新檔案。
+- Obsidian **1.11.0** 或更新版本
+- 支援桌面版與行動版
 
-![conflict](imgs/git-diff.png)
-*內建的差異比對工具 (Diff Viewer) 可讓您在同步前並排比對本機與雲端的修改差異。*
+## 更多文件
 
-在桌面版，點擊 **Diff** 會在專屬窗格開啟比對；行動版則維持面板內的比對。可點擊檔案路徑開啟本機筆記，或在支援的服務上開啟遠端檔案頁面。
-
----
-
-## 4. 行動裝置使用技巧
-
-- **開啟面板**：從螢幕左側向右滑動，展開功能列即可看到同步圖示。
-- **工作前先 Pull**：建議每次開始寫筆記前，先點一下 Refresh 確保讀取到最新版本。
-- **完成後即 Push**：寫完後隨手 Push，確保您的變更已儲存至雲端。
-
----
-
-## 🔒 隱私與安全
-
-- 您的存取權杖 (Token) 僅會儲存在本機 vault 的外掛資料目錄中，只會傳送到您設定的 Git 服務。
-- 本外掛不會收集任何個人資料或使用紀錄。
+- [English README](README.md)
+- [简体中文使用指南](USAGE_zh-cn.md)
+- [Symbolic link handling](docs/symlink-handling.md)
+- [完整版本紀錄](CHANGELOG.md)
+- [Releases](https://github.com/firstsun-dev/git-files-sync/releases)

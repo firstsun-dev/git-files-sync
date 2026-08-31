@@ -78,4 +78,65 @@ describe('WhatsNewModal', () => {
 
         expect(closeSpy).toHaveBeenCalledOnce();
     });
+
+    describe('onboarding release (e.g. 1.6.0)', () => {
+        const onboardingReleases: ChangelogRelease[] = [
+            {
+                version: '1.6.0',
+                headline: { en: 'A new Source Control workflow' },
+                summary: { en: 'Review, queue, then sync.' },
+                onboarding: {
+                    action: 'open-source-control',
+                    steps: [
+                        { title: { en: 'Review' }, description: { en: 'See what changed.' } },
+                        { title: { en: 'Queue' }, description: { en: 'Pick what to sync.' } },
+                        { title: { en: 'Sync' }, description: { en: 'Apply it all.' } },
+                    ],
+                },
+                entries: [{ text: { en: 'New Source Control workflow' }, notable: true }],
+            },
+            ...releases,
+        ];
+
+        it('renders the headline for the enhanced release', () => {
+            const contentEl = openModal(onboardingReleases);
+            const headings = Array.from(contentEl.querySelectorAll('h4')).map(h => h.textContent);
+            expect(headings).toContain('A new Source Control workflow');
+        });
+
+        it('renders all three onboarding steps with their titles', () => {
+            const contentEl = openModal(onboardingReleases);
+            const stepTitles = Array.from(contentEl.querySelectorAll('.ssv-whats-new-step strong')).map(el => el.textContent);
+            expect(stepTitles).toEqual(['Review', 'Queue', 'Sync']);
+        });
+
+        it('shows "Open Source Control" as the primary CTA', () => {
+            const contentEl = openModal(onboardingReleases);
+            const buttons = Array.from(contentEl.querySelectorAll('button'));
+            const cta = buttons.find(b => b.textContent?.includes('Open Source Control'));
+            expect(cta).toBeTruthy();
+            expect(cta?.classList.contains('mod-cta')).toBe(true);
+        });
+
+        it('invokes the open-source-control callback and closes when the CTA is clicked', () => {
+            const onOpenSourceControl = vi.fn();
+            const modal = new WhatsNewModal(new App(), onboardingReleases, onOpenSourceControl);
+            modal.contentEl = createContainer();
+            modal.onOpen();
+            const closeSpy = vi.spyOn(modal, 'close');
+
+            const buttons = Array.from(modal.contentEl.querySelectorAll('button'));
+            const cta = buttons.find(b => b.textContent?.includes('Open Source Control'));
+            cta?.click();
+
+            expect(onOpenSourceControl).toHaveBeenCalledOnce();
+            expect(closeSpy).toHaveBeenCalledOnce();
+        });
+
+        it('still renders legacy releases as a plain list alongside the onboarding release', () => {
+            const contentEl = openModal(onboardingReleases);
+            const headings = Array.from(contentEl.querySelectorAll('h4')).map(h => h.textContent);
+            expect(headings).toEqual(['A new Source Control workflow', 'v1.3.0', 'v1.2.1']);
+        });
+    });
 });

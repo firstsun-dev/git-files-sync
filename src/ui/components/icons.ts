@@ -11,6 +11,7 @@ export const ICONS = {
     addition: 'file-plus',
     push:     'arrow-up',
     pull:     'arrow-down',
+    download: 'download',
     checking: 'refresh-cw',
     refresh:  'refresh-cw',
     delete:   'trash-2',
@@ -18,10 +19,20 @@ export const ICONS = {
     diffOpen: 'chevron-up',
     moved:    'move',
     revert:   'undo-2',
+    error:    'alert-triangle',
+    chevronRight: 'chevron-right',
+    chevronDown:  'chevron-down',
+    back:     'arrow-left',
     // Search filter
     search:   'search',
     clear:    'x',
     // Info strip
     branch:   'git-branch',
     folder:   'folder',
+    // Diff layout toggle (mobile)
+    diffSplit:   'columns-2',
+    diffUnified: 'rows-2',
+    // Repository changes view toggle
+    viewTree: 'folder-tree',
+    viewList: 'list',
 } as const;

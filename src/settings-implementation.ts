@@ -1,7 +1,8 @@
-import {App, PluginSettingTab, Setting, Notice, TextComponent} from 'obsidian';
+import {App, PluginSettingTab, Setting, Notice, TextComponent, ButtonComponent} from 'obsidian';
 import GitLabFilesPush, { type ConnectionStatus } from "./main";
 import {FolderSuggest} from "./ui/FolderSuggest";
 import {RemoteFolderSuggest} from "./ui/RemoteFolderSuggest";
+import {WhatsNewModal} from "./ui/WhatsNewModal";
 import { t, setLanguageOverride, type LanguageSetting } from "./i18n";
 import { CHANGELOG, entryText } from "./changelog";
 
@@ -172,10 +173,8 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 	}
 
 	// Persistent (until dismissed) banner surfacing the current version's notable
-	// highlights right at the top of the settings tab, so users who dismissed or
-	// never saw the WhatsNewModal (see main.ts) can still find them. Separate
-	// from `lastSeenVersion` — that gate controls the once-per-upgrade modal,
-	// this one just tracks whether the banner itself was dismissed.
+	// highlights right at the top of the settings tab. Dismissing this only hides
+	// the attention banner; release history remains available from Settings.
 	private renderWhatsNewBanner(containerEl: HTMLElement): void {
 		const currentVersion = this.plugin.manifest.version;
 		if (this.plugin.settings.bannerDismissedVersion === currentVersion) return;
@@ -184,13 +183,24 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		const notableEntries = release?.entries.filter(entry => entry.notable) ?? [];
 		if (notableEntries.length === 0) return;
 
+		// Onboarding releases already teach their mental model in the modal's
+		// step-by-step layout — keep the banner itself to a couple of highlights
+		// rather than repeating every notable entry.
+		const bannerEntries = release?.onboarding ? notableEntries.slice(0, 2) : notableEntries;
+
 		const banner = containerEl.createDiv({ cls: 'gfs-whats-new-banner' });
 		const textEl = banner.createDiv({ cls: 'gfs-whats-new-banner-text' });
 		textEl.createEl('strong', { text: t('settings.whatsNewBanner.title', { version: currentVersion }) });
 		const list = textEl.createEl('ul', { cls: 'gfs-whats-new-banner-list' });
-		for (const entry of notableEntries) {
+		for (const entry of bannerEntries) {
 			list.createEl('li', { text: entryText(entry) });
 		}
+		const viewBtn = new ButtonComponent(textEl)
+			.setButtonText(t('settings.whatsNewBanner.view'))
+			.onClick(() => {
+				new WhatsNewModal(this.app, CHANGELOG, () => void this.plugin.activateSourceControlView()).open();
+			});
+		viewBtn.buttonEl.addClass('gfs-whats-new-banner-view');
 
 		const dismissBtn = banner.createEl('button', {
 			cls: 'gfs-whats-new-banner-dismiss',
@@ -204,6 +214,17 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				this.refresh();
 			})();
 		});
+	}
+
+	private renderReleaseHistorySetting(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName(t('settings.releaseHistory.name'))
+			.setDesc(t('settings.releaseHistory.desc'))
+			.addButton(button => button
+				.setButtonText(t('settings.releaseHistory.button'))
+				.onClick(() => {
+					new WhatsNewModal(this.app, CHANGELOG, () => void this.plugin.activateSourceControlView()).open();
+				}));
 	}
 
 	// Rebuilding the whole settings tab (renderSettings) to refresh the badge
@@ -249,6 +270,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		this.renderWhatsNewBanner(containerEl);
+		this.renderReleaseHistorySetting(containerEl);
 		this.renderConnectionStatus(containerEl);
 
 		new Setting(containerEl)
@@ -490,7 +512,7 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
 				.setPlaceholder('https://gitea.example.com')
 				.setValue(this.plugin.settings.giteaBaseUrl)
 				.onChange((value) => {
-					this.plugin.settings.giteaBaseUrl = value;
+					this.plugin.settings.giteaBaseUrl = value || 'https://gitea.example.com';
 					void this.plugin.saveSettings();
 					this.plugin.initializeGitService();
 					this.scheduleConnectionTest();

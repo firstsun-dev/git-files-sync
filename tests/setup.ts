@@ -42,7 +42,7 @@ export const PluginSettingTab = class {
   constructor(app?: unknown, plugin?: unknown) {
     this.app = app;
     this.plugin = plugin;
-    this.containerEl = document.createElement('div') as HTMLElement;
+    this.containerEl = document.createElement('div');
   }
 };
 
@@ -198,11 +198,15 @@ export const Notice = class {
 
 export const Modal = class {
   app: unknown;
+  modalEl: HTMLElement;
   contentEl: HTMLElement;
 
   constructor(app?: unknown) {
     this.app = app;
-    this.contentEl = document.createElement('div') as HTMLElement;
+    // Real Modal nests contentEl inside modalEl, like Obsidian's DOM.
+    this.modalEl = document.createElement('div');
+    this.contentEl = document.createElement('div');
+    this.modalEl.appendChild(this.contentEl);
   }
 
   open() {
@@ -233,7 +237,7 @@ export const ItemView = class {
     this.app = leaf?.app;
     // Real ItemView's containerEl has a header at children[0] and the
     // content root at children[1]; views render into the latter.
-    this.containerEl = document.createElement('div') as HTMLElement;
+    this.containerEl = document.createElement('div');
     this.containerEl.appendChild(document.createElement('div'));
     this.containerEl.appendChild(document.createElement('div'));
   }

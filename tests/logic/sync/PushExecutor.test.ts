@@ -35,6 +35,25 @@ describe('PushExecutor', () => {
         expect(updateMetadata).not.toHaveBeenCalled();
     });
 
+    it('still reports success and returns the sha when the remote push succeeds but local metadata persistence fails', async () => {
+        const pushFile = vi.fn().mockResolvedValue({ sha: 'remote-sha' });
+        const updateMetadata = vi.fn().mockRejectedValue(new Error('disk full'));
+        const notify = vi.fn();
+        const executor = new PushExecutor(
+            () => ({ pushFile } as unknown as GitServiceInterface),
+            () => 'main',
+            path => path,
+            updateMetadata,
+            () => 'GitHub',
+            notify,
+        );
+
+        const sha = await executor.push({ path: 'a.md', name: 'a.md' }, 'hello', undefined, undefined, true);
+
+        expect(sha).toBe('remote-sha');
+        expect(notify).toHaveBeenCalledWith(expect.stringContaining('failed to save local sync state'));
+    });
+
     it('reads the current provider lazily after a provider switch', async () => {
         const firstPush = vi.fn();
         const secondPush = vi.fn().mockResolvedValue({ sha: 'sha' });

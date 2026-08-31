@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/unbound-method */
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn() mocks intentionally reference methods unbound; safe under Vitest's mocking model */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SyncManager, BatchPushConflict, ConflictResolution } from '../../src/logic/sync-manager';
 
@@ -9,6 +9,7 @@ import { BatchConflictResolutionModal } from '../../src/ui/BatchConflictResoluti
 import { SyncConflictModal } from '../../src/ui/SyncConflictModal';
 import { gitBlobSha } from '../../src/utils/git-blob-sha';
 import { ObsidianSyncInteraction } from '../../src/ui/ObsidianSyncInteraction';
+import { SyncDiffService } from '../../src/logic/sync/SyncDiffService';
 
 vi.mock('../../src/ui/SyncConflictModal');
 // Every push/pull now shows a plan for review before applying. These tests
@@ -83,22 +84,23 @@ describe('SyncManager', () => {
     let manager: SyncManager;
     /** How the mocked BatchConflictResolutionModal resolves each conflict by default; override per-test. */
     let conflictResolver: (conflict: BatchPushConflict) => ConflictResolution;
+    /** Vault files "existing" on disk per path, so getFileByPath resolves to the exact TFile instances tests created. */
+    let createdFiles: Map<string, TFile>;
 
     beforeEach(() => {
         vi.clearAllMocks();
+        createdFiles = new Map();
         conflictResolver = () => 'skip';
         vi.mocked(SyncPlanModal).mockImplementation(function (
             this: SyncPlanModal, _app: unknown, _plan: unknown, _direction: SyncPlanDirection, onConfirm: () => void
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
         vi.mocked(BatchConflictResolutionModal).mockImplementation(function (
             this: BatchConflictResolutionModal,
             _app: unknown,
-            _gitService: unknown,
             conflicts: BatchPushConflict[],
-            _totalFiles: number,
             _safeCount: number,
             onResolve: () => void,
             _onCancel: () => void,
@@ -106,10 +108,17 @@ describe('SyncManager', () => {
             for (const conflict of conflicts) conflict.resolution = conflictResolver(conflict);
             onResolve();
             return this;
-        } as never);
+        });
         mockSettings.syncMetadata = {};
         // Default: file exists in vault
-        vi.spyOn(mockApp.vault, 'getFileByPath').mockReturnValue(new TFile());
+        vi.spyOn(mockApp.vault, 'getFileByPath').mockImplementation((path: string) => {
+            const found = createdFiles.get(path);
+            if (found) return found;
+            const synthetic = new TFile();
+            synthetic.path = path;
+            synthetic.name = path.slice(path.lastIndexOf('/') + 1);
+            return synthetic;
+        });
         manager = new SyncManager(mockApp, mockGitLab, mockSettings, undefined, undefined, undefined, new ObsidianSyncInteraction(mockApp));
     });
 
@@ -219,6 +228,51 @@ describe('SyncManager', () => {
         expect(modalMock).toHaveBeenCalled();
     });
 
+    /** Tests that the composition wires a ConflictDiffStatLoader into the batch modal — see the plugin's plugin-only wiring in main.ts via setConflictDiffStatLoader. */
+    it('passes the wired diff-stat loader to the batch conflict modal (production composition, not undefined)', async () => {
+        const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
+        mockSettings.syncMetadata['test.md'] = { lastSyncedSha: 'old-sha', lastSyncedAt: Date.now() };
+
+        vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
+        vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'remote content', sha: 'new-remote-sha' });
+        vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'test.md', sha: 'new-remote-sha', symlink: false }]);
+
+        // Mirror main.ts composition: SyncManager gets a conflict diff-stat
+        // loader AND the "View Diff" loader, both built on the shared
+        // SyncDiffService. Without this wiring the modal renders stat slots
+        // that stay empty forever (:empty display) and View Diff would have
+        // no data path.
+        const diffService = new SyncDiffService(manager.status, (sha, path) => mockGitLab.getBlob(sha, path));
+        manager.setConflictDiffStatLoader(conflict => diffService.getConflictStat(conflict));
+        manager.setConflictDiffLoader(conflict => diffService.getConflictDiff(conflict));
+        vi.spyOn(mockGitLab, 'getBlob').mockResolvedValue({ content: 'remote content\nmore', sha: 'new-remote-sha' });
+
+        const modalMock = vi.mocked(BatchConflictResolutionModal);
+
+        await manager.pushFiles([mockFile]);
+
+        expect(modalMock).toHaveBeenCalled();
+        // The mock's 7th constructor arg is the optional diffStatLoader.
+        const loader = modalMock.mock.calls[0]![6];
+        expect(loader).toBeTypeOf('function');
+        // The 6th is the shared diff-service-backed "View Diff" loader.
+        const diffLoader = modalMock.mock.calls[0]![5];
+        expect(diffLoader).toBeTypeOf('function');
+
+        // The loader is a live data path: resolving a text conflict yields a ready stat from the reviewed blob.
+        const conflicts = modalMock.mock.calls[0]![1];
+        // 'remote content\nmore' vs 'local content': the LCS turns
+        // "remote content"→"local content" into one removed + one added
+        // line, plus the extra remote line removed → +1 / -2.
+        const result = await loader!({ path: conflicts[0]!.path, localContent: conflicts[0]!.localContent, remoteSha: conflicts[0]!.remoteSha, repoPath: conflicts[0]!.repoPath });
+        expect(result).toEqual({ status: 'ready', stat: { additions: 1, deletions: 2 } });
+
+        // The diff loader is the same single data path: one shared fetch
+        // serves both stat and View Diff for the same blob.
+        const diff = await diffLoader!({ path: conflicts[0]!.path, localContent: conflicts[0]!.localContent, remoteSha: conflicts[0]!.remoteSha, repoPath: conflicts[0]!.repoPath });
+        expect(diff).toEqual({ localContent: 'local content', remoteContent: 'remote content\nmore' });
+    });
+
     it('should handle conflict by choosing local', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
         mockSettings.syncMetadata['test.md'] = { lastSyncedSha: 'old', lastSyncedAt: 0 };
@@ -238,20 +292,21 @@ describe('SyncManager', () => {
 
     it('should handle conflict by choosing remote', async () => {
         const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
+        createdFiles.set('test.md', mockFile);
         mockSettings.syncMetadata['test.md'] = { lastSyncedSha: 'old', lastSyncedAt: 0 };
 
         vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
         vi.spyOn(mockGitLab, 'getFile').mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
         vi.spyOn(mockGitLab, 'listFilesDetailed').mockResolvedValue([{ path: 'test.md', sha: 'remote-sha', symlink: false }]);
         vi.spyOn(mockGitLab, 'getBlob').mockResolvedValue({ content: 'remote content', sha: 'remote-sha' });
-        // The batch conflict pipeline applies "keep remote" by path (via the
-        // adapter), not through the original TFile reference.
-        const writeSpy = vi.spyOn(mockApp.vault.adapter, 'write').mockResolvedValue(undefined);
+        // Keep Remote now writes through vault.modify on the existing TFile
+        // instead of bypassing the vault with a raw adapter write.
+        const modifySpy = vi.spyOn(mockApp.vault, 'modify').mockResolvedValue(undefined);
         conflictResolver = () => 'keep-remote';
 
         await manager.pushFiles([mockFile]);
 
-        expect(writeSpy).toHaveBeenCalledWith('test.md', 'remote content');
+        expect(modifySpy).toHaveBeenCalledWith(mockFile, 'remote content');
         expect(mockSettings.syncMetadata['test.md']?.lastSyncedSha).toBe('remote-sha');
     });
 
@@ -511,14 +566,12 @@ describe('SyncManager', () => {
         });
 
         it('regression: an Individual Push resolved as a path string (no live TFile) must still classify a tracked rename as a move, not an addition', async () => {
-            // Regression test for the reported bug: SyncStatusView's per-row push
-            // button calls `pushFiles([fileStatus.file || fileStatus.path])` -- a raw
+            // Regression test for the reported bug: a UI push entry can call
+            // `pushFiles([fileStatus.file || fileStatus.path])` -- a raw
             // path string whenever no live TFile is attached to that row's status
-            // entry yet (e.g. right after a rename, before the panel's next refresh
-            // re-resolves it). "Selected x1 Push" resolves the exact same `pushFiles`
-            // pipeline, normally with a live TFile -- there is now only one function,
-            // so "Individual Push" and "Selected x1 Push" can no longer structurally
-            // diverge. A string input must still classify a tracked rename as a move.
+            // entry yet (e.g. right after a rename, before the next refresh
+            // re-resolves it). A string input must still classify a tracked
+            // rename as a move, never an addition.
             const oldPath = 'old.md';
             const newPath = 'new.md';
 
@@ -711,6 +764,7 @@ describe('SyncManager', () => {
         it('pulls a remote-only change without opening conflict resolution', async () => {
             const path = 'remote-edited.md';
             const file = Object.assign(new TFile(), { path, name: path });
+            createdFiles.set(path, file);
             const baseSha = await gitBlobSha('base content');
             mockSettings.syncMetadata[path] = {
                 lastSyncedSha: baseSha,
@@ -753,7 +807,7 @@ describe('SyncManager', () => {
             ) {
                 onCancel?.();
                 return this;
-            } as never);
+            });
 
             const mockFile = Object.assign(new TFile(), { path: 'test.md', name: 'test.md' });
             vi.spyOn(mockApp.vault, 'read').mockResolvedValue('local content');
@@ -772,7 +826,7 @@ describe('SyncManager', () => {
             ) {
                 onCancel?.();
                 return this;
-            } as never);
+            });
 
             const path = 'new-remote-file.md';
             vi.mocked(mockGitLab.getFile).mockResolvedValue({ content: 'remote content', sha: 'new-sha' });
@@ -804,3 +858,5 @@ describe('SyncManager', () => {
         });
     });
 });
+
+/* eslint-enable @typescript-eslint/unbound-method -- re-enable after the whole-file exemption above */

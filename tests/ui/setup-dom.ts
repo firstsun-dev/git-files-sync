@@ -22,13 +22,14 @@ export function setupObsidianDOM(): void {
     const proto = window.HTMLElement.prototype;
     if ('createEl' in proto) return;
 
-    type DomOpts = { cls?: string; text?: string; type?: string };
+    type DomOpts = { cls?: string; text?: string; type?: string; value?: string };
     const toOpts = (o?: DomOpts | string): DomOpts => (typeof o === 'string' ? { cls: o } : o ?? {});
 
     function applyOpts(el: Element, o: DomOpts): void {
         if (o.cls) el.className = o.cls;
         if (o.text) el.textContent = o.text;
         if (o.type) (el as HTMLInputElement).type = o.type;
+        if (o.value !== undefined) (el as HTMLInputElement).value = o.value;
     }
 
     Object.assign(proto, {
@@ -42,13 +43,13 @@ export function setupObsidianDOM(): void {
             const el = window.document.createElement('div');
             applyOpts(el, toOpts(opts));
             (this as HTMLElement).appendChild(el);
-            return el as unknown as HTMLDivElement;
+            return el;
         },
         createSpan(opts?: DomOpts | string): HTMLSpanElement {
             const el = window.document.createElement('span');
             applyOpts(el, toOpts(opts));
             (this as HTMLElement).appendChild(el);
-            return el as unknown as HTMLSpanElement;
+            return el;
         },
         addClass(cls: string): void {
             (this as HTMLElement).classList.add(cls);
@@ -77,5 +78,5 @@ export function setupObsidianDOM(): void {
 }
 
 export function createContainer(): HTMLElement {
-    return dom.window.document.createElement('div') as unknown as HTMLElement;
+    return dom.window.document.createElement('div');
 }

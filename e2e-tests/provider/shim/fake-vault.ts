@@ -1,0 +1,116 @@
+import type { App } from 'obsidian';
+
+/**
+ * Real in-memory Obsidian Vault/App stand-in for SyncManager E2E (see
+ * e2e-tests/provider/suites/sync-manager.e2e.test.ts) — not a `vi.fn()` mock. The point of
+ * SyncManager E2E is to exercise real `SyncManager` + real provider service
+ * code against a real Git server; the *only* thing worth faking is the
+ * Obsidian filesystem boundary, so this implements exactly the `vault`/
+ * `vault.adapter` surface `src/logic/sync-manager.ts` actually touches, as a
+ * plain `Map<path, content>`.
+ *
+ * `TFile` itself has to come from the caller rather than being imported here:
+ * production code does `fileOrPath instanceof TFile`, so it must be the exact
+ * same class the vitest `obsidian` alias resolves to
+ * (e2e-tests/provider/runtime/obsidian-request-url.ts — see
+ * docs/testing/real-provider-e2e.md), not a second, unrelated class.
+ */
+export interface TFileLike { path: string; name: string }
+export type TFileCtor = new (path: string) => TFileLike;
+
+export class FakeVault {
+    private readonly files = new Map<string, string | ArrayBuffer>();
+
+    constructor(private readonly TFile: TFileCtor) {}
+
+    /** Seeds local vault state directly, bypassing any sync logic. */
+    writeLocal(path: string, content: string | ArrayBuffer): void {
+        this.files.set(path, content);
+    }
+
+    has(path: string): boolean {
+        return this.files.has(path);
+    }
+
+    /** Mirrors what Obsidian does on a vault rename: same content, new path. */
+    renameLocal(oldPath: string, newPath: string): void {
+        const content = this.files.get(oldPath);
+        if (content === undefined) throw new Error(`fake vault: no local file at ${oldPath}`);
+        this.files.delete(oldPath);
+        this.files.set(newPath, content);
+    }
+
+    /** Removes a local file, mirroring Obsidian's vault delete. */
+    removeLocal(path: string): void {
+        this.files.delete(path);
+    }
+
+    /** Constructs a real TFile handle for a path already in this vault. */
+    fileAt(path: string): TFileLike {
+        return new this.TFile(path);
+    }
+
+    /** All paths currently in this vault (the local tree, for convergence assertions). */
+    paths(): string[] {
+        return [...this.files.keys()];
+    }
+
+    /** Mirrors `vault.getFiles()` for the Source Control refresh pipeline. */
+    getFiles(): TFileLike[] {
+        return [...this.files.keys()].map(path => this.fileAt(path));
+    }
+
+    readonly adapter = {
+        exists: async (path: string): Promise<boolean> => this.files.has(path),
+        read: async (path: string): Promise<string> => {
+            const content = this.files.get(path);
+            if (typeof content !== 'string') throw new Error(`fake vault: no text file at ${path}`);
+            return content;
+        },
+        readBinary: async (path: string): Promise<ArrayBuffer> => {
+            const content = this.files.get(path);
+            if (!(content instanceof ArrayBuffer)) throw new Error(`fake vault: no binary file at ${path}`);
+            return content;
+        },
+        write: async (path: string, content: string): Promise<void> => {
+            this.files.set(path, content);
+        },
+        writeBinary: async (path: string, content: ArrayBuffer): Promise<void> => {
+            this.files.set(path, content);
+        },
+        // ensureParentDirs (src/utils/vault-path.ts) tolerates mkdir failures;
+        // there are no real directories to create in an in-memory map.
+        mkdir: async (): Promise<void> => {},
+        // SyncStatusRefreshService.discoverHiddenLocalFiles/recursiveScan list
+        // directories directly; an in-memory map has no directories, so the
+        // listing is just the root's files (its try/catch tolerates absence).
+        list: async (path: string): Promise<{ files: string[]; folders: string[] }> => (
+            path === '' || path === '/'
+                ? { files: this.paths(), folders: [] }
+                : { files: [], folders: [] }
+        ),
+        stat: async (path: string): Promise<{ type: 'file' } | null> => (
+            this.files.has(path) ? { type: 'file' } : null
+        ),
+    };
+
+    readonly vault = {
+        read: async (file: TFileLike): Promise<string> => this.adapter.read(file.path),
+        readBinary: async (file: TFileLike): Promise<ArrayBuffer> => this.adapter.readBinary(file.path),
+        modify: async (file: TFileLike, content: string): Promise<void> => {
+            this.files.set(file.path, content);
+        },
+        modifyBinary: async (file: TFileLike, content: ArrayBuffer): Promise<void> => {
+            this.files.set(file.path, content);
+        },
+        getFiles: (): TFileLike[] => this.getFiles(),
+        getFileByPath: (path: string): TFileLike | null => (this.files.has(path) ? this.fileAt(path) : null),
+        getAbstractFileByPath: (path: string): TFileLike | null => (this.files.has(path) ? this.fileAt(path) : null),
+        adapter: this.adapter,
+    };
+}
+
+/** Casts a FakeVault into the shape SyncManager expects as its `App` — it only ever touches `app.vault.*`. */
+export function fakeApp(fakeVault: FakeVault): App {
+    return { vault: fakeVault.vault } as unknown as App;
+}

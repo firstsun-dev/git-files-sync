@@ -4,122 +4,90 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-08-20
-**Active Feature:** feat-026 / issue #105 — sync architecture refactor on `refactor/sync-domain-pipeline`. `SyncPlanner` is now the decision source for normal push, batch pull/preview, single pull, and moves. Edited tracked renames with a free destination plan one move instead of being auto-skipped; remote-only changes pull without false conflicts; real two-sided divergence and occupied move destinations remain conflicts. Post-push CI hardening is locally green; real provider CI plus Obsidian desktop/mobile manual verification remain before declaring the feature complete.
-**Parallel Work:** PR #87 (4x Dependabot security alerts via npm overrides) and Issue #57 (live-credential smoke test).
+**Last Updated:** 2026-08-31
+**Active Feature:** Issue #142 — move real-provider E2E from `e2e/` to `e2e-tests/provider/` and replace `E2E_RUNTIME_DIR` per-run generation with committed static runtime files. Working tree changes complete, uncommitted.
+**Branch / PR:** `refactor/e2e-tests-scanner-boundary`, branched off `claude/source-control-foundation` (PR #129, still open). Intended to retarget/rebase onto `main` once #129 merges — see #142 for the full plan.
+
+**Open risk, not yet resolved**: this PR's core premise — that a directory rename from `e2e/` to `e2e-tests/` makes committing `fetch`/`node:child_process` `.ts` files scanner-safe — is unverified against the actual Obsidian community-plugin scanner, and contradicts this repo's own prior audit (`docs/obsidian-scanner-audit.md`), which found the scanner flagged those exact APIs while committed under `e2e/` regardless of directory. Proceeded on explicit user instruction; flagged in `docs/testing/real-provider-e2e.md`'s "Known gaps" and `docs/obsidian-scanner-audit.md`'s Phase 2 section. **A real scanner rescan is required before trusting this.**
+
+Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation` — not superseded by this entry.
 
 ## Outstanding Items
 
-0a. **Re-enable the gitea leg in CI** (`.github/workflows/ci.yml`, "Determine whether this provider leg should run" step) — disabled 2026-08-13 after two rounds of real-CI-only failures (host-port/127.0.0.1 unreachable from this self-hosted fleet's sibling-container topology, then a curl hang) got fixed but a third run wasn't attempted before the user asked to pause it; harness code (`scripts/e2e-harness.sh`'s gitea path, `e2e/suites/gitea.e2e.test.ts`) is unchanged and passes locally every time (`npm run test:e2e -- --provider gitea`, most recently re-confirmed 14/14 twice this session). While disabled, fork PRs get zero E2E coverage (gitea is normally the only leg that needs no secrets). PR #124 is already open and green with this leg gated off; re-enabling is a follow-up, not a blocker.
-1. **feat-025 manual verification** — Tree view code is complete and all automated checks pass; manual Obsidian verification in a real vault remains for user to confirm functionality (tree hierarchy, folder expand/collapse, checkboxes, Show synced toggle).
-2. **PR #87** — Dependabot security patches via npm overrides; awaiting review/merge.
-3. **Issue #57** — Live-credential smoke test; pre-existing, relevant before pushing major sync work.
+1. Run the new two-client e2e suite on a Linux/CI shell (local macOS system bash 3.2 can't run `scripts/e2e-harness.sh provision` — pre-existing `${var@Q}` bash-4-ism, not this session's change): `npm run test:e2e -- --provider gitea` exercises `e2e/suites/two-client-sync.e2e.test.ts` (now registered in `scripts/e2e-suites.txt`).
+2. Manual Obsidian verification of the prior UI rounds (see handoff); commit working tree; push → CI → merge flow.
+3. P0-4 (delete/modify) and P0-5 (rename/modify) are written as SAFETY INVARIANTS, not semantics: if production's current behavior silently loses content, the test goes RED — file `fix(sync): prevent silent data loss on divergent operations` follow-up in that case (per plan, likely a separate PR).
+4. Next phases (not started): Phase 4 divergence matrix (add/add, rename/rename, reverse delete/modify, mixed batch), Phase 5 offline/restart, Phase 6 failure/recovery, Phase 7 stress (scheduled/manual only).
 
-## Latest Evidence
+## Verification Evidence
 
-- [x] Issue #105 post-push CI hardening (2026-08-20), commit `948df28`: diagnosed run 32336155736 as two exhausted transient-provider attempts rather than a planner regression (GitHub 503/socket close; GitLab deadline exceeded). Increased provider E2E attempts from 2 to 3. A duplicate matrix cancelled by the shared push/PR concurrency group now produces a neutral aggregate gate with `run-ci=false`, so it neither creates a misleading `E2E gate` failure nor starts duplicate downstream CI; real failures still block. SyncManager E2E push preconditions now include `success`, `failed`, and provider `errors` in assertion diagnostics instead of surfacing only a secondary count mismatch. Added workflow contract and diagnostic unit tests and updated the E2E documentation. Verification: `actionlint v1.7.12 .github/workflows/ci.yml` — 0 errors; `npx eslint .` — 0 errors; `npm run build` — clean including Obsidian 1.11 compatibility; `npx vitest run` — 56 files / 613 tests; `npm run test:e2e -- --provider gitea` — 2 files / 14 tests and container cleanup; `git diff --check` — clean. Real CI run 32338116598 passed GitHub/GitLab production E2E, independent verification, cleanup, aggregate gate, Node 22/24 tests, lint, package, and build/release. The initial disabled-Gitea job landed on offline runner `heavenweb-runner-8`; failed-only rerun completed its skip in 11s and the full run concluded success. Provider API checks found no remaining `e2e/pr/127/**` or branch-source E2E refs. AGENTS-required Haiku was unavailable, so verification ran locally and through real CI.
+This session (follow-up round on the same PR — `test(e2e): isolate and streamline two-client sync scenarios`):
 
-- [x] Issue #105 unified sync decisions and move regression (2026-08-20): added operation-aware `SyncPlanner.planFor(push|pull)`, `MoveFacts`, and the `move` domain action. Normal push, batch pull and preview, single pull, and tracked moves now consume planner decisions instead of reimplementing SHA conflict checks. Removed `PushCoordinator.queueMove`'s stale-metadata gate, so an edited tracked rename with a free destination appears under Moves and commits once; occupied destinations remain conflicts. Fixed the complementary pull false positive: a remote-only change now pulls, while real two-sided divergence still resolves as conflict. Content-fetched text/binary paths normalize equal bytes to the provider blob SHA before planning, preserving binary and GitLab legacy-baseline behavior. Added planner operation matrix, coordinator move regression, batch pull, and single pull coverage. Verification: `npx eslint .` — 0 errors; `npm run build` — clean including Obsidian 1.11 compatibility; `npx vitest run` — 54 files / 610 tests; `git diff --check` — clean. Manual Obsidian verification remains.
+- Phase 1 (correctness, requested follow-up to the prior round): extracted the vaultFolder path-mapping rules (`filterPathByVaultFolder`/`filterFilesByVaultFolder`/`getNormalizedVaultPath`/`getVaultPathFromNormalized`) into a new pure module `src/logic/sync/vault-folder-scope.ts`, shared by `src/main.ts` (delegates now, behavior unchanged), `SyncScanner.toRepoPath` (delegates now, behavior unchanged), and `two-client-sync-scenario.ts`'s `TwoClient` wiring (now imports the same functions instead of a hand-copied duplicate) — so production and the E2E fixture can never silently drift apart on this logic again.
+- Phase 2 (remove redundant work):
+  - P0-1: dropped the second `s.baseline(other, ...)` — `other` was baselined then immediately treated as "A creates a new file", which was actually exercising modify, not create. `other` is now a genuine create (never baselined), one fewer real provider push + verifier read, and the test now actually covers the create→remote→pull path its comment claims.
+  - P0-2: dropped its trailing `expectIdempotent(ctx)` + second `expectTwoClientConvergence(ctx)` — idempotency-under-repeated-sync is already covered by P0-1's own `expectIdempotent`; P0-2's contract is "concurrent edits on different files both survive", which the first `expectTwoClientConvergence` + explicit remote-content checks already prove. Removes 3 extra full sync rounds (`A.sync/B.sync/A.sync`) worth of provider round trips per run.
+  - `convergence-assertions.ts`: added `captureRemoteSnapshot`/`RemoteSnapshot` — one `getFile` per tracked path + one `listFiles`, captured once — and `expectConverged`/`expectMetadataConsistent` now accept an optional snapshot instead of each independently re-fetching the same remote files. `expectTwoClientConvergence` captures one snapshot and passes it to both, roughly halving the verifier calls per convergence check.
+- Phase 3 (measurement): `captureRemoteSnapshot` is now wrapped in the existing opt-in `timed()` helper (`E2E_TIMING_DEBUG=1`) as `"remote snapshot (verifier)"`, alongside the prior round's `refresh`/`sync`/`baseline` timings — covers the plan's tree-listing/refresh/push/pull/verifier attribution list. Per-test total duration is already reported natively by vitest's own output; not hand-rolled separately.
+- Explicitly NOT done this round (per plan): no GitLab-provider-side server-side `rootPath` tree-listing optimization, no timeout/retry changes, no production sync **semantics** changes — `main.ts`/`SyncScanner.ts` changes here are a pure logic-preserving extraction only.
+- `npx eslint .` — 0 errors, 1 pre-existing unrelated warning (`obsidian-request-url.ts`'s unused `_T` generic).
+- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
+- `npx vitest run` — 68 files / 862 tests passed (same count as before this round — the extraction is behavior-preserving, no new/removed unit tests).
+- **Not verified in this environment**: a real multi-suite E2E run proving the new P0-1/P0-2 timings land in the plan's target ranges (35–50s / 25–40s) and that GitLab stops hitting 120s — needs `scripts/run-e2e.sh --provider gitlab|github|gitea` against a real provisioned branch/CI (no Docker daemon / provider credentials in this environment).
 
-- [x] Issue #105 architecture implementation (2026-08-19): extracted `SyncStatusRenderer` and `SyncStatusComposition`; `SyncStatusView.ts` is 11.5 KB / 251 lines. Extracted `PullCoordinator` and `PushCoordinator`; `SyncManager.ts` is 13.7 KB / 298 lines and retains its public compatibility API. `SyncManagerWorkspace` now owns refresh/tree-snapshot reuse, push/pull, diff, local/remote deletion, move, metadata mutations, provider URLs and UI-safe workspace info; sync-status UI code no longer reaches provider/tree/settings/vault mutation helpers, and `src/logic/**` has no UI imports. Legacy refresh characterization cases now target the extracted service instead of private View delegates; legacy modal tests explicitly inject the Obsidian interaction adapter. Added real refresh integration plus focused push-coordinator/workspace regression tests. Independent verification: `npx eslint .` — 0 errors; `npm run build` — clean including Obsidian 1.11 compatibility; `npx vitest run` — 54 files / 598 tests; `npm run test:e2e -- --provider gitea` — 2 files / 14 tests with container cleanup; `git diff --check` — clean. Desktop/mobile Obsidian smoke remains manual.
+This session (test(e2e): isolate two-client sync scope — follow-up to the CI-run-33358507732 triage):
 
-- [x] Issue #105 architecture slice 3 (2026-08-19): added tested `SyncDiffService` and `SyncStatusNavigator`, so lazy blob loading/cache/content-kind projection is a domain `FileDiff` boundary. Extracted single-file, batch push/pull, local/remote delete, move revert, remote-tree reuse, progress/confirmation, and optimistic-status orchestration into `SyncStatusOperations`; all View row/group events now enter through `SyncStatusController`. The actual View is about 40 KB (down from 58 KB this slice and 80 KB initially). Independent verification: `npx eslint .` — 0 errors; `npm run build` — clean including Obsidian 1.11 compatibility; `npx vitest run` — 52 files / 594 tests; `npm run test:e2e -- --provider gitea` — 2 files / 14 tests with container cleanup; `git diff --check` — clean. Feature remains in progress because renderer composition and the ~50 KB manager facade are still oversized.
-- [x] Issue #105 architecture slice 2 (2026-08-19): extracted `SyncStatusRefreshService` for local/remote discovery, hidden files, symlinks, SHA/content classification, out-of-band move reconciliation, and live modify/rename transitions. The actual View fell from about 80 KB to 58 KB while legacy characterization entrypoints remain thin delegates. Added `SyncInteractionPort` plus `ObsidianSyncInteraction`; `logic/sync/SyncManager.ts` no longer imports Modal or Notice classes. Independent verification: `npx eslint .` — 0 errors; `npm run build` — clean including Obsidian 1.11 compatibility; `npx vitest run` — 51 files / 585 tests; `npm run test:e2e -- --provider gitea` — 2 files / 14 tests with container cleanup; `git diff --check` — clean. Feature remains in progress: action orchestration is still View-owned, the manager core is about 50 KB, and desktop/mobile manual smoke tests remain pending.
-- [x] Issue #105 architecture slice (2026-08-19): moved compatibility entrypoints to thin re-exports; added presentation state, pure selectors, path-only controller commands, pure planner matrix, scanner, metadata store, push/pull/remote-delete/conflict executors, `SyncManagerWorkspace`, `FileDiff`, and four workspace integration paths. `npx eslint .` — 0 errors; `npm run build` — clean including Obsidian 1.11 compatibility; `npx vitest run` — 51 files / 585 tests passed; `npm run test:e2e -- --provider gitea` — 2 files / 14 tests passed with sandbox cleanup. Feature remains in progress: the implementation files are still oversized (`sync-status/SyncStatusView.ts` ~80 KB, `sync/SyncManager.ts` ~50 KB), domain still imports modal adapters, and manual Obsidian desktop/mobile checks are pending.
-- [x] Real-provider E2E Phase 2, PR #124 fully green (2 more follow-up commits, same branch/PR):
-  (1) NOSONAR placement fix — the previous commit's `# NOSONAR` comments on the gitea-provisioning
-  `curl` calls landed on the *closing* line of each multi-line statement, but SonarCloud attributes
-  shell:S5332 to the *opening* `curl` line, which can't carry a trailing comment while also ending
-  in a `\` continuation; collapsed those two calls to single lines (payload JSON pulled into a
-  local var first) so the marker lands correctly — confirmed via SonarCloud's issues API (2 of 7
-  findings were still OPEN after the first fix, both on the curl lines themselves; 0 after this
-  one, Security Rating A). (2) Dedup push/pull_request races — `provider-e2e`'s concurrency group
-  keyed PR runs by PR number and branch-only runs by branch name, so a push to a branch with an
-  open PR (this branch, since it has an open PR) fired both a `push` and a `pull_request` run in
-  *different* concurrency groups for the same commit, running fully concurrently against the same
-  shared GitLab sandbox; reproduced twice (rerunning the `pull_request`-triggered run's GitLab leg
-  failed both times — first with 3 different real-API errors including `400: Deadline Exceeded`,
-  then with a plain `testConnection` 120s timeout — while the `push`-triggered run for the
-  identical commit passed cleanly both times). Fixed by keying the group by branch name alone
-  (`github.head_ref || github.ref_name`, same expression `E2E_SOURCE_BRANCH` already used)
-  regardless of trigger event, and updated `e2e-pr-cleanup.yml`/`e2e-branch-cleanup.yml`'s groups
-  to match (documented as sharing `provider-e2e`'s group so cleanup queues behind rather than races
-  an active run). Verified end-to-end: pushed the fix, both a `push` and a `pull_request` run fired
-  again for the same commit as expected, and this time the concurrency group correctly cancelled
-  one of them instead of letting them race — the surviving run passed 100% clean (GitHub/GitLab/
-  Gitea E2E, full CI, SonarCloud A). User explicitly chose "fix the dedup now" over deferring or
-  just re-running until green, when asked.
-  Verification: `actionlint` — 0 errors; `npx eslint .` — 0 errors; `npm run build` — clean;
-  `npx vitest run` — 527 passed; real end-to-end Gitea sandbox run (`npm run test:e2e --
-  --provider gitea`) — 14/14 passed, twice, exercising the edited curl calls directly; real CI —
-  PR #124's surviving run fully green including all three real-provider E2E legs and SonarCloud
-  Security Rating A.
-- [x] Real-provider E2E Phase 2 follow-up fix (same branch/PR #124): `ci.yml`'s `provider-e2e` job
-  set `E2E_WORKDIR` in job-level `env:` using `${{ runner.temp }}` — `runner` isn't an allowed
-  context there (only `github`/`inputs`/`matrix`/`needs`/`secrets`/`strategy`/`vars` are), which
-  makes GitHub Actions reject the whole workflow file at parse time; confirmed via `actionlint`
-  and via the GitHub API (`jobs_url` for the c8382cb push run returned `total_count: 0` — no job
-  was ever created). Fixed by computing `E2E_WORKDIR` in an unconditional first step instead,
-  exporting it through `$GITHUB_ENV` (uses `$RUNNER_TEMP`, the step-level equivalent). Also fixed
-  the SonarCloud Quality Gate failure (Security Rating D on new code, required ≥ A):
-  `scripts/e2e-namespace.sh`'s `e2e_branch_hash` used `sha1sum`/`shasum` (CRITICAL, shell:S4790
-  weak-hash — not a real security use, just a collision-avoidance digest, but Sonar flags SHA-1
-  regardless of context) — switched to `sha256sum`/`shasum -a 256`; five `curl`/log lines in
-  `scripts/e2e-harness.sh`'s gitea provisioning that talk `http://` to a per-run Docker-bridge-only
-  container (shell:S5332 clear-text-protocol) — annotated `# NOSONAR` with an inline justification
-  (address never leaves the run's own Docker network, credentials are freshly random and
-  discarded at cleanup); `.github/workflows/ci.yml`'s new `npm ci` (githubactions:S6505, missing
-  `--ignore-scripts`) and `actions/checkout@v6`/`actions/setup-node@v6`/`dorny/paths-filter@v3` in
-  the two new jobs plus the three new standalone workflow files (githubactions:S7637, unpinned
-  action refs) — pinned to full commit SHAs, `npm ci` in the new job got `--ignore-scripts`
-  (husky's `prepare` hook isn't needed in CI). Left the pre-existing `build-artifact` job's
-  checkout/setup-node/npm ci untouched (not flagged, out of this fix's scope).
-  Verification: `actionlint` (downloaded v1.7.12 binary) — 0 errors on all 4 workflow files
-  (aside from an expected false-positive on the `32gb-ram` custom self-hosted label, which
-  actionlint can't know about); `bash -n` on all 5 changed/touched shell scripts — all parse;
-  `npx eslint .` — 0 errors; `npm run build` (incl. Obsidian 1.11.0 compat typecheck) — clean;
-  `npx vitest run` — 527 passed. Not yet re-verified against real CI/SonarCloud (push pending).
-- [x] Real-provider E2E Phase 2 (multi-run isolation): added `scripts/e2e-namespace.sh` (single
-  canonical `e2e/pr/<n>/<provider>/run-<id>-<attempt>` / `e2e/branch/<sanitized-id>/<provider>/
-  run-<id>-<attempt>` identity generator, sourced by every other layer — no branch-naming logic
-  duplicated anywhere else), `scripts/e2e-namespace-cleanup.sh` (layer 2: deletes a whole PR/branch
-  namespace), `scripts/e2e-janitor.sh` (layer 3: TTL sweep, default 24h, of any leftover `e2e/**`
-  branch, generic `git for-each-ref`/`push --delete`, tolerant of already-deleted refs — no
-  Node-based sweeper reintroduced). Removed `e2e-harness.sh`'s old `sweep` subcommand (superseded
-  by the janitor) and its ad hoc `gfs-e2e-<provider>-<run>` naming. `ci.yml`'s `provider-e2e` job
-  now sets `E2E_WORKDIR` to `$RUNNER_TEMP/git-files-sync-e2e/<run-id>/<run-attempt>/<provider>`
-  (was a shared `e2e-<provider>` dir), passes `E2E_PR_NUMBER`/`E2E_SOURCE_BRANCH` through for
-  `provision`, and carries a per-source/provider `concurrency` group
-  (`e2e-pr-<n>-<provider>`/`e2e-branch-<branch>-<provider>`, `cancel-in-progress: true`) so a
-  repeated push/rerun cancels its own predecessor instead of both running. Added
-  `.github/workflows/e2e-pr-cleanup.yml` (`pull_request_target: [closed]`, no `ref:` override on
-  checkout so it only ever runs this repo's own trusted code/secrets, never the closing PR's
-  branch) and `e2e-branch-cleanup.yml` (`delete` event) — both share the same concurrency-group
-  naming as `provider-e2e` with `cancel-in-progress: false` so cleanup queues behind rather than
-  races an active run. Added `.github/workflows/e2e-janitor.yml` (schedule, every 6h, plus
-  `workflow_dispatch`). Rewrote `docs/testing/real-provider-e2e.md`'s "Isolation model" section
-  (namespace scheme, concurrency/cancellation semantics, 3-layer cleanup hierarchy with a Mermaid
-  diagram, self-hosted workdir isolation) and updated Layout/CI/Cleanup/Known-gaps to match.
-  Verification: `npx eslint .` — 0 errors; `npm run build` (incl. Obsidian 1.11.0 compat
-  typecheck) — clean; `npx vitest run` — 527 passed; `python3 -c yaml.safe_load(...)` on all 4
-  touched/new workflow YAML files — all parse; `bash -n` on all 4 shell scripts — all parse;
-  functional dry-runs against throwaway local git repos (not the real sandboxes) for
-  `e2e_test_branch`/`e2e_branch_id` collision resolution (`feature/foo-bar` vs `feature-foo/bar`
-  hash to different identities), the janitor's TTL sweep (old branch deleted, recent branch and an
-  unrelated `feature/keep-me` branch both left untouched), and `e2e-namespace-cleanup.sh`'s prefix
-  match (`e2e/pr/123/**` matches only that PR's two provider branches, not PR 456 or the
-  branch-only namespace); **real end-to-end run against a live local Gitea sandbox**
-  (`npm run test:e2e -- --provider gitea`) with the new harness/namespace code — 14/14 E2E tests
-  passed including a real Docker provision/seed/cleanup cycle; confirmed
-  `E2E_PROVIDER=github scripts/e2e-harness.sh provision` still hard-fails on missing
-  `E2E_GITHUB_OWNER` (never a silent skip) with the new identity plumbing in place. Not yet
-  exercised against live GitHub/GitLab sandboxes or the real self-hosted runner fleet from this
-  checkout (no credentials/runner access here) — see `docs/testing/real-provider-e2e.md`'s "Known
-  gaps".
-- [x] Real-provider E2E: pushed to `origin/test/real-provider-e2e`, real CI run against `firstsun-dev/git-files-sync`'s self-hosted fleet (run 31666859288) fully green: `E2E / github` (3m15s) and `E2E / gitlab` (3m54s) both passed for real against live sandboxes, `E2E / github`+`gitlab`+`gitea` gate, and the full downstream `CI` (lint, test Node 22/24, package, build/release) all green. Getting there took 3 fix-and-repush rounds off real CI failures the local-only verification hadn't caught: (1) the generated `GitVerifier`'s git calls had no `GIT_ASKPASS`/`GIT_TERMINAL_PROMPT` in the separate vitest-step process — fixed by persisting them (paths/flags only, not the token itself) into `e2e.env`; (2) gitea provisioning timed out on `127.0.0.1:<host-port>` — this runner fleet is itself a sibling container of the Docker daemon, so a published host port isn't reachable from it; switched to the container's own bridge IP; (3) that same curl call could hang indefinitely with no `--max-time`, silently blowing past the health-check loop's own retry budget — added `--max-time` everywhere and a retry-with-backoff on `docker inspect` returning an empty IP. Gitea leg then temporarily disabled in CI per user request (still passes locally) — see Outstanding Items.
-- [x] Real-provider E2E Phase 1 (Shell/Git harness rewrite): replaced the Node-based `e2e/provision`/`e2e/verifier`/`e2e/providers`/`e2e/shim/{obsidian-request-url,window-timers}`/`scripts/run-e2e*.mjs` (fetch/globalThis/node:child_process/node:crypto in committed `.ts` — the exact APIs `docs/obsidian-scanner-audit.md` flagged) with `scripts/e2e-harness.sh` (provision/seed/verify/cleanup/sweep — Shell + Git CLI: `git push <sha>:refs/heads/<branch>` for GitHub/GitLab branch isolation, plain `docker`/`curl` for Gitea's disposable container+repo, `GIT_ASKPASS` generated per-run under `$RUNNER_TEMP`/`$E2E_WORKDIR`, never persisted) plus `scripts/run-e2e.sh` (local orchestration wrapper). Node-only glue the suites still need at runtime (real `requestUrl` shim, `window` timer alias, a git-CLI-backed verifier) is generated by `provision` into `$E2E_RUNTIME_DIR` and loaded via runtime-computed dynamic `import()` — never committed — so `e2e/**/*.ts` went back into `tsconfig.json`'s `include`/`eslint.config.mts`'s scope clean. Ported all 4 suites (github/gitlab/gitea/sync-manager) to the new `SyncManager.pushFiles` API and the generated verifier. `npx eslint .` — 0 errors; `npm run build` — clean; `npx vitest run` — 527 passed; **real end-to-end run against a live local Gitea sandbox** (`npm run test:e2e -- --provider gitea`) — 14/14 E2E tests passed (gitea contract suite + SyncManager suite), including a real Docker container provision/seed/cleanup cycle. GitHub/GitLab E2E legs are written and typecheck/lint clean but weren't run live (no sandbox credentials in this environment) — same known gap the pre-Phase-1 harness had, documented in `docs/testing/real-provider-e2e.md`'s "Known gaps". Self-audit of `docs/obsidian-scanner-audit.md`'s grep method against the new tree: zero hits for `fetch`/`globalThis`/`node:crypto`/`node:child_process`/`node:util`/bare-timers in `e2e/**` or `src/**`.
-- [x] Real-provider E2E Phase 0 reconcile: merged `origin/main` (scanner-driven E2E removal, v1.5.8) into `test/real-provider-e2e-work`, keeping the old `e2e/**` tree temporarily (added `e2e/**`/`vitest.e2e.config.ts` to `eslint.config.mts` `globalIgnores` as an interim measure — not in `tsconfig.json` `include` either, both to be resolved for real by the Phase 1 harness rewrite), then merged `origin/claude/unify-push-pull-pipeline` (new unified `SyncManager.pushFiles` API) cleanly (disjoint file sets, only `package-lock.json` auto-merged). `npx eslint .` — 0 errors; `npm run build` (incl. Obsidian 1.11.0 compat typecheck) — clean; `npx vitest run` — 527 tests passed.
-- [x] `fix(sync): ensure parent dirs exist when reverting file moves` (issue #94): extracted `ensureParentDirs()` to `src/utils/vault-path.ts` and called it before rename in both `revertMove` and `revertMoveGroup`, fixing "folder does not exist" error when reverting moves to deleted parent folders. `npx eslint .` — 0 errors; `npm run build` — clean; `npx vitest run` — 502 tests passed.
-- [x] `fix(gitlab): fix sha/revision semantics for optimistic locking` (issue #101, PR #113, merged): `GitFile.sha` now consistently represents blob identity across providers; added `GitFile.revision` for provider-specific write control.
+- Root cause of the P0-1..P0-5 slowness/timeout risk: `two-client-sync.e2e.test.ts`'s fixture (`createSyncManagerFixture()`) built settings with `rootPath: ''`/`vaultFolder: ''`, and `TwoClient`'s `SyncStatusRefreshService` wiring bypassed vault-folder filtering entirely (`filterFilesByVaultFolder: files => files`, `filterPathByVaultFolder: () => true`). Every `refresh()` therefore listed and classified the WHOLE shared branch's remote tree — every other suite's `e2e-sc-*` fixtures included — not just this run's `e2e-tc-<runId>/` namespace.
+- Fixed via the real production rootPath/vaultFolder model, not a test-only filter: `createSyncManagerFixture({ scoped: true })` (new opt-in option, `e2e-tests/provider/support/sync-manager-fixture.ts`) now generates its `runId` up front and configures BOTH the git service's own `rootPath` (`e2e-tests/provider/config/env.ts`'s `contextFor`/`githubContext`/`gitlabContext`/`giteaContext` now take a `rootPath` param, threaded into `service.updateConfig`) and `settings.vaultFolder` to the same `e2e-tc-<runId>` value. Because `vaultFolder` and `rootPath` are set identically, the local-vault-path ⇄ repo-relative-path round trip cancels out symmetrically: `SyncScanner.toRepoPath` strips `vaultFolder` before calling the service, and the service's own `rootPath` re-adds the same prefix when resolving the real remote path — so push/pull targets are unchanged, but `SyncStatusRefreshService.getNormalizedRemotePath` (already reading `settings().rootPath`) now actually scopes remote-tree classification, and `filterFilesByVaultFolder`/`filterPathByVaultFolder`/`getNormalizedPath`/`getVaultPath` in `two-client-sync-scenario.ts`'s `TwoClient` wiring were changed from test-only bypasses to the same vaultFolder-prefix logic `src/main.ts` uses in production.
+- Added a fail-fast scope-leakage guard: `TwoClient.refresh()` now asserts every classified change's path starts with `e2e-tc-<runId>/` immediately after refresh, so a future regression in this isolation fails in seconds instead of surfacing as a 120s suite timeout.
+- Added opt-in timing diagnostics (`e2e-tests/provider/support/timing-diagnostics.ts`, gated on `E2E_TIMING_DEBUG=1`, silent otherwise) around `refresh`/`sync`/`baseline`, so a future slow CI run can be attributed to a specific phase (tree listing / refresh / push / pull) instead of only "the test approached 120s".
+- Scope: E2E fixture/support/diagnostics only — did not touch `E2E_TEST_TIMEOUT_MS`, retry policy, or `src/` production sync code. `path()`-based test bodies in `two-client-sync.e2e.test.ts` (P0-1..P0-5) needed no changes — the vaultFolder/rootPath symmetry keeps their existing `s.path('...')` full-path convention working unchanged.
+- `npx eslint .` — 0 errors, 1 pre-existing unrelated warning (`obsidian-request-url.ts`'s unused `_T` generic).
+- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
+- `npx vitest run` — 68 files / 862 tests passed.
+- **Not verified in this environment**: an actual multi-suite-sharing-one-branch E2E run proving the leakage is gone in practice (needs `scripts/run-e2e.sh --provider gitlab|github|gitea` against a real provisioned branch/CI, per the plan's verification matrix — this environment has no Docker daemon / provider credentials).
 
-Full history of completed features (feat-001 through feat-024) archived to [archive/2026-07.md](./archive/2026-07.md). August work archived to [archive/2026-08.md](./archive/2026-08.md).
+This session (#142 — e2e/ → e2e-tests/provider/ scanner-boundary move, static runtime files):
+
+- Moved `e2e/{config,shim,suites,support}` → `e2e-tests/provider/{config,shim,suites,support}` (git mv, history preserved); deleted `e2e/runtime-modules.d.ts` and `e2e/verifier-runtime-types.ts`.
+- Replaced `scripts/e2e-harness.sh`'s `generate_runtime()` (which wrote `obsidian-request-url.ts`/`window-timers.ts`/`git-verifier.ts` per-run into `$E2E_RUNTIME_DIR`) with committed static files at `e2e-tests/provider/runtime/{obsidian-request-url,window-timers}.ts` and `e2e-tests/provider/support/git-verifier.ts`. `GitVerifier` now reads its clone path from `process.env.E2E_WORKDIR` at call time instead of a shell-baked constructor default — verified directly against a throwaway local git repo (`listFiles`/`getFile`/`listCommitShas` all correct).
+- Side effect: removing `generate_runtime()` also removed the file's only `${var@Q}` bash-4-ism, which previously blocked `scripts/e2e-harness.sh provision` under macOS system bash 3.2 (see "Outstanding Items" #1 below — that specific blocker no longer applies, though a live run still needs Docker, which this sandbox doesn't have running).
+- Updated `scripts/run-e2e.sh`, `scripts/e2e-suites.txt`, `vitest.e2e.config.ts`, `tsconfig.json`, `eslint.config.mts`, `.github/workflows/ci.yml` (`e2e-relevant` filter: `e2e/**` → `e2e-tests/**`, added `scripts/e2e-suites.txt`/`vitest.e2e.config.ts`, added `src/logic/sync/**`/`src/logic/source-control/**` — these were exercised by the E2E suites but not previously watched by the path filter) for the new layout.
+- Extended `tests/ci-workflow.test.ts` with contract assertions for the new paths and for the absence of `E2E_RUNTIME_DIR`/`generate_runtime`/`@e2e-runtime`.
+- Manually replayed `scripts/run-e2e.sh`'s forward/reverse suite-manifest checks against the new paths (bash snippet, no Docker needed) — both pass.
+- `npx eslint .` — 0 errors, 1 pre-existing-shape warning (unused `_T` generic in the committed `AbstractInputSuggest<_T>` stand-in, matches obsidian's real generic shape).
+- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
+- `npx vitest run` — 68 files / 857 tests passed.
+- **Not verified in this environment**: an actual local Gitea E2E run (`npm run test:e2e -- --provider gitea`) — Docker is installed but its daemon isn't reachable/running in this sandbox. The suite-manifest and `GitVerifier` logic were validated by other means above, but the full provision→seed→vitest→cleanup path was not exercised end-to-end here.
+- Filed #143 (`test: reduce real-provider API pressure`) as a separate follow-up for CI retry/tiering — out of scope for this PR, not touched here.
+
+This session (Source Control error-handling fixes, code-review follow-up + small cleanups):
+
+- `DiffStatProvider.clear()` now also clears the per-row `generations` map (previously only `cache`/`queued`/`active` were cleared, so `generations` grew unbounded across refreshes); added a white-box regression test.
+- `styles.css` `.batch-conflict-row`: replaced the ambiguous multicol-spec `column-gap` with the unambiguous `gap` shorthand (same grid layout, fixes an "Unexpected browser feature 'multicolumn' is only partially supported by Obsidian 1.9.12" lint warning).
+- `npx eslint .` — 0 errors; `npx vitest run` — 68 files / 850 tests passed; `npm run build` — passed.
+
+
+- Fixed 4 review findings against `SourceControlActionService.ts` / `PushExecutor.ts`: (1) `resolveConflict`'s local-push branch now checks `PushResults.errors` instead of assuming success whenever the workspace call doesn't throw; (2) `sync()`'s `planPush`/`planPull`/`confirmPlan` phase is now wrapped in `try/catch` (extracted into `planSync()`) so a planning rejection fails the batch and notifies instead of becoming an unhandled rejection; (3) `PushExecutor` now isolates local metadata bookkeeping (`updateMetadata`/`clearMetadata`) from the remote mutation call via `persistMetadata`/`persistMetadataClear`, so a metadata-write failure after a successful remote commit/push/delete no longer misreports the whole chunk as failed; (4) `sync()`'s remote-commit and pull phases (extracted into `commitRemoteBucket()`/`applyPullBucket()`) now have independent error boundaries, so a pull failure no longer fails already-succeeded push/delete targets.
+- `npx eslint .` — 0 errors
+- `npm run build` (+ Obsidian 1.11.0 compat typecheck) — passed
+- `npx vitest run` — 68 files / 849 tests passed (5 new regression tests added: 1 in `PushExecutor.test.ts`, 4 in `SourceControlActionService.test.ts`)
+
+Prior session (Multi-client E2E hardening):
+
+- `npx eslint .` — 0 errors (4 new files, no warnings)
+- `npx vitest run` — 68 files / 844 tests passed
+- `npm run build` (+ Obsidian 1.11.0 compat typecheck) — passed
+- `E2E_RUNTIME_DIR=<stub> E2E_PROVIDER=gitea npx vitest -c vitest.e2e.config.ts run e2e/suites/two-client-sync.e2e.test.ts` — suite collects all 5 P0 tests and wires real mocks/fixtures; fails only at provider-credential load (expected locally without harness env). Full run requires CI/`run-e2e.sh` (blocked locally by pre-existing bash-3.2 `${var@Q}` issue in `scripts/e2e-harness.sh`).
+- New files: `e2e/support/two-client-sync-scenario.ts`, `e2e/support/convergence-assertions.ts`, `e2e/suites/two-client-sync.e2e.test.ts`; extended `e2e/shim/fake-vault.ts` (paths/getFiles/getAbstractFileByPath/adapter.list/adapter.stat for the real refresh pipeline), `e2e/support/sync-manager-fixture.ts` (conflictResolver getter), `scripts/e2e-suites.txt` (suite registration).
+
+This session (CI run 33358507732 triage — `feat(source-control): replace sync status panel with the source control workflow`, PR #129):
+
+- Diagnosed the `github` provider E2E leg: `firstsun-dev/obsidian-sync-test`'s `main` branch had accumulated ~1,307 leftover `bench-61-*` files from an old manual perf run, never cleaned up. Every CI run clones that bloated `main`, and the two-client-sync suite's per-file remote pulls against it exhausted GitHub's API rate limit (2,669 "rate limit exceeded" hits in the log), cascading into failures across the whole run's retries. Fixed by removing the `bench-61-*` debris from `main` directly (outside this repo).
+- Diagnosed the `gitlab` leg (clean fixture repo, no pollution) and found the same underlying symptom independent of repo size: `two-client-sync.e2e.test.ts`'s P0-1..P0-4 tests each hang silently for exactly their 120s `testTimeout` with zero log output — consistent with a stalled `fetch()` that never resolves rather than an application-level deadlock, since `e2e-tests/provider/runtime/obsidian-request-url.ts`'s `requestUrl` shim had no network timeout at all.
+- Fixed: added a 30s `AbortSignal.timeout` to the shim's `fetch()` call so a stalled connection fails fast with a clear error instead of masquerading as a hang until the suite's own timeout. Does not by itself prove/disprove a real sync-logic deadlock — if CI still times out here after this fix, that's stronger evidence of an actual bug in `two-client-sync`, not infra flakiness (see #143 for the pre-existing "reduce real-provider API pressure" follow-up).
+- `npx eslint e2e-tests/provider/runtime/obsidian-request-url.ts` — 0 errors, 1 pre-existing warning (unused `_T` generic).
+- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
+- `npx vitest run` — 68 files / 862 tests passed.
+
+Prior round evidence (UI refactor rounds above) — see git log + [archive/2026-08.md](./archive/2026-08.md) at next archive pass.

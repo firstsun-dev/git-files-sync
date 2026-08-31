@@ -1,50 +1,114 @@
 <div align="center">
 
 # Git File Sync
-*Selective, file-by-file sync between your vault and GitHub, GitLab, or Gitea.*
+*Selective, file-by-file sync between your Obsidian vault and GitHub, GitLab, or Gitea.*
 
 [![CI](https://img.shields.io/github/actions/workflow/status/firstsun-dev/git-files-sync/ci.yml?branch=main&style=for-the-badge)](https://github.com/firstsun-dev/git-files-sync/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/firstsun-dev/git-files-sync?style=for-the-badge&color=2ea44f)](https://github.com/firstsun-dev/git-files-sync/releases)
 [![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&query=%24%5B%22git-file-sync%22%5D.downloads&label=downloads&style=for-the-badge&color=007acc)](https://obsidian.md/plugins?id=git-file-sync)
 [![License](https://img.shields.io/github/license/firstsun-dev/git-files-sync?style=for-the-badge)](LICENSE)
 
-**[Releases](https://github.com/firstsun-dev/git-files-sync/releases)** · **[繁體中文](USAGE_zh.md)** · **[简体中文](USAGE_zh-cn.md)** · **[Changelog](CHANGELOG.md)**
+**[Website](https://firstsun.org/en/)** · **[Releases](https://github.com/firstsun-dev/git-files-sync/releases)** · **[繁體中文](USAGE_zh.md)** · **[简体中文](USAGE_zh-cn.md)** · **[Changelog](CHANGELOG.md)**
 
 </div>
 
-Push, pull, diff, and resolve conflicts — file by file, not whole-vault. Unlike full-vault sync solutions, Git File Sync gives you granular control over exactly what leaves your device, so you can keep personal notes private while sharing project files through a real Git repository.
+Review changes, choose exactly what to sync, and apply them through a clear Source Control workflow — without syncing your entire vault.
+
+Unlike full-vault sync solutions, Git File Sync gives you control over exactly which files leave your device. Keep personal notes private while selectively synchronizing project files through a real Git repository. No local `.git` repository or Git CLI is required.
 
 <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub" height="20"> <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab" height="20"> <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea" height="20">
 
 <video src="https://blog-assets.firstsun.org/obsidian/plugins/git-file-sync/git-file-sync-en.webm" autoplay loop muted playsinline width="600"></video>
 
-![sync-status](imgs/sync-status.png)
-*The Sync Status View gives a bird's-eye view of your vault, letting you selectively push, pull, or diff modified files.*
+![Source Control](imgs/sync-status.png)
+*Review repository changes, choose what to sync, and apply them through the Sync Queue.*
 
-## What's inside
+## How it works
 
-- **File-by-file control** — Sync individual notes or selected files from a folder, not your entire vault. No lock-in to a single sync provider for everything.
-- **Three Git providers** — GitHub, GitLab (including self-hosted), and Gitea, all behind one consistent UI.
-- **Review before applying** — Every push, pull, and remote deletion shows a plan of additions, changes, moves, and deletions before it writes anything.
-- **Real rename support** — Renamed files and moved folders are committed as moves, without leaving duplicate files behind remotely.
-- **Visual diffing** — A built-in diff viewer compares local and remote versions before anything is overwritten; on desktop it opens in a dedicated pane.
-- **Conflict resolution** — When local and remote both changed, resolve manually with a dedicated conflict tool instead of guessing which version wins.
-- **Works on mobile** — Full support for Obsidian Mobile with a touch-friendly sync dashboard; the inline diff remains available there.
-- **Three interface languages** — English, Traditional Chinese, and Simplified Chinese. Follow Obsidian's display language or choose one in Settings.
+Git File Sync uses a simple Source Control workflow:
 
-## Sync Status View
+**Review → Queue → Sync**
 
-A single dashboard shows the state of every tracked file:
+1. **Review Repository Changes** — see local changes, remote changes, renames, deletions, and conflicts in one place.
+2. **Build your Sync Queue** — select exactly which changes should be included in the next sync.
+3. **Review and Sync** — inspect one combined sync plan before anything is applied.
 
-- **Live status and startup refresh** — tracked files update as you edit or rename them, and the view refreshes automatically after Obsidian starts (configurable in Settings).
-- **Status filtering and search** — instantly narrow the list to modified, new, remote-only, moved, or matching paths.
-- **Tree view and folder selection** — optionally browse files as a collapsible hierarchy, select folders with tri-state checkboxes, and choose whether synced files appear in All.
-- **Safe moves** — renamed files appear as **Moved**; related folder moves collapse into one row and can be pushed or reverted together.
-- **Visual diffs** — line-by-line comparison of local vs. remote before syncing; click a path to open the local note or its remote page when available.
-- **Remote-only detection** — spot files that exist on GitHub/GitLab/Gitea but haven't been pulled into the vault yet.
+A selected change moves from **Repository Changes** into the **Sync Queue**, so the same change is never shown in both places at once.
+
+## What you can do
+
+- **Sync only what you choose** — keep unrelated or private notes out of Git.
+- **Review everything in one Source Control view** — local changes, remote changes, renames, deletions, and conflicts.
+- **Build one Sync Queue** — mix uploads, downloads, and remote deletions in the same sync operation.
+- **Review before applying** — inspect additions, modifications, moves, downloads, and deletions before they are applied.
+- **Compare before overwriting** — built-in unified and side-by-side diffs for local and remote versions.
+- **Resolve conflicts explicitly** — choose which side wins instead of silently overwriting changes.
+- **Use the same workflow everywhere** — GitHub, GitLab, and Gitea on desktop and mobile.
+- **Use your preferred language** — English, Traditional Chinese, and Simplified Chinese are built in.
+
+## Quick start
+
+1. Install Git File Sync from Obsidian Community Plugins.
+2. Configure GitHub, GitLab, or Gitea under **Settings → Git File Sync**.
+3. Open **Source Control** from the ribbon or Command Palette.
+4. Review **Repository Changes**.
+5. Select the changes you want; they move into the **Sync Queue**.
+6. Click **Sync**, review the combined plan, then choose **Apply**.
+
+## Source Control
+
+The Source Control view separates work into two clear areas:
+
+### Repository Changes
+
+Files that need attention but are not yet part of the next sync. Use search, filters, and Tree/List view to narrow the workspace.
+
+### Sync Queue
+
+Changes selected for the next sync operation. Each queued item shows the action that will be applied:
+
+- **Upload** — apply the local version to the remote repository.
+- **Download** — bring the remote version into your vault.
+- **Delete** — mirror a local deletion to the remote repository.
+
+One **Sync** action builds a combined plan. Remote additions, modifications, moves, and deletions are committed together, while downloads are applied locally after review.
+
+### File states
+
+| Status | Meaning |
+|---|---|
+| `A` | Added locally |
+| `M` | Modified locally |
+| `D` | Deleted locally |
+| `R` | Renamed or moved |
+| `↓` | Available remotely |
+| `↕` | Modified remotely |
+| `!` | Conflict |
+| `S` | Synced |
+
+> **Deleted locally:** adding a `D` change to the Sync Queue deletes the tracked file from the remote repository by default. Use **Download** instead if you want to restore the remote copy locally.
+
+## Common workflows
+
+| Situation | What happens |
+|---|---|
+| New local file | `A` → Queue → **Upload** |
+| Local edit | `M` → Queue → **Upload** |
+| File exists only remotely | `↓` → Queue → **Download** |
+| Remote version changed | `↕` → Queue → **Download** |
+| Local tracked file deleted | `D` → Queue → **Delete** remote |
+| Local deletion was accidental | `D` → **Download** to restore locally |
+| File renamed or moved | `R` → Queue → **Upload** as a move |
+| Both sides changed | `!` → review conflict → **Keep Local** or **Keep Remote** |
+
+## Diff and conflict review
+
+Select a changed file to inspect its local and remote versions before syncing. The diff viewer supports unified and side-by-side layouts and shows addition/deletion statistics where available.
 
 ![conflict](imgs/git-diff.png)
-*The built-in diff viewer compares local and remote changes before you push or pull.*
+*Review local and remote differences before deciding which version to keep.*
+
+When both sides changed, Git File Sync keeps the conflict explicit. Choose **Keep Local** to overwrite the remote version or **Keep Remote** to accept the remote copy locally.
 
 ## Providers
 
@@ -54,89 +118,59 @@ A single dashboard shows the state of every tracked file:
 | <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab"> | gitlab.com · self-hosted | GitLab 13.0+ |
 | <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea"> | self-hosted | Gitea 1.12+ |
 
-> **Gitea note:** the plugin talks to the Gitea API v1 (`/api/v1`) and resolves branch names to commit SHAs before fetching the file tree, which is what makes 1.12+ the floor.
-
 ## Configuration
 
 ![Plugin Settings](imgs/plugin-settings.png)
-*Pick a provider and supply its credentials in Settings > Git File Sync.*
+*Choose a provider and configure the repository under Settings → Git File Sync.*
 
-| | Provider | Required info | Token scope |
-|:---:|---|---|---|
-| <img src="https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub"> | **GitHub** | Personal access token, owner, repo name | `Contents: Read and write` (fine-grained); `repo` (classic) |
-| <img src="https://img.shields.io/badge/GitLab-FC6D26?style=flat-square&logo=gitlab&logoColor=white" alt="GitLab"> | **GitLab** | Personal access token, project ID, base URL | `read_repository`, `write_repository` |
-| <img src="https://img.shields.io/badge/Gitea-609926?style=flat-square&logo=gitea&logoColor=white" alt="Gitea"> | **Gitea** | Personal access token, base URL, owner, repo name | `write:repository` (1.19+); account-wide on older versions |
+| Provider | Required information | Recommended permission |
+|---|---|---|
+| **GitHub** | Token, owner, repository | Fine-grained token with **Contents: Read and write** |
+| **GitLab** | Token, project ID, base URL | `read_repository`, `write_repository` |
+| **Gitea** | Token, owner, repository, base URL | `write:repository` on Gitea 1.19+ |
 
-> **Security tip:** scope every token as narrowly as possible — one repo, the minimum permissions, and a short expiration — and store it only in this plugin's settings. Never paste it into a note that gets synced. Rotate it immediately if it's ever exposed, and revoke tokens you're no longer using.
+Other settings include language, branch, repository root path, vault-folder scope, startup refresh, ignore patterns, and symbolic-link handling. See [Symbolic link handling](docs/symlink-handling.md) for details.
 
-- **GitHub token:** create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) (Settings → Developer settings → Personal access tokens → Fine-grained tokens) rather than a classic one. Set **Repository access** to *Only select repositories* and pick just the repo you're syncing, set an **Expiration** (90 days or less), and grant only **Contents: Read and write**. If you must use a classic token, limit the `repo` scope to that one use and set an expiration.
-- **GitLab token:** prefer a [project access token](https://docs.gitlab.com/user/project/settings/project_access_tokens/) (Project → Settings → Access tokens) over a personal one — it's scoped to a single project and can be revoked without affecting your account. The plugin only calls the repository tree/blobs/commits/branches endpoints, so grant just `read_repository` and `write_repository` (**not** `api`, which also grants issues, merge requests, CI, and account-wide access). Role **Developer** is the minimum that can push to a non-protected branch. Set an expiration date, and base URL defaults to `https://gitlab.com`; change it for self-hosted instances.
-- **Gitea token:** User settings → Applications → Access tokens. The plugin only touches repository content, branches, and git data, so on Gitea 1.19+ (which supports per-scope tokens) select just **`write:repository`** — that implies read access too — instead of "Select all". Older Gitea versions (down to the 1.12 minimum) don't support scoped tokens, so the token is account-wide by default; in that case, use a dedicated bot/service account with access to only the target repo rather than your personal account's token. Set an expiration if your instance offers one, and point the base URL at your instance (e.g. `https://gitea.example.com`).
+> **Security:** scope tokens to the smallest possible repository access and permissions, set an expiration where possible, and never place a token inside a note that may be synced. Revoke and rotate a token immediately if it may have been exposed.
 
-All three providers let you revoke a token instantly from its settings page — do that first if a token may have leaked, then issue a new one.
+## Mobile
 
-Other settings: **language** (system default, English, Traditional Chinese, or Simplified Chinese); **auto-refresh Sync Status on startup**; **branch** to sync against (default `main`); **root path** prefix inside the repo; **vault folder** to scope which notes are tracked; and **symbolic link handling** (*real* — recreate the link, GitHub only; *follow* — sync the target's content; *skip*). See [Symbolic link handling](docs/symlink-handling.md) for details.
+The same Source Control model is available on Obsidian Mobile. The Sync Queue starts compact so Repository Changes remain easy to browse, and selecting a change opens a mobile-friendly detail/diff view.
 
-## Daily workflow
-
-**Pushing:**
-- One note — the cloud icon in the ribbon, or the command `Push current file to GitLab/GitHub/Gitea`.
-- Several notes — open the Sync Status View, filter to **Modified**, select files, click **Push selected**.
-- From the file tree — right-click any file and choose `Push to GitLab/GitHub/Gitea`.
-- Review the proposed changes in the plan, then choose **Apply**. Renames and folder moves are included as real moves.
-
-**Pulling:**
-1. Open the Sync Status View and click **Refresh status**.
-2. Files with remote updates show as **Modified** or **Remote only**.
-3. Select them and click **Pull selected**.
-4. Review the plan and choose **Apply**. Pulling overwrites local changes — if both sides changed, the conflict tool opens instead.
-
-**Resolving a conflict:**
-1. The Conflict Resolution window opens automatically.
-2. Left pane is your **Local** version, right pane is **Remote**.
-3. Choose **Keep Local** (overwrite remote on next push) or **Keep Remote** (accept remote, overwrite local).
-
-**On mobile:** swipe from the left to open the ribbon and the Sync Status View, pull before you start editing, push when you're done.
+A practical multi-device habit is still useful: refresh before editing on another device, review what changed, then sync only the files you intend to move between devices.
 
 ## Installation
 
 ### From Community Plugins (recommended)
-1. Open **Settings > Community plugins** and turn off restricted mode.
-2. Click **Browse**, search for **Git File Sync**, click **Install**, then **Enable**.
+
+1. Open **Settings → Community plugins** and turn off Restricted mode if required.
+2. Click **Browse**, search for **Git File Sync**, then **Install** and **Enable**.
 
 ### Manual
+
 1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/firstsun-dev/git-files-sync/releases/latest).
 2. Create `<vault>/.obsidian/plugins/git-file-sync/`.
 3. Copy the three files into that folder.
-4. Reload Obsidian and enable the plugin under **Settings > Community plugins**.
-
-## Quick start
-
-1. Configure a provider in **Settings > Git File Sync** (see [Configuration](#configuration)).
-2. Open the **Sync Status View** — the list icon in the ribbon, or run `Open sync status view` from the Command Palette.
-3. The view refreshes automatically after startup; click **Refresh status** whenever you want to check again.
-4. Use the status tabs, path search, or optional tree view to find files; select files or folders and choose **Push selected** or **Pull selected**.
-5. Review the sync plan, then choose **Apply**.
-
-**Commands:**
-
-| Command | What it does |
-|---|---|
-| Open sync status view | Open the sync dashboard |
-| Push current file to GitLab/GitHub/Gitea | Push the active note |
-| Pull current file to GitLab/GitHub/Gitea | Pull the active note |
-| Push all files | Review and push every tracked, changed file |
-| Pull all files | Review and pull every tracked, changed file |
+4. Reload Obsidian and enable the plugin under **Settings → Community plugins**.
 
 ## Privacy and security
 
-- **Local storage** — personal access tokens are stored locally in the plugin's data folder inside your vault, and are only ever sent to the Git provider you configured.
-- **No telemetry** — the plugin collects no usage data or analytics.
+- **Local token storage** — access tokens are stored locally in the plugin data inside your vault and are sent only to the Git provider you configure.
+- **No telemetry** — Git File Sync does not collect usage analytics or personal data.
+- **Selective sync** — files outside your configured scope or not selected for sync are not automatically uploaded as part of the Source Control workflow.
 
 ## Requirements
 
-- Obsidian **1.13.0** or later
+- Obsidian **1.11.0** or later
 - Desktop and mobile supported
+
+## More documentation
+
+- [Traditional Chinese guide](USAGE_zh.md)
+- [Simplified Chinese guide](USAGE_zh-cn.md)
+- [Symbolic link handling](docs/symlink-handling.md)
+- [Full changelog](CHANGELOG.md)
+- [Releases](https://github.com/firstsun-dev/git-files-sync/releases)
 
 ## Development
 
@@ -156,4 +190,4 @@ MIT
 
 ---
 
-**Created by [ClaudiaFang](https://github.com/ClaudiaFang)**
+**Created by [ClaudiaFang](https://github.com/ClaudiaFang) · [firstsun-dev](https://github.com/firstsun-dev)**

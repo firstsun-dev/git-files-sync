@@ -4,13 +4,14 @@ import type { GitFile, GitServiceInterface, GitTreeEntry } from '../../services/
 import { gitBlobSha } from '../../utils/git-blob-sha';
 import { logger } from '../../utils/logger';
 import { contentsEqual, isBinaryPath } from '../../utils/path';
+import { t } from '../../i18n';
 import type { PullExecutor } from './PullExecutor';
 import type { SyncScanner } from './SyncScanner';
 import { SyncPlanner } from './SyncPlanner';
-import type { PlannedFileAction, SyncPlan, SyncPlanEntry, SyncResult } from './types';
+import type { PlannedFileAction, PullExecutionOptions, SyncPlan, SyncPlanEntry, SyncResult } from './types';
 import { isSyncPlanEmpty } from './types';
 
-type BatchOutcome = 'done' | 'unchanged' | 'conflict';
+type BatchOutcome = 'added' | 'updated' | 'unchanged' | 'conflict';
 type PlanKind = 'addition' | 'modification' | 'unchanged' | 'conflict' | 'skip';
 
 export interface PullCoordinatorDependencies {
@@ -40,9 +41,25 @@ export class PullCoordinator {
         const tree = await this.resolveTree(remoteTree);
         const plan = await this.planPullBatch(files, tree);
         if (!isSyncPlanEmpty(plan) && !await this.dependencies.confirmPlan(plan)) {
-            return { success: 0, failed: 0, conflicts: 0, errors: [] };
+            return { success: 0, added: 0, updated: 0, failed: 0, conflicts: 0, errors: [] };
         }
         return this.processBatch(files, onProgress, tree);
+    }
+
+    /**
+     * Applies an already-planned/confirmed pull batch without showing its own
+     * confirm modal — for a unified Sync Plan orchestrator that already got
+     * one confirmation covering the whole plan (pushes/moves/deletions and
+     * this download set together), so pulling shouldn't prompt a second time.
+     */
+    async applyPullBatch(
+        files: Array<TFile | string>,
+        onProgress?: (current: number, total: number, fileName: string) => void,
+        remoteTree?: GitTreeEntry[],
+        options: PullExecutionOptions = {},
+    ): Promise<SyncResult> {
+        const tree = await this.resolveTree(remoteTree);
+        return this.processBatch(files, onProgress, tree, options);
     }
 
     async planPullBatch(files: Array<TFile | string>, remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
@@ -74,8 +91,9 @@ export class PullCoordinator {
         files: Array<TFile | string>,
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[],
+        options: PullExecutionOptions = {},
     ): Promise<SyncResult> {
-        const results: SyncResult = { success: 0, failed: 0, conflicts: 0, errors: [] };
+        const results: SyncResult = { success: 0, added: 0, updated: 0, failed: 0, conflicts: 0, errors: [] };
         const tree = remoteTree ? new Map(remoteTree.map(entry => [entry.path, entry])) : undefined;
         for (let index = 0; index < files.length; index += 1) {
             const file = files[index];
@@ -84,7 +102,8 @@ export class PullCoordinator {
             onProgress?.(index + 1, files.length, name);
             try {
                 const outcome = await this.processFile(file, path, name, isString, tree);
-                if (outcome === 'done') results.success += 1;
+                if (outcome === 'added') { results.success += 1; results.added += 1; }
+                else if (outcome === 'updated') { results.success += 1; results.updated += 1; }
                 else if (outcome === 'conflict') results.conflicts += 1;
             } catch (error) {
                 logger.error(`Failed to pull ${path}:`, error);
@@ -93,7 +112,7 @@ export class PullCoordinator {
             }
         }
         await this.dependencies.saveSettings();
-        this.notifyResult(results);
+        if (options.notify !== false) this.notifyResult(results);
         return results;
     }
 
@@ -135,7 +154,7 @@ export class PullCoordinator {
         if (decision.action === 'resolve-conflict') return 'conflict';
         const target = typeof file === 'string' ? { path, name } : file;
         await this.dependencies.executor.pull(target, remote.content, remote.sha, true, this.symlinkTarget(remote));
-        return 'done';
+        return decision.action === 'pull-create' ? 'added' : 'updated';
     }
 
     private async classifyFromTree(
@@ -218,11 +237,20 @@ export class PullCoordinator {
     }
 
     private notifyResult(result: SyncResult): void {
-        if (result.success > 0) this.dependencies.notify(`Pulled ${result.success} file(s) to ${this.dependencies.serviceName()}`);
+        if (result.success > 0) {
+            const service = this.dependencies.serviceName();
+            const key = this.pullSummaryKey(result.added, result.updated);
+            this.dependencies.notify(t(key, { service, added: result.added, updated: result.updated }));
+        }
         if (result.conflicts > 0) {
             this.dependencies.notify(`Skipped ${result.conflicts} file(s) with conflicting changes on both sides. Push or pull each one individually to resolve.`, 8000);
         }
         if (result.failed > 0) this.dependencies.notify(`Failed to pull ${result.failed} file(s). Check console for details.`);
+    }
+
+    private pullSummaryKey(added: number, updated: number): 'sync.notice.pullSummary' | 'sync.notice.pullAddedOnly' | 'sync.notice.pullUpdatedOnly' {
+        if (added > 0 && updated > 0) return 'sync.notice.pullSummary';
+        return added > 0 ? 'sync.notice.pullAddedOnly' : 'sync.notice.pullUpdatedOnly';
     }
 
     private errorMessage(error: unknown): string {

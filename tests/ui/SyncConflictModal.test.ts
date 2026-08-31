@@ -32,26 +32,44 @@ describe('applyDestructiveStyle (Obsidian version compatibility)', () => {
 describe('SyncConflictModal', () => {
 	beforeAll(() => { setupObsidianDOM(); });
 
-	it('defaults to the diff panel and switches panels via tabs', () => {
+	it('renders the diff view directly with no redundant Local/Remote tabs', () => {
 		const modal = new SyncConflictModal(new App(), 'note.md', 'local', 'remote', vi.fn());
 		modal.contentEl = createContainer();
 
 		modal.onOpen();
 
 		const contentEl = modal.contentEl;
-		const tabs = Array.from(contentEl.querySelectorAll<HTMLElement>('.conflict-tab'));
-		const panels = Array.from(contentEl.querySelectorAll<HTMLElement>('.conflict-panel'));
+		expect(contentEl.querySelector('.conflict-diff-section')).not.toBeNull();
+		expect(contentEl.querySelector('.conflict-tabs')).toBeNull();
+		expect(contentEl.querySelector('.conflict-tab')).toBeNull();
+		expect(contentEl.querySelector('.conflict-diff-container')).toBeNull();
+	});
 
-		const activePanel = () => panels.find(panel => panel.classList.contains('is-active'));
-		const activeTab = () => tabs.find(tab => tab.classList.contains('is-active'));
+	describe('diff layout toggle', () => {
+		// Desktop (vitest Node env is not mobile): opens in split, matching
+		// the desktop diff tab's default — the wide modal exists to show
+		// side-by-side.
+		it('renders the shared diff panel defaulting to the split layout on desktop', () => {
+			const modal = new SyncConflictModal(new App(), 'note.md', 'local', 'remote', vi.fn());
+			modal.contentEl = createContainer();
 
-		expect(activeTab()?.textContent).toBe('Diff');
-		expect(activePanel()?.classList.contains('conflict-diff-section')).toBe(true);
+			modal.onOpen();
 
-		const localTab = tabs.find(tab => tab.textContent === 'Local');
-		localTab?.dispatchEvent(new Event('click'));
+			const body = modal.contentEl.querySelector('.scv-diff-tab-body');
+			expect(body?.classList.contains('scv-diff-layout-split')).toBe(true);
+			expect(modal.contentEl.querySelector('.ssv-diff-split')).not.toBeNull();
+		});
 
-		expect(activeTab()?.textContent).toBe('Local');
-		expect(activePanel()?.classList.contains('conflict-section')).toBe(true);
+		it('switches to the unified layout when the toggle button is clicked, never showing both at once', () => {
+			const modal = new SyncConflictModal(new App(), 'note.md', 'local', 'remote', vi.fn());
+			modal.contentEl = createContainer();
+
+			modal.onOpen();
+			(modal.contentEl.querySelector('.scv-diff-layout-toggle') as HTMLButtonElement).click();
+
+			const body = modal.contentEl.querySelector('.scv-diff-tab-body');
+			expect(body?.classList.contains('scv-diff-layout-unified')).toBe(true);
+			expect(body?.classList.contains('scv-diff-layout-split')).toBe(false);
+		});
 	});
 });

@@ -59,6 +59,21 @@ export interface BatchMoveItem {
     oldRevision?: string;
 }
 
+/**
+ * Everything one atomic multi-file commit should contain: writes (additions
+ * and modifications — `existedRemotely` on each `BatchPushItem` picks
+ * create vs update), real renames, and plain deletions, all landing in the
+ * same provider mutation. Grouped as one object rather than positional
+ * arrays so a caller can't accidentally transpose `moves`/`deletions`, and
+ * so adding another change kind later doesn't shift existing parameters.
+ */
+export interface BatchCommitPlan {
+    writes: BatchPushItem[];
+    moves: BatchMoveItem[];
+    /** Paths relative to rootPath to remove, same shape deleteBatch takes. */
+    deletions: string[];
+}
+
 export interface GitServiceInterface {
     updateConfig(...args: unknown[]): void;
     getFile(path: string, branch: string): Promise<GitFile>;
@@ -85,14 +100,15 @@ export interface GitServiceInterface {
      */
     pushBatch?(items: BatchPushItem[], branch: string, commitMessage: string): Promise<BatchPushResult[]>;
     /**
-     * Commits file additions and real renames (add new path, remove old path)
-     * together in one commit. Optional: only providers with a way to write
-     * multiple changes atomically implement it; callers must fall back to a
-     * sequential push-then-delete per move when it's absent. Returns a result
-     * for every item in `additions` then every item in `moves`, in that order.
-     * Must be atomic: on failure it throws rather than partially committing.
+     * Commits file writes, real renames (add new path, remove old path), and
+     * plain deletions together in one commit. Optional: only providers with
+     * a way to write multiple changes atomically implement it; callers must
+     * fall back to sequential push/move/delete calls when it's absent.
+     * Returns a result for every item in `plan.writes` then every item in
+     * `plan.moves`, in that order (deletions produce no result entry). Must
+     * be atomic: on failure it throws rather than partially committing.
      */
-    commitBatch?(additions: BatchPushItem[], moves: BatchMoveItem[], branch: string, commitMessage: string): Promise<BatchPushResult[]>;
+    commitBatch?(plan: BatchCommitPlan, branch: string, commitMessage: string): Promise<BatchPushResult[]>;
     deleteFile(path: string, branch: string, commitMessage: string): Promise<void>;
     /**
      * Delete many files in a single commit. Optional: only providers with a way

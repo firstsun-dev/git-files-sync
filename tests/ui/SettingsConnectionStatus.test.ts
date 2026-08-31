@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-deprecated -- exercising the Obsidian < 1.13 display() compat fallback intentionally */
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabSyncSettingTab } from '../../src/settings';
 import GitLabFilesPush from '../../src/main';
@@ -119,5 +118,69 @@ describe('GitLabSyncSettingTab ignore patterns setting', () => {
 
     const textarea = tab.containerEl.querySelector('textarea') as HTMLTextAreaElement;
     expect(textarea.value).toBe('draft/\n*.tmp');
+  });
+});
+
+describe('GitLabSyncSettingTab release history', () => {
+  it('keeps release history accessible after the current-version banner was dismissed', () => {
+    vi.useFakeTimers();
+    const plugin = createPluginStub(vi.fn().mockResolvedValue({ repoOk: true, branchOk: true }));
+    plugin.manifest = { version: '1.5.0' } as GitLabFilesPush['manifest'];
+    plugin.settings.bannerDismissedVersion = '1.5.0';
+    const tab = new GitLabSyncSettingTab(new App(), plugin);
+    tab.containerEl = createContainer();
+
+    try {
+      tab.display();
+
+      expect(tab.containerEl.querySelector('.gfs-whats-new-banner')).toBeNull();
+      const buttons = Array.from(tab.containerEl.querySelectorAll('button'));
+      expect(buttons.some(button => button.textContent === 'View release history')).toBe(true);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('GitLabSyncSettingTab what\'s new banner', () => {
+  function renderTab(version: string, bannerDismissedVersion = ''): GitLabSyncSettingTab {
+    vi.useFakeTimers();
+    const plugin = createPluginStub(vi.fn().mockResolvedValue({ repoOk: true, branchOk: true }));
+    plugin.manifest = { version } as GitLabFilesPush['manifest'];
+    plugin.settings.bannerDismissedVersion = bannerDismissedVersion;
+    const tab = new GitLabSyncSettingTab(new App(), plugin);
+    tab.containerEl = createContainer();
+    tab.display();
+    return tab;
+  }
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('shows the banner for the current version when it has notable entries', () => {
+    const tab = renderTab('1.6.0');
+    expect(tab.containerEl.querySelector('.gfs-whats-new-banner')).not.toBeNull();
+    expect(tab.containerEl.querySelector('.gfs-whats-new-banner-text strong')?.textContent).toContain('1.6.0');
+  });
+
+  it('hides the banner once dismissed for the current version', () => {
+    const tab = renderTab('1.6.0', '1.6.0');
+    expect(tab.containerEl.querySelector('.gfs-whats-new-banner')).toBeNull();
+  });
+
+  it('shows the banner again once the plugin has been upgraded past the dismissed version', () => {
+    // Dismissed while on 1.5.9; current version is the newer 1.6.0, so the
+    // dismissal (keyed to the exact version string) no longer applies.
+    const tab = renderTab('1.6.0', '1.5.9');
+    expect(tab.containerEl.querySelector('.gfs-whats-new-banner')).not.toBeNull();
+  });
+
+  it('keeps release history available even while the banner is showing', () => {
+    const tab = renderTab('1.6.0');
+    const buttons = Array.from(tab.containerEl.querySelectorAll('button'));
+    expect(buttons.some(button => button.textContent === 'View release history')).toBe(true);
   });
 });

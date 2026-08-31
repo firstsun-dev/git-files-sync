@@ -50,6 +50,9 @@ interface DiscoveredFiles {
 export class SyncStatusRefreshService {
     private static readonly STATUS_CHECK_CONCURRENCY = 8;
 
+    /** Per-path monotonic revision ordering async content writes (create read vs a raced modify). */
+    private readonly contentRevisions = new Map<string, number>();
+
     constructor(
         private readonly dependencies: SyncStatusRefreshDependencies,
         private readonly statuses: SyncStatusService,
@@ -177,13 +180,52 @@ export class SyncStatusRefreshService {
             if (localFile) extra.push(localFile);
             else if (await this.isLocalFile(vaultPath)) extra.push(vaultPath);
             else {
+                // No local file at all. A tracked file that's since been
+                // removed locally (sync metadata still present for the path,
+                // and not a pending move source) is a *local deletion* — a
+                // potential remote deletion — distinct from a never-tracked
+                // remote-only file, which is simply available to download.
                 this.statuses.set(vaultPath, {
                     path: vaultPath,
-                    status: this.statuses.classify({ localExists: false, remoteExists: true }),
+                    status: this.statuses.classify({
+                        localExists: false,
+                        remoteExists: true,
+                        wasTracked: this.wasTrackedBeforeDelete(vaultPath),
+                    }),
                 });
             }
         }
         return extra;
+    }
+
+    /**
+     * Whether `vaultPath` was previously tracked locally and has since been
+     * removed (sync metadata present for the path, and not a pending move
+     * source). Used to distinguish a `local-deleted` row from a
+     * never-tracked `remote-only` download candidate.
+     */
+    private wasTrackedBeforeDelete(vaultPath: string): boolean {
+        const metadata = this.dependencies.settings().syncMetadata;
+        const pathMetadata = metadata ? metadata[vaultPath] : undefined;
+        return isSyncMetadataAtPath(pathMetadata, vaultPath) && !pathMetadata.renamedFrom;
+    }
+
+    /** The last-synced blob sha on record for `path`, or undefined if never tracked there. */
+    private baseShaFor(path: string): string | undefined {
+        const metadata = this.dependencies.settings().syncMetadata;
+        const pathMetadata = metadata ? metadata[path] : undefined;
+        return isSyncMetadataAtPath(pathMetadata, path) ? pathMetadata.lastSyncedSha : undefined;
+    }
+
+    /**
+     * Direction facts for a two-sided diff, relative to the last-synced
+     * baseline: undefined for both when there is no baseline on record (the
+     * two-sided diff then falls back to the direction-blind `modified`).
+     */
+    private diffDirection(path: string, localSha: string, remoteSha: string): { localChanged?: boolean; remoteChanged?: boolean } {
+        const baseSha = this.baseShaFor(path);
+        if (baseSha === undefined) return {};
+        return { localChanged: localSha !== baseSha, remoteChanged: remoteSha !== baseSha };
     }
 
     async reconcileOutOfBandMoves(remoteMap: Map<string, GitTreeEntry>): Promise<void> {
@@ -229,26 +271,95 @@ export class SyncStatusRefreshService {
         await Promise.all(Array.from({ length: workerCount }, () => worker()));
     }
 
+    /**
+     * Handles an out-of-band local create so a brand-new file appears in the
+     * Source Control view immediately rather than waiting for the next full
+     * refresh. The file is published in two resilient steps:
+     *
+     * 1. The `unsynced` (local-only) row is published *immediately* without
+     *    content, so the row is visible even if the subsequent read fails
+     *    (its stat stays pending — never cached — until content lands).
+     * 2. The file content is read asynchronously; on success the row is
+     *    republished with `localContent` so its `+N` stat can compute, on
+     *    failure only a warning is logged (a later modify/full refresh
+     *    retries the read).
+     *
+     * A per-path async revision guards the republish against racing
+     * create → modify/delete/rename events: the read's result is applied
+     * only if the path still exists in the map under the same file object
+     * (a delete/rename re-keys or removes it) and is still the newest
+     * pending read for that path, so an old read cannot clobber a newer
+     * one's content.
+     *
+     * No-op when the path is already tracked (a `modify`/`rename` event will
+     * have handled it) or falls outside the configured vault folder. Returns
+     * whether the status map changed, so a caller can skip a republish.
+     */
+    async handleFileCreated(file: TFile): Promise<boolean> {
+        if (this.statuses.has(file.path) || !this.dependencies.filterPathByVaultFolder(file.path)) return false;
+        const revision = this.bumpContentRevision(file.path);
+        this.statuses.set(file.path, {
+            file,
+            path: file.path,
+            status: this.statuses.classify({ localExists: true, remoteExists: false }),
+        });
+        void this.readFileContent(file, isBinaryPath(file.path), false).then(localContent => {
+            const current = this.statuses.get(file.path);
+            if (!current
+                || current.file !== file
+                || this.contentRevisions.get(file.path) !== revision) return;
+            this.statuses.set(file.path, { ...current, localContent });
+        }).catch(error => {
+            logger.warn(`Failed to read created file ${file.path}; its row stays pending until the next refresh`, error);
+        });
+        return true;
+    }
+
+    /** Monotonic per-path counter ordering async content reads so only the newest one may write. */
+    private bumpContentRevision(path: string): number {
+        const next = (this.contentRevisions.get(path) ?? 0) + 1;
+        this.contentRevisions.set(path, next);
+        return next;
+    }
+
     async handleFileModified(file: TFile): Promise<boolean> {
         const existing = this.statuses.get(file.path);
         if (!existing || !['synced', 'modified', 'unsynced', 'moved'].includes(existing.status)) return false;
+        const revision = this.bumpContentRevision(file.path);
         const localContent = await this.readFileContent(file, isBinaryPath(file.path), false);
-        let status: FileStatus['status'] = existing.status;
-        if (existing.status !== 'moved') {
-            status = existing.remoteSha === undefined
-                ? this.statuses.classify({ localExists: true, remoteExists: false })
-                : this.statuses.classify({
+        // A create's slow async read may still be in flight behind this
+        // modify; only the newest read may write.
+        if (this.contentRevisions.get(file.path) !== revision) return true;
+        // Re-read AFTER the await: a full refresh may have completed while
+        // the read was pending and replaced the row's remoteSha/
+        // remoteContent/isSymlink/movedFrom. Classifying from the stale
+        // pre-await snapshot would write that old state back over the fresh
+        // refresh result; the row may even no longer exist (deleted/renamed
+        // away while pending) — in both cases the snapshot must be abandoned.
+        const current = this.statuses.get(file.path);
+        if (!current || current.file !== file) return true;
+        let status: FileStatus['status'] = current.status;
+        if (current.status !== 'moved') {
+            const remoteSha = current.remoteSha;
+            if (remoteSha === undefined) {
+                status = this.statuses.classify({ localExists: true, remoteExists: false });
+            } else {
+                const localSha = await gitBlobSha(localContent);
+                status = this.statuses.classify({
                     localExists: true,
                     remoteExists: true,
-                    contentsEqual: await gitBlobSha(localContent) === existing.remoteSha,
+                    contentsEqual: localSha === remoteSha,
+                    ...this.diffDirection(file.path, localSha, remoteSha),
                 });
+            }
         }
-        this.statuses.set(file.path, { ...existing, status, localContent });
+        this.statuses.set(file.path, { ...current, status, localContent });
         return true;
     }
 
     handleFileRenamed(file: TFile, oldPath: string): boolean {
         const existing = this.statuses.get(oldPath);
+        this.contentRevisions.delete(oldPath);
         if (!existing || existing.status === 'checking') return false;
         this.statuses.delete(oldPath);
         if (!this.dependencies.filterPathByVaultFolder(file.path)) return true;
@@ -267,6 +378,43 @@ export class SyncStatusRefreshService {
         } else {
             this.statuses.set(file.path, { ...existing, file, path: file.path });
         }
+        return true;
+    }
+
+    /**
+     * Handles an out-of-band local delete of a previously known file so the
+     * Source Control view reflects it immediately rather than waiting for the
+     * next full refresh.
+     *
+     * - A *tracked* file removed locally (`synced`/`modified`) is marked
+     *   `local-deleted`: the remote still holds it, so this is a potential
+     *   remote deletion, distinct from a never-tracked `remote-only` file.
+     * - A *local-only* (`unsynced`) file simply drops out of the status map —
+     *   nothing on the remote to delete or restore, so there's no change to
+     *   surface.
+     * - A tracked *move* (`moved`) abandons its move: the row is dropped and a
+     *   later refresh reconciles the old remote path (still on the remote,
+     *   metadata relocated by `trackRename`) as `remote-only`/`local-deleted`.
+     * - A `remote-only`/`local-deleted`/`checking` row is left untouched
+     *   (nothing local existed to delete, or it's still resolving).
+     *
+     * Returns whether the status map changed, so a caller can skip a
+     * republish when nothing moved.
+     */
+    handleFileDeleted(path: string): boolean {
+        const existing = this.statuses.get(path);
+        this.contentRevisions.delete(path);
+        if (!existing || existing.status === 'checking' || existing.status === 'remote-only' || existing.status === 'local-deleted') return false;
+        if (existing.status === 'moved') {
+            this.statuses.delete(path);
+            return true;
+        }
+        if (existing.status === 'unsynced') {
+            this.statuses.delete(path);
+            return true;
+        }
+        // synced / modified: tracked, remote still holds this path -> local-deleted.
+        this.statuses.set(path, { ...existing, status: 'local-deleted', localContent: undefined });
         return true;
     }
 
@@ -305,10 +453,13 @@ export class SyncStatusRefreshService {
         const binary = isBinaryPath(path);
         const symlinkMode = getEffectiveSymlinkHandling(this.dependencies.settings());
         const localContent = await this.readLocalContentForSha(fileOrPath, isStringPath, binary, remoteEntry.symlink, symlinkMode);
+        const localSha = await gitBlobSha(localContent);
+        const remoteSha = remoteEntry.sha;
         const status = this.statuses.classify({
             localExists: true,
             remoteExists: true,
-            contentsEqual: await gitBlobSha(localContent) === remoteEntry.sha,
+            contentsEqual: localSha === remoteSha,
+            ...(remoteSha !== undefined ? this.diffDirection(path, localSha, remoteSha) : {}),
         });
         if (status === 'synced' && remoteEntry.sha) {
             await this.dependencies.syncManager().updateMetadata(path, remoteEntry.sha);
@@ -332,13 +483,18 @@ export class SyncStatusRefreshService {
             this.dependencies.getNormalizedPath(path),
             this.dependencies.settings().branch,
         );
-        const status = remote.sha
-            ? this.statuses.classify({
+        let status: FileStatus['status'];
+        if (!remote.sha) {
+            status = this.statuses.classify({ localExists: true, remoteExists: false });
+        } else {
+            const equal = contentsEqual(localContent, remote.content);
+            status = this.statuses.classify({
                 localExists: true,
                 remoteExists: true,
-                contentsEqual: contentsEqual(localContent, remote.content),
-            })
-            : this.statuses.classify({ localExists: true, remoteExists: false });
+                contentsEqual: equal,
+                ...(equal ? {} : this.diffDirection(path, await gitBlobSha(localContent), remote.sha)),
+            });
+        }
         if (status === 'synced' && remote.sha) {
             await this.dependencies.syncManager().updateMetadata(path, remote.sha);
         }
@@ -377,7 +533,11 @@ export class SyncStatusRefreshService {
         const metadata = this.dependencies.settings().syncMetadata ?? {};
         const orphansBySha = new Map<string, string[]>();
         for (const [path, status] of this.statuses) {
-            if (status.status !== 'remote-only') continue;
+            // A tracked-then-deleted file is now classified `local-deleted`
+            // (not `remote-only`), so both qualify as an orphaned move
+            // source: the remote entry still exists, sync metadata is
+            // present for the path, and it isn't itself a pending move.
+            if (status.status !== 'remote-only' && status.status !== 'local-deleted') continue;
             const pathMetadata = metadata[path];
             if (!isSyncMetadataAtPath(pathMetadata, path) || pathMetadata.renamedFrom) continue;
             const entry = remoteMap.get(path);

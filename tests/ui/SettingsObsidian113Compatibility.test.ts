@@ -34,7 +34,6 @@ function renderAsObsidian113(tab: GitLabSyncSettingTab): void {
   const definitions = tab.getSettingDefinitions();
 
   if (definitions.length === 0) {
-    // eslint-disable-next-line @typescript-eslint/no-deprecated -- intentionally exercising the legacy fallback path
     tab.display();
   }
 }

@@ -74,6 +74,8 @@ export interface SyncPlan {
     modifications: SyncPlanEntry[];
     deletions: SyncPlanEntry[];
     moves: SyncPlanEntry[];
+    /** Remote-only/remote-modified entries a unified Sync will pull locally — zero-commit, shown for review alongside the remote mutation set. */
+    downloads?: SyncPlanEntry[];
     acceptedRemote?: SyncPlanEntry[];
     skippedConflicts?: SyncPlanEntry[];
 }
@@ -85,9 +87,16 @@ export interface SyncFailure {
 
 export interface SyncResult {
     success: number;
+    added: number;
+    updated: number;
     failed: number;
     conflicts: number;
     errors: SyncFailure[];
+}
+
+/** Controls presentation owned by a caller that composes pull into a larger transaction. */
+export interface PullExecutionOptions {
+    notify?: boolean;
 }
 
 export interface FileDiff {
@@ -111,6 +120,8 @@ export interface BatchPushConflict {
 
 export interface PushResults {
     success: number;
+    added: number;
+    updated: number;
     failed: number;
     conflicts: number;
     resolvedConflicts: number;
@@ -140,11 +151,18 @@ export interface MoveQueueEntry {
     oldRevision?: string;
 }
 
+export interface DeleteQueueEntry {
+    path: string;
+    name: string;
+    repoPath: string;
+}
+
 export function isSyncPlanEmpty(plan: SyncPlan): boolean {
     return plan.additions.length === 0
         && plan.modifications.length === 0
         && plan.deletions.length === 0
         && plan.moves.length === 0
+        && !plan.downloads?.length
         && !plan.acceptedRemote?.length
         && !plan.skippedConflicts?.length;
 }

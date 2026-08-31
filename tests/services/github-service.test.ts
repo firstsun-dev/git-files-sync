@@ -574,8 +574,8 @@ describe('GitHubService', () => {
     });
 
     describe('commitBatch', () => {
-        it('returns [] and makes no requests when both additions and moves are empty', async () => {
-            const result = await service.commitBatch([], [], 'main', 'nothing');
+        it('returns [] and makes no requests when writes, moves, and deletions are all empty', async () => {
+            const result = await service.commitBatch({ writes: [], moves: [], deletions: [] }, 'main', 'nothing');
             expect(result).toEqual([]);
             expect(requestUrl).not.toHaveBeenCalled();
         });
@@ -586,8 +586,11 @@ describe('GitHubService', () => {
                 .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse); // mutation
 
             const result = await service.commitBatch(
-                [{ path: 'a.md', content: 'hello' }],
-                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                {
+                    writes: [{ path: 'a.md', content: 'hello' }],
+                    moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                    deletions: [],
+                },
                 'main',
                 'Push 1 file(s) and move 1 file(s) from Obsidian'
             );
@@ -612,13 +615,38 @@ describe('GitHubService', () => {
                 .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
 
             const result = await service.commitBatch(
-                [],
-                [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                { writes: [], moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }], deletions: [] },
                 'main',
                 'Move 1 file(s) from Obsidian'
             );
 
             expect(result).toEqual([{ path: 'new.md' }]);
+        });
+
+        it('commits writes, moves, and plain deletions in one mutation — the one-Sync-Plan-one-commit contract', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce(headOidResponse('commit1'))
+                .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
+
+            await service.commitBatch(
+                {
+                    writes: [{ path: 'a.md', content: 'hello' }],
+                    moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                    deletions: ['gone.md'],
+                },
+                'main',
+                'Sync 3 file(s) from Obsidian'
+            );
+
+            const calls = vi.mocked(requestUrl).mock.calls.map(c => c[0] as RequestUrlParam);
+            expect(calls).toHaveLength(2);
+            const mutationBody = JSON.parse(calls[1]?.body as string) as {
+                variables: { input: { fileChanges: { additions: Array<{ path: string }>; deletions: Array<{ path: string }> } } };
+            };
+            expect(mutationBody.variables.input.fileChanges.deletions).toEqual([
+                { path: 'old.md' },
+                { path: 'gone.md' },
+            ]);
         });
 
         it('retries a rename\'s deletion-side stale read ("does not exist as of commit oid")', async () => {
@@ -637,8 +665,7 @@ describe('GitHubService', () => {
                     .mockResolvedValueOnce({ status: 200, json: { data: { createCommitOnBranch: { commit: { oid: 'commit2' } } } } } as unknown as RequestUrlResponse);
 
                 const resultPromise = service.commitBatch(
-                    [],
-                    [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }],
+                    { writes: [], moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved content' }], deletions: [] },
                     'main',
                     'Move 1 file(s) from Obsidian'
                 );

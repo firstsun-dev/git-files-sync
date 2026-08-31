@@ -1,8 +1,7 @@
 import { App, Modal, Setting } from 'obsidian';
 import { t } from '../i18n';
 import { isBinaryPath } from '../utils/path';
-
-type ConflictPanelName = 'diff' | 'local' | 'remote';
+import { renderDiffViewer, currentDiffLayout, rememberDiffLayout } from './components/DiffViewer';
 
 /**
  * Apply the "destructive" button style, but only when the running Obsidian
@@ -36,22 +35,36 @@ export class SyncConflictModal extends Modal {
     }
 
     onOpen() {
-        const { contentEl } = this;
-        contentEl.addClass('sync-conflict-modal');
+        const { contentEl, modalEl } = this;
+        modalEl.addClass('gfs-conflict-modal');
+        modalEl.addClass('gfs-conflict-modal--single');
+        modalEl.addClass('gfs-diff-surface');
 
-        contentEl.createEl('h2', { text: t('syncConflictModal.title', { fileName: this.fileName }) });
-        contentEl.createEl('p', {
+        // Fixed header: identity + view controls (Differences / layout
+        // toggle). flex-shrink: 0 in CSS — scrolls away never.
+        const header = contentEl.createDiv({ cls: 'conflict-header' });
+        header.createEl('h2', { text: t('syncConflictModal.title', { fileName: this.fileName }) });
+        header.createEl('p', {
             text: t('syncConflictModal.description'),
             cls: 'conflict-description'
         });
 
+        // Fixed footer FIRST in the flex column's content plan is not needed
+        // — order below is header, scroller, footer; footer is after the
+        // scroll area in the DOM too, pinned by flex-shrink: 0.
+
         if (this.isBinary) {
-            contentEl.createDiv({ cls: 'conflict-content-area' })
-                .createEl('p', { text: t('syncConflictModal.binaryChanged'), cls: 'conflict-binary-notice' });
-        } else {
-            this.renderTextComparison(contentEl);
+            const scroll = contentEl.createDiv({ cls: 'conflict-content-area' });
+            scroll.createEl('p', { text: t('syncConflictModal.binaryChanged'), cls: 'conflict-binary-notice' });
+            this.renderButtons(contentEl);
+            return;
         }
 
+        this.renderTextComparison(contentEl);
+        this.renderButtons(contentEl);
+    }
+
+    private renderButtons(contentEl: HTMLElement): void {
         const buttonContainer = contentEl.createDiv({ cls: 'conflict-buttons' });
 
         new Setting(buttonContainer)
@@ -77,87 +90,37 @@ export class SyncConflictModal extends Modal {
                 }));
     }
 
+    /**
+     * The split diff layout already lays local and remote content side by
+     * side (with per-line highlighting, unlike a plain full-text dump), so a
+     * separate Local/Remote tab pair would just duplicate it -- this renders
+     * the diff view directly with no tab switching needed.
+     */
     private renderTextComparison(contentEl: HTMLElement) {
         const localContent = this.localContent as string;
         const remoteContent = this.remoteContent as string;
 
-        const panels = {} as Record<ConflictPanelName, HTMLElement>;
-        const tabs = {} as Record<ConflictPanelName, HTMLElement>;
+        // "Differences + layout toggle" is a VIEW control: it stays in the
+        // fixed header region (outside the scroll container) so it remains
+        // reachable while a long diff scrolls below it. Only diff lines and
+        // the binary notice live inside the scroller.
+        const header = contentEl.createDiv({ cls: 'conflict-diff-header' });
+        header.createEl('h3', { text: t('syncConflictModal.differences') });
+        const toggleSlot = header.createDiv({ cls: 'conflict-diff-header-toggle' });
 
-        const setActivePanel = (name: ConflictPanelName) => {
-            (Object.keys(panels) as ConflictPanelName[]).forEach(key => {
-                panels[key].toggleClass('is-active', key === name);
-                tabs[key].toggleClass('is-active', key === name);
-            });
-        };
+        const scrollArea = contentEl.createDiv({ cls: 'conflict-content-area' });
+        const diffSection = scrollArea.createDiv({ cls: 'conflict-diff-section' });
 
-        const tabsContainer = contentEl.createDiv({ cls: 'conflict-tabs' });
-        const tabLabels: Record<ConflictPanelName, string> = {
-            diff: t('syncConflictModal.tab.diff'),
-            local: t('syncConflictModal.tab.local'),
-            remote: t('syncConflictModal.tab.remote')
-        };
-        (['diff', 'local', 'remote'] as const).forEach(name => {
-            const tab = tabsContainer.createEl('button', { text: tabLabels[name], cls: 'conflict-tab' });
-            tab.addEventListener('click', () => setActivePanel(name));
-            tabs[name] = tab;
+        // One shared default/policy for all surfaces (see DiffViewer):
+        // split on wide desktop viewport, unified on phones — and whatever
+        // layout the user last picked anywhere in the session.
+        renderDiffViewer(diffSection, {
+            remote: remoteContent,
+            local: localContent,
+            layout: currentDiffLayout(),
+            toggleHost: toggleSlot,
+            onLayoutChange: rememberDiffLayout,
         });
-
-        const contentArea = contentEl.createDiv({ cls: 'conflict-content-area' });
-
-        const diffContainer = contentArea.createDiv({ cls: 'conflict-diff-container' });
-
-        const localSection = diffContainer.createDiv({ cls: 'conflict-section conflict-panel' });
-        localSection.createEl('h3', { text: t('syncConflictModal.localVersion') });
-        const localPre = localSection.createEl('pre', { cls: 'conflict-content' });
-        localPre.createEl('code', { text: localContent });
-        panels.local = localSection;
-
-        const remoteSection = diffContainer.createDiv({ cls: 'conflict-section conflict-panel' });
-        remoteSection.createEl('h3', { text: t('syncConflictModal.remoteVersion') });
-        const remotePre = remoteSection.createEl('pre', { cls: 'conflict-content' });
-        remotePre.createEl('code', { text: remoteContent });
-        panels.remote = remoteSection;
-
-        const diffSection = contentArea.createDiv({ cls: 'conflict-diff-section conflict-panel' });
-        diffSection.createEl('h3', { text: t('syncConflictModal.differences') });
-        const diffPre = diffSection.createEl('pre', { cls: 'conflict-diff' });
-        this.renderDiff(diffPre, localContent, remoteContent);
-        panels.diff = diffSection;
-
-        setActivePanel('diff');
-    }
-
-    private renderDiff(container: HTMLElement, localContent: string, remoteContent: string) {
-        const localLines = localContent.split('\n');
-        const remoteLines = remoteContent.split('\n');
-
-        const createLine = (text: string, type: 'header' | 'added' | 'removed' | 'unchanged') => {
-            const lineEl = container.createSpan({ cls: `diff-line ${type}` });
-            lineEl.textContent = text + '\n';
-        };
-
-        createLine('--- Remote', 'header');
-        createLine('+++ Local', 'header');
-        createLine('', 'unchanged');
-
-        const maxLines = Math.max(localLines.length, remoteLines.length);
-
-        for (let i = 0; i < maxLines; i++) {
-            const remoteLine = remoteLines[i];
-            const localLine = localLines[i];
-
-            if (remoteLine !== localLine) {
-                if (remoteLine !== undefined) {
-                    createLine(`- ${remoteLine}`, 'removed');
-                }
-                if (localLine !== undefined) {
-                    createLine(`+ ${localLine}`, 'added');
-                }
-            } else if (remoteLine !== undefined) {
-                createLine(`  ${remoteLine}`, 'unchanged');
-            }
-        }
     }
 
     onClose() {

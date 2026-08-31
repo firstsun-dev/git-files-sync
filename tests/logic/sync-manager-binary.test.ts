@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/unbound-method */
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn() mocks intentionally reference methods unbound; safe under Vitest's mocking model */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSyncManagerMocks, makeBuf, SyncManagerMocks } from './sync-manager-test-helpers';
 import { SyncPlanModal, SyncPlanDirection } from '../../src/ui/SyncPlanModal';
@@ -19,7 +19,7 @@ describe('SyncManager – binary file handling', () => {
         ) {
             onConfirm();
             return this;
-        } as never);
+        });
         mocks = createSyncManagerMocks();
     });
 
@@ -121,3 +121,5 @@ describe('SyncManager – binary file handling', () => {
         });
     });
 });
+
+/* eslint-enable @typescript-eslint/unbound-method -- re-enable after the whole-file exemption above */

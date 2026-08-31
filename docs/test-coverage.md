@@ -2,9 +2,11 @@
 
 All tests are in `tests/` and run with `npm run test` (Vitest).
 
-## Temporary E2E status
+## Real-provider E2E
 
-Real-provider E2E source has been temporarily removed from the plugin repository because the Obsidian official scanner treats Node-only E2E tooling as plugin source. The long-term E2E architecture is being evaluated separately.
+Real-provider E2E (GitHub/GitLab/Gitea, against a real Git server) lives under
+`e2e-tests/provider/`, separate from the unit tests in `tests/`. See
+`docs/testing/real-provider-e2e.md` and `docs/obsidian-scanner-audit.md`.
 
 ---
 
