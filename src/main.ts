@@ -64,7 +64,7 @@ export default class GitLabFilesPush extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-		this.addSettingTab(new GitLabSyncSettingTab(this.app, this));
+		this.addSettingTab(new GitLabSyncSettingTab(this.app, this, this));
 
 		this.registerView(
 			SOURCE_CONTROL_VIEW_TYPE,

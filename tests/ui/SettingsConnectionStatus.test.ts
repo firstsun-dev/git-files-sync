@@ -58,7 +58,8 @@ describe('GitLabSyncSettingTab connection status badge', () => {
 
   it('shows checking then connected after opening the tab', async () => {
     const testConnection = vi.fn().mockResolvedValue({ repoOk: true, branchOk: true });
-    const tab = new GitLabSyncSettingTab(new App(), createPluginStub(testConnection));
+    const plugin = createPluginStub(testConnection);
+    const tab = new GitLabSyncSettingTab(new App(), plugin, plugin);
     tab.containerEl = createContainer();
 
     tab.display();
@@ -78,7 +79,7 @@ describe('GitLabSyncSettingTab connection status badge', () => {
   it('debounces repeated field edits into a single connection test', async () => {
     const testConnection = vi.fn().mockResolvedValue({ repoOk: false, branchOk: false, error: 'bad token' });
     const plugin = createPluginStub(testConnection);
-    const tab = new GitLabSyncSettingTab(new App(), plugin);
+    const tab = new GitLabSyncSettingTab(new App(), plugin, plugin);
     tab.containerEl = createContainer();
 
     tab.display();
@@ -108,7 +109,7 @@ describe('GitLabSyncSettingTab ignore patterns setting', () => {
   it('renders a textarea seeded with the saved ignorePatterns value', async () => {
     const plugin = createPluginStub(vi.fn().mockResolvedValue({ repoOk: true, branchOk: true }));
     plugin.settings.ignorePatterns = 'draft/\n*.tmp';
-    const tab = new GitLabSyncSettingTab(new App(), plugin);
+    const tab = new GitLabSyncSettingTab(new App(), plugin, plugin);
     tab.containerEl = createContainer();
 
     vi.useFakeTimers();
@@ -127,7 +128,7 @@ describe('GitLabSyncSettingTab release history', () => {
     const plugin = createPluginStub(vi.fn().mockResolvedValue({ repoOk: true, branchOk: true }));
     plugin.manifest = { version: '1.5.0' } as GitLabFilesPush['manifest'];
     plugin.settings.bannerDismissedVersion = '1.5.0';
-    const tab = new GitLabSyncSettingTab(new App(), plugin);
+    const tab = new GitLabSyncSettingTab(new App(), plugin, plugin);
     tab.containerEl = createContainer();
 
     try {
@@ -149,7 +150,7 @@ describe('GitLabSyncSettingTab what\'s new banner', () => {
     const plugin = createPluginStub(vi.fn().mockResolvedValue({ repoOk: true, branchOk: true }));
     plugin.manifest = { version } as GitLabFilesPush['manifest'];
     plugin.settings.bannerDismissedVersion = bannerDismissedVersion;
-    const tab = new GitLabSyncSettingTab(new App(), plugin);
+    const tab = new GitLabSyncSettingTab(new App(), plugin, plugin);
     tab.containerEl = createContainer();
     tab.display();
     return tab;
