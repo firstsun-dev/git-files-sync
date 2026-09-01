@@ -18,15 +18,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Test: `npm run test` (runs vitest suite)
 - Version bump: `npm run version` (updates manifest.json and versions.json via script)
 
-## Code Architecture
-- **Type**: Obsidian Plugin (TypeScript) that syncs vault files with a GitLab or GitHub repository.
-- **Entry Point**: `src/main.ts` contains the main `GitLabFilesPush` class extending `Plugin`.
+## Architecture Contract
+
+Before production code changes:
+- Read `docs/architecture.md`.
+- For bug fixes also read `docs/bug-fix-guidelines.md`.
+- Identify the owning module before editing.
+- Preserve dependency direction.
+- Do not bypass `SyncWorkspace`.
+- Do not move domain/provider logic into UI.
+- Do not duplicate status/conflict/rename/action policy.
+
+`docs/architecture.md` is the canonical module map (layers, ownership table, MUST/MUST NOT rules, current hotspots) — this file does not duplicate it. A short summary:
+
+- **Type**: Obsidian Plugin (TypeScript) that syncs vault files with a GitHub, GitLab, or Gitea repository.
+- **Entry point**: `src/main.ts` owns only Obsidian lifecycle (settings load/save, command/view/ribbon/vault-event registration); the sync/Source Control constructor graph is wired by `src/runtime/createSyncRuntime.ts`.
 - **Settings**: `src/settings.ts` defines `GitLabFilesPushSettings` interface, `DEFAULT_SETTINGS` object, and `GitLabSyncSettingTab` for the Obsidian UI.
-- **Services**: `src/services/` abstracts the git provider behind `GitServiceInterface`, with `GitHubService` and `GitLabService` implementations sharing common logic via `BaseGitService`.
-- **Sync logic**: `src/logic/sync-manager.ts` handles push/pull, conflict detection, and rename detection; `src/logic/gitignore-manager.ts` merges local and remote `.gitignore` rules.
-- **UI**: the production Source Control surface is `SourceControlItemView` (`src/ui/source-control/SourceControlItemView.ts`), which renders `SourceControlView` (`src/ui/source-control/SourceControlView.ts`). User intent (push/pull/delete-remote/resolve-conflict) flows through `SourceControlActionService` (`src/logic/source-control/SourceControlActionService.ts`) into `SyncWorkspace` (`src/logic/sync/SyncWorkspace.ts`), which drives `SyncManager` and its executors (`PushExecutor`, `PullExecutor`, `RemoteDeleteExecutor`, etc. in `src/logic/sync/`). `src/ui/components/` holds shared diff/change presentation pieces used by this surface.
-  - Do not reintroduce `SyncStatusView` or `ui/sync-status/*` — that legacy presentation layer was replaced by the Source Control surface above and is blocked by an ESLint `no-restricted-imports` rule (`eslint.config.*`). The historical migration docs live in `docs/source-control-refactor/` and are marked as such; they are not current implementation guidance.
-  - `SOURCE_CONTROL_VIEW_TYPE` (`'sync-status-view'`) and the `open-sync-status` command id are intentionally kept as-is for pinned-leaf/workspace-layout compatibility — they resolve to the current `SourceControlItemView`, not a leftover of the old UI. Do not rename them as "cleanup."
+
+Two compatibility gotchas not covered by `docs/architecture.md`:
+- Do not reintroduce `SyncStatusView` or `ui/sync-status/*` — that legacy presentation layer was replaced by the Source Control surface (`SourceControlItemView`/`SourceControlView`) and is blocked by an ESLint `no-restricted-imports` rule (`eslint.config.*`). The historical migration docs live in `docs/source-control-refactor/` and are marked as such; they are not current implementation guidance.
+- `SOURCE_CONTROL_VIEW_TYPE` (`'sync-status-view'`) and the `open-sync-status` command id are intentionally kept as-is for pinned-leaf/workspace-layout compatibility — they resolve to the current `SourceControlItemView`, not a leftover of the old UI. Do not rename them as "cleanup."
+
 - **Bundling**: Uses `esbuild.config.mjs` for compilation from TypeScript to a single `main.js` file.
 - **Deployment**: Relies on `manifest.json` for plugin metadata and `versions.json` for version mapping/compatibility.
 

@@ -26,7 +26,8 @@ The dependency direction should normally flow downward. Results and state flow b
 
 | Layer | Module | Owns | Interacts with | Must not own |
 | --- | --- | --- | --- | --- |
-| Plugin runtime | `src/main.ts` | Obsidian lifecycle, command/view/event registration, top-level wiring | settings, UI, sync runtime | sync planning, conflict algorithms, provider-specific workflow |
+| Plugin runtime | `src/main.ts` | Obsidian lifecycle, command/view/event registration | settings, `createSyncRuntime`, UI | sync/Source Control constructor graph, sync planning, conflict algorithms, provider-specific workflow |
+| Plugin runtime | `createSyncRuntime` (`src/runtime/createSyncRuntime.ts`) | wires `SyncManager`, `SyncStatusRefreshService`, `SyncDiffService`, `SyncWorkspace`, and the Source Control application layer together | the constructors it composes | Obsidian lifecycle events, commands, views, ribbons |
 | UI | `src/ui/source-control/*` | rendering, user interaction, Source Control composition | `SourceControlViewModel`, `SourceControlActionService` | provider API calls, sync classification rules |
 | Application | `ChangeRepository` | authoritative Source Control `SyncChange` snapshot | `FileStatusAdapter`, ViewModel, action services | remote Git or filesystem access |
 | Application | `SyncSelectionStore` | queued selection and explicit per-change action override | ViewModel, current repository snapshot | sync execution |
@@ -43,10 +44,14 @@ The dependency direction should normally flow downward. Results and state flow b
 | Sync domain | `PushExecutor` | provider-side batch mutations | `GitServiceInterface`, metadata | UI state |
 | Sync domain | `PullExecutor` | local file application for pulls | Obsidian vault, metadata | Source Control UI state |
 | Sync domain | `RemoteDeleteExecutor` | remote deletion execution | `GitServiceInterface` | UI |
-| Sync domain | `SyncStatusRefreshService` | local/remote discovery, status refresh, incremental file event reconciliation, out-of-band move reconciliation | vault, provider, gitignore, status store, metadata | Source Control rendering |
+| Sync domain | `SyncStatusRefreshService` | orchestrates discovery → resolve → reconcile → publish, plus incremental create/modify/delete/rename event handling | `SyncFileDiscovery`, `SyncStatusResolver`, `RenameReconciler`, status store | Source Control rendering, the three algorithms below (delegates to their owning class) |
+| Sync domain | `SyncFileDiscovery` | vault/hidden-file/remote-tree/gitignore/symlink discovery, remote-only vs local-deleted classification | vault, provider, gitignore, status store | status resolution, rename reconciliation |
+| Sync domain | `SyncStatusResolver` | local-vs-remote status resolution: SHA/content comparison, baseline diff direction, `FileStatus` classification | provider, sync manager, status store | discovery, rename reconciliation |
+| Sync domain | `RenameReconciler` | out-of-band (external) rename detection by orphan/candidate blob-sha matching | sync manager, status store | discovery, status resolution |
 | Sync domain | `SyncStatusService` | observable `FileStatus` store and status classification | refresh/sync domain, adapters | UI orchestration |
 | Sync domain | `SyncMetadataStore` | last-synced SHA and rename metadata persistence | manager/executors/coordinators | presentation |
-| Sync domain | `SyncDiffService` | diff content/stat loading and cache | status store, blob loader, workspace | sync orchestration |
+| Sync domain | `SyncDiffService` | diff content/stat loading and cache | status store, blob loader, workspace, `DiffStat` | sync orchestration |
+| Sync domain | `DiffStat` (`src/logic/sync/DiffStat.ts`) | pure +/- diff-stat computation and the `DiffStatLoadResult` contract | diff utilities | UI rendering, provider calls |
 | Interaction boundary | `SyncInteractionPort` | domain-facing confirmation/conflict interaction contract | domain, Obsidian adapter | provider implementation |
 | UI adapter | `ObsidianSyncInteraction` | Obsidian modal/notice implementation of interaction port | `SyncInteractionPort`, modal UI | sync algorithms |
 | Infrastructure | `GitServiceInterface` | provider abstraction used by the sync domain | concrete provider services | UI/application state |
@@ -157,9 +162,9 @@ If the owning module cannot fix a bug without crossing a forbidden boundary, imp
 
 Some current modules have high responsibility density. That is not permission to bypass them, and file size alone is not a reason to split them.
 
-- `main.ts`: composition and Obsidian lifecycle are still concentrated here.
-- `SyncStatusRefreshService`: currently owns several related refresh concerns (discovery, classification, incremental events, rename reconciliation).
-- `SourceControlView`: currently contains substantial Source Control presentation/composition logic.
+- `main.ts`: reduced to Obsidian lifecycle (settings load/save, command/view/ribbon/vault-event registration). The sync/Source Control constructor graph now lives in `createSyncRuntime` (`src/runtime/createSyncRuntime.ts`).
+- `SyncStatusRefreshService`: reduced to orchestration (discovery → resolve → reconcile → publish) plus the incremental create/modify/delete/rename handlers. Discovery, status resolution, and rename reconciliation each now have a single owner: `SyncFileDiscovery`, `SyncStatusResolver`, `RenameReconciler`.
+- `SourceControlView`: reduced by extracting the "Sync Queue" and "Repository Changes" regions into `SyncQueueSection`/`RepositoryChangesSection` (`src/ui/source-control/`, pure state+callbacks render functions matching `FilterMenu`/`SourceControlHeader`). Still owns the diff pane, scroll-state management, and section composition.
 - `PushCoordinator`: large, but still centered on one batch-push use case; split only when a stable responsibility boundary is identified.
 
 Future refactors should reduce these hotspots while preserving the dependency direction in this document.
