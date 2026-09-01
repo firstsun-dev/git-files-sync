@@ -1,5 +1,8 @@
 # Phase 4 — Legacy Cleanup
 
+> **Historical migration roadmap. Do not use as current implementation
+> guidance.** See `docs/source-control.md` for the current architecture.
+
 ## Goal
 
 移除舊 Source Control orchestration，保留同步核心能力。

@@ -10,8 +10,6 @@ import {
     isSyncPlanEmpty,
 } from './types';
 import { logger } from '../../utils/logger';
-import { contentsEqual, isBinaryPath } from '../../utils/path';
-import { gitBlobSha } from '../../utils/git-blob-sha';
 import { SyncStatusService } from '../sync-status-service';
 import { PushExecutor } from './PushExecutor';
 import { PullExecutor } from './PullExecutor';
@@ -21,7 +19,6 @@ import { ConflictResolver } from './ConflictResolver';
 import { SyncExecutor } from './SyncExecutor';
 import { PullCoordinator } from './PullCoordinator';
 import { PushCoordinator } from './PushCoordinator';
-import { SyncPlanner } from './SyncPlanner';
 import {
     HeadlessSyncInteraction,
     type ConflictDiffLoader,
@@ -41,7 +38,6 @@ export class SyncManager {
     private readonly scanner: SyncScanner;
     private readonly pullCoordinator: PullCoordinator;
     private readonly pushCoordinator: PushCoordinator;
-    private readonly planner = new SyncPlanner();
     private readonly interaction: SyncInteractionPort;
     /** Optional progressive +/- diff-stat source handed to the batch conflict modal. */
     private diffStatLoader?: ConflictDiffStatLoader;
@@ -211,23 +207,12 @@ export class SyncManager {
 
             const exists = await this.fileExists(fileOrPath);
             const localContent = exists ? await this.getFileContent(fileOrPath) : null;
-            const lastSynced = this.settings.syncMetadata[path];
-            const kind = isBinaryPath(path) ? 'binary' : 'text';
-            const baseline = lastSynced?.lastSyncedSha === remote.revision ? remote.sha : lastSynced?.lastSyncedSha;
-            let localSha: string | undefined;
-            if (localContent !== null) {
-                localSha = contentsEqual(localContent, remote.content) ? remote.sha : await gitBlobSha(localContent);
-            }
-            const decision = this.planner.planFor('pull', {
-                local: {
-                    path,
-                    exists,
-                    blobSha: localSha,
-                    kind,
-                },
-                remote: { path, repoPath, exists: true, blobSha: remote.sha, kind },
-                base: { blobSha: baseline },
-            });
+            // Shared with batch pull's own no-prefetched-tree classification
+            // (PullCoordinator.planFromRemote), so single- and batch-pull
+            // planning semantics can't silently drift apart. Interactive
+            // conflict handling, confirmation, and notification stay separate
+            // below -- see PullCoordinator.planSingleFile's doc comment.
+            const decision = await this.pullCoordinator.planSingleFile(fileOrPath, remote);
 
             if (decision.action === 'none') {
                 await this.updateMetadata(path, remote.sha);

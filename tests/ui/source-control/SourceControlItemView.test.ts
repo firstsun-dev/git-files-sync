@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TFile, WorkspaceLeaf } from 'obsidian';
 import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from '../../../src/ui/source-control/SourceControlItemView';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
@@ -24,6 +24,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
     const push = vi.fn().mockResolvedValue(undefined);
     const pull = vi.fn().mockResolvedValue(undefined);
     const deleteRemote = vi.fn().mockResolvedValue(undefined);
+    const deleteLocal = vi.fn().mockResolvedValue(undefined);
     const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
     const openDiffTab = vi.fn().mockResolvedValue(undefined);
     const getRemoteFileUrl = vi.fn().mockReturnValue('https://github.com/owner/repo/blob/main/a.md');
@@ -35,7 +36,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
         pushSelectionStore: selection,
         operationState: operations,
         sourceControlViewModel: viewModel,
-        sourceControlActions: { sync, push, pull, deleteRemote, loadDiffContent },
+        sourceControlActions: { sync, push, pull, deleteRemote, deleteLocal, loadDiffContent },
         sync: { status },
         syncWorkspace: { getInfo: () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '' }), getRemoteFileUrl },
         settings: { syncMetadata: {} },
@@ -44,7 +45,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
         diffTabPath,
     } as unknown as GitLabFilesPush;
 
-    return { plugin, repository, selection, sync, push, pull, deleteRemote, loadDiffContent, openDiffTab, getRemoteFileUrl, status, diffTabPath };
+    return { plugin, repository, selection, operations, sync, push, pull, deleteRemote, deleteLocal, loadDiffContent, openDiffTab, getRemoteFileUrl, status, diffTabPath };
 }
 
 function buildLeaf() {
@@ -84,7 +85,7 @@ describe('SourceControlItemView', () => {
         const container = view.containerEl.children[1] as HTMLElement;
         (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
-        expect(sync).toHaveBeenCalledWith([toChangeId('a.md')]);
+        expect(sync).toHaveBeenCalledWith([{ changeId: toChangeId('a.md'), action: undefined }]);
     });
 
     it('waits for sync to settle through the production runAction wiring before re-rendering (regression: runAction used to discard the action promise)', async () => {
@@ -104,7 +105,7 @@ describe('SourceControlItemView', () => {
         const container = view.containerEl.children[1] as HTMLElement;
         (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
-        expect(sync).toHaveBeenCalledWith([toChangeId('a.md'), toChangeId('b.md')]);
+        expect(sync).toHaveBeenCalledWith([{ changeId: toChangeId('a.md'), action: undefined }, { changeId: toChangeId('b.md'), action: undefined }]);
 
         resolveSync();
         await new Promise(resolve => window.setTimeout(resolve, 0));
@@ -361,5 +362,74 @@ describe('SourceControlItemView', () => {
         await Promise.resolve();
 
         expect(openDiffTab).toHaveBeenCalledWith('a.md', null);
+    });
+
+    it('refreshes the open diff tab using the ViewModel\'s real selection/operation projection, not hardcoded defaults', async () => {
+        const { plugin, selection, operations, loadDiffContent, diffTabPath } = buildPlugin('local-modified');
+        (diffTabPath as ReturnType<typeof vi.fn>).mockReturnValue('a.md');
+        // Prior to the getItem() refactor this path hardcoded isSelectedForSync:
+        // false / operationStatus: 'idle' regardless of actual state.
+        selection.selectForSync(toChangeId('a.md'));
+        operations.start(toChangeId('a.md'));
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+
+        const status = (plugin as unknown as { sync: { status: SyncStatusService } }).sync.status;
+        status.set({ path: 'a.md', status: 'modified', localContent: 'local', remoteContent: 'remote' });
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+        loadDiffContent.mockClear();
+
+        status.set({ path: 'a.md', status: 'synced', localContent: 'remote', remoteContent: 'remote', remoteSha: 'new-sha' });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(loadDiffContent).toHaveBeenCalledWith(expect.objectContaining({
+            isSelectedForSync: true,
+            operationStatus: 'running',
+        }));
+    });
+
+    describe('row menu delete-remote confirmation', () => {
+        afterEach(() => {
+            document.querySelectorAll('.menu').forEach(el => el.remove());
+        });
+
+        it('confirms before calling sourceControlActions.deleteRemote, and does not call it if cancelled', async () => {
+            const { plugin, deleteRemote } = buildPlugin('remote-only');
+            const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+            await view.onOpen();
+
+            const container = view.containerEl.children[1] as HTMLElement;
+            (container.querySelector('.scv-change-menu') as HTMLButtonElement).click();
+            (Array.from(document.querySelectorAll('.menu .menu-item'))
+                .find(el => el.getAttribute('data-title') === 'Delete remote…') as HTMLElement).click();
+
+            // Confirm modal is now open; deleteRemote must not run until confirmed.
+            expect(deleteRemote).not.toHaveBeenCalled();
+            const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.ssv-confirm-buttons button'));
+            expect(buttons.length).toBe(2);
+
+            // Cancel: still not called.
+            buttons[0]?.click();
+            expect(deleteRemote).not.toHaveBeenCalled();
+        });
+
+        it('calls sourceControlActions.deleteRemote with the row id once confirmed', async () => {
+            const { plugin, deleteRemote } = buildPlugin('remote-only');
+            const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+            await view.onOpen();
+
+            const container = view.containerEl.children[1] as HTMLElement;
+            (container.querySelector('.scv-change-menu') as HTMLButtonElement).click();
+            (Array.from(document.querySelectorAll('.menu .menu-item'))
+                .find(el => el.getAttribute('data-title') === 'Delete remote…') as HTMLElement).click();
+
+            const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.ssv-confirm-buttons button'));
+            buttons[1]?.click();
+            await Promise.resolve();
+
+            expect(deleteRemote).toHaveBeenCalledWith([toChangeId('a.md')]);
+        });
     });
 });

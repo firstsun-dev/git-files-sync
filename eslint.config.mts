@@ -51,6 +51,75 @@ export default tseslint.config(
 		},
 	},
 	{
+		// Architecture regression guard (docs/architecture.md): the UI layer
+		// must reach the sync domain only through SyncWorkspace / the Source
+		// Control application services -- never a concrete Git provider or a
+		// push/pull coordinator/executor directly.
+		files: ["src/ui/**/*.ts", "src/ui/**/*.tsx"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [
+						{
+							group: ["**/services/github-service", "**/services/gitlab-service", "**/services/gitea-service"],
+							message: "UI must not depend on a concrete Git provider; go through SyncWorkspace instead.",
+						},
+						{
+							group: ["**/logic/sync/PushCoordinator", "**/logic/sync/PullCoordinator", "**/logic/sync/PushExecutor", "**/logic/sync/PullExecutor"],
+							message: "UI must not bypass SyncWorkspace to reach a push/pull coordinator or executor directly.",
+						},
+					],
+				},
+			],
+		},
+	},
+	{
+		// Architecture regression guard (docs/architecture.md): the Source
+		// Control application layer (ChangeRepository, SourceControlActionService,
+		// SyncIntentExecutor, ...) must reach the sync domain only through
+		// SyncWorkspace -- never a concrete Git provider or a push/pull
+		// coordinator/executor directly.
+		files: ["src/logic/source-control/**/*.ts"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [
+						{
+							group: ["**/services/github-service", "**/services/gitlab-service", "**/services/gitea-service"],
+							message: "Source Control must not depend on a concrete Git provider; go through SyncWorkspace instead.",
+						},
+						{
+							group: ["**/logic/sync/PushCoordinator", "**/logic/sync/PullCoordinator", "**/logic/sync/PushExecutor", "**/logic/sync/PullExecutor"],
+							message: "Source Control must not bypass SyncWorkspace to reach a push/pull coordinator or executor directly.",
+						},
+					],
+				},
+			],
+		},
+	},
+	{
+		// Architecture regression guard (docs/architecture.md): sync-domain
+		// modules (SyncManager, coordinators, executors, status resolution)
+		// must not depend on the Source Control presentation layer -- the
+		// dependency direction runs UI -> application -> domain, never back.
+		files: ["src/logic/sync/**/*.ts"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [
+						{
+							group: ["**/ui/source-control", "**/ui/source-control/*"],
+							message: "Sync-domain modules must not depend on the Source Control UI; the dependency direction runs UI -> domain, never back.",
+						},
+					],
+				},
+			],
+		},
+	},
+	{
 		files: ["src/**/*.ts", "src/**/*.tsx"],
 		...sonarjs.configs.recommended,
 	},

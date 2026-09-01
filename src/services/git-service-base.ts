@@ -1,6 +1,6 @@
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { logger } from '../utils/logger';
-import { GitTreeEntry } from './git-service-interface';
+import { ConnectionTestResult, GitTreeEntry } from './git-service-interface';
 import { isBinaryPath } from '../utils/path';
 
 export interface GitFile {
@@ -46,15 +46,6 @@ export interface GitLabTreeItem {
     mode?: string;
     /** GitLab's tree API calls the blob SHA "id", not "sha". */
     id?: string;
-}
-
-export interface ConnectionTestResult {
-    /** Whether the repository/project itself was reachable with the given credentials. */
-    repoOk: boolean;
-    /** Whether the configured branch was found. Only meaningful when repoOk is true. */
-    branchOk: boolean;
-    /** Populated when repoOk is false, describing the repo-level failure. */
-    error?: string;
 }
 
 /** Max files per single batch-commit call. Guards against oversized request

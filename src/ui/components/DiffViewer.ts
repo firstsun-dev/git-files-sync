@@ -35,18 +35,31 @@ export function resetDiffLayoutMemoryForTests(): void {
 }
 
 export interface DiffViewerOptions {
-    remote: string;
-    local: string;
+    /**
+     * Diff content. Omit both when the content isn't loaded yet (e.g. an
+     * async fetch is in flight) — the viewer renders just the empty body,
+     * and the caller fills it in later via the returned handle's
+     * `setContent`. Passing only one of the two is not supported.
+     */
+    remote?: string;
+    local?: string;
     layout: DiffLayout;
     /**
      * Where the split/unified toggle renders — typically the fixed header
      * region of the enclosing surface, so it stays reachable while a long
      * diff scrolls below. When omitted, no toggle is rendered and the viewer
-     * shows the given layout statically.
+     * shows the given layout statically. Also suppressed on phones (see
+     * `renderDiffViewer` doc) regardless of this option.
      */
     toggleHost?: HTMLElement;
     /** State-sync callback so the owning surface can persist the layout across its own re-renders. */
     onLayoutChange?: (next: DiffLayout) => void;
+}
+
+/** Handle to the diff body a `renderDiffViewer` call created, for filling in content that wasn't ready yet at render time. */
+export interface DiffViewerHandle {
+    /** Replaces the body's content. Safe to call once the initial (possibly content-less) render has happened. */
+    setContent(remote: string, local: string): void;
 }
 
 /**
@@ -54,24 +67,43 @@ export interface DiffViewerOptions {
  * diff panel. Every diff surface (desktop diff tab, conflict modal, mobile
  * detail) renders through this instead of reassembling DiffLayoutToggle and
  * DiffPanel — and never rebuilds its own "apply layout class + re-render
- * toggle" dance.
+ * toggle" dance. This is also the single owner of the diff body element:
+ * callers that load content asynchronously must go through the returned
+ * handle's `setContent` rather than reaching into the DOM and calling
+ * `renderDiffPanel` themselves, which would append a second copy alongside
+ * whatever this function already rendered.
+ *
+ * Phones (`Platform.isPhone`) always render unified with no toggle — a
+ * split view is unreadable at phone width, and offering a toggle that
+ * produces two ~150px columns is worse than not offering it. Tablets and
+ * desktop keep the caller's requested layout and toggle.
  */
-export function renderDiffViewer(container: HTMLElement, options: DiffViewerOptions): void {
-    const body = container.createDiv({ cls: `scv-diff-tab-body scv-diff-layout-${options.layout}` });
-    renderDiffPanel(body, options.remote, options.local);
+export function renderDiffViewer(container: HTMLElement, options: DiffViewerOptions): DiffViewerHandle {
+    const layout: DiffLayout = Platform.isPhone ? 'unified' : options.layout;
+    const body = container.createDiv({ cls: `scv-diff-tab-body scv-diff-layout-${layout}` });
+    if (options.remote !== undefined && options.local !== undefined) {
+        renderDiffPanel(body, options.remote, options.local);
+    }
 
     const toggleHost = options.toggleHost;
-    if (!toggleHost) return;
+    if (toggleHost && !Platform.isPhone) {
+        const renderToggle = (l: DiffLayout): void => {
+            toggleHost.empty();
+            renderDiffLayoutToggle(toggleHost, l, next => {
+                applyLayoutClass(body, next);
+                options.onLayoutChange?.(next);
+                renderToggle(next);
+            });
+        };
+        renderToggle(layout);
+    }
 
-    const renderToggle = (layout: DiffLayout): void => {
-        toggleHost.empty();
-        renderDiffLayoutToggle(toggleHost, layout, next => {
-            applyLayoutClass(body, next);
-            options.onLayoutChange?.(next);
-            renderToggle(next);
-        });
+    return {
+        setContent(remote: string, local: string): void {
+            body.empty();
+            renderDiffPanel(body, remote, local);
+        },
     };
-    renderToggle(options.layout);
 }
 
 function applyLayoutClass(body: HTMLElement, layout: DiffLayout): void {

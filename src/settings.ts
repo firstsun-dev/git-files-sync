@@ -1,8 +1,15 @@
-export * from './settings-implementation';
+// Public compatibility surface: re-exports the settings model/helpers and the
+// settings UI so existing `from './settings'` / `from '../settings'` imports
+// across the codebase keep working unchanged. See src/settings/ (model,
+// helpers) and src/ui/settings/GitLabSyncSettingTab.ts for the actual
+// implementations; nothing else should be added directly to this file.
+export * from './settings/model';
+export * from './settings/helpers';
+export type { SettingsHost } from './ui/settings/GitLabSyncSettingTab';
 
 import {
 	GitLabSyncSettingTab as ImperativeGitLabSyncSettingTab,
-} from './settings-implementation';
+} from './ui/settings/GitLabSyncSettingTab';
 
 /**
  * Keep the existing imperative settings UI on Obsidian's display() lifecycle.

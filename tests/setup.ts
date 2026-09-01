@@ -210,6 +210,10 @@ export const Modal = class {
   }
 
   open() {
+    // Real Modal appends modalEl to document.body on open(), inside a
+    // '.modal-container' wrapper; mirrored here so tests can find/click into
+    // it via document queries like any other rendered control.
+    document.body.appendChild(this.modalEl);
     const withOnOpen = this as unknown as { onOpen?: () => void };
     if (typeof withOnOpen.onOpen === 'function') {
       withOnOpen.onOpen();
@@ -217,6 +221,7 @@ export const Modal = class {
   }
 
   close() {
+    this.modalEl.remove();
     const withOnClose = this as unknown as { onClose?: () => void };
     if (typeof withOnClose.onClose === 'function') {
       withOnClose.onClose();
@@ -297,10 +302,83 @@ export const debounce = <T extends unknown[]>(cb: (...args: T) => unknown, timeo
   return fn;
 };
 // Mutable so tests can exercise both the desktop and mobile branches.
-export const Platform = { isDesktopApp: true, isMobile: false };
+export const Platform = { isDesktopApp: true, isMobile: false, isPhone: false, isTablet: false };
 export const FileSystemAdapter = class {
   getBasePath() { return '/mock/path'; }
 };
+
+// Real MenuItem builds a DOM row inside its owning Menu's popover; mirrored
+// here (rather than a plain recorder) so tests can query/click menu items
+// the same way they interact with any other rendered control.
+export class MenuItem {
+  el: HTMLElement;
+  titleEl: HTMLElement;
+  private clickCb?: (evt: MouseEvent | KeyboardEvent) => void;
+
+  constructor() {
+    this.el = document.createElement('div');
+    this.el.className = 'menu-item';
+    this.titleEl = document.createElement('div');
+    this.titleEl.className = 'menu-item-title';
+    this.el.appendChild(this.titleEl);
+    this.el.addEventListener('click', (evt) => this.clickCb?.(evt));
+  }
+
+  setTitle(title: string) {
+    this.titleEl.textContent = title;
+    this.el.setAttribute('data-title', title);
+    return this;
+  }
+
+  setIcon(icon: string | null) {
+    if (icon) this.el.setAttribute('data-icon', icon);
+    return this;
+  }
+
+  setChecked(checked: boolean | null) {
+    this.el.setAttribute('data-checked', String(checked));
+    this.el.classList.toggle('is-checked', checked === true);
+    return this;
+  }
+
+  onClick(cb: (evt: MouseEvent | KeyboardEvent) => unknown) {
+    this.clickCb = cb;
+    return this;
+  }
+}
+
+// Real Menu shows a native/DOM popover on showAtMouseEvent/showAtPosition;
+// mocked here as a plain element appended to document.body so tests can find
+// and click its items instead of reaching into internal state.
+export class Menu {
+  menuEl: HTMLElement;
+
+  constructor() {
+    this.menuEl = document.createElement('div');
+    this.menuEl.className = 'menu';
+  }
+
+  addItem(cb: (item: MenuItem) => unknown) {
+    const item = new MenuItem();
+    cb(item);
+    this.menuEl.appendChild(item.el);
+    return this;
+  }
+
+  addSeparator() {
+    this.menuEl.appendChild(Object.assign(document.createElement('div'), { className: 'menu-separator' }));
+    return this;
+  }
+
+  setNoIcon() { return this; }
+  setUseNativeMenu() { return this; }
+  setParentElement() { return this; }
+  showAtMouseEvent() { document.body.appendChild(this.menuEl); return this; }
+  showAtPosition() { document.body.appendChild(this.menuEl); return this; }
+  hide() { this.menuEl.remove(); return this; }
+  close() { this.menuEl.remove(); }
+  onHide() {}
+}
 
 vi.mock('obsidian', () => ({
   Plugin,
@@ -326,4 +404,6 @@ vi.mock('obsidian', () => ({
   setIcon,
   Platform,
   FileSystemAdapter,
+  Menu,
+  MenuItem,
 }));

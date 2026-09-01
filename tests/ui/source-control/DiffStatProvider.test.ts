@@ -2,11 +2,20 @@ import { describe, expect, it, vi } from 'vitest';
 import { DiffStatProvider } from '../../../src/ui/source-control/DiffStatProvider';
 import type { DiffStatLoadResult } from '../../../src/ui/source-control/DiffStatProvider';
 import type { SourceControlItem } from '../../../src/logic/source-control/SourceControlViewModel';
-import type { ChangeStat } from '../../../src/ui/source-control/ChangePresentation';
+import { resolveSyncAction } from '../../../src/logic/source-control/ChangeActionPolicy';
+import type { ChangeStat } from '../../../src/logic/sync/DiffStat';
 import { toChangeId } from '../../../src/logic/source-control/types';
 
 function item(id: string, kind: SourceControlItem['kind'] = 'local-only'): SourceControlItem {
-    return { id: toChangeId(id), path: `${id}.md`, kind, isSelectedForSync: false, operationStatus: 'idle' };
+    return {
+        id: toChangeId(id),
+        path: `${id}.md`,
+        kind,
+        isSelectedForSync: false,
+        operationStatus: 'idle',
+        syncAction: resolveSyncAction(kind),
+        hasActionOverride: false,
+    };
 }
 
 function ready(stat: ChangeStat): DiffStatLoadResult {

@@ -1,12 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
-import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
+import { SourceControlActionService, type SyncIntentRequest } from '../../../src/logic/source-control/SourceControlActionService';
 import type { SyncExecutionResult, SyncResultNotificationPort } from '../../../src/logic/source-control/SyncResultNotifier';
 import type { PlannedPushBatch } from '../../../src/logic/sync/PushCoordinator';
-import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
+import { toChangeId, type ChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import type { SyncWorkspace } from '../../../src/logic/sync/SyncWorkspace';
 import type { BatchPushConflict, PushResults, SyncPlan, SyncResult } from '../../../src/logic/sync/types';
+
+/** Builds plain sync() intents (no explicit action override) from change ids, for tests that don't exercise overrides. */
+function intents(...changeIds: ChangeId[]): SyncIntentRequest[] {
+    return changeIds.map(changeId => ({ changeId }));
+}
 
 const keepRemoteConflict = (path: string, remoteSha = 'reviewed'): BatchPushConflict => ({
     path,
@@ -88,9 +94,10 @@ function buildService(
 ) {
     const repository = new ChangeRepository();
     repository.replace(changes);
+    const selection = new SyncSelectionStore();
     const operations = new OperationState();
-    const service = new SourceControlActionService(repository, operations, workspace, notifier);
-    return { service, operations, notifier };
+    const service = new SourceControlActionService(repository, selection, operations, workspace, notifier);
+    return { service, selection, operations, notifier };
 }
 
 describe('SourceControlActionService', () => {
@@ -179,7 +186,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await service.sync([toChangeId('c-1'), toChangeId('c-2')]);
+            await service.sync(intents(toChangeId('c-1'), toChangeId('c-2')));
 
             expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
             expect(commitResolvedBatch).toHaveBeenCalledWith(
@@ -208,7 +215,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await service.sync([toChangeId('c-1')]);
+            await service.sync(intents(toChangeId('c-1')));
 
             expect(planPush).not.toHaveBeenCalled();
             expect(commitResolvedBatch).not.toHaveBeenCalled();
@@ -240,7 +247,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await service.sync([toChangeId('update'), toChangeId('delete'), toChangeId('download')]);
+            await service.sync(intents(toChangeId('update'), toChangeId('delete'), toChangeId('download')));
 
             expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
             expect(applyPull).toHaveBeenCalledWith(['remote.md'], { notify: false });
@@ -262,7 +269,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await service.sync([toChangeId('update')]);
+            await service.sync(intents(toChangeId('update')));
 
             expect(operations.get(toChangeId('update'))).toBe('failed');
             expect(notify).toHaveBeenCalledTimes(1);
@@ -278,7 +285,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await expect(service.sync([toChangeId('c-1')])).resolves.toBeUndefined();
+            await expect(service.sync(intents(toChangeId('c-1')))).resolves.toBeUndefined();
 
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
             expect(notify).toHaveBeenCalledTimes(1);
@@ -298,7 +305,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await expect(service.sync([toChangeId('c-1')])).resolves.toBeUndefined();
+            await expect(service.sync(intents(toChangeId('c-1')))).resolves.toBeUndefined();
 
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
             expect(notify).toHaveBeenCalledTimes(1);
@@ -323,7 +330,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await service.sync([toChangeId('push'), toChangeId('pull')]);
+            await service.sync(intents(toChangeId('push'), toChangeId('pull')));
 
             expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
             expect(operations.get(toChangeId('push'))).toBe('success');
@@ -344,7 +351,7 @@ describe('SourceControlActionService', () => {
                 fakeWorkspace({ planPush, confirmPlan, commitResolvedBatch }),
             );
 
-            await service.sync([toChangeId('c-1')]);
+            await service.sync(intents(toChangeId('c-1')));
 
             expect(confirmPlan).toHaveBeenCalledWith(expect.any(Object), 'sync');
             expect(commitResolvedBatch).not.toHaveBeenCalled();
@@ -360,7 +367,7 @@ describe('SourceControlActionService', () => {
                 fakeWorkspace({ planPush, confirmPlan, commitResolvedBatch }),
             );
 
-            await service.sync([toChangeId('c-1')]);
+            await service.sync(intents(toChangeId('c-1')));
 
             expect(confirmPlan).not.toHaveBeenCalled();
             expect(commitResolvedBatch).not.toHaveBeenCalled();
@@ -383,7 +390,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await service.sync([toChangeId('c-1')]);
+            await service.sync(intents(toChangeId('c-1')));
 
             expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
             expect(commitResolvedBatch).toHaveBeenCalledWith(
@@ -425,7 +432,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await service.sync([toChangeId('c-1'), toChangeId('c-2')]);
+            await service.sync(intents(toChangeId('c-1'), toChangeId('c-2')));
 
             expect(operations.get(toChangeId('c-1'))).toBe('success');
             expect(operations.get(toChangeId('c-2'))).toBe('failed');
@@ -435,6 +442,108 @@ describe('SourceControlActionService', () => {
                 failed: 1,
                 downloaded: 0,
             }));
+        });
+
+        describe('explicit action overrides', () => {
+            it('honors an explicit pull override on a local-modified change (routes to pull, not the push default)', async () => {
+                const planPush = vi.fn();
+                const planPull = vi.fn().mockResolvedValue(emptySyncPlan({ modifications: [{ path: 'a.md', name: 'a.md' }] }));
+                const applyPull = vi.fn().mockResolvedValue(emptySyncResult({ added: 0, updated: 1, success: 1 }));
+                const { service, operations } = buildService(
+                    [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                    fakeWorkspace({ planPush, planPull, applyPull }),
+                );
+
+                await service.sync([{ changeId: toChangeId('c-1'), action: 'pull' }]);
+
+                expect(planPush).not.toHaveBeenCalled();
+                expect(applyPull).toHaveBeenCalledWith(['a.md'], { notify: false });
+                expect(operations.get(toChangeId('c-1'))).toBe('success');
+            });
+
+            it('honors an explicit push override on a remote-modified change (routes to push, not the pull default)', async () => {
+                const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                    reviewPlan: emptySyncPlan({ modifications: [{ path: 'a.md', name: 'a.md' }] }),
+                    pushes: [{ path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'local wins', existingSha: 'sha-a' }],
+                }));
+                const planPull = vi.fn();
+                const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+                const { service, operations } = buildService(
+                    [{ id: toChangeId('c-1'), path: 'a.md', kind: 'remote-modified' }],
+                    fakeWorkspace({ planPush, planPull, commitResolvedBatch }),
+                );
+
+                await service.sync([{ changeId: toChangeId('c-1'), action: 'push' }]);
+
+                expect(planPull).not.toHaveBeenCalled();
+                expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
+                expect(operations.get(toChangeId('c-1'))).toBe('success');
+            });
+
+            it('honors an explicit pull override on a local-deleted change (restores instead of mirroring the delete)', async () => {
+                const planPush = vi.fn();
+                const planPull = vi.fn().mockResolvedValue(emptySyncPlan({ additions: [{ path: 'gone.md', name: 'gone.md' }] }));
+                const applyPull = vi.fn().mockResolvedValue(emptySyncResult({ added: 1, success: 1 }));
+                const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+                const { service, operations } = buildService(
+                    [{ id: toChangeId('c-1'), path: 'gone.md', kind: 'local-deleted' }],
+                    fakeWorkspace({ planPush, planPull, applyPull, commitResolvedBatch }),
+                );
+
+                await service.sync([{ changeId: toChangeId('c-1'), action: 'pull' }]);
+
+                expect(commitResolvedBatch).not.toHaveBeenCalled();
+                expect(applyPull).toHaveBeenCalledWith(['gone.md'], { notify: false });
+                expect(operations.get(toChangeId('c-1'))).toBe('success');
+            });
+
+            it('falls back to the default when the override is no longer legal for the change\'s current kind', async () => {
+                // Caller's snapshot said local-modified + pull override; by the
+                // time sync() runs the repository already reports local-only
+                // (remote copy gone) — 'pull' isn't legal there, so it should
+                // fall back to push instead of being silently dropped or throwing.
+                const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                    reviewPlan: emptySyncPlan({ additions: [{ path: 'a.md', name: 'a.md' }] }),
+                    pushes: [{ path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'local', existingSha: undefined }],
+                }));
+                const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+                const { service, operations } = buildService(
+                    [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                    fakeWorkspace({ planPush, commitResolvedBatch }),
+                );
+
+                await service.sync([{ changeId: toChangeId('c-1'), action: 'pull' }]);
+
+                expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
+                expect(operations.get(toChangeId('c-1'))).toBe('success');
+            });
+
+            it('merges mixed default and overridden intents into one plan and one remote commit', async () => {
+                const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+                const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                    reviewPlan: emptySyncPlan({ modifications: [{ path: 'push-me.md', name: 'push-me.md' }] }),
+                    pushes: [{ path: 'push-me.md', name: 'push-me.md', repoPath: 'push-me.md', content: 'x', existingSha: 'sha' }],
+                }));
+                const planPull = vi.fn().mockResolvedValue(emptySyncPlan({ modifications: [{ path: 'pull-me.md', name: 'pull-me.md' }] }));
+                const applyPull = vi.fn().mockResolvedValue(emptySyncResult({ updated: 1, success: 1 }));
+                const { service, operations } = buildService(
+                    [
+                        { id: toChangeId('push-default'), path: 'push-me.md', kind: 'local-modified' },
+                        { id: toChangeId('pull-override'), path: 'pull-me.md', kind: 'local-modified' },
+                    ],
+                    fakeWorkspace({ planPush, planPull, applyPull, commitResolvedBatch }),
+                );
+
+                await service.sync([
+                    { changeId: toChangeId('push-default') },
+                    { changeId: toChangeId('pull-override'), action: 'pull' },
+                ]);
+
+                expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
+                expect(applyPull).toHaveBeenCalledWith(['pull-me.md'], { notify: false });
+                expect(operations.get(toChangeId('push-default'))).toBe('success');
+                expect(operations.get(toChangeId('pull-override'))).toBe('success');
+            });
         });
     });
 
@@ -658,6 +767,8 @@ describe('SourceControlActionService', () => {
                 kind: 'local-modified',
                 isSelectedForSync: false,
                 operationStatus: 'idle',
+                syncAction: 'push',
+                hasActionOverride: false,
             });
 
             expect(getDiff).toHaveBeenCalledWith('a.md');
@@ -682,9 +793,75 @@ describe('SourceControlActionService', () => {
                 kind: 'local-modified',
                 isSelectedForSync: false,
                 operationStatus: 'idle',
+                syncAction: 'push',
+                hasActionOverride: false,
             });
 
             expect(content).toBeNull();
+        });
+    });
+
+    describe('selection mutation', () => {
+        it('selectForSync / deselectFromSync toggle one change through SyncSelectionStore', () => {
+            const { service, selection } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                fakeWorkspace(),
+            );
+
+            service.selectForSync(toChangeId('c-1'));
+            expect(selection.isIncluded(toChangeId('c-1'))).toBe(true);
+
+            service.deselectFromSync(toChangeId('c-1'));
+            expect(selection.isIncluded(toChangeId('c-1'))).toBe(false);
+        });
+
+        it('selectMany / deselectMany toggle a batch through SyncSelectionStore', () => {
+            const { service, selection } = buildService(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'local-only' },
+                ],
+                fakeWorkspace(),
+            );
+
+            service.selectMany([toChangeId('c-1'), toChangeId('c-2')]);
+            expect(selection.getSelectedChangeIds()).toEqual([toChangeId('c-1'), toChangeId('c-2')]);
+
+            service.deselectMany([toChangeId('c-1'), toChangeId('c-2')]);
+            expect(selection.getSelectedChangeIds()).toEqual([]);
+        });
+
+        it('setSyncAction stores a non-default override, and clears it once it matches the kind default', () => {
+            const { service, selection } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                fakeWorkspace(),
+            );
+
+            service.setSyncAction(toChangeId('c-1'), 'pull');
+            expect(selection.getActionOverride(toChangeId('c-1'))).toBe('pull');
+
+            // 'push' is local-modified's own default, so setting it back clears the override.
+            service.setSyncAction(toChangeId('c-1'), 'push');
+            expect(selection.getActionOverride(toChangeId('c-1'))).toBeUndefined();
+        });
+
+        it('clearSyncAction removes an explicit override', () => {
+            const { service, selection } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                fakeWorkspace(),
+            );
+
+            selection.setActionOverride(toChangeId('c-1'), 'pull');
+            service.clearSyncAction(toChangeId('c-1'));
+
+            expect(selection.getActionOverride(toChangeId('c-1'))).toBeUndefined();
+        });
+
+        it('setSyncAction on a stale (already-removed) change id is a no-op, not a throw', () => {
+            const { service, selection } = buildService([], fakeWorkspace());
+
+            expect(() => service.setSyncAction(toChangeId('gone'), 'pull')).not.toThrow();
+            expect(selection.getActionOverride(toChangeId('gone'))).toBeUndefined();
         });
     });
 });

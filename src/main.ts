@@ -3,9 +3,8 @@ import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getSer
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
 import { GiteaService } from './services/gitea-service';
-import { GitServiceInterface, GitTreeEntry } from './services/git-service-interface';
-import { ConnectionTestResult } from './services/git-service-base';
-import { SyncManager } from './logic/sync-manager';
+import { ConnectionTestResult, GitServiceInterface, GitTreeEntry } from './services/git-service-interface';
+import type { SyncManager } from './logic/sync-manager';
 import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from './ui/source-control/SourceControlItemView';
 import { DiffTabView, SOURCE_CONTROL_DIFF_VIEW_TYPE, type DiffTabContent } from './ui/source-control/DiffTabView';
 import { GitignoreManager } from './logic/gitignore-manager';
@@ -15,18 +14,16 @@ import { WhatsNewModal } from './ui/WhatsNewModal';
 import { CHANGELOG, getUnseenReleases } from './changelog';
 import { compareVersions } from './utils/version';
 import { t, setLanguageOverride } from './i18n';
-import { ObsidianSyncInteraction } from './ui/ObsidianSyncInteraction';
-import { SyncStatusRefreshService } from './logic/sync/SyncStatusRefreshService';
-import { SyncDiffService } from './logic/sync/SyncDiffService';
-import { SyncManagerWorkspace, type SyncWorkspace } from './logic/sync/SyncWorkspace';
-import { ChangeRepository } from './logic/source-control/ChangeRepository';
-import { OperationState } from './logic/source-control/OperationState';
-import { RefreshState } from './logic/source-control/RefreshState';
-import { SyncSelectionStore } from './logic/source-control/SyncSelectionStore';
-import { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
-import { SourceControlActionService } from './logic/source-control/SourceControlActionService';
-import { SyncResultNotifier } from './logic/source-control/SyncResultNotifier';
-import { toSyncChanges } from './logic/source-control/FileStatusAdapter';
+import type { SyncStatusRefreshService } from './logic/sync/SyncStatusRefreshService';
+import type { SyncDiffService } from './logic/sync/SyncDiffService';
+import type { SyncWorkspace } from './logic/sync/SyncWorkspace';
+import type { ChangeRepository } from './logic/source-control/ChangeRepository';
+import type { OperationState } from './logic/source-control/OperationState';
+import type { RefreshState } from './logic/source-control/RefreshState';
+import type { SyncSelectionStore } from './logic/source-control/SyncSelectionStore';
+import type { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
+import type { SourceControlActionService } from './logic/source-control/SourceControlActionService';
+import { createSyncRuntime } from './runtime/createSyncRuntime';
 import {
 	filterFilesByVaultFolder as scopeFilterFiles,
 	filterPathByVaultFolder as scopeFilterPath,
@@ -55,7 +52,7 @@ export default class GitLabFilesPush extends Plugin {
 	refreshState: RefreshState;
 	sourceControlViewModel: SourceControlViewModel;
 	sourceControlActions: SourceControlActionService;
-	private unsubscribeChangeRepository?: () => void;
+	private disposeSyncRuntime?: () => void;
 	private gitignoreConfigKey = '';
 	private pushRibbonEl: HTMLElement;
 	private statusBarEl: HTMLElement;
@@ -66,7 +63,7 @@ export default class GitLabFilesPush extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-		this.addSettingTab(new GitLabSyncSettingTab(this.app, this));
+		this.addSettingTab(new GitLabSyncSettingTab(this.app, this, this));
 
 		this.registerView(
 			SOURCE_CONTROL_VIEW_TYPE,
@@ -92,68 +89,32 @@ export default class GitLabFilesPush extends Plugin {
 
 		this.initializeGitService();
 		this.updateGitignoreManager();
-		this.sync = new SyncManager(
-			this.app,
-			this.gitService,
-			this.settings,
-			this.saveSettings.bind(this),
-			(path) => this.gitignoreManager.isIgnored(this.getNormalizedPath(path)),
-			undefined,
-			new ObsidianSyncInteraction(this.app),
-		);
-		this.syncStatusRefresh = new SyncStatusRefreshService({
+		const runtime = createSyncRuntime({
 			app: this.app,
-			settings: () => this.settings,
-			gitService: () => this.gitService,
-			gitignoreManager: () => this.gitignoreManager,
-			syncManager: () => this.sync,
+			gitService: this.gitService,
+			getGitService: () => this.gitService,
+			settings: this.settings,
+			getSettings: () => this.settings,
+			saveSettings: this.saveSettings.bind(this),
+			getGitignoreManager: () => this.gitignoreManager,
+			isIgnored: (path) => this.gitignoreManager.isIgnored(this.getNormalizedPath(path)),
 			filterFilesByVaultFolder: files => this.filterFilesByVaultFolder(files),
 			filterPathByVaultFolder: path => this.filterPathByVaultFolder(path),
 			getNormalizedPath: path => this.getNormalizedPath(path),
 			getVaultPath: path => this.getVaultPath(path),
-		}, this.sync.status);
-		// One diff data service shared by the sync workspace (diff pane),
-		// the batch conflict modal's progressive +/- stat, and its "View
-		// Diff" — the modal never grows its own getBlob/cache path (see
-		// SyncDiffService.getConflictDiff).
-		this.syncDiffService = new SyncDiffService(this.sync.status, (sha, path) => this.gitService.getBlob(sha, path));
-		this.sync.setConflictDiffStatLoader(conflict => this.syncDiffService.getConflictStat(conflict));
-		this.sync.setConflictDiffLoader(conflict => this.syncDiffService.getConflictDiff(conflict));
-		this.syncWorkspace = new SyncManagerWorkspace({
-			manager: () => this.sync,
-			gitService: () => this.gitService,
-			settings: () => this.settings,
-			refreshService: this.syncStatusRefresh,
-			diffService: this.syncDiffService,
-			normalizePath: path => this.getNormalizedPath(path),
-			app: this.app,
+			notify: message => new Notice(message),
 		});
-
-		this.changeRepository = new ChangeRepository();
-		this.syncSelectionStore = new SyncSelectionStore();
-		this.operationState = new OperationState();
-		this.refreshState = new RefreshState();
-		this.sourceControlViewModel = new SourceControlViewModel(
-			this.changeRepository,
-			this.syncSelectionStore,
-			this.operationState,
-			() => this.syncWorkspace.refresh(),
-			this.refreshState,
-		);
-		this.sourceControlActions = new SourceControlActionService(
-			this.changeRepository,
-			this.operationState,
-			this.syncWorkspace,
-			new SyncResultNotifier(message => new Notice(message)),
-		);
-		// Keeps ChangeRepository (and therefore the Source Control view) in
-		// sync with the same SyncStatusService instance the sync domain
-		// already publishes to -- no separate refresh/polling path.
-		this.unsubscribeChangeRepository = this.sync.status.subscribe((statuses) => {
-			const changes = toSyncChanges([...statuses.values()]);
-			this.changeRepository.replace(changes);
-			this.syncSelectionStore.refresh(changes.map(change => change.id));
-		});
+		this.sync = runtime.sync;
+		this.syncStatusRefresh = runtime.syncStatusRefresh;
+		this.syncDiffService = runtime.syncDiffService;
+		this.syncWorkspace = runtime.syncWorkspace;
+		this.changeRepository = runtime.changeRepository;
+		this.syncSelectionStore = runtime.syncSelectionStore;
+		this.operationState = runtime.operationState;
+		this.refreshState = runtime.refreshState;
+		this.sourceControlViewModel = runtime.sourceControlViewModel;
+		this.sourceControlActions = runtime.sourceControlActions;
+		this.disposeSyncRuntime = () => runtime.dispose();
 
 		this.statusBarEl = this.addStatusBarItem();
 		this.statusBarEl.addClass('gfs-status-bar-connection');
@@ -715,10 +676,11 @@ export default class GitLabFilesPush extends Plugin {
 
 	onunload() {
 		// Cleanup of registered components (views, commands, DOM/vault event
-		// listeners) is handled by Obsidian. The ChangeRepository subscription
-		// isn't Obsidian-managed, so it's unsubscribed explicitly.
-		this.unsubscribeChangeRepository?.();
-		this.unsubscribeChangeRepository = undefined;
+		// listeners) is handled by Obsidian. The sync runtime's cross-object
+		// wiring (the ChangeRepository subscription) isn't Obsidian-managed,
+		// so it's disposed explicitly.
+		this.disposeSyncRuntime?.();
+		this.disposeSyncRuntime = undefined;
 	}
 
 	async loadSettings() {

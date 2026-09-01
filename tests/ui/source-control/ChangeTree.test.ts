@@ -1,13 +1,20 @@
 import { describe, expect, it, vi, beforeAll, beforeEach } from 'vitest';
 import { renderChangeTree, type ChangeTreeCallbacks } from '../../../src/ui/source-control/ChangeTree';
 import type { SourceControlItem } from '../../../src/logic/source-control/SourceControlViewModel';
+import { resolveSyncAction } from '../../../src/logic/source-control/ChangeActionPolicy';
 import { toChangeId } from '../../../src/logic/source-control/types';
 import { setupObsidianDOM, createContainer } from '../setup-dom';
 
 beforeAll(() => { setupObsidianDOM(); });
 
 function item(overrides: Partial<SourceControlItem> & Pick<SourceControlItem, 'id' | 'path' | 'kind'>): SourceControlItem {
-    return { isSelectedForSync: false, operationStatus: 'idle', ...overrides };
+    return {
+        isSelectedForSync: false,
+        operationStatus: 'idle',
+        syncAction: resolveSyncAction(overrides.kind),
+        hasActionOverride: false,
+        ...overrides,
+    };
 }
 
 describe('renderChangeTree', () => {
