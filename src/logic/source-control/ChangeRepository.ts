@@ -1,16 +1,20 @@
 import type { ChangeId, SyncChange } from './types';
 
+type ChangeRepositoryListener = (changes: readonly SyncChange[]) => void;
+
 /**
- * Read-side lookup for the current set of pending `SyncChange`s. Holds no
- * sync/business logic of its own — it's populated wholesale (`replace`) by
- * whatever assembles `SyncChange[]` from the sync domain, and exists purely
- * to give the ViewModel and UI O(1) lookup by id or path instead of scanning
- * an array.
+ * Read-side lookup for the current set of Source Control changes.
+ *
+ * The repository is populated wholesale from the sync.status pipeline and
+ * exposes one snapshot-change notification so dependent state stores can
+ * reconcile when that source of truth changes. It still owns no sync or
+ * provider behavior.
  */
 export class ChangeRepository {
     private changes: SyncChange[] = [];
     private readonly byId = new Map<ChangeId, SyncChange>();
     private readonly byPath = new Map<string, SyncChange>();
+    private readonly listeners = new Set<ChangeRepositoryListener>();
 
     /** Replaces the full change set, e.g. after a status refresh. */
     replace(changes: readonly SyncChange[]): void {
@@ -21,6 +25,13 @@ export class ChangeRepository {
             this.byId.set(change.id, change);
             this.byPath.set(change.path, change);
         }
+        for (const listener of this.listeners) listener(this.changes);
+    }
+
+    /** Subscribes to authoritative snapshot replacements. */
+    subscribe(listener: ChangeRepositoryListener): () => void {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
     }
 
     getAll(): SyncChange[] {

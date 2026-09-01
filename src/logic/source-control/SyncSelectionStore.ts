@@ -1,23 +1,14 @@
-import type { ChangeId } from './types';
-import type { SyncAction } from './ChangeActionPolicy';
+import { resolveSyncAction, type SyncAction } from './ChangeActionPolicy';
+import type { ChangeId, SyncChange } from './types';
 
 /**
- * Tracks which pending sync changes are selected for the Sync Queue —
- * independent of the underlying change/plan model and of any UI. Named for
- * "selected for sync" rather than "push" since the Sync Queue it backs holds
- * push, pull, and delete-remote candidates alike (a queued `remote-only` row
- * pulls, a queued `local-deleted` row deletes remotely by default). Also
- * deliberately avoids VCS stage/unstage terminology since this isn't a
- * staging area.
+ * Tracks which pending changes are selected for the Sync Queue and the
+ * user's optional per-change action override.
  *
- * Keyed by ChangeId rather than path so a rename/move doesn't drop the
- * selection.
- *
- * Also holds an optional per-change action override — the user explicitly
- * picking pull instead of the default push, say — keyed the same way.
- * Legality of an override (is 'pull' even valid for this change's kind) is
- * not this store's concern; that's `ChangeActionPolicy`'s job, applied at
- * read time via `resolveSyncAction`.
+ * Keyed by ChangeId rather than path so a rename/move does not drop intent.
+ * The store owns lifecycle cleanup for that intent: when a refreshed change
+ * disappears, or an override is no longer legal for its current kind, the
+ * stale state is discarded here instead of during ViewModel projection.
  */
 export class SyncSelectionStore {
     private readonly selected = new Set<ChangeId>();
@@ -32,12 +23,10 @@ export class SyncSelectionStore {
         this.actionOverrides.delete(changeId);
     }
 
-    /** Selects a batch of changes for sync in one call (folder "select all"). */
     selectMany(changeIds: readonly ChangeId[]): void {
         for (const id of changeIds) this.selected.add(id);
     }
 
-    /** Deselects a batch of changes from sync in one call ("clear queue" / folder deselect). */
     deselectMany(changeIds: readonly ChangeId[]): void {
         for (const id of changeIds) {
             this.selected.delete(id);
@@ -53,12 +42,10 @@ export class SyncSelectionStore {
         return [...this.selected];
     }
 
-    /** Records the user's explicit action choice for a change (e.g. pull instead of the default push). */
     setActionOverride(changeId: ChangeId, action: SyncAction): void {
         this.actionOverrides.set(changeId, action);
     }
 
-    /** Reverts a change back to its default action. */
     clearActionOverride(changeId: ChangeId): void {
         this.actionOverrides.delete(changeId);
     }
@@ -67,7 +54,25 @@ export class SyncSelectionStore {
         return this.actionOverrides.get(changeId);
     }
 
-    /** Drops selections for change ids that are no longer present, keeping the rest. */
+    /**
+     * Reconciles queued intent with a freshly published repository snapshot.
+     * Missing ids are removed and action overrides are revalidated against
+     * each change's current kind. This is the write-side lifecycle boundary;
+     * read-only ViewModel projection must not clean state as a side effect.
+     */
+    reconcile(changes: readonly SyncChange[]): void {
+        const currentById = new Map(changes.map(change => [change.id, change] as const));
+        this.refresh([...currentById.keys()]);
+
+        for (const [changeId, override] of this.actionOverrides) {
+            const change = currentById.get(changeId);
+            if (change && resolveSyncAction(change.kind, override) !== override) {
+                this.actionOverrides.delete(changeId);
+            }
+        }
+    }
+
+    /** Drops selections for ids that are no longer present, keeping the rest. */
     refresh(currentChangeIds: readonly ChangeId[]): void {
         const present = new Set(currentChangeIds);
         for (const changeId of this.selected) {
@@ -75,6 +80,12 @@ export class SyncSelectionStore {
                 this.selected.delete(changeId);
                 this.actionOverrides.delete(changeId);
             }
+        }
+
+        // Defensive cleanup for callers/tests that recorded an override
+        // without first selecting the row.
+        for (const changeId of this.actionOverrides.keys()) {
+            if (!present.has(changeId)) this.actionOverrides.delete(changeId);
         }
     }
 }
