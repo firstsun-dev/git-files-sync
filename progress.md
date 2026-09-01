@@ -5,17 +5,17 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-09-01
-**Active Feature:** PR2 responsibility cleanup, item 1/5 — Source Control state boundary (no tracked issue number; an ad-hoc follow-up plan on top of `origin/1.6.1`, not in `feature_list.json`).
+**Active Feature:** PR2 responsibility cleanup, item 2/5 done — Settings boundary cleanup (no tracked issue number; an ad-hoc follow-up plan on top of `origin/1.6.1`, not in `feature_list.json`).
 **Branch / PR:** `claude/pr2-source-control-boundary`, branched from `origin/1.6.1` (commit `69e5540`). Not yet pushed or opened as a PR.
 
-**Scope (item 1 only, per the PR2 plan):** `SourceControlViewModel` is now a pure read-only projection — removed its `selection` getter and its constructor's `ChangeRepository.subscribe(... reconcile ...)` wiring. That reconciliation wiring now lives in `createSyncRuntime`, which also drops the redundant explicit `syncSelectionStore.refresh()` call it used to make alongside it (reconcile already supersedes it). Selection mutation (`selectForSync`/`deselectFromSync`/`selectMany`/`deselectMany`/`setSyncAction`/`clearSyncAction`) moved onto `SourceControlActionService`, which now also takes `SyncSelectionStore` in its constructor; `SourceControlView` calls injected callbacks instead of reaching into `SyncSelectionStore` via the ViewModel. Updated the 3 e2e-support call sites that constructed `SourceControlActionService` directly. Deliberately did not touch items 2-5 of the PR2 plan (Settings boundary, item-projection centralization, pull-orchestration reuse, provider contract cleanup) or any UX.
+**Scope (item 2, per the PR2 plan):** Split `src/settings-implementation.ts` into `src/settings/model.ts` (types + `DEFAULT_SETTINGS`), `src/settings/helpers.ts` (pure functions), and `src/ui/settings/GitLabSyncSettingTab.ts` (all Obsidian rendering); `src/settings.ts` is now a thin re-export shim so every existing `from './settings'` import is unchanged. `GitLabSyncSettingTab` no longer imports the concrete `GitLabFilesPush` class for its own behavior — it depends on a narrow `SettingsHost` interface instead, with `plugin: Plugin` and `host: SettingsHost` kept as separate constructor parameters (an intersection type would re-trip `obsidianmd/no-unsupported-api` on `Plugin`'s own version-gated `settings` field). One remaining wart — `RemoteFolderSuggest.attach` still needs the concrete plugin class — is called out with a type-only cast + comment rather than fixed here (out of scope). No settings UX change. Did **not** touch `eslint.config.mts` — added an architecture-guard rule for this boundary, then reverted it per user feedback (config changes need to be proposed, not made inline).
 
-**Next:** items 2-5 of the PR2 plan, one at a time, each its own commit — Settings boundary cleanup (item 2) is next up.
+**Next:** items 3-5 of the PR2 plan, one at a time, each its own commit — item 3 (centralize Source Control item projection via `SourceControlViewModel.getItem()`) is next up.
 
 Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation`, Issue #143, and `claude/fix-source-control-explicit-sync-intent` — not superseded by this entry, carried over from the base branch history.
 
 - `npx eslint .` — 0 errors.
-- `npx vitest run` — 74 files / 940 tests passed (up from 933; added SourceControlActionService selection-mutation tests and createSyncRuntime reconciliation-wiring tests).
+- `npx vitest run` — 75 files / 945 tests passed (up from 940; added `tests/settings.test.ts` for the model/helpers split).
 - `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
 
 ## Outstanding Items
