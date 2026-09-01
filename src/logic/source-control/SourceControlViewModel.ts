@@ -69,6 +69,19 @@ export class SourceControlViewModel {
     }
 
     /**
+     * Projects a single change by id, independent of any filter -- the sole
+     * projection path for callers (e.g. a diff pane host) that need one
+     * row's current selection/operation/syncAction state without hand-rolling
+     * a SourceControlItem themselves. Returns undefined once the change is no
+     * longer in the repository (e.g. it synced and dropped out, or was
+     * deleted).
+     */
+    getItem(id: ChangeId): SourceControlItem | undefined {
+        const change = this.changes.getById(id);
+        return change ? this.toItem(change) : undefined;
+    }
+
+    /**
      * Triggers a view-wide refresh through the injected source and records
      * only its presentation lifecycle. Repository population still happens
      * exclusively through the existing sync.status publish subscription.

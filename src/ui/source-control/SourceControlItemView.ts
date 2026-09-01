@@ -2,7 +2,6 @@ import { ItemView, Platform, TFile, WorkspaceLeaf, debounce } from 'obsidian';
 import GitLabFilesPush from '../../main';
 import { t } from '../../i18n';
 import type { SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
-import { resolveSyncAction } from '../../logic/source-control/ChangeActionPolicy';
 import type { FileStatus } from '../../logic/sync-status-service';
 import { toChangeId, type ChangeId } from '../../logic/source-control/types';
 import { SourceControlView, type SourceControlViewCallbacks } from './SourceControlView';
@@ -122,21 +121,15 @@ export class SourceControlItemView extends ItemView {
         if (!openPath || openPath !== path) return;
         const requestId = ++this.diffTabRequestSeq;
         void (async () => {
-            // Project the repository row into the full item shape the diff
-            // loader consumes; the repo row dropped means the change is gone
-            // and the pane clears rather than showing contradictory sides.
-            const change = this.plugin.changeRepository.getById(toChangeId(path));
-            if (!change) {
+            // ViewModel.getItem() is the single SourceControlItem projection
+            // owner; undefined means the change dropped out of the
+            // repository, and the pane clears rather than showing
+            // contradictory sides.
+            const item = this.plugin.sourceControlViewModel.getItem(toChangeId(path));
+            if (!item) {
                 await this.plugin.openDiffTab(path, null);
                 return;
             }
-            const item: SourceControlItem = {
-                ...change,
-                isSelectedForSync: false,
-                operationStatus: 'idle',
-                syncAction: resolveSyncAction(change.kind),
-                hasActionOverride: false,
-            };
             const content = await this.plugin.sourceControlActions.loadDiffContent(item);
             if (requestId !== this.diffTabRequestSeq) return;
             await this.plugin.openDiffTab(path, content);

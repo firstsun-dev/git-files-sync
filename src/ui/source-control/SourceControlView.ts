@@ -559,8 +559,7 @@ export class SourceControlView {
 
     private async loadAndRenderDiff(viewer: DiffViewerHandle, changeId: ChangeId): Promise<void> {
         if (!this.callbacks.loadDiffContent) return;
-        const item = this.viewModel.getState('all').items.find(i => i.id === changeId)
-            ?? this.viewModel.getState('synced', true).items.find(i => i.id === changeId);
+        const item = this.viewModel.getItem(changeId);
         if (!item) return;
 
         const content = await this.callbacks.loadDiffContent(item);
