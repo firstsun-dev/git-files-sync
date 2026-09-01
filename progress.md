@@ -5,14 +5,18 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-09-01
-**Active Feature:** restore explicit per-file sync actions (no tracked issue number). All 7 planned commits landed and each individually passes lint/tests/build.
-**Branch / PR:** `claude/fix-source-control-explicit-sync-intent`, based on `claude/fix-mobile-diff-rendering-and-responsive-layout` (itself 1 commit ahead of `main`). Not yet pushed or opened as a PR.
+**Active Feature:** PR2 responsibility cleanup, item 1/5 — Source Control state boundary (no tracked issue number; an ad-hoc follow-up plan on top of `origin/1.6.1`, not in `feature_list.json`).
+**Branch / PR:** `claude/pr2-source-control-boundary`, branched from `origin/1.6.1` (commit `69e5540`). Not yet pushed or opened as a PR.
 
-**Scope:** `SyncSelectionStore`/`ChangeActionPolicy` (per-change action overrides + resolution), `SourceControlViewModel` (resolved `syncAction`/`hasActionOverride` projection), Sync Queue grouping/row controls, `SourceControlActionService.sync()` (now takes `SyncIntentRequest[]`), a new Repository Changes row "⋯" menu, and `SyncPlanModal` per-row direction icons. Deliberately did not touch `DiffViewer.ts`, mobile diff lifecycle, or E2E cleanup — that's the base branch's prior work.
+**Scope (item 1 only, per the PR2 plan):** `SourceControlViewModel` is now a pure read-only projection — removed its `selection` getter and its constructor's `ChangeRepository.subscribe(... reconcile ...)` wiring. That reconciliation wiring now lives in `createSyncRuntime`, which also drops the redundant explicit `syncSelectionStore.refresh()` call it used to make alongside it (reconcile already supersedes it). Selection mutation (`selectForSync`/`deselectFromSync`/`selectMany`/`deselectMany`/`setSyncAction`/`clearSyncAction`) moved onto `SourceControlActionService`, which now also takes `SyncSelectionStore` in its constructor; `SourceControlView` calls injected callbacks instead of reaching into `SyncSelectionStore` via the ViewModel. Updated the 3 e2e-support call sites that constructed `SourceControlActionService` directly. Deliberately did not touch items 2-5 of the PR2 plan (Settings boundary, item-projection centralization, pull-orchestration reuse, provider contract cleanup) or any UX.
 
-**Next:** push the branch and open the PR (title `fix(source-control): restore explicit per-file sync actions`); no further planned work outstanding.
+**Next:** items 2-5 of the PR2 plan, one at a time, each its own commit — Settings boundary cleanup (item 2) is next up.
 
-Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation` and Issue #143 — not superseded by this entry, carried over from the base branch history.
+Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation`, Issue #143, and `claude/fix-source-control-explicit-sync-intent` — not superseded by this entry, carried over from the base branch history.
+
+- `npx eslint .` — 0 errors.
+- `npx vitest run` — 74 files / 940 tests passed (up from 933; added SourceControlActionService selection-mutation tests and createSyncRuntime reconciliation-wiring tests).
+- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
 
 ## Outstanding Items
 
