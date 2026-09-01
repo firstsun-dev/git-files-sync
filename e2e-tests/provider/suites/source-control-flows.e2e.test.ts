@@ -615,7 +615,7 @@ describe('Source Control Flows E2E', () => {
             const deleted = change(deletePath, 'local-deleted');
             const { actionService, operations } = s.selectionStack([modified, deleted]);
 
-            await actionService.sync([modified.id, deleted.id]);
+            await actionService.sync([{ changeId: modified.id }, { changeId: deleted.id }]);
 
             expect(operations.get(modified.id)).toBe('success');
             expect(operations.get(deleted.id)).toBe('success');
@@ -634,7 +634,7 @@ describe('Source Control Flows E2E', () => {
             const remoteOnly = change(p, 'remote-only');
             const { actionService, operations } = s.selectionStack([remoteOnly]);
 
-            await actionService.sync([remoteOnly.id]);
+            await actionService.sync([{ changeId: remoteOnly.id }]);
 
             expect(operations.get(remoteOnly.id)).toBe('success');
             expect(await s.readLocal(p)).toBe('remote-content');

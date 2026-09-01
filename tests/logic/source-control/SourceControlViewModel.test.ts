@@ -198,4 +198,72 @@ describe('SourceControlViewModel', () => {
         await expect(viewModel.refresh()).rejects.toThrow('boom');
         expect(refreshState.get()).toBe('failed');
     });
+
+    describe('syncAction projection', () => {
+        it('defaults syncAction to the kind default with no override', () => {
+            const { viewModel } = buildViewModel([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }]);
+
+            const item = viewModel.getState('all').items[0];
+            expect(item?.syncAction).toBe('push');
+            expect(item?.hasActionOverride).toBe(false);
+        });
+
+        it('resolves syncAction to a legal override and marks hasActionOverride', () => {
+            const { viewModel, selection } = buildViewModel([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }]);
+            selection.setActionOverride(toChangeId('c-1'), 'pull');
+
+            const item = viewModel.getState('all').items[0];
+            expect(item?.syncAction).toBe('pull');
+            expect(item?.hasActionOverride).toBe(true);
+        });
+
+        it('falls back to the default once a stale override is no longer legal for the current kind', () => {
+            // Reconciling a stale override against a ChangeRepository replacement is
+            // wired by createSyncRuntime, not by SourceControlViewModel (see
+            // tests/runtime/createSyncRuntime.test.ts). This only verifies the
+            // ViewModel's own projection once SyncSelectionStore has already
+            // dropped the override.
+            const { viewModel, selection } = buildViewModel([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            selection.setActionOverride(toChangeId('c-1'), 'pull');
+            selection.reconcile([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+
+            const item = viewModel.getState('all').items[0];
+            expect(item?.syncAction).toBe('push');
+            expect(item?.hasActionOverride).toBe(false);
+            expect(selection.getActionOverride(toChangeId('c-1'))).toBeUndefined();
+        });
+    });
+
+    describe('getItem', () => {
+        it('projects a single change by id, independent of any filter', () => {
+            const synced: SyncChange = { id: toChangeId('c-1'), path: 'a.md', kind: 'synced' };
+            const { viewModel, operations } = buildViewModel([synced]);
+            operations.start(toChangeId('c-1'));
+
+            // 'synced' kind is excluded from getState('all')/('changes'), but
+            // getItem() is not a filtered view -- it's the single projection
+            // path any caller can use to resolve one row directly by id.
+            const item = viewModel.getItem(toChangeId('c-1'));
+            expect(item?.id).toBe(toChangeId('c-1'));
+            expect(item?.kind).toBe('synced');
+            expect(item?.operationStatus).toBe('running');
+        });
+
+        it('returns undefined once the change is no longer in the repository', () => {
+            const { viewModel } = buildViewModel([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+
+            expect(viewModel.getItem(toChangeId('gone'))).toBeUndefined();
+        });
+
+        it('reflects selection and syncAction override state, same as getState()', () => {
+            const { viewModel, selection } = buildViewModel([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }]);
+            selection.selectForSync(toChangeId('c-1'));
+            selection.setActionOverride(toChangeId('c-1'), 'pull');
+
+            const item = viewModel.getItem(toChangeId('c-1'));
+            expect(item?.isSelectedForSync).toBe(true);
+            expect(item?.syncAction).toBe('pull');
+            expect(item?.hasActionOverride).toBe(true);
+        });
+    });
 });

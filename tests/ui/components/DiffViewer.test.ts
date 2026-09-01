@@ -1,4 +1,5 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { Platform } from 'obsidian';
 import { renderDiffViewer } from '../../../src/ui/components/DiffViewer';
 import { setupObsidianDOM, createContainer } from '../setup-dom';
 
@@ -51,5 +52,54 @@ describe('renderDiffViewer', () => {
         (toggleHost.querySelector('.scv-diff-layout-toggle') as HTMLButtonElement).click();
         expect(layouts).toEqual(['split', 'unified']);
         expect(body?.classList.contains('scv-diff-layout-unified')).toBe(true);
+    });
+
+    describe('content-less initial render (async load in flight)', () => {
+        it('renders no diff panel when remote/local are omitted', () => {
+            const container = createContainer();
+
+            renderDiffViewer(container, { layout: 'split' });
+
+            expect(container.querySelector('.ssv-diff-split')).toBeNull();
+            expect(container.querySelector('.ssv-diff-unified')).toBeNull();
+        });
+
+        it('fills in the diff panel exactly once via the handle, replacing any prior content', () => {
+            const container = createContainer();
+
+            const viewer = renderDiffViewer(container, { layout: 'split' });
+            viewer.setContent('remote text', 'local text');
+            viewer.setContent('remote text 2', 'local text 2');
+
+            expect(container.querySelectorAll('.ssv-diff-split')).toHaveLength(1);
+            expect(container.querySelectorAll('.ssv-diff-unified')).toHaveLength(1);
+            expect(container.textContent).toContain('remote text 2');
+            expect(container.textContent).not.toContain('remote text\n');
+        });
+    });
+
+    describe('phone layout policy', () => {
+        afterEach(() => { Platform.isPhone = false; });
+
+        it('forces unified and ignores the requested split layout', () => {
+            Platform.isPhone = true;
+            const container = createContainer();
+
+            renderDiffViewer(container, { remote: 'r', local: 'l', layout: 'split' });
+
+            const body = container.querySelector('.scv-diff-tab-body');
+            expect(body?.classList.contains('scv-diff-layout-unified')).toBe(true);
+            expect(body?.classList.contains('scv-diff-layout-split')).toBe(false);
+        });
+
+        it('renders no layout toggle even when a toggleHost is given', () => {
+            Platform.isPhone = true;
+            const container = createContainer();
+            const toggleHost = createContainer();
+
+            renderDiffViewer(container, { remote: 'r', local: 'l', layout: 'split', toggleHost });
+
+            expect(toggleHost.querySelector('.scv-diff-layout-toggle')).toBeNull();
+        });
     });
 });

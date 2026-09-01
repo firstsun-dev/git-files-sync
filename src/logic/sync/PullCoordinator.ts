@@ -62,6 +62,25 @@ export class PullCoordinator {
         return this.processBatch(files, onProgress, tree, options);
     }
 
+    /**
+     * Plans one already-fetched remote file exactly like batch pull's own
+     * per-file classification without a prefetched tree (`planFromRemote`) --
+     * the shared decision step `SyncManager.pullFile()` delegates to, so
+     * single- and batch-pull planning semantics (baseline resolution,
+     * exists/content/sha comparison) can't silently drift apart.
+     *
+     * Deliberately NOT unified: interactive conflict handling ("resolve
+     * conflict" opens a modal for single-file pull, but is skipped/aggregated
+     * for batch pull), per-call confirmation (single confirms every call;
+     * batch confirms once for the whole plan), and notification (single
+     * always reports "up to date"; batch only summarizes). Those differences
+     * are deliberate UX, not accidental drift, and stay owned by each caller.
+     */
+    async planSingleFile(file: TFile | string, remote: GitFile): Promise<PlannedFileAction> {
+        const { path, isString } = this.dependencies.scanner.fileInfo(file);
+        return this.planFromRemote(file, path, isString, remote);
+    }
+
     async planPullBatch(files: Array<TFile | string>, remoteTree?: GitTreeEntry[]): Promise<SyncPlan> {
         const tree = remoteTree ? new Map(remoteTree.map(entry => [entry.path, entry])) : undefined;
         const plan: SyncPlan = { additions: [], modifications: [], deletions: [], moves: [] };

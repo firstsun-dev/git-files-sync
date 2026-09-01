@@ -1,4 +1,11 @@
-import { ConnectionTestResult } from './git-service-base';
+export interface ConnectionTestResult {
+    /** Whether the repository/project itself was reachable with the given credentials. */
+    repoOk: boolean;
+    /** Whether the configured branch was found. Only meaningful when repoOk is true. */
+    branchOk: boolean;
+    /** Populated when repoOk is false, describing the repo-level failure. */
+    error?: string;
+}
 
 export interface GitFile {
     content: string | ArrayBuffer;

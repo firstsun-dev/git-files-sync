@@ -96,7 +96,13 @@ export class SyncPlanModal extends Modal {
         const list = section.createEl('ul', { cls: 'sync-plan-file-list' });
         for (const entry of entries) {
             const item = list.createEl('li', { cls: 'sync-plan-file-item' });
-            item.createSpan({ cls: 'sync-plan-file-path', text: entry.path });
+            // Mirrors the section heading's icon on each row — with a long
+            // mixed-direction plan (the merged Sync review), a section label
+            // scrolled out of view shouldn't leave a row's direction
+            // ambiguous.
+            const row = item.createDiv({ cls: 'sync-plan-file-row' });
+            setIcon(row.createSpan({ cls: 'sync-plan-file-icon' }), icon);
+            row.createSpan({ cls: 'sync-plan-file-path', text: entry.path });
             if (entry.movedFrom) {
                 item.createSpan({ cls: 'sync-plan-file-moved-from', text: t('syncPlanModal.movedFrom', { path: entry.movedFrom }) });
             }

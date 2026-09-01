@@ -4,13 +4,19 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-08-31
-**Active Feature:** Issue #143 — reduce redundant real-provider E2E round trips. Working tree changes complete, uncommitted.
-**Branch / PR:** Current working branch; no commit or push created in this session.
+**Last Updated:** 2026-09-01
+**Active Feature:** PR2 responsibility cleanup, item 5 done — provider contract cleanup, partial (no tracked issue number; an ad-hoc follow-up plan on top of `origin/1.6.1`, not in `feature_list.json`).
+**Branch / PR:** `claude/pr2-source-control-boundary`, branched from `origin/1.6.1` (commit `69e5540`). Pushed; opened as [PR #154](https://github.com/firstsun-dev/git-files-sync/pull/154) against `1.6.1` (covers items 1-4; item 5 below lands as a follow-up commit on the same branch/PR).
 
-**Scope:** E2E fixtures, verifier helpers, and tests only; production `SyncManager` and provider batching behavior remain unchanged.
+**Scope (item 5, per the PR2 plan):** Moved `ConnectionTestResult` out of `git-service-base.ts` into `git-service-interface.ts` — it's a contract type consumed by `GitServiceInterface.testConnection`, so it belongs with the interface, not the base implementation class. `git-service-base.ts` now imports it back for its own `abstract testConnection` signature; `github-service.ts`/`gitlab-service.ts`/`gitea-service.ts`/`main.ts`/`GitLabSyncSettingTab.ts`/`tests/ui/SettingsConnectionStatus.test.ts` updated to import from the new location. Reviewed `updateConfig(...args: unknown[])` on `GitServiceInterface` per the plan's ask, but did **not** convert it to a typed discriminated union: every actual call site (`main.ts` `initializeGitService()`, 3 branches) already calls `updateConfig` on the concrete class (`GitLabService`/`GiteaService`/`GitHubService`), never through the loose interface type, so the untyped signature isn't causing a real type-safety gap today. A discriminated union would mean reshaping the interface, all three services' `updateConfig` bodies, and all three `main.ts` call sites into config-object form for no functional benefit — exactly the "touches too much, leave for later" case the plan calls out, so left as-is.
 
-Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation` — not superseded by this entry.
+**Next:** PR2 plan is now fully worked through (items 1-5). Nothing further planned here; watch PR #154 for review feedback.
+
+Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation`, Issue #143, and `claude/fix-source-control-explicit-sync-intent` — not superseded by this entry, carried over from the base branch history.
+
+- `npx eslint .` — 0 errors.
+- `npx vitest run` — 76 files / 953 tests passed (unchanged count; pure type-relocation, no new tests needed).
+- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
 
 ## Outstanding Items
 
@@ -18,6 +24,12 @@ Below that: the previous "Outstanding Items"/"Verification Evidence" entries tra
 2. Commit and push the current working tree, then monitor the CI provider matrix.
 
 ## Verification Evidence
+
+This session (explicit per-file sync actions, 7 commits on `claude/fix-source-control-explicit-sync-intent`):
+
+- Each commit individually verified before being made: `npx eslint .` (0 errors), `npx vitest run` (68 files, growing from 892 to 914 tests across the branch), `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — all passed at every commit.
+- Final state: `npx eslint .` — 0 errors. `npx vitest run` — 68 files / 914 tests passed. `npm run build` — passed.
+- Not run this session: the real-provider E2E suite (`vitest.e2e.config.ts`) — only typechecked (two call sites updated for the new `SyncIntentRequest[]` shape), not executed; needs provisioned credentials.
 
 This session (Issue #143 — reduce redundant real-provider E2E round trips):
 

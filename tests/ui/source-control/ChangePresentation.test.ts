@@ -1,13 +1,20 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { addedContentStat, cheapLocalStat, computeDiffStat, deletedContentStat, presentChange } from '../../../src/ui/source-control/ChangePresentation';
+import { presentChange } from '../../../src/ui/source-control/ChangePresentation';
 import type { SourceControlItem } from '../../../src/logic/source-control/SourceControlViewModel';
+import { resolveSyncAction } from '../../../src/logic/source-control/ChangeActionPolicy';
 import { toChangeId } from '../../../src/logic/source-control/types';
 import { setupObsidianDOM } from '../setup-dom';
 
 beforeAll(() => { setupObsidianDOM(); });
 
 function item(overrides: Partial<SourceControlItem> & Pick<SourceControlItem, 'id' | 'path' | 'kind'>): SourceControlItem {
-    return { isSelectedForSync: false, operationStatus: 'idle', ...overrides };
+    return {
+        isSelectedForSync: false,
+        operationStatus: 'idle',
+        syncAction: resolveSyncAction(overrides.kind),
+        hasActionOverride: false,
+        ...overrides,
+    };
 }
 
 describe('presentChange', () => {
@@ -75,75 +82,5 @@ describe('presentChange', () => {
             'y.md',
         );
         expect(view.renameFrom).toBe('old.md');
-    });
-});
-
-describe('computeDiffStat', () => {
-    it('counts additions and deletions from a two-sided diff', () => {
-        const remote = 'line1\nline2\nline3';
-        const local = 'line1\nchanged\nline3\nline4';
-        const stat = computeDiffStat(remote, local);
-        expect(stat.additions).toBe(2);
-        expect(stat.deletions).toBe(1);
-    });
-
-    it('reports zero for identical content', () => {
-        const stat = computeDiffStat('a\nb', 'a\nb');
-        expect(stat).toEqual({ additions: 0, deletions: 0 });
-    });
-
-    it('treats a pure addition as additions only', () => {
-        const stat = computeDiffStat('a', 'a\nb');
-        expect(stat).toEqual({ additions: 1, deletions: 0 });
-    });
-
-    it('treats a pure deletion as deletions only', () => {
-        const stat = computeDiffStat('a\nb', 'a');
-        expect(stat).toEqual({ additions: 0, deletions: 1 });
-    });
-});
-
-describe('cheapLocalStat', () => {
-    it('counts local lines as additions with no deletions', () => {
-        expect(cheapLocalStat('a\nb\nc')).toEqual({ additions: 3, deletions: 0 });
-    });
-
-    it('reports zero for empty content', () => {
-        expect(cheapLocalStat('')).toEqual({ additions: 0, deletions: 0 });
-    });
-
-    it('does not count a trailing newline as a phantom line', () => {
-        expect(cheapLocalStat('a\nb\n')).toEqual({ additions: 2, deletions: 0 });
-    });
-
-    it('normalizes CRLF line endings', () => {
-        expect(cheapLocalStat('a\r\nb\r\nc')).toEqual({ additions: 3, deletions: 0 });
-    });
-});
-describe('addedContentStat', () => {
-    it('counts every line as an addition for a one-sided +N change', () => {
-        expect(addedContentStat('line1\nline2')).toEqual({ additions: 2, deletions: 0 });
-    });
-
-    it('reports zero for empty content', () => {
-        expect(addedContentStat('')).toEqual({ additions: 0, deletions: 0 });
-    });
-
-    it('does not count a trailing newline as a phantom line', () => {
-        expect(addedContentStat('line1\nline2\n')).toEqual({ additions: 2, deletions: 0 });
-    });
-});
-
-describe('deletedContentStat', () => {
-    it('counts every line as a deletion for a one-sided -N change', () => {
-        expect(deletedContentStat('line1\nline2')).toEqual({ additions: 0, deletions: 2 });
-    });
-
-    it('reports zero for empty content', () => {
-        expect(deletedContentStat('')).toEqual({ additions: 0, deletions: 0 });
-    });
-
-    it('does not count a trailing newline as a phantom line', () => {
-        expect(deletedContentStat('line1\nline2\n')).toEqual({ additions: 0, deletions: 2 });
     });
 });

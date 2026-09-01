@@ -211,7 +211,7 @@ export class SourceControlScenario {
                 getDiff: (): Promise<FileDiff> => Promise.resolve({ path: '', kind: 'text' } as FileDiff),
             },
         );
-        const actionService = new SourceControlActionService(repository, operations, workspace);
+        const actionService = new SourceControlActionService(repository, selection, operations, workspace);
         return { repository, selection, operations, actionService, workspace };
     }
 }
