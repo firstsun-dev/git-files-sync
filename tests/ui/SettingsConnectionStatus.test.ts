@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS, GitLabSyncSettingTab } from '../../src/settings';
 import GitLabFilesPush from '../../src/main';
-import type { ConnectionTestResult } from '../../src/services/git-service-base';
+import type { ConnectionTestResult } from '../../src/services/git-service-interface';
 import { createContainer, setupObsidianDOM } from './setup-dom';
 
 vi.mock('../../src/main', () => ({

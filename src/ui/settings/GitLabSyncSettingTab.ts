@@ -5,7 +5,7 @@ import type { ConnectionStatus } from '../../main';
 // that unrelated widget's needs would leak scope into this PR; narrowing
 // RemoteFolderSuggest itself is a separate cleanup, not part of this one.
 import type GitLabFilesPush from '../../main';
-import type { ConnectionTestResult } from '../../services/git-service-base';
+import type { ConnectionTestResult } from '../../services/git-service-interface';
 import { FolderSuggest } from '../FolderSuggest';
 import { RemoteFolderSuggest } from '../RemoteFolderSuggest';
 import { WhatsNewModal } from '../WhatsNewModal';

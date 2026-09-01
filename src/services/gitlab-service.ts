@@ -1,5 +1,6 @@
 import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, BatchCommitPlan } from './git-service-interface';
-import { BaseGitService, ConnectionTestResult, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
+import { BaseGitService, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
+import { ConnectionTestResult } from './git-service-interface';
 import { isBinaryPath } from '../utils/path';
 
 export class GitLabService extends BaseGitService implements GitServiceInterface {

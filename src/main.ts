@@ -3,8 +3,7 @@ import { DEFAULT_SETTINGS, GitLabFilesPushSettings, GitLabSyncSettingTab, getSer
 import { GitLabService } from './services/gitlab-service';
 import { GitHubService } from './services/github-service';
 import { GiteaService } from './services/gitea-service';
-import { GitServiceInterface, GitTreeEntry } from './services/git-service-interface';
-import { ConnectionTestResult } from './services/git-service-base';
+import { ConnectionTestResult, GitServiceInterface, GitTreeEntry } from './services/git-service-interface';
 import type { SyncManager } from './logic/sync-manager';
 import { SourceControlItemView, SOURCE_CONTROL_VIEW_TYPE } from './ui/source-control/SourceControlItemView';
 import { DiffTabView, SOURCE_CONTROL_DIFF_VIEW_TYPE, type DiffTabContent } from './ui/source-control/DiffTabView';
