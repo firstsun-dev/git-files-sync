@@ -5,17 +5,17 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-09-01
-**Active Feature:** PR2 responsibility cleanup, item 4/5 done — reuse pull orchestration path (no tracked issue number; an ad-hoc follow-up plan on top of `origin/1.6.1`, not in `feature_list.json`).
-**Branch / PR:** `claude/pr2-source-control-boundary`, branched from `origin/1.6.1` (commit `69e5540`). Not yet pushed or opened as a PR.
+**Active Feature:** PR2 responsibility cleanup, item 5 done — provider contract cleanup, partial (no tracked issue number; an ad-hoc follow-up plan on top of `origin/1.6.1`, not in `feature_list.json`).
+**Branch / PR:** `claude/pr2-source-control-boundary`, branched from `origin/1.6.1` (commit `69e5540`). Pushed; opened as [PR #154](https://github.com/firstsun-dev/git-files-sync/pull/154) against `1.6.1` (covers items 1-4; item 5 below lands as a follow-up commit on the same branch/PR).
 
-**Scope (item 4, per the PR2 plan):** `SyncManager.pullFile()` no longer duplicates `PullCoordinator`'s no-prefetched-tree classification (exists/local-content/local-sha/baseline + `SyncPlanner.planFor('pull', ...)`, including the legacy GitLab revision-keyed baseline correction) — both now share `PullCoordinator.planSingleFile()`, a thin wrapper over the existing private `planFromRemote()`. Removed `SyncManager`'s now-dead `SyncPlanner` instance and `contentsEqual`/`isBinaryPath`/`gitBlobSha` imports. Deliberately did **not** unify interactive conflict handling, per-call confirmation, or notification — those are deliberate UX differences between single-file and batch pull (documented on `planSingleFile`), not accidental duplication. Also noted but explicitly left alone: `planFromTree` (tree-available path) persists a legacy-baseline correction via `migrateGitLabLegacyBaseline`, while `planFromRemote`/`planSingleFile` (no-tree path) only corrects it ephemerally per-call without persisting — this asymmetry predates this PR and unifying it would be a separate, larger change.
+**Scope (item 5, per the PR2 plan):** Moved `ConnectionTestResult` out of `git-service-base.ts` into `git-service-interface.ts` — it's a contract type consumed by `GitServiceInterface.testConnection`, so it belongs with the interface, not the base implementation class. `git-service-base.ts` now imports it back for its own `abstract testConnection` signature; `github-service.ts`/`gitlab-service.ts`/`gitea-service.ts`/`main.ts`/`GitLabSyncSettingTab.ts`/`tests/ui/SettingsConnectionStatus.test.ts` updated to import from the new location. Reviewed `updateConfig(...args: unknown[])` on `GitServiceInterface` per the plan's ask, but did **not** convert it to a typed discriminated union: every actual call site (`main.ts` `initializeGitService()`, 3 branches) already calls `updateConfig` on the concrete class (`GitLabService`/`GiteaService`/`GitHubService`), never through the loose interface type, so the untyped signature isn't causing a real type-safety gap today. A discriminated union would mean reshaping the interface, all three services' `updateConfig` bodies, and all three `main.ts` call sites into config-object form for no functional benefit — exactly the "touches too much, leave for later" case the plan calls out, so left as-is.
 
-**Next:** item 5 of the PR2 plan (provider contract cleanup — move `ConnectionTestResult` out of `git-service-base.ts`, review `updateConfig(...args: unknown[])`) is small/optional; the plan says drop it to a follow-up PR if it starts to spread. After that, this PR2 branch is otherwise ready to push and open as a PR.
+**Next:** PR2 plan is now fully worked through (items 1-5). Nothing further planned here; watch PR #154 for review feedback.
 
 Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation`, Issue #143, and `claude/fix-source-control-explicit-sync-intent` — not superseded by this entry, carried over from the base branch history.
 
 - `npx eslint .` — 0 errors.
-- `npx vitest run` — 76 files / 953 tests passed (up from 949; added `tests/logic/sync/PullCoordinator.test.ts`, the first dedicated test file for `PullCoordinator`, covering `planSingleFile`'s addition/none/legacy-baseline/conflict cases).
+- `npx vitest run` — 76 files / 953 tests passed (unchanged count; pure type-relocation, no new tests needed).
 - `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
 
 ## Outstanding Items
