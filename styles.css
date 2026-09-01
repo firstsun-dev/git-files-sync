@@ -672,6 +672,10 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 
 .scv-change-download-label { white-space: nowrap; }
 
+/* Phone: icon-only, so the button doesn't crowd out the filename at narrow widths. */
+body.is-mobile .scv-change-download-label { display: none; }
+body.is-mobile .scv-change-download { padding: 4px; min-width: 28px; min-height: 28px; justify-content: center; }
+
 /* ── Sync Queue row action control (resolved action + override menu) ── */
 .scv-change-action {
     display: inline-flex;
