@@ -7,11 +7,13 @@ import { defaultSyncAction, type SyncAction } from '../../logic/source-control/C
 import type { ChangeId } from '../../logic/source-control/types';
 import { ICONS } from '../components/icons';
 import { renderDiffViewer, currentDiffLayout, rememberDiffLayout, type DiffViewerHandle } from '../components/DiffViewer';
-import { renderChangeTree, renderChangeList, type ChangeTreeCallbacks } from './ChangeTree';
-import { renderChangeItem, type RowActionKind } from './ChangeItem';
+import type { ChangeTreeCallbacks } from './ChangeTree';
+import type { RowActionKind } from './ChangeItem';
 import { DiffStatProvider, type DiffStatLoadResult } from './DiffStatProvider';
 import { renderFilterMenu } from './FilterMenu';
 import { renderSourceControlHeader, type SourceControlWorkspaceInfo } from './SourceControlHeader';
+import { renderSyncQueueSection } from './SyncQueueSection';
+import { renderRepositoryChangesSection } from './RepositoryChangesSection';
 
 export interface SourceControlDiffContent {
     remote: string;
@@ -84,11 +86,6 @@ export interface SourceControlViewCallbacks {
      */
     loadDiffStat?: (item: SourceControlItem) => Promise<DiffStatLoadResult>;
 }
-
-/** Tree shaping so the change tree stays a compact change view, not a full Explorer. */
-const TREE_OPTIONS = { collapseSingleChild: true };
-/** Mobile tree: collapse single-child folders and cap depth so the tree stays flat on a phone. */
-const MOBILE_TREE_OPTIONS = { collapseSingleChild: true, maxDepth: 2 };
 
 /**
  * Scroll positions of the main list's independently-scrolling regions,
@@ -342,22 +339,42 @@ export class SourceControlView {
         // tree instead of blowing out the layout under
         // `.scv-root { overflow: hidden }`.
         const body = container.createDiv({ cls: 'scv-body' });
-        this.renderSelectedSection(body, state.syncQueue, treeCallbacks);
+        renderSyncQueueSection(
+            body,
+            {
+                syncQueue: state.syncQueue,
+                collapsed: this.collapsedSections.has('checkedChanges'),
+                mobileCollapsed: this.mobileQueueCollapsed,
+                isMobile,
+            },
+            treeCallbacks,
+            {
+                onToggleCollapsed: () => {
+                    if (isMobile) { this.mobileQueueCollapsed = !this.mobileQueueCollapsed; this.rerender(); }
+                    else this.toggleSection('checkedChanges');
+                },
+                onClearSelection: (items) => this.clearSelection(items),
+            },
+        );
         // The Changes region is its own flex/scroll area so a tall tree
         // scrolls independently and never pushes the pinned Sync Queue
         // region above it out of view.
         const changesRegion = body.createDiv({ cls: 'scv-changes-region' });
-        this.renderRepositoryHeader(changesRegion, unchecked.length);
-        if (!this.collapsedSections.has('changes')) {
-            const treeWrap = changesRegion.createDiv({ cls: 'scv-changes-tree' });
-            if (unchecked.length === 0) {
-                treeWrap.createDiv({ cls: 'scv-empty', text: t('sourceControl.empty') });
-            } else if (this.viewMode === 'list') {
-                renderChangeList(treeWrap, unchecked, treeCallbacks);
-            } else {
-                renderChangeTree(treeWrap, unchecked, this.collapsedFolders, treeCallbacks, isMobile ? MOBILE_TREE_OPTIONS : TREE_OPTIONS);
-            }
-        }
+        renderRepositoryChangesSection(
+            changesRegion,
+            {
+                items: unchecked,
+                collapsed: this.collapsedSections.has('changes'),
+                viewMode: this.viewMode,
+                collapsedFolders: this.collapsedFolders,
+                isMobile,
+            },
+            treeCallbacks,
+            {
+                onToggleCollapsed: () => this.toggleSection('changes'),
+                onSetViewMode: (mode) => this.setViewMode(mode),
+            },
+        );
         // Only rendered rows background-load their stats: a collapsed
         // Repository Changes section renders no tree, so hidden rows must
         // not fire provider fetches; expanding the section re-renders and
@@ -422,49 +439,6 @@ export class SourceControlView {
         if (cursor !== null) newInput.setSelectionRange(cursor, cursor);
     }
 
-    /**
-     * Renders the "Repository Changes (N)" header above the change tree/list.
-     * A single role label (not the active filter name — the filter chips above
-     * already carry that) makes the section's job — "navigate the source I can
-     * pick from" — distinct from the Sync Queue's "what I'm about to push".
-     * The whole header collapses/expands the region; the Tree/List view toggle
-     * on the right stops propagation so switching presentation doesn't also
-     * collapse the section.
-     */
-    private renderRepositoryHeader(container: HTMLElement, count: number): void {
-        const collapsed = this.collapsedSections.has('changes');
-        const header = container.createDiv({ cls: 'scv-repository-header scv-collapsible-header' });
-        header.setAttr('role', 'button');
-        header.setAttr('aria-expanded', String(!collapsed));
-        header.createSpan({ cls: 'scv-section-toggle', text: collapsed ? '▶' : '▼' });
-        header.createSpan({ cls: 'scv-repository-title', text: t('sourceControl.section.repositoryChanges') });
-        header.createSpan({ cls: 'scv-repository-count', text: String(count) });
-        header.addEventListener('click', () => this.toggleSection('changes'));
-        this.renderViewToggle(header);
-    }
-
-    /**
-     * Tree/List segmented toggle, scoped to the Repository Changes region only
-     * (the Sync Queue is always a flat list, so it gets no such toggle). The
-     * active mode is highlighted; clicks stop propagation so they don't also
-     * collapse the section via the title area.
-     */
-    private renderViewToggle(container: HTMLElement): void {
-        const toggle = container.createDiv({ cls: 'scv-view-toggle' });
-        toggle.setAttr('role', 'group');
-        toggle.setAttr('aria-label', t('sourceControl.view.toggleLabel'));
-        for (const mode of ['tree', 'list'] as const) {
-            const active = this.viewMode === mode;
-            const btn = toggle.createEl('button', { cls: `scv-view-toggle-btn${active ? ' is-active' : ''}` });
-            btn.setAttr('data-view', mode);
-            btn.setAttr('aria-pressed', String(active));
-            btn.setAttr('title', mode === 'tree' ? t('sourceControl.view.tree') : t('sourceControl.view.list'));
-            setIcon(btn.createSpan({ cls: 'scv-view-toggle-icon' }), mode === 'tree' ? ICONS.viewTree : ICONS.viewList);
-            btn.createSpan({ cls: 'scv-view-toggle-label', text: mode === 'tree' ? t('sourceControl.view.tree') : t('sourceControl.view.list') });
-            btn.addEventListener('click', (evt) => { evt.stopPropagation(); this.setViewMode(mode); });
-        }
-    }
-
     private setViewMode(mode: 'tree' | 'list'): void {
         if (this.viewMode === mode) return;
         this.viewMode = mode;
@@ -475,75 +449,6 @@ export class SourceControlView {
         if (this.collapsedSections.has(key)) this.collapsedSections.delete(key);
         else this.collapsedSections.add(key);
         this.rerender();
-    }
-
-    /**
-     * Renders the "SYNC QUEUE" region — the working push batch, a flat list
-     * of the changes selected for sync. Each queued change is a normal change
-     * row (badge + name + diff-stat) with its selection checkbox checked:
-     * unchecking it here moves the row back down into the repository tree,
-     * and checking a repository row moves it up here, so the queue and the
-     * tree stay disjoint. The set comes straight from the ViewModel's
-     * single-source `syncQueue` projection (same definition as the Sync
-     * button count), so the section and the button can never drift.
-     *
-     * On mobile the queue renders expanded by default (same as desktop) so
-     * the upcoming changes are directly visible without an extra tap; the
-     * repository tree's own scroll region absorbs the height. Tapping the
-     * header collapses it to a header bar (the bottom sync bar still carries
-     * the count).
-     */
-    private renderSelectedSection(
-        container: HTMLElement,
-        syncQueue: readonly SourceControlItem[],
-        callbacks: ChangeTreeCallbacks,
-    ): void {
-        if (syncQueue.length === 0) return;
-        const isMobile = Platform.isMobile;
-        const collapsed = isMobile ? this.mobileQueueCollapsed : this.collapsedSections.has('checkedChanges');
-        const section = container.createDiv({ cls: 'scv-selected-section' });
-        const header = section.createDiv({ cls: 'scv-selected-section-header scv-collapsible-header' });
-        header.setAttr('role', 'button');
-        header.setAttr('aria-expanded', String(!collapsed));
-        header.createSpan({ cls: 'scv-section-toggle', text: collapsed ? '▶' : '▼' });
-        header.createSpan({ cls: 'scv-selected-section-title', text: t('sourceControl.section.selectedForSync') });
-
-        const clearBtn = header.createEl('button', {
-            cls: 'scv-selected-section-clear',
-            attr: { type: 'button' },
-        });
-        clearBtn.createSpan({ cls: 'scv-selected-section-clear-label', text: t('sourceControl.section.clearSelection') });
-        setTooltip(clearBtn, t('sourceControl.section.clearSelection.tooltip'));
-        clearBtn.addEventListener('click', (evt) => { evt.stopPropagation(); this.clearSelection(syncQueue); });
-        header.addEventListener('click', () => {
-            if (isMobile) { this.mobileQueueCollapsed = !this.mobileQueueCollapsed; this.rerender(); }
-            else this.toggleSection('checkedChanges');
-        });
-
-        if (collapsed) return;
-        section.createDiv({
-            cls: 'scv-selected-section-subtitle',
-            text: t('sourceControl.section.queueSubtitle', { count: syncQueue.length }),
-        });
-        const list = section.createDiv({ cls: 'scv-selected-section-list' });
-        // Group the queue by its resolved sync action (the default, unless
-        // the user overrode it) so a mixed batch reads as what the Sync
-        // button will actually do (Upload / Download / Delete) rather than a
-        // flat list of ambiguous badges. Only surface group labels when more
-        // than one action is present in the batch — a single-action queue
-        // stays flat (no label noise) and matches the pre-categorization
-        // layout.
-        const upload = syncQueue.filter(item => item.syncAction === 'push');
-        const download = syncQueue.filter(item => item.syncAction === 'pull');
-        const deleteRemote = syncQueue.filter(item => item.syncAction === 'delete-remote');
-        const groupCount = [upload, download, deleteRemote].filter(group => group.length > 0).length;
-        const mixed = groupCount > 1;
-        if (mixed && upload.length > 0) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.upload') });
-        for (const item of upload) renderChangeItem(list, item, basename(item.path), callbacks, { showActionControl: true });
-        if (mixed && download.length > 0) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.download') });
-        for (const item of download) renderChangeItem(list, item, basename(item.path), callbacks, { showActionControl: true });
-        if (mixed && deleteRemote.length > 0) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.delete') });
-        for (const item of deleteRemote) renderChangeItem(list, item, basename(item.path), callbacks, { showActionControl: true });
     }
 
     /** Unselects every change currently in the Sync Queue in one shot. */
@@ -716,12 +621,6 @@ export class SourceControlView {
         btn.createSpan({ cls: 'scv-mobile-sync-btn-label', text: t('sourceControl.mobile.sync') });
         btn.addEventListener('click', () => void this.runSync(queue));
     }
-}
-
-/** Last path segment of a change path, for the Selected section's flat row labels. */
-function basename(path: string): string {
-    const slash = path.lastIndexOf('/');
-    return slash === -1 ? path : path.slice(slash + 1);
 }
 
 /** Attribute-safe escaping for a ChangeId used inside a `[data-change-id="…"]` selector. */
