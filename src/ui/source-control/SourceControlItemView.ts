@@ -7,8 +7,7 @@ import type { FileStatus } from '../../logic/sync-status-service';
 import { toChangeId, type ChangeId } from '../../logic/source-control/types';
 import { SourceControlView, type SourceControlViewCallbacks } from './SourceControlView';
 import type { SourceControlWorkspaceInfo } from './SourceControlHeader';
-import { addedContentStat, cheapLocalStat, computeDiffStat, deletedContentStat } from './ChangePresentation';
-import type { DiffStatLoadResult } from './DiffStatProvider';
+import { addedContentStat, cheapLocalStat, computeDiffStat, deletedContentStat, type DiffStatLoadResult } from '../../logic/sync/DiffStat';
 import { ConfirmModal } from '../ConfirmModal';
 
 // Reuses the legacy sync-status view's registered type string so an already

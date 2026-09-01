@@ -3,7 +3,7 @@ import { DiffStatProvider } from '../../../src/ui/source-control/DiffStatProvide
 import type { DiffStatLoadResult } from '../../../src/ui/source-control/DiffStatProvider';
 import type { SourceControlItem } from '../../../src/logic/source-control/SourceControlViewModel';
 import { resolveSyncAction } from '../../../src/logic/source-control/ChangeActionPolicy';
-import type { ChangeStat } from '../../../src/ui/source-control/ChangePresentation';
+import type { ChangeStat } from '../../../src/logic/sync/DiffStat';
 import { toChangeId } from '../../../src/logic/source-control/types';
 
 function item(id: string, kind: SourceControlItem['kind'] = 'local-only'): SourceControlItem {

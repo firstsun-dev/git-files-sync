@@ -1,4 +1,4 @@
-import type { DiffStatLoadResult } from '../../ui/source-control/DiffStatProvider';
+import type { DiffStatLoadResult } from './DiffStat';
 import type { BatchPushConflict, SyncPlan } from './types';
 
 export type SyncPlanDirection = 'push' | 'pull' | 'delete' | 'sync';
