@@ -1,9 +1,9 @@
-import { setIcon, setTooltip } from 'obsidian';
+import { Menu, setIcon, setTooltip } from 'obsidian';
 import { t } from '../../i18n';
 import { ICONS } from '../components/icons';
 import { renderOperationIndicator } from './OperationIndicator';
 import { presentChange, type ChangeStat } from './ChangePresentation';
-import { canDownload } from '../../logic/source-control/ChangeActionPolicy';
+import { availableSyncActions, canDownload, type SyncAction } from '../../logic/source-control/ChangeActionPolicy';
 import type { SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
 
@@ -18,6 +18,13 @@ export interface ChangeItemCallbacks {
      * kinds, so the callback never has to re-classify.
      */
     onDownload?: (item: SourceControlItem) => void;
+    /**
+     * Records the user's explicit action choice for a queued change (e.g.
+     * "Use remote" instead of the default push). Only wired for Sync Queue
+     * rows — see {@link ChangeItemOptions.showActionControl} — since
+     * Repository Changes rows don't carry a queue-scoped action to override.
+     */
+    onChangeSyncAction?: (item: SourceControlItem, action: SyncAction) => void;
     /** Looks up a cached diff stat for a row, if one has been computed. */
     getDiffStat?: (id: ChangeId) => ChangeStat | undefined;
 }
@@ -36,6 +43,13 @@ export interface ChangeItemOptions {
      * to fill the row, leaving room for {@link folderPath} on the right.
      */
     listMode?: boolean;
+    /**
+     * Renders the compact action control (resolved action + menu to
+     * override/view diff/remove) instead of the plain inline Download
+     * button. Sync Queue rows only — Repository Changes rows stay
+     * unselector'd per row, matching the pre-existing layout.
+     */
+    showActionControl?: boolean;
 }
 
 /**
@@ -88,13 +102,19 @@ export function renderChangeItem(
 
     renderDiffStat(row, callbacks.getDiffStat?.(item.id));
 
-    // A change with something to pull from remote (remote-only: add it
-    // locally; remote-modified: overwrite the local copy; local-deleted:
-    // restore it locally) carries a direct Download action so the user can
-    // pull it without first adding it to the Sync Queue. The button stops
-    // propagation so clicking it doesn't also trigger the row's
-    // open-diff/open-remote behavior.
-    if (canDownload(item.kind) && callbacks.onDownload) {
+    if (options.showActionControl && callbacks.onChangeSyncAction) {
+        // Sync Queue row: the resolved action plus a menu to override it,
+        // view the diff, or drop the row from the queue — supersedes the
+        // plain Download button below (its "use remote" case is one of the
+        // menu's options), so only one action affordance renders per row.
+        renderActionControl(row, item, callbacks);
+    } else if (canDownload(item.kind) && callbacks.onDownload) {
+        // A change with something to pull from remote (remote-only: add it
+        // locally; remote-modified: overwrite the local copy; local-deleted:
+        // restore it locally) carries a direct Download action so the user
+        // can pull it without first adding it to the Sync Queue. The button
+        // stops propagation so clicking it doesn't also trigger the row's
+        // open-diff/open-remote behavior.
         renderDownloadAction(row, item, callbacks.onDownload);
     }
 
@@ -122,6 +142,65 @@ function renderDownloadAction(row: HTMLElement, item: SourceControlItem, onDownl
     btn.createSpan({ cls: 'scv-change-download-label', text: t('sourceControl.action.download') });
     setTooltip(btn, t('sourceControl.action.download.tooltip'));
     btn.addEventListener('click', (evt) => { evt.stopPropagation(); onDownload(item); });
+}
+
+/** Icon + label for each {@link SyncAction}, shared by the queue action control and its menu. */
+function actionIcon(action: SyncAction): string {
+    if (action === 'pull') return ICONS.pull;
+    if (action === 'delete-remote') return ICONS.delete;
+    return ICONS.push;
+}
+
+function actionLabel(action: SyncAction): string {
+    if (action === 'pull') return t('sourceControl.queue.action.pull');
+    if (action === 'delete-remote') return t('sourceControl.queue.action.deleteRemote');
+    return t('sourceControl.queue.action.push');
+}
+
+/**
+ * The compact Sync Queue row action: shows the resolved action (icon +
+ * label on desktop, icon-only on phone — matching the row's own space
+ * constraints) and opens a menu to override it, view the diff, or remove the
+ * row from the queue. Only the actions {@link availableSyncActions} allows
+ * for the row's kind appear as choices, so the menu can never offer an
+ * illegal override.
+ */
+function renderActionControl(row: HTMLElement, item: SourceControlItem, callbacks: ChangeItemCallbacks): void {
+    const btn = row.createEl('button', {
+        cls: 'scv-change-action',
+        attr: { type: 'button' },
+    });
+    setIcon(btn.createSpan({ cls: 'scv-change-action-icon' }), actionIcon(item.syncAction));
+    btn.createSpan({ cls: 'scv-change-action-label', text: actionLabel(item.syncAction) });
+    setTooltip(btn, actionLabel(item.syncAction));
+
+    btn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        const menu = new Menu();
+        for (const action of availableSyncActions(item.kind)) {
+            menu.addItem((menuItem) => {
+                menuItem
+                    .setTitle(actionLabel(action))
+                    .setIcon(actionIcon(action))
+                    .setChecked(action === item.syncAction)
+                    .onClick(() => callbacks.onChangeSyncAction?.(item, action));
+            });
+        }
+        menu.addSeparator();
+        menu.addItem((menuItem) => {
+            menuItem
+                .setTitle(t('sourceControl.queue.menu.viewDiff'))
+                .setIcon(ICONS.diff)
+                .onClick(() => callbacks.onOpenDiff(item));
+        });
+        menu.addItem((menuItem) => {
+            menuItem
+                .setTitle(t('sourceControl.queue.menu.removeFromQueue'))
+                .setIcon(ICONS.clear)
+                .onClick(() => callbacks.onToggleSelect(item.id, false));
+        });
+        menu.showAtMouseEvent(evt);
+    });
 }
 
 /**

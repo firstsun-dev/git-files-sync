@@ -672,6 +672,38 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 
 .scv-change-download-label { white-space: nowrap; }
 
+/* ── Sync Queue row action control (resolved action + override menu) ── */
+.scv-change-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: auto;
+    padding: 1px 6px;
+    background: transparent;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    color: var(--text-muted);
+    font-size: 0.72em;
+    line-height: 1.4;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.scv-change-action:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+    border-color: var(--interactive-accent);
+}
+
+.scv-change-action .svg-icon,
+.scv-change-action-icon .svg-icon { width: 12px; height: 12px; }
+
+.scv-change-action-label { white-space: nowrap; }
+
+/* Phone: icon-only, matching the row's tighter width budget. */
+body.is-mobile .scv-change-action-label { display: none; }
+body.is-mobile .scv-change-action { padding: 4px; min-width: 28px; min-height: 28px; justify-content: center; }
+
 .scv-change-rename-from {
     color: var(--text-faint);
     text-decoration: line-through;

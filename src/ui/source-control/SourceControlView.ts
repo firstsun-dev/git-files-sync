@@ -3,6 +3,7 @@ import { t } from '../../i18n';
 import type { SourceControlFilter } from '../../logic/source-control/SourceControlFilter';
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { SyncIntentRequest } from '../../logic/source-control/SourceControlActionService';
+import { defaultSyncAction, type SyncAction } from '../../logic/source-control/ChangeActionPolicy';
 import type { ChangeId } from '../../logic/source-control/types';
 import { ICONS } from '../components/icons';
 import { renderDiffViewer, currentDiffLayout, rememberDiffLayout, type DiffViewerHandle } from '../components/DiffViewer';
@@ -287,6 +288,7 @@ export class SourceControlView {
             onToggleFolderSelect: (ids, selected) => this.toggleFolderSelect(ids, selected),
             onOpenDiff: (item) => this.openDiff(item),
             onDownload: (item) => this.download(item),
+            onChangeSyncAction: (item, action) => this.changeSyncAction(item, action),
             getDiffStat: (id) => this.diffStat.get(id),
         };
 
@@ -517,11 +519,11 @@ export class SourceControlView {
         const groupCount = [upload, download, deleteRemote].filter(group => group.length > 0).length;
         const mixed = groupCount > 1;
         if (mixed && upload.length > 0) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.upload') });
-        for (const item of upload) renderChangeItem(list, item, basename(item.path), callbacks);
+        for (const item of upload) renderChangeItem(list, item, basename(item.path), callbacks, { showActionControl: true });
         if (mixed && download.length > 0) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.download') });
-        for (const item of download) renderChangeItem(list, item, basename(item.path), callbacks);
+        for (const item of download) renderChangeItem(list, item, basename(item.path), callbacks, { showActionControl: true });
         if (mixed && deleteRemote.length > 0) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.delete') });
-        for (const item of deleteRemote) renderChangeItem(list, item, basename(item.path), callbacks);
+        for (const item of deleteRemote) renderChangeItem(list, item, basename(item.path), callbacks, { showActionControl: true });
     }
 
     /** Unselects every change currently in the Sync Queue in one shot. */
@@ -549,6 +551,22 @@ export class SourceControlView {
     /** Pulls a single remote-only change into the vault — the inline Download button. */
     private download(item: SourceControlItem): void {
         if (this.callbacks.onPull) void this.callbacks.onPull([item.id]);
+    }
+
+    /**
+     * Records (or clears) a Sync Queue row's explicit action override, chosen
+     * from its {@link ChangeItemCallbacks.onChangeSyncAction} menu. Picking
+     * the kind's own default clears the override rather than storing a
+     * redundant one, so `hasActionOverride` only ever means "the user chose
+     * something other than the default".
+     */
+    private changeSyncAction(item: SourceControlItem, action: SyncAction): void {
+        if (action === defaultSyncAction(item.kind)) {
+            this.viewModel.selection.clearActionOverride(item.id);
+        } else {
+            this.viewModel.selection.setActionOverride(item.id, action);
+        }
+        this.rerender();
     }
 
     private renderDetail(root: HTMLElement): void {
