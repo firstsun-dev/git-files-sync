@@ -7,6 +7,7 @@ const harness = readFileSync('scripts/e2e-harness.sh', 'utf8');
 const runner = readFileSync('scripts/run-e2e.sh', 'utf8');
 const vitestE2eConfig = readFileSync('vitest.e2e.config.ts', 'utf8');
 const eslintConfig = readFileSync('eslint.config.mts', 'utf8');
+const syncManagerE2eSuite = readFileSync('e2e-tests/provider/suites/sync-manager.e2e.test.ts', 'utf8');
 
 describe('CI workflow contracts', () => {
     it('retries transient provider failures three times', () => {
@@ -130,5 +131,30 @@ describe('E2E scanner-boundary contracts (e2e-tests/provider, no runtime generat
     it('scopes e2e-tests/** Node-tooling lint exemptions to that directory, not the whole repo', () => {
         expect(eslintConfig).toContain('"e2e-tests/**/*.ts"');
         expect(eslintConfig).not.toContain('"e2e/**/*.ts"');
+    });
+
+    it('still blocks src/ imports of the removed legacy sync-status presentation layer', () => {
+        // Architecture regression guard for the SyncStatusView -> Source
+        // Control migration (see docs/source-control.md): a future refactor
+        // must not silently drop this no-restricted-imports rule and let
+        // ui/sync-status or SyncStatusView get re-wired back in.
+        expect(eslintConfig).toContain('"**/ui/sync-status"');
+        expect(eslintConfig).toContain('"**/ui/sync-status/*"');
+        expect(eslintConfig).toContain('"**/SyncStatusView"');
+        expect(eslintConfig).toContain('"**/ui/SyncStatusView"');
+        expect(eslintConfig).toContain('no-restricted-imports');
+    });
+
+    it('exercises remote delete through the Source Control application path, not a direct provider bypass', () => {
+        // The remote-delete E2E used to call `service.deleteFile()` directly,
+        // reproducing what the removed SyncStatusView UI used to do. The
+        // current production path is SourceControlActionService.deleteRemote()
+        // -> SyncWorkspace.deleteRemote() -> RemoteDeleteExecutor ->
+        // gitService.deleteFile() -- a future edit must keep exercising that
+        // chain instead of quietly reverting to the raw provider call.
+        expect(syncManagerE2eSuite).not.toMatch(/\bservice\.deleteFile\(/);
+        expect(syncManagerE2eSuite).toContain('actionService.deleteRemote(');
+        expect(syncManagerE2eSuite).toContain("from '../../../src/logic/source-control/SourceControlActionService'");
+        expect(syncManagerE2eSuite).toContain("from '../../../src/logic/sync/SyncWorkspace'");
     });
 });
