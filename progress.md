@@ -4,13 +4,15 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-08-31
-**Active Feature:** Issue #143 — reduce redundant real-provider E2E round trips. Working tree changes complete, uncommitted.
-**Branch / PR:** Current working branch; no commit or push created in this session.
+**Last Updated:** 2026-09-01
+**Active Feature:** restore explicit per-file sync actions (no tracked issue number). All 7 planned commits landed and each individually passes lint/tests/build.
+**Branch / PR:** `claude/fix-source-control-explicit-sync-intent`, based on `claude/fix-mobile-diff-rendering-and-responsive-layout` (itself 1 commit ahead of `main`). Not yet pushed or opened as a PR.
 
-**Scope:** E2E fixtures, verifier helpers, and tests only; production `SyncManager` and provider batching behavior remain unchanged.
+**Scope:** `SyncSelectionStore`/`ChangeActionPolicy` (per-change action overrides + resolution), `SourceControlViewModel` (resolved `syncAction`/`hasActionOverride` projection), Sync Queue grouping/row controls, `SourceControlActionService.sync()` (now takes `SyncIntentRequest[]`), a new Repository Changes row "⋯" menu, and `SyncPlanModal` per-row direction icons. Deliberately did not touch `DiffViewer.ts`, mobile diff lifecycle, or E2E cleanup — that's the base branch's prior work.
 
-Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation` — not superseded by this entry.
+**Next:** push the branch and open the PR (title `fix(source-control): restore explicit per-file sync actions`); no further planned work outstanding.
+
+Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation` and Issue #143 — not superseded by this entry, carried over from the base branch history.
 
 ## Outstanding Items
 
@@ -18,6 +20,12 @@ Below that: the previous "Outstanding Items"/"Verification Evidence" entries tra
 2. Commit and push the current working tree, then monitor the CI provider matrix.
 
 ## Verification Evidence
+
+This session (explicit per-file sync actions, 7 commits on `claude/fix-source-control-explicit-sync-intent`):
+
+- Each commit individually verified before being made: `npx eslint .` (0 errors), `npx vitest run` (68 files, growing from 892 to 914 tests across the branch), `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — all passed at every commit.
+- Final state: `npx eslint .` — 0 errors. `npx vitest run` — 68 files / 914 tests passed. `npm run build` — passed.
+- Not run this session: the real-provider E2E suite (`vitest.e2e.config.ts`) — only typechecked (two call sites updated for the new `SyncIntentRequest[]` shape), not executed; needs provisioned credentials.
 
 This session (Issue #143 — reduce redundant real-provider E2E round trips):
 
