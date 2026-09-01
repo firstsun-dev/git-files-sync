@@ -8,6 +8,7 @@ import { SyncManagerWorkspace } from '../../../src/logic/sync/SyncWorkspace';
 import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { toChangeId } from '../../../src/logic/source-control/types';
 // `import type` deliberately, not a value import: src/settings.ts also
 // exports settings-tab UI (GitLabSyncSettingTab -> FolderSuggest ->
@@ -261,7 +262,7 @@ describe('SyncManager E2E', () => {
             normalizePath: p => p,
             app: {} as App,
         });
-        const actionService = new SourceControlActionService(repository, operations, workspace);
+        const actionService = new SourceControlActionService(repository, new SyncSelectionStore(), operations, workspace);
 
         await actionService.deleteRemote([changeId]);
 

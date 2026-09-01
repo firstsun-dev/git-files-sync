@@ -217,22 +217,15 @@ describe('SourceControlViewModel', () => {
             expect(item?.hasActionOverride).toBe(true);
         });
 
-        it('falls back to the default and clears a stale override once the kind no longer supports it', () => {
-            const repository = new ChangeRepository();
-            repository.replace([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }]);
-            const selection = new SyncSelectionStore();
+        it('falls back to the default once a stale override is no longer legal for the current kind', () => {
+            // Reconciling a stale override against a ChangeRepository replacement is
+            // wired by createSyncRuntime, not by SourceControlViewModel (see
+            // tests/runtime/createSyncRuntime.test.ts). This only verifies the
+            // ViewModel's own projection once SyncSelectionStore has already
+            // dropped the override.
+            const { viewModel, selection } = buildViewModel([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
             selection.setActionOverride(toChangeId('c-1'), 'pull');
-            const viewModel = new SourceControlViewModel(
-                repository,
-                selection,
-                new OperationState(),
-                vi.fn().mockResolvedValue(undefined),
-                new RefreshState(),
-            );
-
-            // Remote copy of the change disappears — kind moves from
-            // local-modified (allows pull) to local-only (push only).
-            repository.replace([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+            selection.reconcile([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
 
             const item = viewModel.getState('all').items[0];
             expect(item?.syncAction).toBe('push');

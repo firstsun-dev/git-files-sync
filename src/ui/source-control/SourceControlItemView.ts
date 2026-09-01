@@ -62,6 +62,11 @@ export class SourceControlItemView extends ItemView {
             onPush: (changeIds) => this.runAction(this.plugin.sourceControlActions.push(changeIds)),
             onDeleteRemote: (changeIds) => this.runAction(this.confirmThenDeleteRemote(changeIds)),
             onDeleteLocal: (changeIds) => this.runAction(this.plugin.sourceControlActions.deleteLocal(changeIds)),
+            onSelectForSync: (id) => this.plugin.sourceControlActions.selectForSync(id),
+            onDeselectFromSync: (id) => this.plugin.sourceControlActions.deselectFromSync(id),
+            onSelectMany: (ids) => this.plugin.sourceControlActions.selectMany(ids),
+            onDeselectMany: (ids) => this.plugin.sourceControlActions.deselectMany(ids),
+            onSetSyncAction: (id, action) => this.plugin.sourceControlActions.setSyncAction(id, action),
         };
         this.view = new SourceControlView(
             this.plugin.sourceControlViewModel,

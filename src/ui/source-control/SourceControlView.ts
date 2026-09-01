@@ -3,7 +3,7 @@ import { t } from '../../i18n';
 import type { SourceControlFilter } from '../../logic/source-control/SourceControlFilter';
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { SyncIntentRequest } from '../../logic/source-control/SourceControlActionService';
-import { defaultSyncAction, type SyncAction } from '../../logic/source-control/ChangeActionPolicy';
+import type { SyncAction } from '../../logic/source-control/ChangeActionPolicy';
 import type { ChangeId } from '../../logic/source-control/types';
 import { ICONS } from '../components/icons';
 import { renderDiffViewer, currentDiffLayout, rememberDiffLayout, type DiffViewerHandle } from '../components/DiffViewer';
@@ -56,6 +56,21 @@ export interface SourceControlViewCallbacks {
     onDeleteLocal?: (changeIds: ChangeId[]) => void | Promise<void>;
     /** Triggers a view-wide refresh; the host wires this to the ViewModel's refresh delegate. */
     onRefresh: () => void;
+    /** Adds one change to the Sync Queue — a Repository Changes row checkbox. */
+    onSelectForSync: (id: ChangeId) => void;
+    /** Removes one change from the Sync Queue — a Sync Queue row checkbox. */
+    onDeselectFromSync: (id: ChangeId) => void;
+    /** Adds several changes to the Sync Queue in one batch — a folder checkbox. */
+    onSelectMany: (ids: readonly ChangeId[]) => void;
+    /** Removes several changes from the Sync Queue in one batch — a folder checkbox, or "Clear" on the queue. */
+    onDeselectMany: (ids: readonly ChangeId[]) => void;
+    /**
+     * Records a Sync Queue row's explicit action override, chosen from its
+     * per-row action menu. Whether picking the kind's own default clears the
+     * override instead of storing it is decided behind this call
+     * (`SourceControlActionService.setSyncAction`), not by this view.
+     */
+    onSetSyncAction: (id: ChangeId, action: SyncAction) => void;
     /** Notified when a change is selected for diff viewing, in addition to this view's own diff pane rendering. */
     onOpenDiff?: (item: SourceControlItem) => void | Promise<void>;
     /** Supplies diff content for the selected change; omit to leave the diff pane empty. */
@@ -103,12 +118,11 @@ interface MainScrollState {
  * from `SourceControlViewModel` state, per
  * docs/source-control-refactor/phase-3-source-control-ui.md.
  *
- * Pure presentation + wiring: push/diff intent is handed to injected
- * callbacks rather than acted on directly here, so this layer never reaches
- * past the ViewModel to `SyncManager`/a Git provider. Selection toggling goes
- * through `viewModel.selection` (the `SyncSelectionStore`, exposed by the
- * ViewModel) so the view holds no selection reference of its own and the
- * batch ops (`toggle`/`toggleMany`) live on the store, not inline here.
+ * Pure presentation + wiring: push/diff intent, and selection/action-override
+ * mutation alike, are handed to injected callbacks rather than acted on
+ * directly here, so this layer never reaches past the ViewModel/callbacks to
+ * `SyncManager`, a Git provider, or `SyncSelectionStore` — it holds no
+ * selection reference of its own.
  *
  * Rendering semantics (status-grouping fix):
  * - Every filter chip renders a single flat tree (or list). "All" composes
@@ -453,7 +467,7 @@ export class SourceControlView {
 
     /** Unselects every change currently in the Sync Queue in one shot. */
     private clearSelection(items: readonly SourceControlItem[]): void {
-        this.viewModel.selection.deselectMany(items.map(item => item.id));
+        this.callbacks.onDeselectMany(items.map(item => item.id));
         this.rerender();
     }
 
@@ -493,18 +507,13 @@ export class SourceControlView {
     }
 
     /**
-     * Records (or clears) a Sync Queue row's explicit action override, chosen
-     * from its {@link ChangeItemCallbacks.onChangeSyncAction} menu. Picking
-     * the kind's own default clears the override rather than storing a
-     * redundant one, so `hasActionOverride` only ever means "the user chose
-     * something other than the default".
+     * Records a Sync Queue row's explicit action override, chosen from its
+     * {@link ChangeItemCallbacks.onChangeSyncAction} menu. Whether that
+     * clears a default-matching override instead of storing it is decided by
+     * `SourceControlActionService.setSyncAction`, not here.
      */
     private changeSyncAction(item: SourceControlItem, action: SyncAction): void {
-        if (action === defaultSyncAction(item.kind)) {
-            this.viewModel.selection.clearActionOverride(item.id);
-        } else {
-            this.viewModel.selection.setActionOverride(item.id, action);
-        }
+        this.callbacks.onSetSyncAction(item.id, action);
         this.rerender();
     }
 
@@ -567,14 +576,14 @@ export class SourceControlView {
     }
 
     private toggleSelect(id: ChangeId, selected: boolean): void {
-        if (selected) this.viewModel.selection.selectForSync(id);
-        else this.viewModel.selection.deselectFromSync(id);
+        if (selected) this.callbacks.onSelectForSync(id);
+        else this.callbacks.onDeselectFromSync(id);
         this.rerender();
     }
 
     private toggleFolderSelect(ids: readonly ChangeId[], selected: boolean): void {
-        if (selected) this.viewModel.selection.selectMany(ids);
-        else this.viewModel.selection.deselectMany(ids);
+        if (selected) this.callbacks.onSelectMany(ids);
+        else this.callbacks.onDeselectMany(ids);
         this.rerender();
     }
 

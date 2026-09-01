@@ -6,10 +6,33 @@ import { OperationState } from '../../../src/logic/source-control/OperationState
 import { RefreshState } from '../../../src/logic/source-control/RefreshState';
 import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { SourceControlViewModel, type SourceControlItem } from '../../../src/logic/source-control/SourceControlViewModel';
-import { toChangeId, type SyncChange } from '../../../src/logic/source-control/types';
+import { defaultSyncAction } from '../../../src/logic/source-control/ChangeActionPolicy';
+import { toChangeId, type ChangeId, type SyncChange } from '../../../src/logic/source-control/types';
 import { setupObsidianDOM, createContainer } from '../setup-dom';
 
 beforeAll(() => { setupObsidianDOM(); });
+
+/**
+ * Selection-mutation callbacks the view relies on, wired directly to a test
+ * SyncSelectionStore/ChangeRepository — a stand-in for what
+ * SourceControlActionService does against the real store in production.
+ */
+function selectionCallbacks(
+    repository: ChangeRepository,
+    selection: SyncSelectionStore,
+): Pick<SourceControlViewCallbacks, 'onSelectForSync' | 'onDeselectFromSync' | 'onSelectMany' | 'onDeselectMany' | 'onSetSyncAction'> {
+    return {
+        onSelectForSync: (id) => selection.selectForSync(id),
+        onDeselectFromSync: (id) => selection.deselectFromSync(id),
+        onSelectMany: (ids) => selection.selectMany(ids),
+        onDeselectMany: (ids) => selection.deselectMany(ids),
+        onSetSyncAction: (id: ChangeId, action) => {
+            const change = repository.getById(id);
+            if (change && action === defaultSyncAction(change.kind)) selection.clearActionOverride(id);
+            else selection.setActionOverride(id, action);
+        },
+    };
+}
 
 function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCallbacks> = {}) {
     const repository = new ChangeRepository();
@@ -21,7 +44,7 @@ function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCa
     const viewModel = new SourceControlViewModel(repository, selection, operations, refreshSource, refreshState);
     const onSync = callbacks.onSync ?? vi.fn();
     const onRefresh = callbacks.onRefresh ?? vi.fn();
-    const view = new SourceControlView(viewModel, { onSync, onRefresh, ...callbacks }, () => ({
+    const view = new SourceControlView(viewModel, { onSync, onRefresh, ...selectionCallbacks(repository, selection), ...callbacks }, () => ({
         serviceName: 'GitHub',
         branch: 'main',
         vaultFolder: '',
@@ -41,7 +64,7 @@ function buildViewWithRepository(changes: SyncChange[], callbacks: Partial<Sourc
     const viewModel = new SourceControlViewModel(repository, selection, operations, refreshSource, refreshState);
     const onSync = callbacks.onSync ?? vi.fn();
     const onRefresh = callbacks.onRefresh ?? vi.fn();
-    const view = new SourceControlView(viewModel, { onSync, onRefresh, ...callbacks }, () => ({
+    const view = new SourceControlView(viewModel, { onSync, onRefresh, ...selectionCallbacks(repository, selection), ...callbacks }, () => ({
         serviceName: 'GitHub',
         branch: 'main',
         vaultFolder: '',
@@ -1581,7 +1604,15 @@ describe('SourceControlView', () => {
             );
             const view = new SourceControlView(
                 viewModel,
-                { onSync: vi.fn(), onRefresh: vi.fn() },
+                {
+                    onSync: vi.fn(),
+                    onRefresh: vi.fn(),
+                    onSelectForSync: vi.fn(),
+                    onDeselectFromSync: vi.fn(),
+                    onSelectMany: vi.fn(),
+                    onDeselectMany: vi.fn(),
+                    onSetSyncAction: vi.fn(),
+                },
                 () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '', lastCheckedAt }),
             );
             return { view, refreshState };

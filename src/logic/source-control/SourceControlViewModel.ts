@@ -35,10 +35,11 @@ export interface SourceControlViewState {
  * Read-only projection of repository, selection, operation, and refresh state
  * into UI-ready snapshots.
  *
- * The constructor wires selection-intent reconciliation to authoritative
- * ChangeRepository replacements. Cleanup therefore happens on the write-side
- * repository lifecycle, while repeated getState() calls remain observational
- * and never mutate queue intent.
+ * Purely observational: getState() never mutates queue intent, and this
+ * class exposes no selection mutation surface of its own. Selection-intent
+ * reconciliation against authoritative ChangeRepository replacements is
+ * wired by the runtime composition root (createSyncRuntime), not here, and
+ * mutation goes through SourceControlActionService instead of this class.
  */
 export class SourceControlViewModel {
     constructor(
@@ -47,15 +48,7 @@ export class SourceControlViewModel {
         private readonly operations: OperationState,
         private readonly refreshSource: () => Promise<unknown>,
         private readonly refreshState: RefreshState,
-    ) {
-        this.changes.subscribe(changes => this.selectionStore.reconcile(changes));
-    }
-
-    /**
-     * Existing UI mutation boundary for queue selection. Kept for this PR to
-     * avoid mixing a renderer API redesign into the intent/execution cleanup.
-     */
-    get selection(): SyncSelectionStore { return this.selectionStore; }
+    ) {}
 
     getState(filter: SourceControlFilter = 'all', showSynced = false): SourceControlViewState {
         const all = this.changes.getAll();
