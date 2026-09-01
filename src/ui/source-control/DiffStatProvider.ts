@@ -1,19 +1,6 @@
-import type { ChangeStat } from './ChangePresentation';
+import type { ChangeStat, DiffStatLoadResult } from '../../logic/sync/DiffStat';
 
-/**
- * What the loader resolved for one change row. The distinction matters
- * because the cache treats the three outcomes differently:
- * - `ready` — cached as a usable stat.
- * - `unavailable` — permanent (binary, symlink, no two sides to diff);
- *   cached so the row is never retried.
- * - `pending` — the backing content simply isn't in memory yet (e.g. a
- *   `local-only` row whose `localContent` hasn't been read). NOT cached:
- *   the next load pass retries the row, so a late-arriving stat still lands.
- */
-export type DiffStatLoadResult =
-    | { status: 'ready'; stat: ChangeStat }
-    | { status: 'pending' }
-    | { status: 'unavailable' };
+export type { DiffStatLoadResult };
 
 type DiffStatCacheEntry =
     | { state: 'ready'; stat: ChangeStat }

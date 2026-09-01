@@ -1,8 +1,7 @@
 import type { SyncStatusService } from '../sync-status-service';
 import { isBinaryPath } from '../../utils/path';
 import type { FileDiff } from './types';
-import { computeDiffStat } from '../../ui/source-control/ChangePresentation';
-import type { DiffStatLoadResult } from '../../ui/source-control/DiffStatProvider';
+import { computeDiffStat, type DiffStatLoadResult } from './DiffStat';
 
 export type BlobReader = (sha: string, path: string) => Promise<{ content: string | ArrayBuffer }>;
 
