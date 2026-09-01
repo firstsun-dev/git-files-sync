@@ -1,5 +1,8 @@
 # Phase 2 — Sync Action Unification
 
+> **Historical migration roadmap. Do not use as current implementation
+> guidance.** See `docs/source-control.md` for the current architecture.
+
 ## Goal
 
 統一 Source Control、Context Menu、Single File 操作的 pipeline。

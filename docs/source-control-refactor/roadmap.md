@@ -1,8 +1,12 @@
 # Source Control Refactor — Roadmap (v2)
 
+> **Historical migration roadmap. Do not use as current implementation
+> guidance.** The migration this document tracked has landed on `main`; for
+> the current architecture see `docs/source-control.md`.
+
 > Supersedes `phase-1..4-*.md`. Those phase docs are kept only as historical
-> design notes; this file is the authoritative current plan, grounded in the
-> actual branch state as of 2026-08-22.
+> design notes; this file was the authoritative current plan as of
+> 2026-08-22, before the migration it tracked landed on `main`.
 
 ## Where we actually are
 

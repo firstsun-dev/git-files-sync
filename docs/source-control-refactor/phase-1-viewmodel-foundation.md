@@ -1,5 +1,8 @@
 # Phase 1 — Source Control ViewModel Foundation
 
+> **Historical migration roadmap. Do not use as current implementation
+> guidance.** See `docs/source-control.md` for the current architecture.
+
 ## Goal
 
 建立 Source Control UI 與 Sync domain 之間的 ViewModel layer。
