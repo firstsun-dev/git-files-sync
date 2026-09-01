@@ -434,7 +434,7 @@ describe('SourceControlView', () => {
 
             (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
-            expect(onSync).toHaveBeenCalledWith([toChangeId('c-1'), toChangeId('c-2')]);
+            expect(onSync).toHaveBeenCalledWith([{ changeId: toChangeId('c-1'), action: undefined }, { changeId: toChangeId('c-2'), action: undefined }]);
         });
 
         it('disables the push button when nothing is selected', () => {
@@ -462,7 +462,7 @@ describe('SourceControlView', () => {
             (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
             expect(onSync).toHaveBeenCalledOnce();
-            expect(onSync).toHaveBeenCalledWith([toChangeId('c-1'), toChangeId('c-2')]);
+            expect(onSync).toHaveBeenCalledWith([{ changeId: toChangeId('c-1'), action: undefined }, { changeId: toChangeId('c-2'), action: undefined }]);
         });
 
         it('hands a download-only Sync Queue to onSync too', () => {
@@ -476,7 +476,7 @@ describe('SourceControlView', () => {
 
             (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
-            expect(onSync).toHaveBeenCalledWith([toChangeId('c-1')]);
+            expect(onSync).toHaveBeenCalledWith([{ changeId: toChangeId('c-1'), action: undefined }]);
         });
 
         it('hands a local-deleted change in the Sync Queue to onSync, not a separate delete callback', () => {
@@ -490,7 +490,7 @@ describe('SourceControlView', () => {
 
             (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
-            expect(onSync).toHaveBeenCalledWith([toChangeId('c-1')]);
+            expect(onSync).toHaveBeenCalledWith([{ changeId: toChangeId('c-1'), action: undefined }]);
         });
 
         it('shows Upload / Download group labels in the Sync Queue when the queue is mixed', () => {
@@ -1360,7 +1360,7 @@ describe('SourceControlView', () => {
 
             (container.querySelector('.scv-mobile-sync-btn') as HTMLButtonElement).click();
 
-            expect(onSync).toHaveBeenCalledWith([toChangeId('c-1')]);
+            expect(onSync).toHaveBeenCalledWith([{ changeId: toChangeId('c-1'), action: undefined }]);
         });
     });
 

@@ -2,7 +2,7 @@ import type { PlannedPushBatch } from '../sync/PushCoordinator';
 import type { SyncWorkspace } from '../sync/SyncWorkspace';
 import { isSyncPlanEmpty, type DeleteQueueEntry, type PushResults, type SyncPlan, type SyncPlanEntry } from '../sync/types';
 import { type SyncExecutionResult, type SyncResultNotificationPort } from './SyncResultNotifier';
-import { defaultSyncAction } from './ChangeActionPolicy';
+import { resolveSyncAction, type SyncAction } from './ChangeActionPolicy';
 import type { ChangeRepository } from './ChangeRepository';
 import type { OperationState } from './OperationState';
 import type { SourceControlItem } from './SourceControlViewModel';
@@ -10,6 +10,18 @@ import type { ChangeId, SyncChange } from './types';
 
 /** Which side wins when resolving a change in the 'conflict' state. */
 export type ConflictResolution = 'local' | 'remote';
+
+/**
+ * One change to sync, with the caller's explicit action choice if it made
+ * one. `action` omitted (or no longer legal for the change's current kind —
+ * see {@link resolveSyncAction}) means "use the kind's default", so a stale
+ * intent from a UI snapshot can never force an action the change can't
+ * support.
+ */
+export interface SyncIntentRequest {
+    changeId: ChangeId;
+    action?: SyncAction;
+}
 
 /** Diff payload the Source Control diff pane can render directly (text-only; binary/symlink changes resolve to `null`). */
 export interface SourceControlDiffContent {
@@ -89,29 +101,31 @@ export class SourceControlActionService {
 
     /**
      * Syncs one or more changes as a single Sync Plan — the Sync Queue
-     * button's only entry point. Splits `changeIds` by
-     * {@link defaultSyncAction} into push/delete-remote/pull buckets, plans
-     * each without mutating anything, merges the result into one `SyncPlan`,
-     * shows exactly one confirm, and — if confirmed — commits the whole
-     * remote mutation set (pushes + moves + deletions) through
-     * `SyncWorkspace.commitResolvedBatch` as one provider call, then applies
-     * the pull bucket (zero-commit, local-only) separately. This is the fix
-     * for the "one Sync produces two remote commits" bug: previously the
-     * Sync Queue routed push/pull/delete-remote through three independent
-     * `SyncWorkspace` calls, each committing on its own.
+     * button's only entry point. Splits the requested intents by
+     * {@link resolveSyncAction} (an explicit per-change action if the caller
+     * gave one and it's still legal, otherwise the kind's default) into
+     * push/delete-remote/pull buckets, plans each without mutating anything,
+     * merges the result into one `SyncPlan`, shows exactly one confirm, and —
+     * if confirmed — commits the whole remote mutation set (pushes + moves +
+     * deletions) through `SyncWorkspace.commitResolvedBatch` as one provider
+     * call, then applies the pull bucket (zero-commit, local-only)
+     * separately. This is the fix for the "one Sync produces two remote
+     * commits" bug: previously the Sync Queue routed push/pull/delete-remote
+     * through three independent `SyncWorkspace` calls, each committing on its
+     * own.
      */
-    async sync(changeIds: readonly ChangeId[]): Promise<void> {
-        const targets = this.resolve(changeIds);
-        if (targets.length === 0) return;
+    async sync(intents: readonly SyncIntentRequest[]): Promise<void> {
+        const resolved = this.resolveIntents(intents);
+        if (resolved.length === 0) return;
+        const targets = resolved.map(entry => entry.change);
 
         const pushTargets: SyncChange[] = [];
         const deleteTargets: SyncChange[] = [];
         const pullTargets: SyncChange[] = [];
-        for (const target of targets) {
-            const action = defaultSyncAction(target.kind);
-            if (action === 'pull') pullTargets.push(target);
-            else if (action === 'delete-remote') deleteTargets.push(target);
-            else pushTargets.push(target);
+        for (const { change, action } of resolved) {
+            if (action === 'pull') pullTargets.push(change);
+            else if (action === 'delete-remote') deleteTargets.push(change);
+            else pushTargets.push(change);
         }
 
         let plan: { planned: PlannedPushBatch; confirmed: boolean } | null;
@@ -325,6 +339,24 @@ export class SourceControlActionService {
             if (change) targets.push(change);
         }
         return targets;
+    }
+
+    /**
+     * Resolves sync intents to their current `SyncChange` plus the action
+     * each actually syncs as, dropping any change no longer known to the
+     * repository. Legality is re-checked here against the change's *current*
+     * kind (not whatever it was when the caller snapshotted it), via
+     * {@link resolveSyncAction} — so a stale intent degrades to the default
+     * instead of ever forcing an action the current kind can't support.
+     */
+    private resolveIntents(intents: readonly SyncIntentRequest[]): Array<{ change: SyncChange; action: SyncAction }> {
+        const resolved: Array<{ change: SyncChange; action: SyncAction }> = [];
+        for (const intent of intents) {
+            const change = this.changes.getById(intent.changeId);
+            if (!change) continue;
+            resolved.push({ change, action: resolveSyncAction(change.kind, intent.action) });
+        }
+        return resolved;
     }
 
     private startAll(targets: readonly SyncChange[]): void {

@@ -189,8 +189,8 @@ export class TwoClient {
      */
     async sync(): Promise<void> {
         await this.refresh();
-        const changeIds = this.repository.getAll().map(change => change.id);
-        await timed(`sync ${this.name}`, () => this.actionService.sync(changeIds));
+        const intents = this.repository.getAll().map(change => ({ changeId: change.id }));
+        await timed(`sync ${this.name}`, () => this.actionService.sync(intents));
     }
 
     /** Push-only path (the per-row Sync/Push on one or more changes). */

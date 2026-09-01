@@ -84,7 +84,7 @@ describe('SourceControlItemView', () => {
         const container = view.containerEl.children[1] as HTMLElement;
         (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
-        expect(sync).toHaveBeenCalledWith([toChangeId('a.md')]);
+        expect(sync).toHaveBeenCalledWith([{ changeId: toChangeId('a.md'), action: undefined }]);
     });
 
     it('waits for sync to settle through the production runAction wiring before re-rendering (regression: runAction used to discard the action promise)', async () => {
@@ -104,7 +104,7 @@ describe('SourceControlItemView', () => {
         const container = view.containerEl.children[1] as HTMLElement;
         (container.querySelector('.scv-push-btn') as HTMLButtonElement).click();
 
-        expect(sync).toHaveBeenCalledWith([toChangeId('a.md'), toChangeId('b.md')]);
+        expect(sync).toHaveBeenCalledWith([{ changeId: toChangeId('a.md'), action: undefined }, { changeId: toChangeId('b.md'), action: undefined }]);
 
         resolveSync();
         await new Promise(resolve => window.setTimeout(resolve, 0));

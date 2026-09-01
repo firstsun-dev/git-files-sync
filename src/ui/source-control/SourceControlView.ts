@@ -2,6 +2,7 @@ import { debounce, Platform, setIcon, setTooltip } from 'obsidian';
 import { t } from '../../i18n';
 import type { SourceControlFilter } from '../../logic/source-control/SourceControlFilter';
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
+import type { SyncIntentRequest } from '../../logic/source-control/SourceControlActionService';
 import type { ChangeId } from '../../logic/source-control/types';
 import { ICONS } from '../components/icons';
 import { renderDiffViewer, currentDiffLayout, rememberDiffLayout, type DiffViewerHandle } from '../components/DiffViewer';
@@ -25,7 +26,7 @@ export interface SourceControlViewCallbacks {
      * building, single confirm, and single commit all happen behind this
      * one call (`SourceControlActionService.sync()`).
      */
-    onSync: (changeIds: ChangeId[]) => void | Promise<void>;
+    onSync: (intents: SyncIntentRequest[]) => void | Promise<void>;
     /**
      * Pulls one or more changes — used only by the inline per-row Download
      * button (a single `remote-only`/`local-deleted` row), not by the Sync
@@ -539,7 +540,10 @@ export class SourceControlView {
      */
     private async runSync(queue: readonly SourceControlItem[]): Promise<void> {
         if (queue.length === 0) return;
-        await this.callbacks.onSync(queue.map(item => item.id));
+        await this.callbacks.onSync(queue.map(item => ({
+            changeId: item.id,
+            action: item.hasActionOverride ? item.syncAction : undefined,
+        })));
     }
 
     /** Pulls a single remote-only change into the vault — the inline Download button. */
