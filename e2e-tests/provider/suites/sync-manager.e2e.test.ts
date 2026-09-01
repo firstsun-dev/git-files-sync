@@ -4,12 +4,20 @@ import { SyncPlanModal, SyncPlanDirection } from '../../../src/ui/SyncPlanModal'
 import { BatchConflictResolutionModal } from '../../../src/ui/BatchConflictResolutionModal';
 import { ObsidianSyncInteraction } from '../../../src/ui/ObsidianSyncInteraction';
 import { describePushResult } from '../support/push-result-diagnostic';
+import { SyncManagerWorkspace } from '../../../src/logic/sync/SyncWorkspace';
+import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
+import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
+import { OperationState } from '../../../src/logic/source-control/OperationState';
+import { toChangeId } from '../../../src/logic/source-control/types';
 // `import type` deliberately, not a value import: src/settings.ts also
 // exports settings-tab UI (GitLabSyncSettingTab -> FolderSuggest ->
 // AbstractInputSuggest etc.) which pulls in far more of `obsidian` than this
 // suite's minimal runtime shim provides. A type-only import is erased
 // entirely, so none of that module ever loads.
 import type { GitLabFilesPushSettings } from '../../../src/settings';
+import type { SyncStatusRefreshService } from '../../../src/logic/sync/SyncStatusRefreshService';
+import type { SyncDiffService } from '../../../src/logic/sync/SyncDiffService';
+import type { App } from 'obsidian';
 import { TFile as ObsidianTFile } from 'obsidian';
 import { GitVerifier } from '../support/git-verifier';
 import { FakeVault, fakeApp, type TFileLike, type TFileCtor } from '../shim/fake-vault';
@@ -222,9 +230,14 @@ describe('SyncManager E2E', () => {
         expect(headAfterParent).toBe(headBefore);
     });
 
-    it('deletes a file via the real service, verified independently', async () => {
-        // Deletion isn't a SyncManager method -- src/ui/SyncStatusView.ts calls
-        // gitService.deleteFile directly, so this reproduces that real path.
+    it('deletes a file via the current Source Control application path, verified independently', async () => {
+        // Deletion isn't a SyncManager method -- the production call chain is
+        // SourceControlActionService.deleteRemote() -> SyncWorkspace.deleteRemote()
+        // -> RemoteDeleteExecutor -> gitService.deleteFile(), not a direct
+        // provider call, so this exercises that full chain instead of
+        // bypassing it. `refreshService`/`diffService`/`app` are stubbed --
+        // deleteRemote() never touches them -- the same pattern
+        // tests/logic/sync/SyncWorkspace.test.ts uses for its deleteRemote suite.
         const filePath = path('to-delete.md');
         const vault = new FakeVault(TFile);
         vault.writeLocal(filePath, 'delete me');
@@ -235,9 +248,24 @@ describe('SyncManager E2E', () => {
         expect(initialPush.failed, describePushResult(initialPush)).toBe(0);
         expect(await verifier.fileMissing(filePath, branch)).toBe(false);
 
-        await service.deleteFile(filePath, branch, 'e2e: delete file');
-        await manager.clearMetadata(filePath);
+        const changeId = toChangeId(filePath);
+        const repository = new ChangeRepository();
+        repository.replace([{ id: changeId, path: filePath, kind: 'remote-only' }]);
+        const operations = new OperationState();
+        const workspace = new SyncManagerWorkspace({
+            manager: () => manager,
+            gitService: () => service,
+            settings: () => settings,
+            refreshService: {} as SyncStatusRefreshService,
+            diffService: {} as SyncDiffService,
+            normalizePath: p => p,
+            app: {} as App,
+        });
+        const actionService = new SourceControlActionService(repository, operations, workspace);
 
+        await actionService.deleteRemote([changeId]);
+
+        expect(operations.get(changeId)).toBe('success');
         expect(await verifier.fileMissing(filePath, branch)).toBe(true);
         expect(settings.syncMetadata[filePath]).toBeUndefined();
     });
