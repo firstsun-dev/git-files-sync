@@ -4,11 +4,12 @@ import { t } from '../../i18n';
 import type { SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import { resolveSyncAction } from '../../logic/source-control/ChangeActionPolicy';
 import type { FileStatus } from '../../logic/sync-status-service';
-import { toChangeId } from '../../logic/source-control/types';
+import { toChangeId, type ChangeId } from '../../logic/source-control/types';
 import { SourceControlView, type SourceControlViewCallbacks } from './SourceControlView';
 import type { SourceControlWorkspaceInfo } from './SourceControlHeader';
 import { addedContentStat, cheapLocalStat, computeDiffStat, deletedContentStat } from './ChangePresentation';
 import type { DiffStatLoadResult } from './DiffStatProvider';
+import { ConfirmModal } from '../ConfirmModal';
 
 // Reuses the legacy sync-status view's registered type string so an already
 // open/pinned leaf from before this cutover resolves into the new view
@@ -59,6 +60,9 @@ export class SourceControlItemView extends ItemView {
             onOpenDiff: (item) => { if (!Platform.isMobile) void this.openDesktopDiffTab(item); },
             onOpenLocalFile: (item) => this.openLocalFile(item.path),
             onOpenRemoteFile: (item) => this.openRemoteFile(item.path),
+            onPush: (changeIds) => this.runAction(this.plugin.sourceControlActions.push(changeIds)),
+            onDeleteRemote: (changeIds) => this.runAction(this.confirmThenDeleteRemote(changeIds)),
+            onDeleteLocal: (changeIds) => this.runAction(this.plugin.sourceControlActions.deleteLocal(changeIds)),
         };
         this.view = new SourceControlView(
             this.plugin.sourceControlViewModel,
@@ -150,6 +154,30 @@ export class SourceControlItemView extends ItemView {
     private openRemoteFile(path: string): void {
         const url = this.plugin.syncWorkspace.getRemoteFileUrl(path);
         if (url) window.open(url, '_blank');
+    }
+
+    /**
+     * Confirms before running the row menu's one-off "Delete remote" — unlike
+     * `deleteLocal` (which goes through Obsidian's own trash), a remote
+     * deletion outside the Sync Plan's own confirm has no equivalent safety
+     * net, so this reuses the same `ConfirmModal` `main.ts` uses for its
+     * other immediate destructive actions. Resolves without deleting
+     * anything if the user cancels.
+     */
+    private confirmThenDeleteRemote(changeIds: ChangeId[]): Promise<void> {
+        const paths = changeIds
+            .map(id => this.plugin.changeRepository.getById(id)?.path)
+            .filter((path): path is string => path !== undefined);
+        if (paths.length === 0) return Promise.resolve();
+        const message = t('sourceControl.row.confirmDeleteRemote', { path: paths.join(', ') });
+        return new Promise((resolve) => {
+            new ConfirmModal(
+                this.app,
+                message,
+                () => { void this.plugin.sourceControlActions.deleteRemote(changeIds).then(resolve); },
+                () => resolve(),
+            ).open();
+        });
     }
 
     /**

@@ -8,7 +8,7 @@ import type { ChangeId } from '../../logic/source-control/types';
 import { ICONS } from '../components/icons';
 import { renderDiffViewer, currentDiffLayout, rememberDiffLayout, type DiffViewerHandle } from '../components/DiffViewer';
 import { renderChangeTree, renderChangeList, type ChangeTreeCallbacks } from './ChangeTree';
-import { renderChangeItem } from './ChangeItem';
+import { renderChangeItem, type RowActionKind } from './ChangeItem';
 import { DiffStatProvider, type DiffStatLoadResult } from './DiffStatProvider';
 import { renderFilterMenu } from './FilterMenu';
 import { renderSourceControlHeader, type SourceControlWorkspaceInfo } from './SourceControlHeader';
@@ -34,6 +34,24 @@ export interface SourceControlViewCallbacks {
      * Queue button.
      */
     onPull?: (changeIds: ChangeId[]) => void | Promise<void>;
+    /**
+     * Pushes a single change immediately, bypassing the Sync Queue — the
+     * Repository Changes row menu's "Push local" on a kind that doesn't
+     * default there (e.g. `remote-modified`).
+     */
+    onPush?: (changeIds: ChangeId[]) => void | Promise<void>;
+    /**
+     * Deletes a single change from the remote only, immediately — the row
+     * menu's "Delete remote". Callers show their own confirm before invoking
+     * this; it does not confirm on its own.
+     */
+    onDeleteRemote?: (changeIds: ChangeId[]) => void | Promise<void>;
+    /**
+     * Deletes a single change from the local vault only, immediately — the
+     * row menu's "Delete local". Goes through Obsidian's own trash
+     * (`app.fileManager.trashFile`), so no separate confirm is shown here.
+     */
+    onDeleteLocal?: (changeIds: ChangeId[]) => void | Promise<void>;
     /** Triggers a view-wide refresh; the host wires this to the ViewModel's refresh delegate. */
     onRefresh: () => void;
     /** Notified when a change is selected for diff viewing, in addition to this view's own diff pane rendering. */
@@ -289,6 +307,8 @@ export class SourceControlView {
             onOpenDiff: (item) => this.openDiff(item),
             onDownload: (item) => this.download(item),
             onChangeSyncAction: (item, action) => this.changeSyncAction(item, action),
+            onRowAction: (item, action) => this.runRowAction(item, action),
+            onOpenRemote: (item) => { if (this.callbacks.onOpenRemoteFile) void this.callbacks.onOpenRemoteFile(item); },
             getDiffStat: (id) => this.diffStat.get(id),
         };
 
@@ -551,6 +571,20 @@ export class SourceControlView {
     /** Pulls a single remote-only change into the vault — the inline Download button. */
     private download(item: SourceControlItem): void {
         if (this.callbacks.onPull) void this.callbacks.onPull([item.id]);
+    }
+
+    /**
+     * Runs a Repository Changes row's "⋯" menu action immediately (not
+     * queued) — see {@link ChangeItemCallbacks.onRowAction}. Just dispatches
+     * to the matching single-change callback; confirmation (delete-remote)
+     * and the actual `SourceControlActionService` calls live at the host
+     * (`SourceControlItemView`), not in this pure-projection view.
+     */
+    private runRowAction(item: SourceControlItem, action: RowActionKind): void {
+        if (action === 'push' && this.callbacks.onPush) void this.callbacks.onPush([item.id]);
+        else if (action === 'pull' && this.callbacks.onPull) void this.callbacks.onPull([item.id]);
+        else if (action === 'delete-remote' && this.callbacks.onDeleteRemote) void this.callbacks.onDeleteRemote([item.id]);
+        else if (action === 'delete-local' && this.callbacks.onDeleteLocal) void this.callbacks.onDeleteLocal([item.id]);
     }
 
     /**

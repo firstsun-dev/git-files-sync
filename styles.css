@@ -708,6 +708,30 @@ body.is-mobile .scv-change-download { padding: 4px; min-width: 28px; min-height:
 body.is-mobile .scv-change-action-label { display: none; }
 body.is-mobile .scv-change-action { padding: 4px; min-width: 28px; min-height: 28px; justify-content: center; }
 
+/* ── Repository Changes row "⋯" menu ───────────────────────────────── */
+.scv-change-menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    padding: 2px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-s);
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.scv-change-menu:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.scv-change-menu .svg-icon { width: 14px; height: 14px; }
+
+body.is-mobile .scv-change-menu { min-width: 28px; min-height: 28px; }
+
 .scv-change-rename-from {
     color: var(--text-faint);
     text-decoration: line-through;

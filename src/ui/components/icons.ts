@@ -35,4 +35,8 @@ export const ICONS = {
     // Repository changes view toggle
     viewTree: 'folder-tree',
     viewList: 'list',
+    // Row action menu (Repository Changes "⋯")
+    rowMenu:    'more-horizontal',
+    addToQueue: 'list-plus',
+    openRemote: 'external-link',
 } as const;

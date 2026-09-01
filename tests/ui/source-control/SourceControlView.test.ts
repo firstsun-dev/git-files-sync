@@ -667,6 +667,112 @@ describe('SourceControlView', () => {
         });
     });
 
+    describe('repository row menu', () => {
+        afterEach(() => { document.querySelectorAll('.menu').forEach(el => el.remove()); });
+
+        it('renders no row menu button for a conflict or synced row', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'conflict' },
+            ]);
+            view.render(container);
+
+            expect(container.querySelector('.scv-changes-tree .scv-change-menu')).toBeNull();
+        });
+
+        it('offers Push local, Use remote…, View diff, Add to Sync Queue, and Delete local… for a local-modified row', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' },
+            ]);
+            view.render(container);
+
+            (container.querySelector('.scv-changes-tree .scv-change-menu') as HTMLButtonElement).click();
+
+            const titles = Array.from(document.querySelectorAll('.menu .menu-item')).map(el => el.getAttribute('data-title'));
+            expect(titles).toEqual(['Push local', 'Use remote…', 'View diff', 'Add to Sync Queue', 'Delete local…']);
+        });
+
+        it('offers Download, Delete remote…, Add to Sync Queue, and Open remote for a remote-only row', () => {
+            const { view } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'remote-only' },
+            ]);
+            view.render(container);
+
+            (container.querySelector('.scv-changes-tree .scv-change-menu') as HTMLButtonElement).click();
+
+            const titles = Array.from(document.querySelectorAll('.menu .menu-item')).map(el => el.getAttribute('data-title'));
+            expect(titles).toEqual(['Download', 'Delete remote…', 'Add to Sync Queue', 'Open remote']);
+        });
+
+        it('routes "Push local" to onPush with just that row\'s id', () => {
+            const onPush = vi.fn();
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                { onPush },
+            );
+            view.render(container);
+
+            (container.querySelector('.scv-changes-tree .scv-change-menu') as HTMLButtonElement).click();
+            (Array.from(document.querySelectorAll('.menu .menu-item'))
+                .find(el => el.getAttribute('data-title') === 'Push local') as HTMLElement).click();
+
+            expect(onPush).toHaveBeenCalledWith([toChangeId('c-1')]);
+        });
+
+        it('routes "Delete remote…" to onDeleteRemote', () => {
+            const onDeleteRemote = vi.fn();
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'remote-only' }],
+                { onDeleteRemote },
+            );
+            view.render(container);
+
+            (container.querySelector('.scv-changes-tree .scv-change-menu') as HTMLButtonElement).click();
+            (Array.from(document.querySelectorAll('.menu .menu-item'))
+                .find(el => el.getAttribute('data-title') === 'Delete remote…') as HTMLElement).click();
+
+            expect(onDeleteRemote).toHaveBeenCalledWith([toChangeId('c-1')]);
+        });
+
+        it('routes "Add to Sync Queue" to selection instead of any immediate action', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' },
+            ]);
+            view.render(container);
+
+            (container.querySelector('.scv-changes-tree .scv-change-menu') as HTMLButtonElement).click();
+            (Array.from(document.querySelectorAll('.menu .menu-item'))
+                .find(el => el.getAttribute('data-title') === 'Add to Sync Queue') as HTMLElement).click();
+
+            expect(selection.isIncluded(toChangeId('c-1'))).toBe(true);
+        });
+
+        it('routes "Open remote" to onOpenRemoteFile', () => {
+            const onOpenRemoteFile = vi.fn();
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'remote-only' }],
+                { onOpenRemoteFile },
+            );
+            view.render(container);
+
+            (container.querySelector('.scv-changes-tree .scv-change-menu') as HTMLButtonElement).click();
+            (Array.from(document.querySelectorAll('.menu .menu-item'))
+                .find(el => el.getAttribute('data-title') === 'Open remote') as HTMLElement).click();
+
+            expect(onOpenRemoteFile).toHaveBeenCalledWith(expect.objectContaining({ id: toChangeId('c-1') }));
+        });
+
+        it('does not render the row menu on a Sync Queue row (the compact action control supersedes it)', () => {
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' },
+            ]);
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            const queueSection = container.querySelector('.scv-selected-section') as HTMLElement;
+            expect(queueSection.querySelector('.scv-change-menu')).toBeNull();
+        });
+    });
+
     describe('operation status', () => {
         it('renders the running indicator for a change with an in-flight operation', () => {
             const { view, operations } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);

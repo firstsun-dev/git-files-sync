@@ -210,6 +210,10 @@ export const Modal = class {
   }
 
   open() {
+    // Real Modal appends modalEl to document.body on open(), inside a
+    // '.modal-container' wrapper; mirrored here so tests can find/click into
+    // it via document queries like any other rendered control.
+    document.body.appendChild(this.modalEl);
     const withOnOpen = this as unknown as { onOpen?: () => void };
     if (typeof withOnOpen.onOpen === 'function') {
       withOnOpen.onOpen();
@@ -217,6 +221,7 @@ export const Modal = class {
   }
 
   close() {
+    this.modalEl.remove();
     const withOnClose = this as unknown as { onClose?: () => void };
     if (typeof withOnClose.onClose === 'function') {
       withOnClose.onClose();
