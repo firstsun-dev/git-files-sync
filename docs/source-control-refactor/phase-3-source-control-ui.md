@@ -1,5 +1,8 @@
 # Phase 3 — Source Control UI
 
+> **Historical migration roadmap. Do not use as current implementation
+> guidance.** See `docs/source-control.md` for the current architecture.
+
 ## Goal
 
 建立 VS Code style Source Control workflow。
