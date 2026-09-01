@@ -5,17 +5,17 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-09-01
-**Active Feature:** PR2 responsibility cleanup, item 3/5 done — centralize Source Control item projection (no tracked issue number; an ad-hoc follow-up plan on top of `origin/1.6.1`, not in `feature_list.json`).
+**Active Feature:** PR2 responsibility cleanup, item 4/5 done — reuse pull orchestration path (no tracked issue number; an ad-hoc follow-up plan on top of `origin/1.6.1`, not in `feature_list.json`).
 **Branch / PR:** `claude/pr2-source-control-boundary`, branched from `origin/1.6.1` (commit `69e5540`). Not yet pushed or opened as a PR.
 
-**Scope (item 3, per the PR2 plan):** Added `SourceControlViewModel.getItem(id)` as the single `SourceControlItem` projection path by id. `SourceControlItemView.refreshOpenDiffTab()` no longer hand-rolls a `SourceControlItem` with hardcoded `isSelectedForSync: false` / `operationStatus: 'idle'` / a fresh `resolveSyncAction()` call — it reads the ViewModel's real projection instead, so a queued/running row's diff-tab refresh reflects its actual state. `SourceControlView.loadAndRenderDiff()` (mobile detail view) drops its two-`getState()`-call lookup (needed only to also catch `'synced'` rows) in favor of the unfiltered `getItem()`. No UX change.
+**Scope (item 4, per the PR2 plan):** `SyncManager.pullFile()` no longer duplicates `PullCoordinator`'s no-prefetched-tree classification (exists/local-content/local-sha/baseline + `SyncPlanner.planFor('pull', ...)`, including the legacy GitLab revision-keyed baseline correction) — both now share `PullCoordinator.planSingleFile()`, a thin wrapper over the existing private `planFromRemote()`. Removed `SyncManager`'s now-dead `SyncPlanner` instance and `contentsEqual`/`isBinaryPath`/`gitBlobSha` imports. Deliberately did **not** unify interactive conflict handling, per-call confirmation, or notification — those are deliberate UX differences between single-file and batch pull (documented on `planSingleFile`), not accidental duplication. Also noted but explicitly left alone: `planFromTree` (tree-available path) persists a legacy-baseline correction via `migrateGitLabLegacyBaseline`, while `planFromRemote`/`planSingleFile` (no-tree path) only corrects it ephemerally per-call without persisting — this asymmetry predates this PR and unifying it would be a separate, larger change.
 
-**Next:** items 4-5 of the PR2 plan — item 4 (reuse pull orchestration between `SyncManager.pullFile()` and `PullCoordinator`) is next, and per the plan itself, if single-file and batch-pull semantics turn out to differ intentionally, stop rather than force a merge. Item 5 (provider contract cleanup) is small/optional and may be dropped to a follow-up PR if it starts to spread.
+**Next:** item 5 of the PR2 plan (provider contract cleanup — move `ConnectionTestResult` out of `git-service-base.ts`, review `updateConfig(...args: unknown[])`) is small/optional; the plan says drop it to a follow-up PR if it starts to spread. After that, this PR2 branch is otherwise ready to push and open as a PR.
 
 Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation`, Issue #143, and `claude/fix-source-control-explicit-sync-intent` — not superseded by this entry, carried over from the base branch history.
 
 - `npx eslint .` — 0 errors.
-- `npx vitest run` — 75 files / 949 tests passed (up from 945; added `SourceControlViewModel.getItem()` tests and a regression test proving the diff-tab refresh uses real selection/operation state, not hardcoded defaults).
+- `npx vitest run` — 76 files / 953 tests passed (up from 949; added `tests/logic/sync/PullCoordinator.test.ts`, the first dedicated test file for `PullCoordinator`, covering `planSingleFile`'s addition/none/legacy-baseline/conflict cases).
 - `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
 
 ## Outstanding Items
