@@ -116,6 +116,7 @@ export class BatchConflictResolutionModal extends Modal {
         for (const conflict of this.conflicts) {
             this.renderRow(rowList, conflict);
         }
+        rowList.querySelector<HTMLElement>('.batch-conflict-row:last-child')?.style.setProperty('border-bottom', 'none');
 
         const buttonContainer = contentEl.createDiv({ cls: 'conflict-buttons batch-conflict-buttons' });
         new ButtonComponent(buttonContainer)
