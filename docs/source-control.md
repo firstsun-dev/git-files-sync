@@ -1,5 +1,9 @@
 # Source Control — Current Architecture
 
+> Canonical repo-wide architecture and dependency rules: [`architecture.md`](./architecture.md).
+>
+> Bug-fix placement rules: [`bug-fix-guidelines.md`](./bug-fix-guidelines.md).
+
 The Source Control side panel is the plugin's only sync UI. Historical
 migration notes live under `docs/source-control-refactor/`; they are not
 current implementation guidance.
@@ -33,7 +37,8 @@ SourceControlItemView
   bucket by action, build one merged plan, confirm once, commit the remote
   mutation bucket once, apply the local pull bucket, and aggregate results.
 - `SyncWorkspace` remains the execution boundary. Source Control code never
-  talks directly to a provider.
+  talks directly to a provider or bypasses the workspace to reach sync-domain
+  coordinators/executors.
 
 ## Sync Queue invariant
 
@@ -42,6 +47,19 @@ choices are revalidated against the change's current kind before execution;
 a stale/illegal override falls back to the current default. Remote mutations
 (push/move/delete/keep-local/keep-remote) are committed as one provider
 batch, while pulls are local-only and applied after that remote bucket.
+
+## Bug-fix rule
+
+Do not repair Source Control defects by moving sync/provider behavior upward
+into the UI. Identify the owning module first. In particular:
+
+- wrong display/projection → Source Control UI/ViewModel;
+- wrong action intent → `ChangeActionPolicy` / selection / intent flow;
+- wrong status/change classification → sync status/refresh path;
+- wrong conflict/push semantics → sync domain coordinator/resolver;
+- provider-specific behavior → concrete provider or shared provider base.
+
+See `docs/bug-fix-guidelines.md` for the full checklist.
 
 ## Compatibility identifiers (do not remove)
 
