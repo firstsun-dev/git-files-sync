@@ -19,18 +19,18 @@ describe('renderFilterMenu', () => {
         callbacks = { onFilterChange: vi.fn() };
     });
 
-    it('renders the five chips (All/Needs Sync/Incoming/Conflict/Synced)', () => {
+    it('renders the four chips (All/Needs Sync/Incoming/Synced)', () => {
         renderFilterMenu(container, { filter: 'all', showSynced: false }, zeroCounts, callbacks);
 
         const chips = Array.from(container.querySelectorAll('.scv-filter-option')).map(el => el.getAttribute('data-filter'));
-        expect(chips).toEqual(['all', 'needsSync', 'remote', 'conflict', 'synced']);
+        expect(chips).toEqual(['all', 'needsSync', 'remote', 'synced']);
     });
 
     it('labels the chips with their display names', () => {
         renderFilterMenu(container, { filter: 'all', showSynced: false }, zeroCounts, callbacks);
 
         const labels = Array.from(container.querySelectorAll('.scv-filter-option .scv-filter-label')).map(el => el.textContent);
-        expect(labels).toEqual(['All', 'Needs Sync', 'Incoming', 'Conflict', 'Synced']);
+        expect(labels).toEqual(['All', 'Needs Sync', 'Incoming', 'Synced']);
     });
 
     it('marks the current (filter, showSynced) chip as active', () => {
@@ -66,6 +66,6 @@ describe('renderFilterMenu', () => {
         expect(container.querySelector('.scv-filter-dropdown')).not.toBeNull();
         expect(container.querySelector('.scv-filter-option')).toBeNull();
         const options = Array.from(container.querySelectorAll('.scv-filter-dropdown option')).map(o => (o as HTMLOptionElement).value);
-        expect(options).toEqual(['all', 'needsSync', 'remote', 'conflict', 'synced']);
+        expect(options).toEqual(['all', 'needsSync', 'remote', 'synced']);
     });
 });

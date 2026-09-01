@@ -8,8 +8,6 @@ export interface SourceControlWorkspaceInfo {
     serviceName: string;
     branch: string;
     vaultFolder: string;
-    /** Epoch ms of the most recent successful push/pull, or 0 if nothing has synced yet. */
-    lastSyncTime: number;
     /**
      * Epoch ms the Source Control view last completed a status refresh
      * (any reason — manual, startup, local-change), or 0 if it hasn't
@@ -103,14 +101,6 @@ function renderInfoStrip(container: HTMLElement, info: SourceControlWorkspaceInf
         setIcon(folder.createSpan({ cls: 'scv-info-icon' }), ICONS.folder);
         folder.createSpan({ text: ` ${info.vaultFolder}` });
     }
-
-    strip.createSpan({ cls: 'scv-info-sep', text: '·' });
-    strip.createSpan({
-        cls: 'scv-info-time',
-        text: info.lastSyncTime > 0
-            ? t('sourceControl.info.lastSync', { time: new Date(info.lastSyncTime).toLocaleTimeString() })
-            : t('sourceControl.info.neverSynced'),
-    });
 
     if (info.lastCheckedAt > 0) {
         strip.createSpan({ cls: 'scv-info-sep', text: '·' });

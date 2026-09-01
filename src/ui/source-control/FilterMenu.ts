@@ -15,7 +15,7 @@ import type { SourceControlCounts } from '../../logic/source-control/SourceContr
  *   bucket in the view (see `SourceControlView`) rather than via a domain
  *   change. Surfaced as an opt-in overview; the default stays on Needs Sync
  *   so a quiet workspace stays quiet.
- * - **Incoming / Conflict / Synced** — the matching domain filters (chip id stays `remote`; the label reads "Incoming" — a file only on the remote, or changed only on the remote, is something coming *in*).
+ * - **Incoming / Synced** — the matching domain filters (chip id stays `remote`; the label reads "Incoming" — a file only on the remote, or changed only on the remote, is something coming *in*).
  *
  * "Local" (domain `changes`) is intentionally not a chip: Needs Sync already
  * covers local-side changes, and a standalone local-only view added a
@@ -30,12 +30,11 @@ export interface FilterChip {
     count: (counts: SourceControlCounts) => number;
 }
 
-/** The five filter chips, in display order. */
+/** The four filter chips, in display order. */
 export const FILTER_CHIPS: readonly FilterChip[] = [
     { id: 'all',       filter: 'all',            showSynced: true,  labelKey: 'sourceControl.filter.all',       count: c => c.all + c.synced },
     { id: 'needsSync', filter: 'all',            showSynced: false, labelKey: 'sourceControl.filter.needsSync', count: c => c.all },
     { id: 'remote',    filter: 'remote-changes', showSynced: false, labelKey: 'sourceControl.filter.remote',   count: c => c['remote-changes'] },
-    { id: 'conflict',  filter: 'conflicts',      showSynced: false, labelKey: 'sourceControl.filter.conflict', count: c => c.conflicts },
     { id: 'synced',    filter: 'synced',         showSynced: true,  labelKey: 'sourceControl.filter.synced',   count: c => c.synced },
 ];
 
@@ -55,8 +54,8 @@ export interface FilterMenuOptions {
 }
 
 /**
- * Renders the Source Control filter row: five chips — All / Needs Sync /
- * Incoming / Conflict / Synced. On mobile a single `<select>` dropdown
+ * Renders the Source Control filter row: four chips — All / Needs Sync /
+ * Incoming / Synced. On mobile a single `<select>` dropdown
  * replaces the chips (same chip ids, counts inline as "Label (N)").
  *
  * Per-filter counts come straight from the ViewModel's single-source counts

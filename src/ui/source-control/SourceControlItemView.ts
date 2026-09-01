@@ -219,10 +219,8 @@ export class SourceControlItemView extends ItemView {
 
     private getWorkspaceInfo(): SourceControlWorkspaceInfo {
         const info = this.plugin.syncWorkspace.getInfo();
-        const lastSyncTime = Object.values(this.plugin.settings.syncMetadata)
-            .reduce((latest, metadata) => Math.max(latest, metadata.lastSyncedAt), 0);
         const lastCheckedAt = this.plugin.refreshState.getLastCheckedAt();
-        return { ...info, lastSyncTime, lastCheckedAt };
+        return { ...info, lastCheckedAt };
     }
 
     getViewType(): string { return SOURCE_CONTROL_VIEW_TYPE; }
