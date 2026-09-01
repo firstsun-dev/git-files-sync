@@ -1,3 +1,42 @@
+## [1.6.1](https://github.com/firstsun-dev/git-files-sync/compare/1.6.0...1.6.1) (2026-09-01)
+
+### Bug Fixes
+
+* **docs:** align agent guidance with source control architecture ([cf2239d](https://github.com/firstsun-dev/git-files-sync/commit/cf2239d84527e128aa38ec6be21f146bbac468e4))
+* **docs:** mark legacy source control migration docs historical ([0f11e17](https://github.com/firstsun-dev/git-files-sync/commit/0f11e172beec7b6d0bbf7a46141f5c5ea2c5429b))
+* **e2e:** exercise current remote delete application path ([8fcdfea](https://github.com/firstsun-dev/git-files-sync/commit/8fcdfeaa95a945c76b9a379f360db9bd489fb4c0))
+* **mobile:** remove duplicate safe-area padding from sync bar ([3a053a9](https://github.com/firstsun-dev/git-files-sync/commit/3a053a95c0c049fe463ffb80965cebf76eeefffc))
+* **source-control:** add compact per-row action control to the Sync Queue ([8d5d427](https://github.com/firstsun-dev/git-files-sync/commit/8d5d427e3cdb88a308da9f2f7084306a6e6669f3))
+* **source-control:** add per-kind advanced action menu to Repository Changes rows ([1a54acb](https://github.com/firstsun-dev/git-files-sync/commit/1a54acba09e6a20f25e2764e0c414903f25b0b99))
+* **source-control:** dedupe mobile diff render, force unified on phones ([fd6d7ec](https://github.com/firstsun-dev/git-files-sync/commit/fd6d7ec4798830e27119594701dc493b9ecbf438))
+* **source-control:** honor explicit actions in sync queue execution ([735bdc0](https://github.com/firstsun-dev/git-files-sync/commit/735bdc0627918734c9494093d822e14b4b9063b4))
+* **source-control:** preserve per-change action overrides in sync selection ([6baa0da](https://github.com/firstsun-dev/git-files-sync/commit/6baa0da4672fdfddc557d54edd4eb44e59d1f4e2))
+* **source-control:** remove Conflict filter chip and dedupe sync time in header ([1c69aed](https://github.com/firstsun-dev/git-files-sync/commit/1c69aed959954c427c910ccd3d9eb54ecc74de45))
+* **source-control:** remove Conflict filter chip and dedupe sync time in header ([e2015cc](https://github.com/firstsun-dev/git-files-sync/commit/e2015cce2830aeff7ddeb58d719bcdba5dd8dcc8))
+* **source-control:** resolve queue grouping from actual sync action ([601013f](https://github.com/firstsun-dev/git-files-sync/commit/601013fe69b186f32aef4f39ae7f3a4aff56592e))
+* **source-control:** shrink the inline Download button to icon-only on phone ([b44389d](https://github.com/firstsun-dev/git-files-sync/commit/b44389d1eb6afc5f17d77ef4d42724003461b713))
+* **sync-plan:** mark each plan row with its section's direction icon ([c4a198c](https://github.com/firstsun-dev/git-files-sync/commit/c4a198ce7d2ba881eea4a400ceb2a007782c3b8f))
+* **test:** guard removed sync status presentation imports ([beba48d](https://github.com/firstsun-dev/git-files-sync/commit/beba48dd1997221d2291227080fedf80f9e42101))
+* **ui:** drop setCssProps last-row override, use CSS :last-child instead ([15e1a6b](https://github.com/firstsun-dev/git-files-sync/commit/15e1a6b740d6f6475b768b5150febb30c14f2539))
+* **ui:** drop setCssProps last-row override, use CSS :last-child instead ([#155](https://github.com/firstsun-dev/git-files-sync/issues/155)) ([f626fb5](https://github.com/firstsun-dev/git-files-sync/commit/f626fb5aacb029380881898b0159e8addfc30784)), closes [#154](https://github.com/firstsun-dev/git-files-sync/issues/154)
+* **ui:** remove duplicate batch conflict divider ([6aab586](https://github.com/firstsun-dev/git-files-sync/commit/6aab58667597dc9af40f60cba8d211a3efaf5e0d))
+* **ui:** use Obsidian CSS helper for conflict divider ([adee61d](https://github.com/firstsun-dev/git-files-sync/commit/adee61dee64bded649e962a3bc4c378461132999))
+
+### Documentation
+
+* **architecture:** define module boundaries and bug-fix rules ([025a8c7](https://github.com/firstsun-dev/git-files-sync/commit/025a8c76902c6c9fa5c9c698da568b1f54c3fd3d))
+* record explicit sync intent session in progress.md ([d91fa6e](https://github.com/firstsun-dev/git-files-sync/commit/d91fa6e1faa20d81ff3f75bc2fefa9888de9b7b3))
+* sync CLAUDE.md and architecture.md with the enforced module boundaries ([69e5540](https://github.com/firstsun-dev/git-files-sync/commit/69e5540675b98a151c76d69b0f709a17e456a206))
+
+### Code Refactoring
+
+* **architecture:** add ESLint boundary guards and fix a reverse sync->UI dependency ([9f7449c](https://github.com/firstsun-dev/git-files-sync/commit/9f7449c77ea6aecdf4c814dc410eb25efb285985))
+* **runtime:** extract createSyncRuntime as the sync/Source Control composition root ([f21f169](https://github.com/firstsun-dev/git-files-sync/commit/f21f16902ccbfd50bedb90da74e24a022e10e79c))
+* **source-control:** isolate sync intent orchestration ([f554031](https://github.com/firstsun-dev/git-files-sync/commit/f5540311e5eacb7a08a9d27630308f2f19d4ddad))
+* **source-control:** responsibility cleanup (PR2) ([#154](https://github.com/firstsun-dev/git-files-sync/issues/154)) ([499ac9e](https://github.com/firstsun-dev/git-files-sync/commit/499ac9e723eadcf228a3586130d403ed0f95f951))
+* **sync:** split SyncStatusRefreshService into discovery/resolver/reconciler ([e94a6f7](https://github.com/firstsun-dev/git-files-sync/commit/e94a6f74db055e8139eb420df074784555db11e2))
+* **ui:** extract SyncQueueSection and RepositoryChangesSection from SourceControlView ([68c3683](https://github.com/firstsun-dev/git-files-sync/commit/68c3683db3de111a6ee0a6c035ef2978a9622975))
+
 ## [1.6.0](https://github.com/firstsun-dev/git-files-sync/compare/1.5.9...1.6.0) (2026-09-01)
 
 ### Features
