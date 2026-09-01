@@ -74,6 +74,43 @@ describe('createSyncRuntime', () => {
         expect(runtime.changeRepository.getById('other.md' as never)).toBeUndefined();
     });
 
+    it('reconciles SyncSelectionStore against every ChangeRepository replacement, including stale overrides', () => {
+        const runtime = createSyncRuntime(buildDeps());
+
+        runtime.sync.status.set({ path: 'note.md', status: 'modified' });
+        const noteId = runtime.changeRepository.getAll()[0]?.id;
+        expect(noteId).toBeDefined();
+        if (!noteId) return;
+
+        runtime.syncSelectionStore.selectForSync(noteId);
+        runtime.syncSelectionStore.setActionOverride(noteId, 'pull');
+        expect(runtime.syncSelectionStore.isIncluded(noteId)).toBe(true);
+
+        // Republishing without note.md at all drops the selection entirely.
+        runtime.sync.status.delete('note.md');
+
+        expect(runtime.syncSelectionStore.isIncluded(noteId)).toBe(false);
+        expect(runtime.syncSelectionStore.getActionOverride(noteId)).toBeUndefined();
+    });
+
+    it('stops reconciling SyncSelectionStore once disposed', () => {
+        const runtime = createSyncRuntime(buildDeps());
+
+        runtime.sync.status.set({ path: 'note.md', status: 'modified' });
+        const noteId = runtime.changeRepository.getAll()[0]?.id;
+        expect(noteId).toBeDefined();
+        if (!noteId) return;
+        runtime.syncSelectionStore.selectForSync(noteId);
+
+        runtime.dispose();
+        // Calling ChangeRepository.replace() directly (bypassing sync.status)
+        // isolates the selection-reconciliation subscription specifically:
+        // after dispose(), it must no longer reach SyncSelectionStore.
+        runtime.changeRepository.replace([]);
+
+        expect(runtime.syncSelectionStore.isIncluded(noteId)).toBe(true);
+    });
+
     it('routes SourceControlActionService notifications through the injected notify callback', async () => {
         const notify = vi.fn();
         const runtime = createSyncRuntime(buildDeps({ notify }));

@@ -5,14 +5,18 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-09-01
-**Active Feature:** restore explicit per-file sync actions (no tracked issue number). All 7 planned commits landed and each individually passes lint/tests/build.
-**Branch / PR:** `claude/fix-source-control-explicit-sync-intent`, based on `claude/fix-mobile-diff-rendering-and-responsive-layout` (itself 1 commit ahead of `main`). Not yet pushed or opened as a PR.
+**Active Feature:** PR2 responsibility cleanup, item 5 done — provider contract cleanup, partial (no tracked issue number; an ad-hoc follow-up plan on top of `origin/1.6.1`, not in `feature_list.json`).
+**Branch / PR:** `claude/pr2-source-control-boundary`, branched from `origin/1.6.1` (commit `69e5540`). Pushed; opened as [PR #154](https://github.com/firstsun-dev/git-files-sync/pull/154) against `1.6.1` (covers items 1-4; item 5 below lands as a follow-up commit on the same branch/PR).
 
-**Scope:** `SyncSelectionStore`/`ChangeActionPolicy` (per-change action overrides + resolution), `SourceControlViewModel` (resolved `syncAction`/`hasActionOverride` projection), Sync Queue grouping/row controls, `SourceControlActionService.sync()` (now takes `SyncIntentRequest[]`), a new Repository Changes row "⋯" menu, and `SyncPlanModal` per-row direction icons. Deliberately did not touch `DiffViewer.ts`, mobile diff lifecycle, or E2E cleanup — that's the base branch's prior work.
+**Scope (item 5, per the PR2 plan):** Moved `ConnectionTestResult` out of `git-service-base.ts` into `git-service-interface.ts` — it's a contract type consumed by `GitServiceInterface.testConnection`, so it belongs with the interface, not the base implementation class. `git-service-base.ts` now imports it back for its own `abstract testConnection` signature; `github-service.ts`/`gitlab-service.ts`/`gitea-service.ts`/`main.ts`/`GitLabSyncSettingTab.ts`/`tests/ui/SettingsConnectionStatus.test.ts` updated to import from the new location. Reviewed `updateConfig(...args: unknown[])` on `GitServiceInterface` per the plan's ask, but did **not** convert it to a typed discriminated union: every actual call site (`main.ts` `initializeGitService()`, 3 branches) already calls `updateConfig` on the concrete class (`GitLabService`/`GiteaService`/`GitHubService`), never through the loose interface type, so the untyped signature isn't causing a real type-safety gap today. A discriminated union would mean reshaping the interface, all three services' `updateConfig` bodies, and all three `main.ts` call sites into config-object form for no functional benefit — exactly the "touches too much, leave for later" case the plan calls out, so left as-is.
 
-**Next:** push the branch and open the PR (title `fix(source-control): restore explicit per-file sync actions`); no further planned work outstanding.
+**Next:** PR2 plan is now fully worked through (items 1-5). Nothing further planned here; watch PR #154 for review feedback.
 
-Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation` and Issue #143 — not superseded by this entry, carried over from the base branch history.
+Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation`, Issue #143, and `claude/fix-source-control-explicit-sync-intent` — not superseded by this entry, carried over from the base branch history.
+
+- `npx eslint .` — 0 errors.
+- `npx vitest run` — 76 files / 953 tests passed (unchanged count; pure type-relocation, no new tests needed).
+- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
 
 ## Outstanding Items
 

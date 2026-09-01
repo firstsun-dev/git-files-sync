@@ -110,18 +110,27 @@ export function createSyncRuntime(deps: SyncRuntimeDependencies): SyncRuntime {
     );
     const sourceControlActions = new SourceControlActionService(
         changeRepository,
+        syncSelectionStore,
         operationState,
         syncWorkspace,
         new SyncResultNotifier(deps.notify),
     );
 
+    // Selection-intent reconciliation is wired here, at the composition
+    // root, rather than inside SourceControlViewModel: it is a write-side
+    // lifecycle concern (stale selections/overrides get dropped whenever the
+    // repository publishes an authoritative snapshot), not part of the
+    // ViewModel's read-only projection.
+    const unsubscribeSelectionReconciliation = changeRepository.subscribe(changes => syncSelectionStore.reconcile(changes));
+
     // Keeps ChangeRepository (and therefore the Source Control view) in sync
     // with the same SyncStatusService instance the sync domain already
-    // publishes to -- no separate refresh/polling path.
+    // publishes to -- no separate refresh/polling path. SyncSelectionStore
+    // cleanup is handled by the reconciliation subscription above, which
+    // ChangeRepository.replace() below triggers, so it isn't repeated here.
     const unsubscribeChangeRepository = sync.status.subscribe((statuses) => {
         const changes = toSyncChanges([...statuses.values()]);
         changeRepository.replace(changes);
-        syncSelectionStore.refresh(changes.map(change => change.id));
     });
 
     return {
@@ -135,6 +144,9 @@ export function createSyncRuntime(deps: SyncRuntimeDependencies): SyncRuntime {
         refreshState,
         sourceControlViewModel,
         sourceControlActions,
-        dispose: () => unsubscribeChangeRepository(),
+        dispose: () => {
+            unsubscribeChangeRepository();
+            unsubscribeSelectionReconciliation();
+        },
     };
 }

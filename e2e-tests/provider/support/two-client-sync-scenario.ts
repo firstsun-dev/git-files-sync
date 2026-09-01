@@ -14,6 +14,7 @@ import { GitignoreManager } from '../../../src/logic/gitignore-manager';
 import { ensureSyncWorkspaceRuntime } from '../../../src/logic/sync/SyncWorkspace';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { SourceControlActionService } from '../../../src/logic/source-control/SourceControlActionService';
 import { toSyncChanges } from '../../../src/logic/source-control/FileStatusAdapter';
 import {
@@ -67,6 +68,7 @@ export class TwoClient {
      */
     private readonly statuses: SyncStatusService;
     private readonly repository = new ChangeRepository();
+    private readonly selection = new SyncSelectionStore();
     private readonly operations = new OperationState();
     private readonly refreshService: SyncStatusRefreshService;
     private readonly actionService: SourceControlActionService;
@@ -110,7 +112,7 @@ export class TwoClient {
             sync: this.manager,
             getNormalizedPath: path => path,
         }, this.statuses);
-        this.actionService = new SourceControlActionService(this.repository, this.operations, workspace);
+        this.actionService = new SourceControlActionService(this.repository, this.selection, this.operations, workspace);
     }
 
     // --- local vault ops --------------------------------------------------

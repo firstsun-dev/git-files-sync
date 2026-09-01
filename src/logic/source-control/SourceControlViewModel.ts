@@ -35,10 +35,11 @@ export interface SourceControlViewState {
  * Read-only projection of repository, selection, operation, and refresh state
  * into UI-ready snapshots.
  *
- * The constructor wires selection-intent reconciliation to authoritative
- * ChangeRepository replacements. Cleanup therefore happens on the write-side
- * repository lifecycle, while repeated getState() calls remain observational
- * and never mutate queue intent.
+ * Purely observational: getState() never mutates queue intent, and this
+ * class exposes no selection mutation surface of its own. Selection-intent
+ * reconciliation against authoritative ChangeRepository replacements is
+ * wired by the runtime composition root (createSyncRuntime), not here, and
+ * mutation goes through SourceControlActionService instead of this class.
  */
 export class SourceControlViewModel {
     constructor(
@@ -47,15 +48,7 @@ export class SourceControlViewModel {
         private readonly operations: OperationState,
         private readonly refreshSource: () => Promise<unknown>,
         private readonly refreshState: RefreshState,
-    ) {
-        this.changes.subscribe(changes => this.selectionStore.reconcile(changes));
-    }
-
-    /**
-     * Existing UI mutation boundary for queue selection. Kept for this PR to
-     * avoid mixing a renderer API redesign into the intent/execution cleanup.
-     */
-    get selection(): SyncSelectionStore { return this.selectionStore; }
+    ) {}
 
     getState(filter: SourceControlFilter = 'all', showSynced = false): SourceControlViewState {
         const all = this.changes.getAll();
@@ -73,6 +66,19 @@ export class SourceControlViewModel {
             refreshStatus: this.refreshState.get(),
             counts: summary.counts,
         };
+    }
+
+    /**
+     * Projects a single change by id, independent of any filter -- the sole
+     * projection path for callers (e.g. a diff pane host) that need one
+     * row's current selection/operation/syncAction state without hand-rolling
+     * a SourceControlItem themselves. Returns undefined once the change is no
+     * longer in the repository (e.g. it synced and dropped out, or was
+     * deleted).
+     */
+    getItem(id: ChangeId): SourceControlItem | undefined {
+        const change = this.changes.getById(id);
+        return change ? this.toItem(change) : undefined;
     }
 
     /**

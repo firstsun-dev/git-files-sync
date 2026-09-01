@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
+import { SyncSelectionStore } from '../../../src/logic/source-control/SyncSelectionStore';
 import { SourceControlActionService, type SyncIntentRequest } from '../../../src/logic/source-control/SourceControlActionService';
 import type { SyncExecutionResult, SyncResultNotificationPort } from '../../../src/logic/source-control/SyncResultNotifier';
 import type { PlannedPushBatch } from '../../../src/logic/sync/PushCoordinator';
@@ -93,9 +94,10 @@ function buildService(
 ) {
     const repository = new ChangeRepository();
     repository.replace(changes);
+    const selection = new SyncSelectionStore();
     const operations = new OperationState();
-    const service = new SourceControlActionService(repository, operations, workspace, notifier);
-    return { service, operations, notifier };
+    const service = new SourceControlActionService(repository, selection, operations, workspace, notifier);
+    return { service, selection, operations, notifier };
 }
 
 describe('SourceControlActionService', () => {
@@ -796,6 +798,70 @@ describe('SourceControlActionService', () => {
             });
 
             expect(content).toBeNull();
+        });
+    });
+
+    describe('selection mutation', () => {
+        it('selectForSync / deselectFromSync toggle one change through SyncSelectionStore', () => {
+            const { service, selection } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }],
+                fakeWorkspace(),
+            );
+
+            service.selectForSync(toChangeId('c-1'));
+            expect(selection.isIncluded(toChangeId('c-1'))).toBe(true);
+
+            service.deselectFromSync(toChangeId('c-1'));
+            expect(selection.isIncluded(toChangeId('c-1'))).toBe(false);
+        });
+
+        it('selectMany / deselectMany toggle a batch through SyncSelectionStore', () => {
+            const { service, selection } = buildService(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'local-only' },
+                ],
+                fakeWorkspace(),
+            );
+
+            service.selectMany([toChangeId('c-1'), toChangeId('c-2')]);
+            expect(selection.getSelectedChangeIds()).toEqual([toChangeId('c-1'), toChangeId('c-2')]);
+
+            service.deselectMany([toChangeId('c-1'), toChangeId('c-2')]);
+            expect(selection.getSelectedChangeIds()).toEqual([]);
+        });
+
+        it('setSyncAction stores a non-default override, and clears it once it matches the kind default', () => {
+            const { service, selection } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                fakeWorkspace(),
+            );
+
+            service.setSyncAction(toChangeId('c-1'), 'pull');
+            expect(selection.getActionOverride(toChangeId('c-1'))).toBe('pull');
+
+            // 'push' is local-modified's own default, so setting it back clears the override.
+            service.setSyncAction(toChangeId('c-1'), 'push');
+            expect(selection.getActionOverride(toChangeId('c-1'))).toBeUndefined();
+        });
+
+        it('clearSyncAction removes an explicit override', () => {
+            const { service, selection } = buildService(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                fakeWorkspace(),
+            );
+
+            selection.setActionOverride(toChangeId('c-1'), 'pull');
+            service.clearSyncAction(toChangeId('c-1'));
+
+            expect(selection.getActionOverride(toChangeId('c-1'))).toBeUndefined();
+        });
+
+        it('setSyncAction on a stale (already-removed) change id is a no-op, not a throw', () => {
+            const { service, selection } = buildService([], fakeWorkspace());
+
+            expect(() => service.setSyncAction(toChangeId('gone'), 'pull')).not.toThrow();
+            expect(selection.getActionOverride(toChangeId('gone'))).toBeUndefined();
         });
     });
 });

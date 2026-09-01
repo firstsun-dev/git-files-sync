@@ -40,14 +40,16 @@ function renderAsObsidian113(tab: GitLabSyncSettingTab): void {
 
 describe('GitLabSyncSettingTab on Obsidian 1.13+', () => {
   it('returns no declarative definitions until the tab is fully migrated', () => {
-    const tab = new GitLabSyncSettingTab(new App(), createPluginStub());
+    const plugin = createPluginStub();
+    const tab = new GitLabSyncSettingTab(new App(), plugin, plugin);
 
     expect(tab.getSettingDefinitions()).toEqual([]);
   });
 
   it('falls back to display() and renders settings instead of a blank page', () => {
     vi.useFakeTimers();
-    const tab = new GitLabSyncSettingTab(new App(), createPluginStub());
+    const plugin = createPluginStub();
+    const tab = new GitLabSyncSettingTab(new App(), plugin, plugin);
     tab.containerEl = createContainer();
     const displaySpy = vi.spyOn(tab, 'display');
 

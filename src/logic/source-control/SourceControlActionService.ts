@@ -3,6 +3,8 @@ import { type SyncExecutionResult, type SyncResultNotificationPort } from './Syn
 import type { ChangeRepository } from './ChangeRepository';
 import type { OperationState } from './OperationState';
 import type { SourceControlItem } from './SourceControlViewModel';
+import type { SyncSelectionStore } from './SyncSelectionStore';
+import { defaultSyncAction, type SyncAction } from './ChangeActionPolicy';
 import { SyncIntentExecutor } from './SyncIntentExecutor';
 import type { SyncIntentRequest } from './SyncIntent';
 import type { ChangeId, SyncChange } from './types';
@@ -29,12 +31,18 @@ export interface SourceControlDiffContent {
  *
  * Neither layer talks to a Git provider directly; SyncWorkspace remains the
  * execution boundary.
+ *
+ * Also owns the Sync Queue selection/action-override mutation boundary
+ * (select/deselect, set/clear a row's action override) on behalf of
+ * SyncSelectionStore, so the UI never reaches past this facade into that
+ * store directly.
  */
 export class SourceControlActionService {
     private readonly syncIntentExecutor: SyncIntentExecutor;
 
     constructor(
         private readonly changes: ChangeRepository,
+        private readonly selection: SyncSelectionStore,
         private readonly operations: OperationState,
         private readonly workspace: SyncWorkspace,
         private readonly syncResultNotifier: SyncResultNotificationPort = { notify: () => {} },
@@ -45,6 +53,48 @@ export class SourceControlActionService {
             workspace,
             syncResultNotifier,
         );
+    }
+
+    /** Adds one change to the Sync Queue. */
+    selectForSync(changeId: ChangeId): void {
+        this.selection.selectForSync(changeId);
+    }
+
+    /** Removes one change from the Sync Queue, clearing any action override with it. */
+    deselectFromSync(changeId: ChangeId): void {
+        this.selection.deselectFromSync(changeId);
+    }
+
+    /** Adds several changes to the Sync Queue in one batch (e.g. a folder checkbox). */
+    selectMany(changeIds: readonly ChangeId[]): void {
+        this.selection.selectMany(changeIds);
+    }
+
+    /** Removes several changes from the Sync Queue in one batch. */
+    deselectMany(changeIds: readonly ChangeId[]): void {
+        this.selection.deselectMany(changeIds);
+    }
+
+    /**
+     * Sets a Sync Queue row's explicit action override. Picking the kind's
+     * own default clears the override instead of storing a redundant one, so
+     * `SourceControlItem.hasActionOverride` only means "the user chose
+     * something other than the default".
+     */
+    setSyncAction(changeId: ChangeId, action: SyncAction): void {
+        const change = this.changes.getById(changeId);
+        if (!change) return;
+
+        if (action === defaultSyncAction(change.kind)) {
+            this.selection.clearActionOverride(changeId);
+        } else {
+            this.selection.setActionOverride(changeId, action);
+        }
+    }
+
+    /** Clears a Sync Queue row's explicit action override, reverting it to the kind default. */
+    clearSyncAction(changeId: ChangeId): void {
+        this.selection.clearActionOverride(changeId);
     }
 
     /** Pushes one or more changes (single push and batch push share this path). */

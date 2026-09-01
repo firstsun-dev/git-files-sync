@@ -45,7 +45,7 @@ function buildPlugin(kind: SyncChangeKind = 'local-only') {
         diffTabPath,
     } as unknown as GitLabFilesPush;
 
-    return { plugin, repository, selection, sync, push, pull, deleteRemote, deleteLocal, loadDiffContent, openDiffTab, getRemoteFileUrl, status, diffTabPath };
+    return { plugin, repository, selection, operations, sync, push, pull, deleteRemote, deleteLocal, loadDiffContent, openDiffTab, getRemoteFileUrl, status, diffTabPath };
 }
 
 function buildLeaf() {
@@ -362,6 +362,32 @@ describe('SourceControlItemView', () => {
         await Promise.resolve();
 
         expect(openDiffTab).toHaveBeenCalledWith('a.md', null);
+    });
+
+    it('refreshes the open diff tab using the ViewModel\'s real selection/operation projection, not hardcoded defaults', async () => {
+        const { plugin, selection, operations, loadDiffContent, diffTabPath } = buildPlugin('local-modified');
+        (diffTabPath as ReturnType<typeof vi.fn>).mockReturnValue('a.md');
+        // Prior to the getItem() refactor this path hardcoded isSelectedForSync:
+        // false / operationStatus: 'idle' regardless of actual state.
+        selection.selectForSync(toChangeId('a.md'));
+        operations.start(toChangeId('a.md'));
+        const view = new SourceControlItemView({} as WorkspaceLeaf, plugin);
+        await view.onOpen();
+
+        const status = (plugin as unknown as { sync: { status: SyncStatusService } }).sync.status;
+        status.set({ path: 'a.md', status: 'modified', localContent: 'local', remoteContent: 'remote' });
+        await new Promise(resolve => window.setTimeout(resolve, 200));
+        loadDiffContent.mockClear();
+
+        status.set({ path: 'a.md', status: 'synced', localContent: 'remote', remoteContent: 'remote', remoteSha: 'new-sha' });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(loadDiffContent).toHaveBeenCalledWith(expect.objectContaining({
+            isSelectedForSync: true,
+            operationStatus: 'running',
+        }));
     });
 
     describe('row menu delete-remote confirmation', () => {
