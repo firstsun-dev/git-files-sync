@@ -25,7 +25,6 @@ function buildView(changes: SyncChange[], callbacks: Partial<SourceControlViewCa
         serviceName: 'GitHub',
         branch: 'main',
         vaultFolder: '',
-        lastSyncTime: 0,
         lastCheckedAt: 0,
     }));
     return { view, selection, operations, refreshState, refreshSource, onSync, onRefresh };
@@ -46,7 +45,6 @@ function buildViewWithRepository(changes: SyncChange[], callbacks: Partial<Sourc
         serviceName: 'GitHub',
         branch: 'main',
         vaultFolder: '',
-        lastSyncTime: 0,
         lastCheckedAt: 0,
     }));
     return { view, repository, selection, operations, refreshState, refreshSource, onSync, onRefresh };
@@ -110,23 +108,23 @@ describe('SourceControlView', () => {
 
         it('shows a flat tree (no sections) once a specific filter is selected', () => {
             const { view } = buildView([
-                { id: toChangeId('c-1'), path: 'a.md', kind: 'conflict' },
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'remote-only' },
                 { id: toChangeId('c-2'), path: 'b.md', kind: 'local-only' },
             ]);
             view.render(container);
 
-            (container.querySelector('.scv-filter-option[data-filter="conflict"]') as HTMLButtonElement).click();
+            (container.querySelector('.scv-filter-option[data-filter="remote"]') as HTMLButtonElement).click();
 
             expect(container.querySelectorAll('.scv-section')).toHaveLength(0);
             expect(container.querySelectorAll('.scv-change-item')).toHaveLength(1);
-            expect(view.getFilter()).toBe('conflicts');
+            expect(view.getFilter()).toBe('remote-changes');
         });
 
         it('shows the empty state when the active filter has no items', () => {
             const { view } = buildView([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
             view.render(container);
 
-            (container.querySelector('.scv-filter-option[data-filter="conflict"]') as HTMLButtonElement).click();
+            (container.querySelector('.scv-filter-option[data-filter="remote"]') as HTMLButtonElement).click();
 
             expect(container.querySelector('.scv-empty')).not.toBeNull();
         });
@@ -1284,7 +1282,7 @@ describe('SourceControlView', () => {
             const view = new SourceControlView(
                 viewModel,
                 { onSync: vi.fn(), onRefresh: vi.fn() },
-                () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '', lastSyncTime: 0, lastCheckedAt }),
+                () => ({ serviceName: 'GitHub', branch: 'main', vaultFolder: '', lastCheckedAt }),
             );
             return { view, refreshState };
         }
@@ -1294,9 +1292,7 @@ describe('SourceControlView', () => {
             view.render(container);
 
             const infoTimes = container.querySelectorAll('.scv-info-time');
-            // Only the "Never synced" line is present; no "Last checked" line.
-            expect(infoTimes).toHaveLength(1);
-            expect(infoTimes[0]?.textContent).toBe('Never synced');
+            expect(infoTimes).toHaveLength(0);
         });
 
         it('shows "Last checked: just now" when the last refresh was within a minute', () => {
@@ -1304,8 +1300,8 @@ describe('SourceControlView', () => {
             view.render(container);
 
             const infoTimes = container.querySelectorAll('.scv-info-time');
-            expect(infoTimes).toHaveLength(2);
-            expect(infoTimes[1]?.textContent).toBe('Last checked: just now');
+            expect(infoTimes).toHaveLength(1);
+            expect(infoTimes[0]?.textContent).toBe('Last checked: just now');
         });
 
         it('shows "Last checked: <time>" when the last refresh was over a minute ago', () => {
@@ -1313,9 +1309,9 @@ describe('SourceControlView', () => {
             view.render(container);
 
             const infoTimes = container.querySelectorAll('.scv-info-time');
-            expect(infoTimes).toHaveLength(2);
-            expect(infoTimes[1]?.textContent).toContain('Last checked:');
-            expect(infoTimes[1]?.textContent).not.toBe('Last checked: just now');
+            expect(infoTimes).toHaveLength(1);
+            expect(infoTimes[0]?.textContent).toContain('Last checked:');
+            expect(infoTimes[0]?.textContent).not.toBe('Last checked: just now');
         });
     });
 });
