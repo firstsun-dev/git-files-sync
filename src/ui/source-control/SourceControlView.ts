@@ -3,7 +3,6 @@ import { t } from '../../i18n';
 import type { SourceControlFilter } from '../../logic/source-control/SourceControlFilter';
 import { SourceControlViewModel, type SourceControlItem } from '../../logic/source-control/SourceControlViewModel';
 import type { ChangeId } from '../../logic/source-control/types';
-import { defaultSyncAction } from '../../logic/source-control/ChangeActionPolicy';
 import { ICONS } from '../components/icons';
 import { renderDiffViewer, currentDiffLayout, rememberDiffLayout, type DiffViewerHandle } from '../components/DiffViewer';
 import { renderChangeTree, renderChangeList, type ChangeTreeCallbacks } from './ChangeTree';
@@ -504,15 +503,16 @@ export class SourceControlView {
             text: t('sourceControl.section.queueSubtitle', { count: syncQueue.length }),
         });
         const list = section.createDiv({ cls: 'scv-selected-section-list' });
-        // Group the queue by its default sync action so a mixed batch reads
-        // as what the Sync button will actually do (Upload / Download /
-        // Delete) rather than a flat list of ambiguous badges. Only surface
-        // group labels when more than one action is present in the batch —
-        // a single-action queue stays flat (no label noise) and matches the
-        // pre-categorization layout.
-        const upload = syncQueue.filter(item => defaultSyncAction(item.kind) === 'push');
-        const download = syncQueue.filter(item => defaultSyncAction(item.kind) === 'pull');
-        const deleteRemote = syncQueue.filter(item => defaultSyncAction(item.kind) === 'delete-remote');
+        // Group the queue by its resolved sync action (the default, unless
+        // the user overrode it) so a mixed batch reads as what the Sync
+        // button will actually do (Upload / Download / Delete) rather than a
+        // flat list of ambiguous badges. Only surface group labels when more
+        // than one action is present in the batch — a single-action queue
+        // stays flat (no label noise) and matches the pre-categorization
+        // layout.
+        const upload = syncQueue.filter(item => item.syncAction === 'push');
+        const download = syncQueue.filter(item => item.syncAction === 'pull');
+        const deleteRemote = syncQueue.filter(item => item.syncAction === 'delete-remote');
         const groupCount = [upload, download, deleteRemote].filter(group => group.length > 0).length;
         const mixed = groupCount > 1;
         if (mixed && upload.length > 0) list.createDiv({ cls: 'scv-queue-group-label', text: t('sourceControl.queue.upload') });

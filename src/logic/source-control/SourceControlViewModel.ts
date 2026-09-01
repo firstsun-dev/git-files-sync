@@ -1,4 +1,5 @@
 import type { ChangeRepository } from './ChangeRepository';
+import { resolveSyncAction, type SyncAction } from './ChangeActionPolicy';
 import { buildSummary, type SourceControlCounts } from './SourceControlSummary';
 import type { OperationState, OperationStatus } from './OperationState';
 import type { RefreshReason } from './RefreshReason';
@@ -15,6 +16,10 @@ export interface SourceControlItem {
     kind: SyncChangeKind;
     isSelectedForSync: boolean;
     operationStatus: OperationStatus;
+    /** The action this change actually syncs as — the user's override if still legal for `kind`, otherwise the default. */
+    syncAction: SyncAction;
+    /** Whether `syncAction` came from a still-legal user override, as opposed to the kind's default. */
+    hasActionOverride: boolean;
 }
 
 /** The complete state the Source Control UI needs to render for a given filter. */
@@ -50,7 +55,13 @@ export interface SourceControlViewState {
  * synced count is reported as `0` and the `synced` filter yields no items,
  * matching the "Show synced" toggle (default off).
  *
- * The one non-projection responsibility is {@link refresh}: it delegates to an
+ * `toItem` has one side effect for the same reason `refresh` does: a stale
+ * action override (recorded when a change was e.g. `local-modified`, now
+ * stranded because the change became `local-only`) is cleared on the
+ * selection store as soon as a projection notices it's no longer legal,
+ * rather than left to resurface if the kind later reverts.
+ *
+ * The other non-projection responsibility is {@link refresh}: it delegates to an
  * injected refresh callback (wired to `SyncWorkspace.refresh()` in `main.ts`)
  * and drives the injected {@link RefreshState} holder so the UI can surface
  * loading/failed states. It holds no provider or refresh logic of its own,
@@ -119,6 +130,16 @@ export class SourceControlViewModel {
     }
 
     private toItem(change: SyncChange): SourceControlItem {
+        const storedOverride = this.selectionStore.getActionOverride(change.id);
+        const syncAction = resolveSyncAction(change.kind, storedOverride);
+        const hasActionOverride = storedOverride !== undefined && storedOverride === syncAction;
+        // The change's kind moved on since the override was recorded (e.g. a
+        // stored 'pull' on what's now local-only) — resolveSyncAction already
+        // fell back to the default, so drop the now-meaningless override
+        // rather than let it linger and resurface once the kind reverts.
+        if (storedOverride !== undefined && !hasActionOverride) {
+            this.selectionStore.clearActionOverride(change.id);
+        }
         return {
             id: change.id,
             path: change.path,
@@ -126,6 +147,8 @@ export class SourceControlViewModel {
             kind: change.kind,
             isSelectedForSync: this.selectionStore.isIncluded(change.id),
             operationStatus: this.operations.get(change.id),
+            syncAction,
+            hasActionOverride,
         };
     }
 }

@@ -198,4 +198,46 @@ describe('SourceControlViewModel', () => {
         await expect(viewModel.refresh()).rejects.toThrow('boom');
         expect(refreshState.get()).toBe('failed');
     });
+
+    describe('syncAction projection', () => {
+        it('defaults syncAction to the kind default with no override', () => {
+            const { viewModel } = buildViewModel([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }]);
+
+            const item = viewModel.getState('all').items[0];
+            expect(item?.syncAction).toBe('push');
+            expect(item?.hasActionOverride).toBe(false);
+        });
+
+        it('resolves syncAction to a legal override and marks hasActionOverride', () => {
+            const { viewModel, selection } = buildViewModel([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }]);
+            selection.setActionOverride(toChangeId('c-1'), 'pull');
+
+            const item = viewModel.getState('all').items[0];
+            expect(item?.syncAction).toBe('pull');
+            expect(item?.hasActionOverride).toBe(true);
+        });
+
+        it('falls back to the default and clears a stale override once the kind no longer supports it', () => {
+            const repository = new ChangeRepository();
+            repository.replace([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }]);
+            const selection = new SyncSelectionStore();
+            selection.setActionOverride(toChangeId('c-1'), 'pull');
+            const viewModel = new SourceControlViewModel(
+                repository,
+                selection,
+                new OperationState(),
+                vi.fn().mockResolvedValue(undefined),
+                new RefreshState(),
+            );
+
+            // Remote copy of the change disappears — kind moves from
+            // local-modified (allows pull) to local-only (push only).
+            repository.replace([{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' }]);
+
+            const item = viewModel.getState('all').items[0];
+            expect(item?.syncAction).toBe('push');
+            expect(item?.hasActionOverride).toBe(false);
+            expect(selection.getActionOverride(toChangeId('c-1'))).toBeUndefined();
+        });
+    });
 });

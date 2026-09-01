@@ -521,6 +521,24 @@ describe('SourceControlView', () => {
 
             expect(container.querySelector('.scv-queue-group-label')).toBeNull();
         });
+
+        it('groups by the resolved action, not the kind default, when the user overrides it', () => {
+            const { view, selection } = buildView(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+                ],
+            );
+            selection.selectForSync(toChangeId('c-1'));
+            selection.selectForSync(toChangeId('c-2'));
+            // Both default to push; overriding one to pull should move it into
+            // Download despite sharing the same change kind as the other.
+            selection.setActionOverride(toChangeId('c-2'), 'pull');
+            view.render(container);
+
+            const labels = Array.from(container.querySelectorAll('.scv-queue-group-label')).map(el => el.textContent);
+            expect(labels).toEqual(['Upload', 'Download']);
+        });
     });
 
     describe('inline download action', () => {

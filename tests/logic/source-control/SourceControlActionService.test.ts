@@ -658,6 +658,8 @@ describe('SourceControlActionService', () => {
                 kind: 'local-modified',
                 isSelectedForSync: false,
                 operationStatus: 'idle',
+                syncAction: 'push',
+                hasActionOverride: false,
             });
 
             expect(getDiff).toHaveBeenCalledWith('a.md');
@@ -682,6 +684,8 @@ describe('SourceControlActionService', () => {
                 kind: 'local-modified',
                 isSelectedForSync: false,
                 operationStatus: 'idle',
+                syncAction: 'push',
+                hasActionOverride: false,
             });
 
             expect(content).toBeNull();
