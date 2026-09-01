@@ -5,8 +5,7 @@ import { SourceControlViewModel, type SourceControlItem } from '../../logic/sour
 import type { ChangeId } from '../../logic/source-control/types';
 import { defaultSyncAction } from '../../logic/source-control/ChangeActionPolicy';
 import { ICONS } from '../components/icons';
-import { renderDiffViewer, currentDiffLayout, rememberDiffLayout } from '../components/DiffViewer';
-import { renderDiffPanel } from '../components/DiffPanel';
+import { renderDiffViewer, currentDiffLayout, rememberDiffLayout, type DiffViewerHandle } from '../components/DiffViewer';
 import { renderChangeTree, renderChangeList, type ChangeTreeCallbacks } from './ChangeTree';
 import { renderChangeItem } from './ChangeItem';
 import { DiffStatProvider, type DiffStatLoadResult } from './DiffStatProvider';
@@ -569,12 +568,11 @@ export class SourceControlView {
         const toggleSlot = bar.createDiv({ cls: 'scv-detail-bar-toggle' });
 
         // Shared DiffViewer renders an empty placeholder body; the async
-        // load below fills it (stale-guarded) once the diff content is ready.
-        // The viewer appends the body directly to `detail`, so the legacy
-        // .scv-detail-diff wrapper's CSS is kept by styling the body itself.
-        renderDiffViewer(detail, {
-            remote: '',
-            local: '',
+        // load below fills it in (stale-guarded) via the returned handle,
+        // once the diff content is ready. The viewer appends the body
+        // directly to `detail`, so the legacy .scv-detail-diff wrapper's CSS
+        // is kept by styling the body itself.
+        const viewer = renderDiffViewer(detail, {
             layout: currentDiffLayout(),
             toggleHost: toggleSlot,
             onLayoutChange: (next) => {
@@ -584,12 +582,12 @@ export class SourceControlView {
         });
         const diffBody = detail.querySelector<HTMLElement>('.scv-diff-tab-body');
         diffBody?.addClass('scv-detail-diff');
-        if (diffBody && this.selectedChangeId) {
-            void this.loadAndRenderDiff(diffBody, this.selectedChangeId);
+        if (this.selectedChangeId) {
+            void this.loadAndRenderDiff(viewer, this.selectedChangeId);
         }
     }
 
-    private async loadAndRenderDiff(container: HTMLElement, changeId: ChangeId): Promise<void> {
+    private async loadAndRenderDiff(viewer: DiffViewerHandle, changeId: ChangeId): Promise<void> {
         if (!this.callbacks.loadDiffContent) return;
         const item = this.viewModel.getState('all').items.find(i => i.id === changeId)
             ?? this.viewModel.getState('synced', true).items.find(i => i.id === changeId);
@@ -598,7 +596,7 @@ export class SourceControlView {
         const content = await this.callbacks.loadDiffContent(item);
         // Stale response guard: the selection may have moved on while awaiting.
         if (!content || this.selectedChangeId !== changeId) return;
-        renderDiffPanel(container, content.remote, content.local);
+        viewer.setContent(content.remote, content.local);
     }
 
     private toggleFolder(path: string): void {

@@ -645,7 +645,7 @@ describe('SourceControlView', () => {
         // onOpenDiff, and the host (SourceControlItemView) opens a main-area
         // tab. Only the mobile full-screen detail view still loads/renders
         // diff content inside SourceControlView itself.
-        afterEach(() => { Platform.isMobile = false; });
+        afterEach(() => { Platform.isMobile = false; Platform.isPhone = false; });
 
         it('loads and renders diff content in the mobile detail view for the clicked change', async () => {
             Platform.isMobile = true;
@@ -664,6 +664,83 @@ describe('SourceControlView', () => {
             expect(container.querySelector('.scv-detail-diff')).not.toBeNull();
             // Reuses the existing diff panel renderer (Phase 3 spec: don't rewrite diff UI), which uses its own 'ssv-' class prefix.
             expect(container.querySelector('.ssv-diff-split')).not.toBeNull();
+        });
+
+        it('renders no diff panel before the async load resolves, and exactly one once it does', async () => {
+            Platform.isMobile = true;
+            let resolveLoad: (value: { remote: string; local: string }) => void = () => {};
+            const loadDiffContent = vi.fn().mockReturnValue(new Promise(resolve => { resolveLoad = resolve; }));
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                { loadDiffContent },
+            );
+            view.render(container);
+
+            (container.querySelector('.scv-change-item') as HTMLElement).click();
+            await Promise.resolve();
+
+            expect(container.querySelector('.ssv-diff-split')).toBeNull();
+            expect(container.querySelector('.ssv-diff-unified')).toBeNull();
+
+            resolveLoad({ remote: 'remote text', local: 'local text' });
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(container.querySelectorAll('.ssv-diff-split')).toHaveLength(1);
+            expect(container.querySelectorAll('.ssv-diff-unified')).toHaveLength(1);
+            expect(container.querySelectorAll('.ssv-diff-hd')).toHaveLength(2);
+        });
+
+        it('does not let a stale async result render into a reopened detail view', async () => {
+            Platform.isMobile = true;
+            let resolveFirst: (value: { remote: string; local: string }) => void = () => {};
+            const loadDiffContent = vi.fn()
+                .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve; }))
+                .mockResolvedValueOnce({ remote: 'second remote', local: 'second local' });
+            const { view } = buildView(
+                [
+                    { id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' },
+                    { id: toChangeId('c-2'), path: 'b.md', kind: 'local-modified' },
+                ],
+                { loadDiffContent },
+            );
+            view.render(container);
+
+            (container.querySelectorAll('.scv-change-item')[0] as HTMLElement).click();
+            await Promise.resolve();
+            (container.querySelector('.scv-detail-back') as HTMLElement).click();
+            (container.querySelectorAll('.scv-change-item')[1] as HTMLElement).click();
+            await Promise.resolve();
+            await Promise.resolve();
+
+            resolveFirst({ remote: 'first remote', local: 'first local' });
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(container.textContent).not.toContain('first remote');
+            expect(container.textContent).toContain('second remote');
+            expect(container.querySelectorAll('.ssv-diff-split')).toHaveLength(1);
+        });
+
+        it('forces unified with no toggle on a phone regardless of session split preference', async () => {
+            Platform.isMobile = true;
+            Platform.isPhone = true;
+            const loadDiffContent = vi.fn().mockResolvedValue({ remote: 'remote text', local: 'local text' });
+            const { view } = buildView(
+                [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                { loadDiffContent },
+            );
+            view.render(container);
+
+            (container.querySelector('.scv-change-item') as HTMLElement).click();
+            await Promise.resolve();
+            await Promise.resolve();
+
+            const diffContainer = container.querySelector('.scv-detail-diff');
+            expect(diffContainer?.classList.contains('scv-diff-layout-unified')).toBe(true);
+            expect(container.querySelector('.scv-diff-layout-toggle')).toBeNull();
+
+            Platform.isPhone = false;
         });
 
         it('does not render an inline diff pane on desktop -- only notifies onOpenDiff', () => {

@@ -297,7 +297,7 @@ export const debounce = <T extends unknown[]>(cb: (...args: T) => unknown, timeo
   return fn;
 };
 // Mutable so tests can exercise both the desktop and mobile branches.
-export const Platform = { isDesktopApp: true, isMobile: false };
+export const Platform = { isDesktopApp: true, isMobile: false, isPhone: false, isTablet: false };
 export const FileSystemAdapter = class {
   getBasePath() { return '/mock/path'; }
 };
