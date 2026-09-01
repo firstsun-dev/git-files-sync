@@ -1629,9 +1629,26 @@ body.is-mobile .gfs-conflict-modal--batch .batch-conflict-row-actions {
     flex-direction: column;
 }
 
+.sync-plan-file-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sync-plan-file-icon {
+    display: flex;
+    flex-shrink: 0;
+    color: var(--text-faint);
+}
+
+.sync-plan-file-icon .svg-icon { width: 11px; height: 11px; }
+
+.sync-plan-section.is-destructive .sync-plan-file-icon { color: var(--text-error); }
+
 .sync-plan-file-moved-from {
     color: var(--text-muted);
     font-size: 0.9em;
+    padding-left: 17px;
 }
 
 .sync-plan-buttons {

@@ -28,6 +28,26 @@ describe('SyncPlanModal', () => {
         expect(modal.contentEl.querySelector('.sync-plan-section.is-destructive')).toBeNull();
     });
 
+    it('prefixes every file row with a direction icon, so a row reads unambiguously even with its section heading scrolled out of view', () => {
+        const plan: SyncPlan = {
+            ...emptyPlan(),
+            modifications: [{ path: 'push-me.md', name: 'push-me.md' }],
+            downloads: [{ path: 'pull-me.md', name: 'pull-me.md' }],
+            deletions: [{ path: 'gone.md', name: 'gone.md' }],
+        };
+        const modal = new SyncPlanModal(new App(), plan, 'sync', vi.fn());
+        modal.contentEl = createContainer();
+
+        modal.onOpen();
+
+        const rows = Array.from(modal.contentEl.querySelectorAll('.sync-plan-file-row'));
+        expect(rows.length).toBe(3);
+        for (const row of rows) {
+            expect(row.querySelector('.sync-plan-file-icon')).not.toBeNull();
+            expect(row.querySelector('.sync-plan-file-path')).not.toBeNull();
+        }
+    });
+
     it('shows the destructive deletion warning when the plan includes deletions', () => {
         const plan: SyncPlan = { ...emptyPlan(), deletions: [{ path: 'gone.md', name: 'gone.md' }] };
         const modal = new SyncPlanModal(new App(), plan, 'delete', vi.fn());
