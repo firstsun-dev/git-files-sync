@@ -124,13 +124,21 @@ killed run's branch is simply never touched by the next one.
 
 ### Concurrency and cancellation
 
-`.github/workflows/ci.yml`'s E2E jobs carry per-source/per-provider concurrency groups with
-`cancel-in-progress: true`. Push and pull-request runs use the same branch identity, so a push to a
-branch with an open PR cancels its duplicate instead of both competing for runner/provider
-capacity. Manual dispatches and schedules use `<event>-<run-id>` instead: they must not cancel a
-normal PR's required checks or a push's provider run. The two cleanup workflows share the
-branch-based group naming used by push/PR runs, with
-`cancel-in-progress: false`, so cleanup queues behind rather than races an active run.
+`.github/workflows/ci.yml` carries a single whole-workflow-level concurrency group per branch
+(`ci-<branch>`, not per-job or per-provider) with `cancel-in-progress: true`. Push and pull-request
+runs for the same branch share this one group — deliberately, not just to avoid the two competing
+for runner/provider capacity: push and PR-synchronize events for the same branch typically fire for
+the identical commit SHA, so a shared group avoids paying for the expensive self-hosted/real-provider
+E2E matrix twice for the same commit, and avoids a "split winners" bug an earlier per-provider-group
+design had (push could cancel only one provider's leg of a PR run and vice versa, leaving no single
+run fully green — see `ci.yml`'s own header comment). Manual dispatches and schedules use
+`<event>-<run-id>` instead: they must not cancel a normal PR's required checks or a push's provider
+run. The two cleanup workflows use the same `ci-<branch>` group naming as `ci.yml` (not a separate
+`e2e-`-prefixed, per-provider naming — an earlier version of both cleanup workflows used a group name
+that had silently stopped matching `ci.yml`'s after this refactor, defeating the queuing this
+paragraph describes), with `cancel-in-progress: false`, so cleanup queues behind rather than races an
+active run. See a caveat in `e2e-branch-cleanup.yml`'s own comment about whether this holds for
+`delete` events specifically.
 The cancelled duplicate's `CI / Required Checks` treats the cancelled leg as a failure, but that
 run is for the superseded commit — the surviving run (the one GitHub uses for the latest commit)
 is responsible for the real provider result and release gate, so the cancelled duplicate's red
@@ -254,8 +262,8 @@ and its job-level condition rejects fork PRs before runner allocation. Both depe
 computed by the `CI / Detect Changes` job, since GitHub Actions' own `on.*.paths` would gate the
 *entire* workflow file, including the always-must-run validation/release jobs). It always runs in
 full on `workflow_dispatch`, `schedule` (weekly, Monday 06:00 UTC, for API-drift detection), and
-pushes to `main`. Each job carries a per-source/provider `concurrency` group (see "Isolation model"
-above) and a run/attempt/provider-scoped workdir.
+pushes to `main`. The whole workflow shares one `concurrency` group per branch (see "Isolation model"
+above), and each E2E job additionally uses a run/attempt/provider-scoped workdir.
 
 Two more workflows round out the isolation model's other cleanup layers — see "Isolation model"
 above for what each does and why:
@@ -294,8 +302,14 @@ build ────────────────────────�
 
 All five validation jobs start in parallel; a lint/unit/build error now surfaces in <1-2 min
 instead of after the real-provider matrix. `CI / Required Checks` runs with `if: always()` and
-passes only when every validation job reports `success` or `skipped` (a path-filtered-out or
-fork-gated-off `provider-e2e` leg reports `success` because its steps are skipped, not failed).
+passes only when every validation job reports `success` or `skipped`. A fork-gated-off
+`provider-e2e` leg is skipped at the *job* level (the fork-PR check is a job-level `if:`, evaluated
+before any step runs), so its result is `skipped`. A path-filtered-out leg is likewise a job-level
+skip. Separately, `workflow_dispatch`'s single-provider selection uses a *step*-level gate (the
+"Determine whether this provider leg should run" step), so a leg excluded that way still reports
+`success` for the job, just with its individual steps skipped. Both outcomes are accepted by the
+`success|skipped` check above, so the practical effect (doesn't block the gate) is the same either
+way.
 Any other result — including a `cancelled` matrix leg replaced by a newer run in the same
 concurrency group — fails the gate; the surviving run is the one whose gate result GitHub uses
 for the latest commit. `Release / Package` and `Release / Publish` both run only after the gate
