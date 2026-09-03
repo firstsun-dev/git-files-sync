@@ -41,6 +41,12 @@
     overflow: hidden;
     padding: 0;
     container-type: inline-size;
+    /* Shared mobile row-density baseline: the Sync Queue's existing compact
+       row (unchanged) is the visual reference. Repository List and Tree file
+       rows, plus tree folder rows, read these same values instead of each
+       maintaining their own effective height. */
+    --scv-mobile-row-min-height: 30px;
+    --scv-mobile-row-padding: 6px 10px;
 }
 
 .scv-header {
@@ -312,7 +318,10 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 /* ── Selected-for-sync workspace ───────────────────────────── */
 .scv-selected-section {
     flex-shrink: 0;
-    margin: 6px 8px 4px 8px;
+    /* No bottom margin: Repository Changes' own header already contributes
+       the same 6px top padding used above the Queue, so Queue→Repository
+       stays a single 6px gap instead of stacking on top of it. */
+    margin: 6px 8px 0 8px;
     padding: 6px 0;
     border-radius: var(--radius-m);
     background: var(--background-secondary);
@@ -324,7 +333,9 @@ body.is-mobile .scv-view-toggle-label { display: none; }
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 2px 10px 6px 10px;
+    /* Bottom padding matches .scv-repository-header's, so both sections'
+       header→first-row gap reads the same. */
+    padding: 2px 10px 4px 10px;
     color: var(--text-muted);
     font-size: 0.74em;
     font-weight: 600;
@@ -533,6 +544,8 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 .scv-change-item {
     display: flex;
     align-items: center;
+    flex-wrap: nowrap;
+    overflow: hidden;
     gap: 7px;
     min-height: 30px;
     padding: 5px 12px 5px 8px;
@@ -600,11 +613,15 @@ body.is-mobile .scv-view-toggle-label { display: none; }
 }
 
 /* List-view variant: the name shrinks to its content so the folder path
-   suffix can sit on the right, disambiguating flat rows without nesting. */
-.scv-change-item-list .scv-change-name { flex: 0 1 auto; }
+   suffix can sit on the right, disambiguating flat rows without nesting.
+   flex-shrink stays low relative to .scv-change-path's (below) so the path
+   yields space first when the row is tight -- the filename stays readable
+   longest, both ellipsis rather than wrap. */
+.scv-change-item-list .scv-change-name { flex: 0 1 auto; flex-shrink: 1; min-width: 0; }
 
 .scv-change-path {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+    flex-shrink: 20;
     min-width: 0;
     margin-left: auto;
     overflow: hidden;
@@ -1072,10 +1089,25 @@ body.is-mobile .scv-change-menu { min-width: 28px; min-height: 28px; }
 }
 
 /* ── Mobile adjustments ─────────────────────────────────────────── */
+/* Row-density baseline (Sync Queue/Repository List/Repository Tree file and
+   folder rows all read the same var(--scv-mobile-row-*) values -- see
+   .scv-root) applies both by platform (phone/tablet, body.is-mobile) and by
+   narrow panel width (@container), so a compact row shows up whichever
+   condition made the layout tight. */
+body.is-mobile .scv-change-item,
+body.is-mobile .scv-tree-folder-row {
+    min-height: var(--scv-mobile-row-min-height);
+    padding: var(--scv-mobile-row-padding);
+}
+
 @container (max-width: 480px) {
     .scv-filter-menu { padding: 6px 8px; gap: 3px; }
     .scv-filter-option { padding: 4px 8px; font-size: 0.76em; }
-    .scv-change-item { padding: 6px 10px; }
+    .scv-change-item,
+    .scv-tree-folder-row {
+        min-height: var(--scv-mobile-row-min-height);
+        padding: var(--scv-mobile-row-padding);
+    }
     .scv-change-name { font-size: 0.76em; }
 }
 
