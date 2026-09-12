@@ -31,12 +31,17 @@ function settings(): GitLabFilesPushSettings {
         bannerDismissedVersion: '',
         language: 'system',
         autoRefreshOnStartup: true,
+        automaticSyncEnabled: false,
+        automaticSyncIntervalMinutes: 5,
+        automaticSyncOnStartup: false,
     };
 }
 
 function createHarness(overrides: {
     confirmPlan?: boolean;
     pathExists?: (path: string) => Promise<boolean>;
+    resolveConflicts?: (conflicts: unknown[], safeCount: number) => Promise<boolean>;
+    settings?: GitLabFilesPushSettings;
 } = {}) {
     const listFilesDetailed = vi.fn().mockResolvedValue([]);
     const provider = {
@@ -62,7 +67,8 @@ function createHarness(overrides: {
     });
     const saveSettings = vi.fn().mockResolvedValue(undefined);
     const confirmPlan = vi.fn().mockResolvedValue(overrides.confirmPlan ?? true);
-    const syncSettings = settings();
+    const resolveConflicts = vi.fn(overrides.resolveConflicts ?? (() => Promise.resolve(true)));
+    const syncSettings = overrides.settings ?? settings();
     const coordinator = new PushCoordinator({
         app: { vault: { getFileByPath: vi.fn().mockReturnValue({}) } } as unknown as App,
         gitService: () => provider,
@@ -72,14 +78,28 @@ function createHarness(overrides: {
         conflicts: { findStale: vi.fn().mockResolvedValue([]), applyRemote: vi.fn() } as unknown as ConflictResolver,
         isPathIgnored: () => false,
         confirmPlan,
-        resolveConflicts: vi.fn().mockResolvedValue(true),
+        resolveConflicts,
         updateMetadata: vi.fn().mockResolvedValue(undefined),
         migrateBaseline: vi.fn().mockResolvedValue(undefined),
         saveSettings,
         notify: vi.fn(),
         serviceName: () => 'GitHub',
     });
-    return { coordinator, listFilesDetailed, commitBatch, confirmPlan, saveSettings, settings: syncSettings };
+    return { coordinator, listFilesDetailed, commitBatch, confirmPlan, resolveConflicts, saveSettings, settings: syncSettings };
+}
+
+/**
+ * One conflicted candidate (`clash.md`, tracked baseline + divergent remote)
+ * alongside one safe candidate (`safe.md`, no tracked baseline).
+ */
+function conflictingSettings(): GitLabFilesPushSettings {
+    const base = settings();
+    base.syncMetadata['clash.md'] = {
+        lastSyncedSha: 'base-clash',
+        lastSyncedAt: 0,
+        lastKnownPath: 'clash.md',
+    };
+    return base;
 }
 
 describe('PushCoordinator', () => {
@@ -122,6 +142,49 @@ describe('PushCoordinator', () => {
 
         await expect(harness.coordinator.pushFiles(['a.md'])).rejects.toThrow('provider unavailable');
         expect(harness.commitBatch).not.toHaveBeenCalled();
+    });
+
+    describe('planSyncBatch conflict behavior', () => {
+        function conflictedHarness(resolveConflicts?: (conflicts: unknown[], safeCount: number) => Promise<boolean>) {
+            const harness = createHarness({ settings: conflictingSettings(), resolveConflicts });
+            harness.listFilesDetailed.mockResolvedValue([
+                { path: 'clash.md', symlink: false, sha: 'remote-clash' },
+            ]);
+            return harness;
+        }
+
+        it('prompts for conflict resolution in interactive mode and cancels the batch when declined', async () => {
+            const harness = conflictedHarness(() => Promise.resolve(false));
+
+            const plan = await harness.coordinator.planSyncBatch(
+                ['safe.md', 'clash.md'],
+                undefined,
+                undefined,
+                'prompt',
+            );
+
+            expect(harness.resolveConflicts).toHaveBeenCalledTimes(1);
+            expect(plan.cancelled).toBe(true);
+        });
+
+        it('skips conflicting paths and continues with safe paths in background mode, invoking no conflict UI', async () => {
+            const resolveConflicts = vi.fn().mockResolvedValue(true);
+            const harness = conflictedHarness(resolveConflicts);
+
+            const plan = await harness.coordinator.planSyncBatch(
+                ['safe.md', 'clash.md'],
+                undefined,
+                undefined,
+                'skip',
+            );
+
+            expect(resolveConflicts).not.toHaveBeenCalled();
+            expect(plan.cancelled).toBe(false);
+            expect(plan.conflictedPaths).toContain('clash.md');
+            expect(plan.skippedConflicts).toBeGreaterThan(0);
+            expect(plan.pushes.map(entry => entry.path)).not.toContain('clash.md');
+            expect(plan.pushes.map(entry => entry.path)).toContain('safe.md');
+        });
     });
 
     it('plans an edited tracked rename as a move when the destination is free', async () => {

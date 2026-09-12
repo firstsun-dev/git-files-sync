@@ -23,6 +23,19 @@ import {
 
 type BatchOutcome = 'done' | 'unchanged' | 'conflict';
 
+/**
+ * How push planning reacts when a candidate conflicts with the remote.
+ *
+ * - `prompt` (interactive/manual): ask the user to resolve the batch through
+ *   the interaction port; cancelling aborts the whole batch.
+ * - `skip` (background/automatic): do not touch UI, leave each conflicting
+ *   path out of the plan, and continue with the safe paths.
+ *
+ * Deliberately UI-independent: `PushCoordinator` never learns about ExecutionMode
+ * or Obsidian, only this small behavior switch supplied by the caller.
+ */
+export type PushConflictBehavior = 'prompt' | 'skip';
+
 interface BatchPushPlan {
     pushes: PushQueueEntry[];
     moves: MoveQueueEntry[];
@@ -123,6 +136,7 @@ export class PushCoordinator {
         files: Array<TFile | string>,
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[],
+        conflictBehavior: PushConflictBehavior = 'prompt',
     ): Promise<PlannedPushBatch> {
         const syncableFiles = files.filter(file => file && !this.dependencies.isPathIgnored(this.fileInfo(file).path));
         if (syncableFiles.length === 0) {
@@ -150,6 +164,26 @@ export class PushCoordinator {
             errors: immediate.errors,
             syncedPaths: immediate.syncedPaths,
         };
+
+        // Background planning skips the interaction port entirely: every
+        // conflicting path is left out of the plan (safe paths continue), and
+        // the batch is never cancelled. Interactive planning keeps the existing
+        // prompt-and-maybe-cancel behavior untouched.
+        if (conflictBehavior === 'skip') {
+            const skippedConflicts = plan.conflicts.length + plan.autoSkipped.length;
+            return {
+                reviewPlan: this.buildReviewPlan(plan, plan.conflicts, []),
+                pushes: plan.pushes,
+                moves: plan.moves,
+                keepRemote: [],
+                keepLocal: [],
+                skippedConflicts,
+                conflictedPaths: this.conflictedPaths(plan),
+                cancelled: false,
+                immediate,
+            };
+        }
+
         const skipped: BatchPushConflict[] = [];
         const keepRemote: BatchPushConflict[] = [];
         const keepLocal: BatchPushConflict[] = [];

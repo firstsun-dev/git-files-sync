@@ -46,7 +46,45 @@ describe('1.5.0 release notes', () => {
     });
 });
 
+describe('1.7.0 release notes', () => {
+    it('is registered in the changelog', () => {
+        expect(CHANGELOG.some(release => release.version === '1.7.0')).toBe(true);
+    });
+
+    it('provides a headline and summary in every supported language', () => {
+        const release = CHANGELOG.find(r => r.version === '1.7.0');
+        expect(release?.headline?.en).toBeTruthy();
+        expect(release?.headline?.['zh-tw']).toBeTruthy();
+        expect(release?.headline?.['zh-cn']).toBeTruthy();
+        expect(release?.summary?.en).toBeTruthy();
+        expect(release?.summary?.['zh-tw']).toBeTruthy();
+        expect(release?.summary?.['zh-cn']).toBeTruthy();
+    });
+
+    it('has notable entries covering scheduled sync, startup sync, and safe conflict skipping', () => {
+        const release = CHANGELOG.find(r => r.version === '1.7.0');
+        const notable = release?.entries.filter(entry => entry.notable) ?? [];
+        expect(notable.length).toBeGreaterThanOrEqual(3);
+        for (const entry of notable) {
+            expect(entry.text.en).toBeTruthy();
+            expect(entry.text['zh-tw']).toBeTruthy();
+            expect(entry.text['zh-cn']).toBeTruthy();
+        }
+    });
+
+    it('is surfaced as an unseen release for a vault upgrading from 1.6.0', () => {
+        const unseen = getUnseenReleases(CHANGELOG, '1.6.0');
+        expect(unseen.map(release => release.version)).toContain('1.7.0');
+    });
+});
+
 describe('CHANGELOG ordering and content', () => {
+    it('lists 1.7.0 before 1.6.0 before 1.5.0', () => {
+        const versions = CHANGELOG.map(r => r.version);
+        expect(versions.indexOf('1.7.0')).toBeLessThan(versions.indexOf('1.6.0'));
+        expect(versions.indexOf('1.7.0')).toBeGreaterThanOrEqual(0);
+    });
+
     it('lists 1.6.0 before 1.5.0', () => {
         const versions = CHANGELOG.map(r => r.version);
         expect(versions.indexOf('1.6.0')).toBeLessThan(versions.indexOf('1.5.0'));
