@@ -130,6 +130,9 @@ export async function createSyncManagerFixture(options: SyncManagerFixtureOption
             bannerDismissedVersion: '',
             language: 'system',
             autoRefreshOnStartup: true,
+            automaticSyncEnabled: false,
+            automaticSyncIntervalMinutes: 5,
+            automaticSyncOnStartup: false,
         };
     }
 

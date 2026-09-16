@@ -34,7 +34,10 @@ The dependency direction should normally flow downward. Results and state flow b
 | Application | `ChangeActionPolicy` | allowed/default action for each change kind | ViewModel, selection reconciliation, intent execution | UI rendering, network calls |
 | Application | `SourceControlViewModel` | read-only projection of application state for UI | repository, selection, operation/refresh state | side effects, provider calls, filesystem writes |
 | Application | `SourceControlActionService` | stable UI-facing facade for immediate Source Control commands | `SyncWorkspace`, `SyncIntentExecutor` | provider-specific logic, duplicated sync planning |
-| Application | `SyncIntentExecutor` | one Sync Queue workflow: resolve intent, plan, confirm, execute, aggregate | repository, action policy, `SyncWorkspace`, notifier | UI DOM, provider API implementation |
+| Application | `SyncIntentExecutor` | one Sync Queue workflow: resolve intent, plan, confirm, execute, aggregate; selects interactive vs background execution policy per run | repository, action policy, `SyncWorkspace`, notifier, `SyncExecutionGuard` | UI DOM, provider API implementation |
+| Application | `AutomaticSyncService` | one scheduled automatic sync run: refresh, read repository, build default intents, execute in background, refresh again | `SyncWorkspace`, `ChangeRepository`, `SourceControlActionService` | timer/scheduling mechanics, UI rendering, classification rules |
+| Application | `SyncExecutionGuard` | application-level serialization of provider mutations (manual waits, automatic try-acquires) | `SyncIntentExecutor`, `SourceControlActionService` | provider calls, scheduling |
+| Plugin runtime | `AutomaticSyncScheduler` (`src/runtime/AutomaticSyncScheduler.ts`) | the automatic-sync interval timer and its lifecycle registration | settings, `AutomaticSyncService`, Obsidian `registerInterval` | sync execution, change classification |
 | Boundary | `SyncWorkspace` | application-to-sync execution boundary | `SyncManager`, refresh service, diff service | Source Control rendering |
 | Sync domain | `SyncManager` | compatibility/domain facade for sync operations | coordinators, executors, metadata/status services | Source Control UI state |
 | Sync domain | `PushCoordinator` | batch push use case including planning/conflict/review/commit coordination | planner, conflict resolver, push executor | Source Control selection state |
@@ -108,14 +111,36 @@ SyncIntentExecutor
     ↓
 resolve current ChangeId + revalidate explicit action
     ↓
-build one merged Sync Plan
+build one merged Sync plan
     ↓
-confirm once
+execution policy (interactive: confirm once / background: auto-accept, skip conflicts)
     ↓
 SyncWorkspace
     ├─ remote mutation bucket (max one provider batch)
     └─ local pull bucket
 ```
+
+### Automatic sync flow
+
+```text
+AutomaticSyncScheduler (timer, plugin runtime)
+    ↓
+AutomaticSyncService.runOnce()
+    ↓
+refresh authoritative local + remote state
+    ↓
+ChangeRepository → exclude synced/conflict → default intents via ChangeActionPolicy
+    ↓
+SourceControlActionService.sync(intents, 'background')
+    ↓
+SyncIntentExecutor (skip-conflict planning, no confirmation)
+    ↓
+SyncWorkspace → Sync domain → provider
+    ↓
+refresh status again
+```
+
+Automatic sync reuses the same application → `SyncWorkspace` → domain → provider path as manual Sync. It does not own classification, rename detection, action routing, conflict algorithms, push/pull planning, or provider mutation logic, and it never calls a concrete provider service directly.
 
 ## 4. Architecture rules
 
@@ -129,6 +154,9 @@ SyncWorkspace
 - One Sync Queue action must produce one merged review/confirmation flow.
 - Remote mutations from one Sync Queue execution must be grouped into at most one provider mutation batch when supported by the current workflow.
 - Existing compatibility identifiers such as `sync-status-view` and `open-sync-status` must be preserved unless a migration explicitly removes them.
+- Automatic sync must execute through `SourceControlActionService`/`SyncIntentExecutor`/`SyncWorkspace`, never a second sync engine.
+- Manual and automatic provider mutations must be serialized (`SyncExecutionGuard`); automatic work skips a tick rather than queuing when the path is busy.
+- Interactive vs background behavior must be an explicit per-execution policy (`SyncExecutionMode` / `PushConflictBehavior`), not a collection of independent booleans.
 
 ### MUST NOT
 

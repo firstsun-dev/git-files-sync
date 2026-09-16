@@ -52,6 +52,49 @@ describe('i18n', () => {
         expect(typeof t('confirmModal.title')).toBe('string');
     });
 
+    describe('automatic sync settings keys', () => {
+        const keys = [
+            'settings.automaticSync.name',
+            'settings.automaticSync.desc',
+            'settings.automaticSyncInterval.name',
+            'settings.automaticSyncInterval.desc',
+            'settings.automaticSyncOnStartup.name',
+            'settings.automaticSyncOnStartup.desc',
+        ] as const;
+
+        it('exist and resolve in EN', () => {
+            setMomentLocale(undefined);
+            for (const key of keys) {
+                expect(t(key)).toBeTruthy();
+            }
+        });
+
+        it('exist and resolve in zh-TW and zh-CN without falling back to English', () => {
+            setMomentLocale('zh-tw');
+            for (const key of keys) {
+                expect(t(key)).toBeTruthy();
+            }
+            expect(t('settings.automaticSync.name')).toBe('自動同步');
+
+            setMomentLocale('zh-cn');
+            for (const key of keys) {
+                expect(t(key)).toBeTruthy();
+            }
+            expect(t('settings.automaticSync.name')).toBe('自动同步');
+        });
+
+        it('keeps the existing refresh-on-startup setting as a separate key', () => {
+            setMomentLocale(undefined);
+            expect(t('settings.autoRefreshOnStartup.name')).toBe('Refresh status on startup');
+            expect(t('settings.autoRefreshOnStartup.name')).not.toBe(t('settings.automaticSync.name'));
+        });
+
+        it('interpolates the minimum interval into the interval description', () => {
+            setMomentLocale(undefined);
+            expect(t('settings.automaticSyncInterval.desc', { min: 1 })).toContain('1');
+        });
+    });
+
     describe('inline plural forms ({name|singular|plural})', () => {
         it('renders the singular branch when the value is exactly 1 and plural otherwise', () => {
             setMomentLocale(undefined);
