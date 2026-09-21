@@ -250,12 +250,23 @@ cmd_cleanup() {
         return
     fi
     load_env_file
-    setup_askpass
+    # If provision failed before assigning the branch (e.g. a network error),
+    # there is nothing to delete. Never let cleanup throw (`set -u`) and mask
+    # the original failure.
+    if [ -z "${E2E_TEST_BRANCH:-}" ]; then
+        log "No E2E_TEST_BRANCH recorded (provisioning did not get that far) — nothing to clean up"
+        return
+    fi
     if [ "$keep_branch" = "1" ]; then
         log "E2E_KEEP_BRANCH set — leaving $E2E_TEST_BRANCH in place"
         return
     fi
     local dir; dir=$(clone_dir)
+    if [ ! -d "$dir/.git" ]; then
+        log "No clone at $dir — remote branch was never created by this run"
+        return
+    fi
+    setup_askpass
     log "Deleting isolated branch $E2E_TEST_BRANCH"
     git_network -C "$dir" push origin ":refs/heads/${E2E_TEST_BRANCH}" || true
 }

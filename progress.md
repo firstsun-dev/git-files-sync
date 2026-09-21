@@ -23,12 +23,16 @@ Below that: the previous "Outstanding Items"/"Verification Evidence" entries tra
 
 ## Verification Evidence
 
+2026-09-21 review fixes (manual-mutation serialization via `SourceControlActionService.runManual`, e2e cleanup unbound-var fix):
+
+- `npx eslint .` — 0 errors. `npm run build` — passed. `npx vitest run` — 82 files / 1035 tests passed (new: `tests/logic/source-control/ManualSerialization.test.ts`).
+
 2026-09-21 review fixes (Automatic Sync observability / busy skip / single refresh):
 
 - `npx eslint .` — 0 errors. `npm run build` (tsc + Obsidian 1.11.0 compat + esbuild) — passed. `npx vitest run` — 81 files / 1030 tests passed (new: `tests/logic/source-control/AutomaticSyncIntegration.test.ts`, 14 tests over the real action service).
 - Provider E2E (`npm run test:e2e`) **not run**: no provider credentials in this environment.
 
-This session (Issue #141 — Automatic Syncing, `claude/automatic-sync-141` stacked on `claude/mobile-source-control-density`):
+Earlier session (Issue #141 — Automatic Syncing; since merged into `claude/mobile-source-control-density` / combined PR #156 via #159):
 
 - `npx eslint .` — 0 errors, 0 warnings.
 - `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.

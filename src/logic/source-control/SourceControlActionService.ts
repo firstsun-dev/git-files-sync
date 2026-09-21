@@ -84,6 +84,20 @@ export class SourceControlActionService {
         }
     }
 
+    /**
+     * Serialization boundary for legacy/manual entry points that still call
+     * SyncManager directly (ribbon, commands, file context menu, Push/Pull All).
+     * Uses the SAME guard as every other operation here (manual semantics:
+     * waits, never discards).
+     *
+     * The guard is non-reentrant: never wrap sync()/push()/pull()/deleteRemote()/
+     * deleteLocal()/resolveConflict()/runBackground() in this — they already
+     * acquire it, so doing so would deadlock.
+     */
+    async runManual<T>(operation: () => Promise<T>): Promise<T> {
+        return this.serialized(operation);
+    }
+
     /** Adds one change to the Sync Queue. */
     selectForSync(changeId: ChangeId): void {
         this.selection.selectForSync(changeId);

@@ -1,8 +1,8 @@
 # Session Handoff
 
 **Date:** 2026-09-12
-**Active feature:** Issue #141 — Automatic Syncing (target v1.7.0). Implementation complete and locally verified; PR pending.
-**Branch:** `claude/automatic-sync-141`, a child branch of `origin/claude/mobile-source-control-density` (`a1f01b3`, PR #156 still open). The #141 PR must be stacked with base `claude/mobile-source-control-density`; retarget the SAME PR to `main` only if #156 merges first. Do not commit #141 work onto #156.
+**Active feature:** Issue #141 — Automatic Syncing (target v1.7.0), combined with mobile Source Control density in PR #156. Implementation complete; review fixes applied.
+**Branch:** `claude/mobile-source-control-density` — combined PR #156 (mobile density + Automatic Sync, already merged in via #159). Do not split them again.
 
 ## Completed this session
 
@@ -21,14 +21,13 @@
 
 - `npx eslint .` — 0 errors, 0 warnings.
 - `npm run build` — passed (tsc + Obsidian 1.11.0 compat typecheck + esbuild).
-- `npx vitest run` — 80 files / 1010 tests passed.
+- `npx vitest run` — 82 files / 1035 tests passed (as of the manual-serialization review fix; re-check after merging main).
 - NOT done: manual Obsidian runtime verification (no executable Obsidian here) and real-provider E2E. Both are explicitly noted in the PR body; do not claim they ran.
 
 ## Next steps
 
-1. Commit and push `claude/automatic-sync-141`; open the stacked PR (base `claude/mobile-source-control-density`) titled `feat(sync): add automatic scheduled sync`, body includes `Closes #141` + the manual checklist.
-2. If #156 merges: merge latest `main` into this SAME branch and retarget the SAME PR to `main`.
-3. Manual Obsidian verification (desktop + mobile) against the checklist in the PR.
+1. Merge PR #156 (title: `feat(sync): add automatic sync and refine mobile Source Control density`) once Required Checks are green.
+2. Manual Obsidian verification (desktop + mobile) against the checklist in the PR.
 4. Do not hand-bump `manifest.json`/`package.json`/`versions.json`/generated `CHANGELOG.md`; semantic-release performs the 1.7.0 bump.
 
 ## Gotchas

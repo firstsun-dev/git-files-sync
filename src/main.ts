@@ -137,7 +137,7 @@ export default class GitLabFilesPush extends Plugin {
 		this.pushRibbonEl = this.addRibbonIcon('upload-cloud', this.pushRibbonLabel(), async () => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView && activeView.file instanceof TFile) {
-				await this.sync.pushFiles([activeView.file]);
+				await this.pushFileSerialized(activeView.file);
 			} else {
 				new Notice(t('main.notice.noActiveNote'));
 			}
@@ -153,7 +153,7 @@ export default class GitLabFilesPush extends Plugin {
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
-					await this.sync.pushFiles([activeView.file]);
+					await this.pushFileSerialized(activeView.file);
 				}
 			}
 		});
@@ -164,7 +164,7 @@ export default class GitLabFilesPush extends Plugin {
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
-					await this.sync.pullFile(activeView.file);
+					await this.pullFileSerialized(activeView.file);
 				}
 			}
 		});
@@ -191,12 +191,12 @@ export default class GitLabFilesPush extends Plugin {
 					menu.addItem((item) => {
 						item.setTitle(t('main.contextMenu.pushTo', { service: this.serviceName }))
 							.setIcon('upload-cloud')
-							.onClick(async () => { await this.sync.pushFiles([file]); });
+							.onClick(async () => { await this.pushFileSerialized(file); });
 					});
 					menu.addItem((item) => {
 						item.setTitle(t('main.contextMenu.pullFrom', { service: this.serviceName }))
 							.setIcon('download-cloud')
-							.onClick(async () => { await this.sync.pullFile(file); });
+							.onClick(async () => { await this.pullFileSerialized(file); });
 					});
 				}
 			})
@@ -540,6 +540,15 @@ export default class GitLabFilesPush extends Plugin {
 			?.getPath() ?? null;
 	}
 
+	/** Single-file push/pull enter the shared execution guard so they never overlap Automatic Sync. */
+	private async pushFileSerialized(file: TFile): Promise<void> {
+		await this.sourceControlActions.runManual(() => this.sync.pushFiles([file]));
+	}
+
+	private async pullFileSerialized(file: TFile): Promise<void> {
+		await this.sourceControlActions.runManual(() => this.sync.pullFile(file));
+	}
+
 	async pushAllFiles(): Promise<void> {
 		await this.runAllFiles('push');
 	}
@@ -593,13 +602,25 @@ export default class GitLabFilesPush extends Plugin {
 		const progressNotice = new Notice(t('main.progress.running', { verb: runVerb, total: files.length }), 0);
 
 		try {
-			const results = op === 'push'
-				? await this.sync.pushFiles(files, (current, total, fileName) => {
-					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pushing'), current, total, fileName }));
-				}, tree)
-				: await this.sync.pullAllFiles(files, (current, total, fileName) => {
-					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pulling'), current, total, fileName }));
-				}, tree);
+			// The guard is taken only after the user confirms (never held during the
+			// dialog). The remote tree decides the mutation plan, so it is re-read
+			// inside the guard: the pre-confirm `tree` above is only for gitignore
+			// discovery and may be stale if Automatic Sync committed meanwhile.
+			const results = await this.sourceControlActions.runManual(async () => {
+				let authoritativeTree: GitTreeEntry[] | undefined;
+				try {
+					authoritativeTree = await this.gitService.listFilesDetailed(this.settings.branch, false);
+				} catch (e) {
+					logger.warn('Failed to re-fetch remote tree under guard; falling back to per-call fetches', e);
+				}
+				return op === 'push'
+					? await this.sync.pushFiles(files, (current, total, fileName) => {
+						progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pushing'), current, total, fileName }));
+					}, authoritativeTree)
+					: await this.sync.pullAllFiles(files, (current, total, fileName) => {
+						progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pulling'), current, total, fileName }));
+					}, authoritativeTree);
+			});
 
 			progressNotice.hide();
 
