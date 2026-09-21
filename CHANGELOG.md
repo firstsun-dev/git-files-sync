@@ -1,3 +1,5 @@
+## [1.6.2](https://github.com/firstsun-dev/git-files-sync/compare/1.6.1...1.6.2) (2026-09-21)
+
 ## [1.6.1](https://github.com/firstsun-dev/git-files-sync/compare/1.6.0...1.6.1) (2026-09-01)
 
 ### Bug Fixes
