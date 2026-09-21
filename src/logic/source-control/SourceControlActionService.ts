@@ -5,12 +5,23 @@ import type { OperationState } from './OperationState';
 import type { SourceControlItem } from './SourceControlViewModel';
 import type { SyncSelectionStore } from './SyncSelectionStore';
 import { defaultSyncAction, type SyncAction } from './ChangeActionPolicy';
-import { SyncIntentExecutor, type SyncExecutionMode } from './SyncIntentExecutor';
+import { SyncIntentExecutor, type SyncExecutionMode, type SyncExecutionOutcome } from './SyncIntentExecutor';
 import { SyncExecutionGuard } from './SyncExecutionGuard';
 import type { SyncIntentRequest } from './SyncIntent';
 import type { ChangeId, SyncChange } from './types';
 
 export type { SyncIntentRequest } from './SyncIntent';
+export type { SyncExecutionOutcome } from './SyncIntentExecutor';
+
+/** Handle given to a background transaction that already owns the execution guard. */
+export interface BackgroundSyncSession {
+    /** Executes intents in background mode without re-acquiring the (non-reentrant) guard. */
+    sync(intents: readonly SyncIntentRequest[]): Promise<SyncExecutionOutcome>;
+}
+
+export type BackgroundRunOutcome<T> =
+    | { status: 'skipped-busy' }
+    | { status: 'completed'; value: T };
 
 /** Which side wins when resolving a change in the 'conflict' state. */
 export type ConflictResolution = 'local' | 'remote';
@@ -172,8 +183,31 @@ export class SourceControlActionService {
      * SyncIntentExecutor. `mode` is per-execution: manual Sync stays
      * interactive, Automatic Sync passes `background`.
      */
-    async sync(intents: readonly SyncIntentRequest[], mode: SyncExecutionMode = 'interactive'): Promise<void> {
-        await this.syncIntentExecutor.execute(intents, mode);
+    async sync(
+        intents: readonly SyncIntentRequest[],
+        mode: SyncExecutionMode = 'interactive',
+    ): Promise<SyncExecutionOutcome> {
+        return this.syncIntentExecutor.execute(intents, mode);
+    }
+
+    /**
+     * Runs a whole background transaction (refresh -> execute -> refresh)
+     * under one hold of the shared guard. If the guard is busy the task is
+     * never invoked and nothing is queued, so a busy tick costs zero provider
+     * work. Because the guard hands its lock straight to the next waiter, a
+     * waiting manual operation still wins over a later automatic tick.
+     */
+    async runBackground<T>(task: (session: BackgroundSyncSession) => Promise<T>): Promise<BackgroundRunOutcome<T>> {
+        const release = this.guard.tryAcquire();
+        if (!release) return { status: 'skipped-busy' };
+        try {
+            const value = await task({
+                sync: intents => this.syncIntentExecutor.executeHeld(intents, 'background'),
+            });
+            return { status: 'completed', value };
+        } finally {
+            release();
+        }
     }
 
     /** Deletes one or more changes from the local vault only. */

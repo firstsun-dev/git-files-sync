@@ -285,7 +285,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await expect(service.sync(intents(toChangeId('c-1')))).resolves.toBeUndefined();
+            await expect(service.sync(intents(toChangeId('c-1')))).resolves.toMatchObject({ status: 'completed', failures: [expect.any(Error)] });
 
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
             expect(notify).toHaveBeenCalledTimes(1);
@@ -305,7 +305,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await expect(service.sync(intents(toChangeId('c-1')))).resolves.toBeUndefined();
+            await expect(service.sync(intents(toChangeId('c-1')))).resolves.toMatchObject({ status: 'completed', failures: [expect.any(Error)] });
 
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
             expect(notify).toHaveBeenCalledTimes(1);

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AutomaticSyncService } from '../../../src/logic/source-control/AutomaticSyncService';
+import { AutomaticSyncService, type AutomaticSyncDependencies } from '../../../src/logic/source-control/AutomaticSyncService';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
-import type { SyncExecutionMode } from '../../../src/logic/source-control/SyncIntentExecutor';
+import type { BackgroundRunOutcome, BackgroundSyncSession } from '../../../src/logic/source-control/SourceControlActionService';
+import type { SyncExecutionOutcome } from '../../../src/logic/source-control/SyncIntentExecutor';
 import type { SyncIntentRequest } from '../../../src/logic/source-control/SyncIntent';
 import { toChangeId } from '../../../src/logic/source-control/types';
 import type { SyncChange, SyncChangeKind } from '../../../src/logic/source-control/types';
@@ -15,19 +16,28 @@ function emptyRefreshResult(): SyncStatusRefreshResult {
     return {} as SyncStatusRefreshResult;
 }
 
+function completedOutcome(overrides: Partial<SyncExecutionOutcome> = {}): SyncExecutionOutcome {
+    return { status: 'completed', failures: [], ...overrides };
+}
+
 function buildService(changes: SyncChange[], overrides: {
     refresh?: () => Promise<SyncStatusRefreshResult>;
-    sync?: (intents: readonly SyncIntentRequest[], mode?: SyncExecutionMode) => Promise<void>;
+    sync?: (intents: readonly SyncIntentRequest[]) => Promise<SyncExecutionOutcome>;
+    busy?: boolean;
     onError?: (error: unknown) => void;
 } = {}) {
     const repository = new ChangeRepository();
     repository.replace(changes);
     const refresh = vi.fn(overrides.refresh ?? (() => Promise.resolve(emptyRefreshResult())));
-    const sync = vi.fn(overrides.sync ?? (() => Promise.resolve(undefined)));
+    const sync = vi.fn(overrides.sync ?? (() => Promise.resolve(completedOutcome())));
+    const runBackground = vi.fn(async function <T>(task: (session: BackgroundSyncSession) => Promise<T>): Promise<BackgroundRunOutcome<T>> {
+        if (overrides.busy) return { status: 'skipped-busy' };
+        return { status: 'completed', value: await task({ sync }) };
+    }) as AutomaticSyncDependencies['actions']['runBackground'] & ReturnType<typeof vi.fn>;
     const service = new AutomaticSyncService({
         workspace: { refresh },
         changes: repository,
-        actions: { sync },
+        actions: { runBackground },
         onError: overrides.onError,
     });
     return { service, refresh, sync, repository };
@@ -44,11 +54,13 @@ describe('AutomaticSyncService', () => {
                 }
                 order.push('refresh');
             });
-        const sync = vi.fn().mockImplementation(async () => { order.push('sync'); });
+        const sync = vi.fn().mockImplementation(async () => { order.push('sync'); return completedOutcome(); });
         const service = new AutomaticSyncService({
             workspace: { refresh },
             changes: repository,
-            actions: { sync },
+            actions: {
+                runBackground: async task => ({ status: 'completed', value: await task({ sync }) }),
+            },
         });
 
         await service.runOnce();
@@ -86,8 +98,7 @@ describe('AutomaticSyncService', () => {
 
         await service.runOnce();
 
-        const [intents, mode] = sync.mock.calls[0] as [SyncIntentRequest[], SyncExecutionMode];
-        expect(mode).toBe('background');
+        const [intents] = sync.mock.calls[0] as [SyncIntentRequest[]];
         expect(intents).toEqual([
             { changeId: toChangeId('push.md'), action: 'push' },
             { changeId: toChangeId('pull.md'), action: 'pull' },
@@ -105,13 +116,25 @@ describe('AutomaticSyncService', () => {
         await service.runOnce();
 
         expect(sync).not.toHaveBeenCalled();
-        // Still refreshes before/after so the panel reflects current state.
-        expect(refresh).toHaveBeenCalledTimes(2);
+        // Exactly one refresh: nothing was executed, so a second poll would
+        // only double provider traffic on an idle vault.
+        expect(refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('performs no refresh and no sync when the execution guard is busy', async () => {
+        const { service, sync, refresh } = buildService([change('a.md', 'local-only')], { busy: true });
+
+        await service.runOnce();
+
+        expect(refresh).not.toHaveBeenCalled();
+        expect(sync).not.toHaveBeenCalled();
     });
 
     it('does not execute concurrently on overlapping runOnce calls; the second tick is skipped', async () => {
         let releaseFirst: (() => void) | undefined;
-        const firstRun = new Promise<void>(resolve => { releaseFirst = resolve; });
+        const firstRun = new Promise<SyncExecutionOutcome>(resolve => {
+            releaseFirst = () => resolve(completedOutcome());
+        });
         const { service, sync } = buildService([change('a.md', 'local-only')], {
             sync: () => firstRun,
         });
@@ -119,7 +142,6 @@ describe('AutomaticSyncService', () => {
         const first = service.runOnce();
         const second = service.runOnce();
 
-        // The overlapping call returns immediately without a second sync.
         await second;
         expect(sync).toHaveBeenCalledTimes(1);
 
@@ -132,14 +154,72 @@ describe('AutomaticSyncService', () => {
         const onError = vi.fn();
         const sync = vi.fn()
             .mockRejectedValueOnce(new Error('provider down'))
-            .mockResolvedValueOnce(undefined);
+            .mockResolvedValueOnce(completedOutcome());
         const { service } = buildService([change('a.md', 'local-only')], { sync, onError });
 
         await service.runOnce();
         expect(onError).toHaveBeenCalledTimes(1);
 
-        // A later tick still runs and does not swallow the fresh call.
         await service.runOnce();
         expect(sync).toHaveBeenCalledTimes(2);
+    });
+
+    describe('outcome diagnostics', () => {
+        const zero = { added: 0, updated: 0, moved: 0, deleted: 0, downloaded: 0, acceptedRemote: 0, failed: 0, conflicts: 0, skippedConflicts: 0, errors: [] };
+
+        it('stays silent and refreshes twice after a successful run', async () => {
+            const onError = vi.fn();
+            const { service, refresh } = buildService([change('a.md', 'local-only')], {
+                onError,
+                sync: async () => completedOutcome({ result: { ...zero, added: 1 } }),
+            });
+
+            await service.runOnce();
+
+            expect(onError).not.toHaveBeenCalled();
+            expect(refresh).toHaveBeenCalledTimes(2);
+        });
+
+        it('does not treat skipped conflicts as errors', async () => {
+            const onError = vi.fn();
+            const { service } = buildService([change('a.md', 'local-only')], {
+                onError,
+                sync: async () => completedOutcome({ result: { ...zero, skippedConflicts: 2, conflicts: 1 } }),
+            });
+
+            await service.runOnce();
+
+            expect(onError).not.toHaveBeenCalled();
+        });
+
+        it('logs thrown executor failures and still refreshes afterwards', async () => {
+            const onError = vi.fn();
+            const boom = new Error('commit rejected');
+            const { service, refresh } = buildService([change('a.md', 'local-only')], {
+                onError,
+                sync: async () => completedOutcome({ result: { ...zero, failed: 1 }, failures: [boom] }),
+            });
+
+            await service.runOnce();
+
+            expect(onError).toHaveBeenCalledTimes(1);
+            expect(onError).toHaveBeenCalledWith(boom);
+            expect(refresh).toHaveBeenCalledTimes(2);
+        });
+
+        it('logs provider-returned per-file errors', async () => {
+            const onError = vi.fn();
+            const { service } = buildService([change('a.md', 'local-only')], {
+                onError,
+                sync: async () => completedOutcome({
+                    result: { ...zero, failed: 1, errors: [{ file: 'a.md', error: 'HTTP 500' }] },
+                }),
+            });
+
+            await service.runOnce();
+
+            expect(onError).toHaveBeenCalledTimes(1);
+            expect((onError.mock.calls[0]?.[0] as Error).message).toContain('a.md: HTTP 500');
+        });
     });
 });

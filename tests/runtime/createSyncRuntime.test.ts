@@ -71,17 +71,17 @@ describe('createSyncRuntime', () => {
             statuses: new Map(),
             remoteEntries: [],
         } as never);
-        const sync = vi.spyOn(runtime.sourceControlActions, 'sync').mockResolvedValue(undefined);
+        const sync = vi.fn().mockResolvedValue({ status: 'completed', failures: [] });
+        const runBackground = vi.spyOn(runtime.sourceControlActions, 'runBackground')
+            .mockImplementation(task => task({ sync }).then(value => ({ status: 'completed' as const, value })));
 
         runtime.sync.status.set({ path: 'note.md', status: 'unsynced' });
         await runtime.automaticSync.runOnce();
 
         expect(refresh).toHaveBeenCalledTimes(2);
+        expect(runBackground).toHaveBeenCalledTimes(1);
         expect(sync).toHaveBeenCalledTimes(1);
-        expect(sync).toHaveBeenCalledWith(
-            [expect.objectContaining({ changeId: 'note.md' })],
-            'background',
-        );
+        expect(sync).toHaveBeenCalledWith([expect.objectContaining({ changeId: 'note.md' })]);
     });
 
     it('keeps ChangeRepository in sync with the shared SyncStatusService until disposed', () => {

@@ -48,6 +48,26 @@ interface ConfirmedSyncPlan {
 export type SyncExecutionMode = 'interactive' | 'background';
 
 /**
+ * What one Sync Queue execution actually did, so callers that suppress the
+ * user notifier (background mode) can still observe failures.
+ *
+ * - `skipped-busy`: the shared guard was held by another mutation and a
+ *   background run declined to queue; nothing was planned or mutated.
+ * - `completed`: the run finished. `result` aggregates counts and per-file
+ *   provider errors; `failures` holds unexpected rejections from planning,
+ *   the remote commit, or the pull apply. Skipped conflicts are neither.
+ */
+export interface SyncExecutionOutcome {
+    status: 'completed' | 'skipped-busy';
+    result?: SyncExecutionResult;
+    failures: unknown[];
+}
+
+function completed(result: SyncExecutionResult = emptyExecutionResult(), failures: unknown[] = []): SyncExecutionOutcome {
+    return { status: 'completed', result, failures };
+}
+
+/**
  * Executes the Sync Queue use-case from explicit user intent.
  *
  * This class owns only the queued/batched workflow: resolve each ChangeId
@@ -70,23 +90,34 @@ export class SyncIntentExecutor {
         private readonly guard: SyncExecutionGuard = new SyncExecutionGuard(),
     ) {}
 
-    async execute(intents: readonly SyncIntentRequest[], mode: SyncExecutionMode = 'interactive'): Promise<void> {
+    async execute(
+        intents: readonly SyncIntentRequest[],
+        mode: SyncExecutionMode = 'interactive',
+    ): Promise<SyncExecutionOutcome> {
         // Serialize automatic mutations against user-triggered ones. Automatic
         // work skips its tick entirely when the path is busy; manual work waits
         // so a user action is never discarded.
         const release = mode === 'background' ? this.guard.tryAcquire() : await this.guard.acquire();
-        if (!release) return;
+        if (!release) return { status: 'skipped-busy', failures: [] };
 
         try {
-            await this.executeLocked(intents, mode);
+            return await this.executeHeld(intents, mode);
         } finally {
             release();
         }
     }
 
-    private async executeLocked(intents: readonly SyncIntentRequest[], mode: SyncExecutionMode): Promise<void> {
+    /**
+     * Runs the workflow for a caller that already holds the shared guard (an
+     * Automatic Sync transaction spanning refresh -> execute -> refresh). The
+     * guard is non-reentrant, so this must never acquire it again.
+     */
+    async executeHeld(
+        intents: readonly SyncIntentRequest[],
+        mode: SyncExecutionMode = 'background',
+    ): Promise<SyncExecutionOutcome> {
         const resolved = this.resolveIntents(intents);
-        if (resolved.length === 0) return;
+        if (resolved.length === 0) return completed();
 
         const targets = resolved.map(entry => entry.change);
         const buckets = this.bucket(resolved);
@@ -94,13 +125,14 @@ export class SyncIntentExecutor {
         let plan: ConfirmedSyncPlan | null;
         try {
             plan = await this.planAndConfirm(buckets, mode);
-        } catch {
+        } catch (error) {
             this.failAll(targets);
-            if (mode !== 'background') this.notifier.notify({ ...emptyExecutionResult(), failed: targets.length });
-            return;
+            const failedResult = { ...emptyExecutionResult(), failed: targets.length };
+            if (mode !== 'background') this.notifier.notify(failedResult);
+            return completed(failedResult, [error]);
         }
 
-        if (!plan || !plan.confirmed) return;
+        if (!plan || !plan.confirmed) return completed();
 
         // Paths the planner left out because they still need manual conflict
         // resolution. They must never be reported as successfully synced or
@@ -110,12 +142,13 @@ export class SyncIntentExecutor {
 
         this.startAll(targets);
         const summary = emptyExecutionResult();
+        const failures: unknown[] = [];
 
         if (hasRemoteMutations(plan.plannedPush, buckets.deleteRemote)) {
-            await this.commitRemoteBucket(plan.plannedPush, buckets.push, buckets.deleteRemote, summary, skippedPaths);
+            await this.commitRemoteBucket(plan.plannedPush, buckets.push, buckets.deleteRemote, summary, skippedPaths, failures);
         }
         if (buckets.pull.length > 0) {
-            await this.applyPullBucket(buckets.pull, summary, skippedPaths);
+            await this.applyPullBucket(buckets.pull, summary, skippedPaths, failures);
         }
 
         // Any skipped/conflicted target that a commit or pull may have marked
@@ -125,6 +158,7 @@ export class SyncIntentExecutor {
         }
 
         if (mode !== 'background') this.notifier.notify(summary);
+        return completed(summary, failures);
     }
 
     private resolveIntents(intents: readonly SyncIntentRequest[]): ResolvedSyncIntent[] {
@@ -200,6 +234,7 @@ export class SyncIntentExecutor {
         deleteTargets: readonly SyncChange[],
         summary: SyncExecutionResult,
         skippedPaths: ReadonlySet<string>,
+        failures: unknown[],
     ): Promise<void> {
         const targets = [...pushTargets, ...deleteTargets].filter(target => !skippedPaths.has(target.path));
         try {
@@ -232,9 +267,10 @@ export class SyncIntentExecutor {
             const failed = new Set(results.errors.map(error => error.file));
             this.finishAll(targets, path => failed.has(path) ? 'failed' : 'success');
             addRemoteResult(summary, plannedPush, deleteEntries, results);
-        } catch {
+        } catch (error) {
             this.failAll(targets);
             summary.failed += targets.length;
+            failures.push(error);
         }
     }
 
@@ -242,6 +278,7 @@ export class SyncIntentExecutor {
         pullTargets: readonly SyncChange[],
         summary: SyncExecutionResult,
         skippedPaths: ReadonlySet<string>,
+        failures: unknown[],
     ): Promise<void> {
         const targets = pullTargets.filter(target => !skippedPaths.has(target.path));
         try {
@@ -256,9 +293,10 @@ export class SyncIntentExecutor {
             summary.failed += results.failed;
             summary.conflicts += results.conflicts;
             summary.errors.push(...results.errors);
-        } catch {
+        } catch (error) {
             this.failAll(targets);
             summary.failed += pullTargets.length;
+            failures.push(error);
         }
     }
 

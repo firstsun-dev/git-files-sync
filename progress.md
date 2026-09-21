@@ -4,13 +4,15 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-09-12
+**Last Updated:** 2026-09-21
 **Active Feature:** Issue #141 — Automatic Syncing (v1.7.0). Implementation complete, verified locally; PR pending.
-**Branch / PR:** `claude/automatic-sync-141`, a child branch of `claude/mobile-source-control-density` (PR #156, still open). The #141 PR is stacked on that baseline; retarget to `main` only if #156 merges first. PR title: `feat(sync): add automatic scheduled sync` (semantic-release owns the 1.7.0 bump).
+**Branch / PR:** `claude/mobile-source-control-density` / PR #156. #156 is now a combined PR: Mobile Source Control density (CSS + structural tests) **and** Automatic Sync (#141, merged in via #159). It is no longer CSS-only. semantic-release owns the 1.7.0 bump.
 
 **What landed (#141):** persisted `automaticSyncEnabled` / `automaticSyncIntervalMinutes` / `automaticSyncOnStartup` (defaults OFF / 5 / OFF, interval min 1); settings UI rows distinct from the existing `autoRefreshOnStartup`; EN/zh-TW/zh-CN strings; `AutomaticSyncService` (refresh → repository → default intents → background execute → refresh) wired through `createSyncRuntime`; `AutomaticSyncScheduler` in plugin runtime; `SyncExecutionMode` per-execution policy with `PushConflictBehavior = 'skip'` at the `PushCoordinator` planning boundary; `SyncExecutionGuard` serialization; startup sync that never opens Source Control and supersedes the legacy startup refresh; hand-curated 1.7.0 What's New entry.
 
-**Next:** open the stacked PR (body includes `Closes #141`), then monitor CI. Manual Obsidian verification not performed in this environment (no executable Obsidian runtime) — checklist is in the PR body.
+**Review fixes (2026-09-21):** background failures now reach `onError` via `SyncExecutionOutcome`; a busy tick is skipped before any refresh/planning via `SourceControlActionService.runBackground` (one shared `SyncExecutionGuard`, held across refresh → execute → refresh); the redundant second refresh on an idle vault is gone (idle/synced+conflict-only = 1 refresh, executed run = 2, busy = 0).
+
+**Next:** monitor CI on #156. Manual Obsidian verification not performed in this environment (no executable Obsidian runtime) — checklist is in the PR body.
 
 Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation`, Issue #143, and `claude/fix-source-control-explicit-sync-intent` — not superseded by this entry, carried over from the base branch history.
 
@@ -20,6 +22,11 @@ Below that: the previous "Outstanding Items"/"Verification Evidence" entries tra
 2. Commit and push the current working tree, then monitor the CI provider matrix.
 
 ## Verification Evidence
+
+2026-09-21 review fixes (Automatic Sync observability / busy skip / single refresh):
+
+- `npx eslint .` — 0 errors. `npm run build` (tsc + Obsidian 1.11.0 compat + esbuild) — passed. `npx vitest run` — 81 files / 1030 tests passed (new: `tests/logic/source-control/AutomaticSyncIntegration.test.ts`, 14 tests over the real action service).
+- Provider E2E (`npm run test:e2e`) **not run**: no provider credentials in this environment.
 
 This session (Issue #141 — Automatic Syncing, `claude/automatic-sync-141` stacked on `claude/mobile-source-control-density`):
 

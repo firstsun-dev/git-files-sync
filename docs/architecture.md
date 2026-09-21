@@ -35,8 +35,8 @@ The dependency direction should normally flow downward. Results and state flow b
 | Application | `SourceControlViewModel` | read-only projection of application state for UI | repository, selection, operation/refresh state | side effects, provider calls, filesystem writes |
 | Application | `SourceControlActionService` | stable UI-facing facade for immediate Source Control commands | `SyncWorkspace`, `SyncIntentExecutor` | provider-specific logic, duplicated sync planning |
 | Application | `SyncIntentExecutor` | one Sync Queue workflow: resolve intent, plan, confirm, execute, aggregate; selects interactive vs background execution policy per run | repository, action policy, `SyncWorkspace`, notifier, `SyncExecutionGuard` | UI DOM, provider API implementation |
-| Application | `AutomaticSyncService` | one scheduled automatic sync run: refresh, read repository, build default intents, execute in background, refresh again | `SyncWorkspace`, `ChangeRepository`, `SourceControlActionService` | timer/scheduling mechanics, UI rendering, classification rules |
-| Application | `SyncExecutionGuard` | application-level serialization of provider mutations (manual waits, automatic try-acquires) | `SyncIntentExecutor`, `SourceControlActionService` | provider calls, scheduling |
+| Application | `AutomaticSyncService` | one scheduled automatic sync run inside one guard hold: refresh, read repository, build default intents, execute in background, refresh once more only if something executed; reports execution failures to the diagnostic logger | `SyncWorkspace`, `ChangeRepository`, `SourceControlActionService` | timer/scheduling mechanics, UI rendering, classification rules |
+| Application | `SyncExecutionGuard` | the single application-level lock serializing provider mutations (manual waits, automatic try-acquires); owned by `SourceControlActionService`, shared with `SyncIntentExecutor` | `SyncIntentExecutor`, `SourceControlActionService` | provider calls, scheduling |
 | Plugin runtime | `AutomaticSyncScheduler` (`src/runtime/AutomaticSyncScheduler.ts`) | the automatic-sync interval timer and its lifecycle registration | settings, `AutomaticSyncService`, Obsidian `registerInterval` | sync execution, change classification |
 | Boundary | `SyncWorkspace` | application-to-sync execution boundary | `SyncManager`, refresh service, diff service | Source Control rendering |
 | Sync domain | `SyncManager` | compatibility/domain facade for sync operations | coordinators, executors, metadata/status services | Source Control UI state |
@@ -127,18 +127,23 @@ AutomaticSyncScheduler (timer, plugin runtime)
     ↓
 AutomaticSyncService.runOnce()
     ↓
-refresh authoritative local + remote state
-    ↓
-ChangeRepository → exclude synced/conflict → default intents via ChangeActionPolicy
-    ↓
-SourceControlActionService.sync(intents, 'background')
-    ↓
-SyncIntentExecutor (skip-conflict planning, no confirmation)
-    ↓
-SyncWorkspace → Sync domain → provider
-    ↓
-refresh status again
+SourceControlActionService.runBackground()  ← try-acquire shared SyncExecutionGuard
+    ├─ busy → skip the whole tick (no refresh, no planning, no mutation, no queue)
+    └─ held for the whole transaction:
+         refresh authoritative local + remote state
+         ↓
+         ChangeRepository → exclude synced/conflict → default intents via ChangeActionPolicy
+         ↓ (no intents → stop; exactly one refresh)
+         session.sync(intents) → SyncIntentExecutor.executeHeld (background: skip-conflict planning, no confirmation)
+         ↓
+         SyncWorkspace → Sync domain → provider
+         ↓
+         report SyncExecutionOutcome failures via onError (logger), never a Notice
+         ↓
+         refresh status once more
 ```
+
+Refresh counts: busy tick 0, idle / only synced+conflict 1, executed run 2.
 
 Automatic sync reuses the same application → `SyncWorkspace` → domain → provider path as manual Sync. It does not own classification, rename detection, action routing, conflict algorithms, push/pull planning, or provider mutation logic, and it never calls a concrete provider service directly.
 
