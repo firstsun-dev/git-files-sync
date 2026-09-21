@@ -5,23 +5,28 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 ## Current State
 
 **Last Updated:** 2026-09-21
-**Active Feature:** Issue #141 — Automatic Syncing (v1.7.0). Implementation complete, verified locally; PR pending.
+**Active Feature:** Issue #141 — Automatic Syncing (v1.7.0). Implementation complete; PR #156 reviewed, CI green at `12c213d` (run 35562916807).
 **Branch / PR:** `claude/mobile-source-control-density` / PR #156. #156 is now a combined PR: Mobile Source Control density (CSS + structural tests) **and** Automatic Sync (#141, merged in via #159). It is no longer CSS-only. semantic-release owns the 1.7.0 bump.
 
 **What landed (#141):** persisted `automaticSyncEnabled` / `automaticSyncIntervalMinutes` / `automaticSyncOnStartup` (defaults OFF / 5 / OFF, interval min 1); settings UI rows distinct from the existing `autoRefreshOnStartup`; EN/zh-TW/zh-CN strings; `AutomaticSyncService` (refresh → repository → default intents → background execute → refresh) wired through `createSyncRuntime`; `AutomaticSyncScheduler` in plugin runtime; `SyncExecutionMode` per-execution policy with `PushConflictBehavior = 'skip'` at the `PushCoordinator` planning boundary; `SyncExecutionGuard` serialization; startup sync that never opens Source Control and supersedes the legacy startup refresh; hand-curated 1.7.0 What's New entry.
 
 **Review fixes (2026-09-21):** background failures now reach `onError` via `SyncExecutionOutcome`; a busy tick is skipped before any refresh/planning via `SourceControlActionService.runBackground` (one shared `SyncExecutionGuard`, held across refresh → execute → refresh); the redundant second refresh on an idle vault is gone (idle/synced+conflict-only = 1 refresh, executed run = 2, busy = 0).
 
-**Next:** monitor CI on #156. Manual Obsidian verification not performed in this environment (no executable Obsidian runtime) — checklist is in the PR body.
+**Next:** merge #156 once CI is green on the final e2e-cleanup fix head. Manual Obsidian verification not performed in this environment (no executable Obsidian runtime) — checklist is in the PR body.
 
 Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation`, Issue #143, and `claude/fix-source-control-explicit-sync-intent` — not superseded by this entry, carried over from the base branch history.
 
 ## Outstanding Items
 
-1. Run `npm run test:e2e -- --provider github`, `gitlab`, and `gitea` with provisioned credentials; verify mixed-100 remains under 120s (target <30s) and the provider matrix passes.
-2. Commit and push the current working tree, then monitor the CI provider matrix.
+1. Confirm CI is green on the head containing the e2e-harness cleanup fix (no persisted run state ⇒ network-free cleanup), then merge #156.
+2. Manual Obsidian runtime verification (checklist in the PR body) — no executable Obsidian in this environment.
 
 ## Verification Evidence
+
+2026-09-21 e2e cleanup fix (`scripts/e2e-harness.sh cleanup` is network-free when provisioning never wrote `e2e.env`; previously `load_env_file` → `normalize_env` could repeat the GitLab `curl` and mask the original failure):
+
+- Fake-`curl`/`git`/`docker` shell check: gitlab + empty workdir → exit 0, 0 curl/fetch/push calls; state file without branch → exit 0, nothing deleted; github state + branch + clone → reaches `git push origin :refs/heads/<branch>`; gitea cleanup unchanged.
+- Provider E2E (GitHub/GitLab/Gitea) + Required Checks green on `12c213d` (run 35562916807; 82 files / 1035 tests, Node 22 + 24).
 
 2026-09-21 review fixes (manual-mutation serialization via `SourceControlActionService.runManual`, e2e cleanup unbound-var fix):
 
