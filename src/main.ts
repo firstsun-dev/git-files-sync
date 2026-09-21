@@ -24,6 +24,8 @@ import type { SyncSelectionStore } from './logic/source-control/SyncSelectionSto
 import type { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
 import type { SourceControlActionService } from './logic/source-control/SourceControlActionService';
 import { createSyncRuntime } from './runtime/createSyncRuntime';
+import { AutomaticSyncScheduler } from './runtime/AutomaticSyncScheduler';
+import type { AutomaticSyncService } from './logic/source-control/AutomaticSyncService';
 import {
 	filterFilesByVaultFolder as scopeFilterFiles,
 	filterPathByVaultFolder as scopeFilterPath,
@@ -52,6 +54,8 @@ export default class GitLabFilesPush extends Plugin {
 	refreshState: RefreshState;
 	sourceControlViewModel: SourceControlViewModel;
 	sourceControlActions: SourceControlActionService;
+	automaticSync: AutomaticSyncService;
+	private automaticSyncScheduler?: AutomaticSyncScheduler;
 	private disposeSyncRuntime?: () => void;
 	private gitignoreConfigKey = '';
 	private pushRibbonEl: HTMLElement;
@@ -114,7 +118,14 @@ export default class GitLabFilesPush extends Plugin {
 		this.refreshState = runtime.refreshState;
 		this.sourceControlViewModel = runtime.sourceControlViewModel;
 		this.sourceControlActions = runtime.sourceControlActions;
+		this.automaticSync = runtime.automaticSync;
 		this.disposeSyncRuntime = () => runtime.dispose();
+		this.automaticSyncScheduler = new AutomaticSyncScheduler({
+			getSettings: () => this.settings,
+			run: () => this.automaticSync.runOnce(),
+			registerInterval: id => this.registerInterval(id),
+		});
+		this.automaticSyncScheduler.apply();
 
 		this.statusBarEl = this.addStatusBarItem();
 		this.statusBarEl.addClass('gfs-status-bar-connection');
@@ -276,16 +287,27 @@ export default class GitLabFilesPush extends Plugin {
 			})
 		);
 
-		this.app.workspace.onLayoutReady(() => {
-			// Legacy workspaces may hold more than one persisted sync-status
-			// leaf (duplicates accumulated across old plugin versions).
-			// Normalize first so startup activation reuses a single canonical
-			// leaf instead of revealing one duplicate while others linger.
-			this.normalizeSourceControlLeaves();
-			if (this.settings.autoRefreshOnStartup) void this.refreshSyncStatusOnStartup();
-		});
+		this.app.workspace.onLayoutReady(() => this.handleLayoutReady());
 
 		await this.checkForUpdateNotice();
+	}
+
+	/**
+	 * Startup decision after Obsidian's layout is ready:
+	 * - legacy workspaces may hold duplicate persisted leaves; normalize first
+	 *   so activation reuses one canonical leaf;
+	 * - startup Automatic Sync runs its own authoritative refresh in the
+	 *   background and must NOT open/focus Source Control, and it supersedes the
+	 *   legacy refresh-on-startup so boot doesn't fetch twice;
+	 * - otherwise the existing refresh-on-startup behavior is preserved.
+	 */
+	private handleLayoutReady(): void {
+		this.normalizeSourceControlLeaves();
+		if (this.settings.automaticSyncEnabled && this.settings.automaticSyncOnStartup) {
+			void this.automaticSync.runOnce();
+		} else if (this.settings.autoRefreshOnStartup) {
+			void this.refreshSyncStatusOnStartup();
+		}
 	}
 
 	private async refreshSyncStatusOnStartup(): Promise<void> {
@@ -678,7 +700,11 @@ export default class GitLabFilesPush extends Plugin {
 		// Cleanup of registered components (views, commands, DOM/vault event
 		// listeners) is handled by Obsidian. The sync runtime's cross-object
 		// wiring (the ChangeRepository subscription) isn't Obsidian-managed,
-		// so it's disposed explicitly.
+		// so it's disposed explicitly. The automatic-sync timer is also stopped
+		// here even though registerInterval covers unload, so an interval is
+		// cleared the moment the plugin is disabled rather than lingering.
+		this.automaticSyncScheduler?.dispose();
+		this.automaticSyncScheduler = undefined;
 		this.disposeSyncRuntime?.();
 		this.disposeSyncRuntime = undefined;
 	}
@@ -693,5 +719,8 @@ export default class GitLabFilesPush extends Plugin {
 		this.initializeGitService();
 		this.updateGitignoreManager();
 		this.updateRibbonTooltip();
+		// Interval/enabled changes must take effect without a plugin reload;
+		// unchanged values are a no-op (see AutomaticSyncScheduler.apply).
+		this.automaticSyncScheduler?.apply();
 	}
 }

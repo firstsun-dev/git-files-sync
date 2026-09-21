@@ -184,4 +184,19 @@ describe('GitLabSyncSettingTab what\'s new banner', () => {
     const buttons = Array.from(tab.containerEl.querySelectorAll('button'));
     expect(buttons.some(button => button.textContent === 'View release history')).toBe(true);
   });
+
+  it('surfaces the 1.7.0 notable entries in the banner when the manifest version is 1.7.0', () => {
+    const tab = renderTab('1.7.0');
+    const banner = tab.containerEl.querySelector('.gfs-whats-new-banner');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain('1.7.0');
+    // At least one user-facing automatic-sync highlight is shown.
+    const items = Array.from(tab.containerEl.querySelectorAll('.gfs-whats-new-banner-list li'));
+    expect(items.some(item => item.textContent?.includes('Automatic sync'))).toBe(true);
+  });
+
+  it('hides the 1.7.0 banner once dismissed for that exact version', () => {
+    const tab = renderTab('1.7.0', '1.7.0');
+    expect(tab.containerEl.querySelector('.gfs-whats-new-banner')).toBeNull();
+  });
 });

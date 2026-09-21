@@ -60,6 +60,28 @@ describe('createSyncRuntime', () => {
         expect(runtime.refreshState).toBeDefined();
         expect(runtime.sourceControlViewModel).toBeDefined();
         expect(runtime.sourceControlActions).toBeDefined();
+        expect(runtime.automaticSync).toBeDefined();
+    });
+
+    it('wires AutomaticSyncService to refresh, the shared ChangeRepository, and the background sync path', async () => {
+        const runtime = createSyncRuntime(buildDeps());
+        // Stub the workspace refresh (the real service needs a full vault mock)
+        // and the sync execution, isolating the wiring under test.
+        const refresh = vi.spyOn(runtime.syncWorkspace, 'refresh').mockResolvedValue({
+            statuses: new Map(),
+            remoteEntries: [],
+        } as never);
+        const sync = vi.spyOn(runtime.sourceControlActions, 'sync').mockResolvedValue(undefined);
+
+        runtime.sync.status.set({ path: 'note.md', status: 'unsynced' });
+        await runtime.automaticSync.runOnce();
+
+        expect(refresh).toHaveBeenCalledTimes(2);
+        expect(sync).toHaveBeenCalledTimes(1);
+        expect(sync).toHaveBeenCalledWith(
+            [expect.objectContaining({ changeId: 'note.md' })],
+            'background',
+        );
     });
 
     it('keeps ChangeRepository in sync with the shared SyncStatusService until disposed', () => {

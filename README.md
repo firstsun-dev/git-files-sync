@@ -129,7 +129,13 @@ When both sides changed, Git File Sync keeps the conflict explicit. Choose **Kee
 | **GitLab** | Token, project ID, base URL | `read_repository`, `write_repository` |
 | **Gitea** | Token, owner, repository, base URL | `write:repository` on Gitea 1.19+ |
 
-Other settings include language, branch, repository root path, vault-folder scope, startup refresh, ignore patterns, and symbolic-link handling. See [Symbolic link handling](docs/symlink-handling.md) for details.
+Other settings include language, branch, repository root path, vault-folder scope, ignore patterns, and symbolic-link handling. See [Symbolic link handling](docs/symlink-handling.md) for details.
+
+### Automatic sync
+
+Automatic sync is **off by default**. When enabled, Git File Sync refreshes local and remote state on a configurable interval (minimum 1 minute) and applies the same default action the manual **Sync** button would for each pending change — push, pull, or remote delete — through the normal Source Control pipeline. An optional **Sync on startup** runs one automatic pass after Obsidian finishes loading without opening the Source Control view.
+
+Files that need manual conflict resolution are always skipped: they stay visible as conflicts while unrelated safe changes continue to sync. Automatic runs never show confirmation or conflict dialogs, stay silent on success, and skip a tick when another sync is already running. **Refresh status on startup** is a separate setting that only refreshes the Source Control status view.
 
 > **Security:** scope tokens to the smallest possible repository access and permissions, set an expiration where possible, and never place a token inside a note that may be synced. Revoke and rotate a token immediately if it may have been exposed.
 
