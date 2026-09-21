@@ -28,7 +28,7 @@
 
 1. Merge PR #156 (title: `feat(sync): add automatic sync and refine mobile Source Control density`) once Required Checks are green.
 2. Manual Obsidian verification (desktop + mobile) against the checklist in the PR.
-4. Do not hand-bump `manifest.json`/`package.json`/`versions.json`/generated `CHANGELOG.md`; semantic-release performs the 1.7.0 bump.
+3. Do not hand-bump `manifest.json`/`package.json`/`versions.json`/generated `CHANGELOG.md`; semantic-release performs the 1.7.0 bump.
 
 ## Gotchas
 
