@@ -1588,6 +1588,96 @@ describe('SourceControlView', () => {
 
             expect(onSync).toHaveBeenCalledWith([{ changeId: toChangeId('c-1'), action: undefined }]);
         });
+
+        describe('row density parity (Queue / Repository Tree / Repository List)', () => {
+            it('renders Queue, Tree, and List file rows all as .scv-change-item so they share one CSS density baseline', () => {
+                Platform.isMobile = true;
+                const { view, selection } = buildView([
+                    { id: toChangeId('c-1'), path: 'notes/a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'notes/b.md', kind: 'local-only' },
+                ]);
+                selection.selectForSync(toChangeId('c-1'));
+                view.render(container);
+
+                const queueRow = container.querySelector('.scv-selected-section .scv-change-item');
+                const treeRow = container.querySelector('.scv-changes-tree .scv-change-item');
+                expect(queueRow).not.toBeNull();
+                expect(treeRow).not.toBeNull();
+                expect(queueRow?.classList.contains('scv-change-item')).toBe(true);
+                expect(treeRow?.classList.contains('scv-change-item')).toBe(true);
+                // Neither carries the list-only variant class -- both stay on
+                // the shared bare-row density baseline.
+                expect(queueRow?.classList.contains('scv-change-item-list')).toBe(false);
+                expect(treeRow?.classList.contains('scv-change-item-list')).toBe(false);
+
+                (container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement).click();
+                const listRow = container.querySelector('.scv-changes-tree .scv-change-item');
+                expect(listRow?.classList.contains('scv-change-item')).toBe(true);
+                expect(listRow?.classList.contains('scv-change-item-list')).toBe(true);
+            });
+
+            it('List mode keeps filename, folder path, diff stat, and the row menu inside one single-row element', () => {
+                Platform.isMobile = true;
+                const { view } = buildView([
+                    { id: toChangeId('c-1'), path: 'deep/nested/folder/report.md', kind: 'local-modified' },
+                ]);
+                view.render(container);
+                (container.querySelector('.scv-view-toggle-btn[data-view="list"]') as HTMLButtonElement).click();
+
+                const rows = container.querySelectorAll('.scv-changes-tree .scv-change-item');
+                // Exactly one row for the one change -- no extra wrapper rows
+                // that would indicate the content spilled onto a second line.
+                expect(rows).toHaveLength(1);
+                const row = rows[0] as HTMLElement;
+                expect(row.querySelector('.scv-change-name-text')?.textContent).toBe('report.md');
+                expect(row.querySelector('.scv-change-path')?.textContent).toBe('deep/nested/folder');
+                expect(row.querySelector('.scv-change-menu')).not.toBeNull();
+            });
+
+            it('Tree mode omits the folder-path suffix (folders already convey location)', () => {
+                Platform.isMobile = true;
+                const { view } = buildView([
+                    { id: toChangeId('c-1'), path: 'deep/nested/folder/report.md', kind: 'local-modified' },
+                ]);
+                view.render(container);
+
+                const row = container.querySelector('.scv-changes-tree .scv-change-item') as HTMLElement;
+                expect(row.querySelector('.scv-change-path')).toBeNull();
+            });
+
+            it('renders tree folder rows with the shared .scv-tree-folder-row class alongside file rows', () => {
+                Platform.isMobile = true;
+                const { view } = buildView([
+                    { id: toChangeId('c-1'), path: 'notes/a.md', kind: 'local-only' },
+                    { id: toChangeId('c-2'), path: 'notes/b.md', kind: 'local-only' },
+                ]);
+                view.render(container);
+
+                expect(container.querySelector('.scv-tree-folder-row')).not.toBeNull();
+                expect(container.querySelector('.scv-tree-folder-row .scv-change-item')).toBeNull();
+            });
+        });
+
+        it('renders the mobile sync bar exactly once, as a sibling after the scrollable body (space reserved once, not overlaid)', () => {
+            Platform.isMobile = true;
+            const { view, selection } = buildView([
+                { id: toChangeId('c-1'), path: 'a.md', kind: 'local-only' },
+            ]);
+            selection.selectForSync(toChangeId('c-1'));
+            view.render(container);
+
+            const bars = container.querySelectorAll('.scv-mobile-sync-bar');
+            expect(bars).toHaveLength(1);
+            const bar = container.querySelector('.scv-mobile-sync-bar') as HTMLElement;
+            const body = container.querySelector('.scv-body');
+            expect(body).not.toBeNull();
+            // Sibling of .scv-body (same parent), not nested inside it or
+            // inside the independently-scrolling changes region -- so it sits
+            // in normal flow and its height is reserved exactly once.
+            expect(bar.parentElement).toBe(body?.parentElement);
+            expect(body?.contains(bar)).toBe(false);
+            expect(container.querySelector('.scv-changes-region')?.contains(bar)).toBe(false);
+        });
     });
 
     describe('header info strip', () => {

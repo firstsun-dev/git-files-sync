@@ -24,6 +24,8 @@ import type { SyncSelectionStore } from './logic/source-control/SyncSelectionSto
 import type { SourceControlViewModel } from './logic/source-control/SourceControlViewModel';
 import type { SourceControlActionService } from './logic/source-control/SourceControlActionService';
 import { createSyncRuntime } from './runtime/createSyncRuntime';
+import { AutomaticSyncScheduler } from './runtime/AutomaticSyncScheduler';
+import type { AutomaticSyncService } from './logic/source-control/AutomaticSyncService';
 import {
 	filterFilesByVaultFolder as scopeFilterFiles,
 	filterPathByVaultFolder as scopeFilterPath,
@@ -52,6 +54,8 @@ export default class GitLabFilesPush extends Plugin {
 	refreshState: RefreshState;
 	sourceControlViewModel: SourceControlViewModel;
 	sourceControlActions: SourceControlActionService;
+	automaticSync: AutomaticSyncService;
+	private automaticSyncScheduler?: AutomaticSyncScheduler;
 	private disposeSyncRuntime?: () => void;
 	private gitignoreConfigKey = '';
 	private pushRibbonEl: HTMLElement;
@@ -114,7 +118,14 @@ export default class GitLabFilesPush extends Plugin {
 		this.refreshState = runtime.refreshState;
 		this.sourceControlViewModel = runtime.sourceControlViewModel;
 		this.sourceControlActions = runtime.sourceControlActions;
+		this.automaticSync = runtime.automaticSync;
 		this.disposeSyncRuntime = () => runtime.dispose();
+		this.automaticSyncScheduler = new AutomaticSyncScheduler({
+			getSettings: () => this.settings,
+			run: () => this.automaticSync.runOnce(),
+			registerInterval: id => this.registerInterval(id),
+		});
+		this.automaticSyncScheduler.apply();
 
 		this.statusBarEl = this.addStatusBarItem();
 		this.statusBarEl.addClass('gfs-status-bar-connection');
@@ -126,7 +137,7 @@ export default class GitLabFilesPush extends Plugin {
 		this.pushRibbonEl = this.addRibbonIcon('upload-cloud', this.pushRibbonLabel(), async () => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView && activeView.file instanceof TFile) {
-				await this.sync.pushFiles([activeView.file]);
+				await this.pushFileSerialized(activeView.file);
 			} else {
 				new Notice(t('main.notice.noActiveNote'));
 			}
@@ -142,7 +153,7 @@ export default class GitLabFilesPush extends Plugin {
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
-					await this.sync.pushFiles([activeView.file]);
+					await this.pushFileSerialized(activeView.file);
 				}
 			}
 		});
@@ -153,7 +164,7 @@ export default class GitLabFilesPush extends Plugin {
 			callback: async () => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView && activeView.file instanceof TFile) {
-					await this.sync.pullFile(activeView.file);
+					await this.pullFileSerialized(activeView.file);
 				}
 			}
 		});
@@ -180,12 +191,12 @@ export default class GitLabFilesPush extends Plugin {
 					menu.addItem((item) => {
 						item.setTitle(t('main.contextMenu.pushTo', { service: this.serviceName }))
 							.setIcon('upload-cloud')
-							.onClick(async () => { await this.sync.pushFiles([file]); });
+							.onClick(async () => { await this.pushFileSerialized(file); });
 					});
 					menu.addItem((item) => {
 						item.setTitle(t('main.contextMenu.pullFrom', { service: this.serviceName }))
 							.setIcon('download-cloud')
-							.onClick(async () => { await this.sync.pullFile(file); });
+							.onClick(async () => { await this.pullFileSerialized(file); });
 					});
 				}
 			})
@@ -276,16 +287,27 @@ export default class GitLabFilesPush extends Plugin {
 			})
 		);
 
-		this.app.workspace.onLayoutReady(() => {
-			// Legacy workspaces may hold more than one persisted sync-status
-			// leaf (duplicates accumulated across old plugin versions).
-			// Normalize first so startup activation reuses a single canonical
-			// leaf instead of revealing one duplicate while others linger.
-			this.normalizeSourceControlLeaves();
-			if (this.settings.autoRefreshOnStartup) void this.refreshSyncStatusOnStartup();
-		});
+		this.app.workspace.onLayoutReady(() => this.handleLayoutReady());
 
 		await this.checkForUpdateNotice();
+	}
+
+	/**
+	 * Startup decision after Obsidian's layout is ready:
+	 * - legacy workspaces may hold duplicate persisted leaves; normalize first
+	 *   so activation reuses one canonical leaf;
+	 * - startup Automatic Sync runs its own authoritative refresh in the
+	 *   background and must NOT open/focus Source Control, and it supersedes the
+	 *   legacy refresh-on-startup so boot doesn't fetch twice;
+	 * - otherwise the existing refresh-on-startup behavior is preserved.
+	 */
+	private handleLayoutReady(): void {
+		this.normalizeSourceControlLeaves();
+		if (this.settings.automaticSyncEnabled && this.settings.automaticSyncOnStartup) {
+			void this.automaticSync.runOnce();
+		} else if (this.settings.autoRefreshOnStartup) {
+			void this.refreshSyncStatusOnStartup();
+		}
 	}
 
 	private async refreshSyncStatusOnStartup(): Promise<void> {
@@ -518,6 +540,15 @@ export default class GitLabFilesPush extends Plugin {
 			?.getPath() ?? null;
 	}
 
+	/** Single-file push/pull enter the shared execution guard so they never overlap Automatic Sync. */
+	private async pushFileSerialized(file: TFile): Promise<void> {
+		await this.sourceControlActions.runManual(() => this.sync.pushFiles([file]));
+	}
+
+	private async pullFileSerialized(file: TFile): Promise<void> {
+		await this.sourceControlActions.runManual(() => this.sync.pullFile(file));
+	}
+
 	async pushAllFiles(): Promise<void> {
 		await this.runAllFiles('push');
 	}
@@ -571,13 +602,25 @@ export default class GitLabFilesPush extends Plugin {
 		const progressNotice = new Notice(t('main.progress.running', { verb: runVerb, total: files.length }), 0);
 
 		try {
-			const results = op === 'push'
-				? await this.sync.pushFiles(files, (current, total, fileName) => {
-					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pushing'), current, total, fileName }));
-				}, tree)
-				: await this.sync.pullAllFiles(files, (current, total, fileName) => {
-					progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pulling'), current, total, fileName }));
-				}, tree);
+			// The guard is taken only after the user confirms (never held during the
+			// dialog). The remote tree decides the mutation plan, so it is re-read
+			// inside the guard: the pre-confirm `tree` above is only for gitignore
+			// discovery and may be stale if Automatic Sync committed meanwhile.
+			const results = await this.sourceControlActions.runManual(async () => {
+				let authoritativeTree: GitTreeEntry[] | undefined;
+				try {
+					authoritativeTree = await this.gitService.listFilesDetailed(this.settings.branch, false);
+				} catch (e) {
+					logger.warn('Failed to re-fetch remote tree under guard; falling back to per-call fetches', e);
+				}
+				return op === 'push'
+					? await this.sync.pushFiles(files, (current, total, fileName) => {
+						progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pushing'), current, total, fileName }));
+					}, authoritativeTree)
+					: await this.sync.pullAllFiles(files, (current, total, fileName) => {
+						progressNotice.setMessage(t('main.progress.step', { verb: t('main.verb.pulling'), current, total, fileName }));
+					}, authoritativeTree);
+			});
 
 			progressNotice.hide();
 
@@ -678,7 +721,11 @@ export default class GitLabFilesPush extends Plugin {
 		// Cleanup of registered components (views, commands, DOM/vault event
 		// listeners) is handled by Obsidian. The sync runtime's cross-object
 		// wiring (the ChangeRepository subscription) isn't Obsidian-managed,
-		// so it's disposed explicitly.
+		// so it's disposed explicitly. The automatic-sync timer is also stopped
+		// here even though registerInterval covers unload, so an interval is
+		// cleared the moment the plugin is disabled rather than lingering.
+		this.automaticSyncScheduler?.dispose();
+		this.automaticSyncScheduler = undefined;
 		this.disposeSyncRuntime?.();
 		this.disposeSyncRuntime = undefined;
 	}
@@ -693,5 +740,8 @@ export default class GitLabFilesPush extends Plugin {
 		this.initializeGitService();
 		this.updateGitignoreManager();
 		this.updateRibbonTooltip();
+		// Interval/enabled changes must take effect without a plugin reload;
+		// unchanged values are a no-op (see AutomaticSyncScheduler.apply).
+		this.automaticSyncScheduler?.apply();
 	}
 }

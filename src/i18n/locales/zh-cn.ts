@@ -32,6 +32,13 @@ const zhCn: Partial<Record<TranslationKey, string>> = {
 	'settings.autoRefreshOnStartup.name': '启动时刷新状态',
 	'settings.autoRefreshOnStartup.desc': 'Obsidian 加载完成后，自动刷新同步状态窗口',
 
+	'settings.automaticSync.name': '自动同步',
+	'settings.automaticSync.desc': '按照计划自动应用待处理更改的默认同步动作，不会打开源代码控制窗口',
+	'settings.automaticSyncInterval.name': '同步间隔（分钟）',
+	'settings.automaticSyncInterval.desc': '自动同步的执行频率。最短为 {min} 分钟。',
+	'settings.automaticSyncOnStartup.name': '启动时同步',
+	'settings.automaticSyncOnStartup.desc': 'Obsidian 加载完成后执行一次自动同步',
+
 	'settings.ignorePatterns.name': '忽略规则',
 	'settings.ignorePatterns.desc': '选填：以 .gitignore 语法（每行一条）排除本机文件，会与远程仓库的 .gitignore 规则一并应用。',
 

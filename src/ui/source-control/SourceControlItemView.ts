@@ -255,9 +255,9 @@ export class SourceControlItemView extends ItemView {
      * through the subscription above; the explicit re-render here is what
      * covers the failure path, where nothing else republishes status.
      */
-    private runAction(action: Promise<void>): Promise<void> {
+    private runAction(action: Promise<unknown>): Promise<void> {
         this.renderView();
-        return action.finally(() => this.renderView());
+        return action.then(() => undefined).finally(() => this.renderView());
     }
 
     /**
