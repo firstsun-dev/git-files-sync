@@ -32,16 +32,18 @@ on:
 #           └─► provider-e2e ───┤
 #   lint ───────────────────────┤
 #   unit-test ──────────────────┤──► required-checks ──► package
-#   build ──────────────────────┤                  └────► publish (main only)
+#   build ──────────────────────┤                  └────► release-metadata (main only)
 #
 # All five validation jobs start in parallel right after the push; only the E2E
 # jobs wait on `changes` for their
 # path gate. No validation waits on E2E any more -- a lint/unit/build error now
 # surfaces in <1-2 min instead of after the real-provider matrix. The single
 # `required-checks` job is the only status branch protection needs to watch.
-# Release (package/publish) runs only after that gate passes, so a real
-# provider regression still blocks the release instead of shipping and being
-# caught after the fact.
+# Release (package/release-metadata) runs only after that gate passes, so a
+# real provider regression still blocks the release instead of shipping and
+# being caught after the fact. release-metadata only tags/publishes a GitHub
+# Release shell entry (see its own comment); the actual build/attest/upload
+# happens in release-build.yml, triggered by that release being published.
 #
 # Whole-run concurrency (workflow level, NOT per job): a `push` to a branch
 # with an open PR fires both a `push` and a `pull_request` run for the same
@@ -430,12 +432,21 @@ jobs:
             echo "- Artifact: \`${{ env.ZIP_NAME }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  publish:
-    name: Release / Publish
+  # Metadata-only: version bump, CHANGELOG.md, the release commit + tag, and
+  # the GitHub Release shell entry (no assets — see .releaserc.json's
+  # `@semantic-release/github` config). It must NOT build/attest/upload
+  # main.js — that happens in `release-build.yml`, triggered by the
+  # `release: published` event this step fires, checking out the exact tag
+  # this step creates. This ordering is required so the attested/uploaded
+  # bytes are built from the tagged commit (the `chore(release):` commit
+  # `@semantic-release/git` creates and tags here), not from this job's
+  # pre-release checkout.
+  release-metadata:
+    name: Release / Metadata
     needs: [required-checks]
     # semantic-release only releases on main/master (see .releaserc.json's
-    # `branches`); gating the whole job on those refs skips the build/attest
-    # work on every PR run.
+    # `branches`); gating the whole job on those refs skips this on every PR
+    # run.
     if: >-
       needs.required-checks.result == 'success' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
@@ -443,9 +454,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      attestations: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -456,16 +464,6 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - name: Attest main.js
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: main.js
-      - name: Attest styles.css
-        if: hashFiles('styles.css') != ''
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: styles.css
       - env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: npx semantic-release
