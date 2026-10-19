@@ -312,6 +312,15 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         if: steps.gate.outputs.run == 'true'
 
+      # The self-hosted runners share a persistent pnpm store (/cache/pnpm-store)
+      # across concurrent jobs. The two provider legs run in parallel and race
+      # while pnpm/action-setup self-switches the runner's pnpm 11 to the pinned
+      # 12.14.0 inside that store ("Cannot find module .../@pnpm/exe.linux-x64/
+      # bin/pnpm.mjs"). Give each leg its own store under RUNNER_TEMP instead.
+      - name: Use a job-private pnpm store
+        if: steps.gate.outputs.run == 'true'
+        run: echo "pnpm_config_store_dir=$RUNNER_TEMP/pnpm-store-${{ matrix.provider }}" >> "$GITHUB_ENV"
+
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         if: steps.gate.outputs.run == 'true'
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
