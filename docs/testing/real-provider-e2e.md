@@ -198,9 +198,9 @@ and workdir for debugging.
 ## Running locally
 
 ```sh
-npm run test:e2e -- --provider gitea    # no credentials needed, runs a real Gitea in Docker
-npm run test:e2e -- --provider github   # needs E2E_GITHUB_* below
-npm run test:e2e -- --provider gitlab   # needs E2E_GITLAB_* below
+pnpm run test:e2e -- --provider gitea    # no credentials needed, runs a real Gitea in Docker
+pnpm run test:e2e -- --provider github   # needs E2E_GITHUB_* below
+pnpm run test:e2e -- --provider gitlab   # needs E2E_GITLAB_* below
 ```
 
 | Var | Required for | Notes |
@@ -326,7 +326,7 @@ GitHub/GitLab checks it cannot produce.
   assigns its loopback host port. Concurrent runs also use separate `mktemp` workdirs. A container
   left by a hard-killed local process can be removed manually (`docker rm -f <name>`).
 - **`E2E_PROVIDER is not set` error**: `vitest.e2e.config.ts` refuses to run directly under
-  `npx vitest` — always go through `npm run test:e2e -- --provider <name>` (or the CI steps),
+  `npx vitest` — always go through `pnpm run test:e2e -- --provider <name>` (or the CI steps),
   which set it.
 
 ## Known gaps
