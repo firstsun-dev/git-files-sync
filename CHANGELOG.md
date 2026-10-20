@@ -1,3 +1,9 @@
+## [1.6.3](https://github.com/firstsun-dev/git-files-sync/compare/1.6.2...1.6.3) (2026-10-20)
+
+### Bug Fixes
+
+* **ci:** isolate pnpm store per self-hosted E2E leg ([58d6b4e](https://github.com/firstsun-dev/git-files-sync/commit/58d6b4e3bf39001838fc9d2111f76034e60bb96a))
+
 ## [1.6.2](https://github.com/firstsun-dev/git-files-sync/compare/1.6.1...1.6.2) (2026-09-21)
 
 ## [1.6.1](https://github.com/firstsun-dev/git-files-sync/compare/1.6.0...1.6.1) (2026-09-01)
