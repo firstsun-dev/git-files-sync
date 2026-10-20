@@ -98,7 +98,8 @@ jobs:
               - 'scripts/e2e-suites.txt'
               - 'scripts/run-e2e.sh'
               - 'package.json'
-              - 'package-lock.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
               - '.github/workflows/ci.yml'
 
   # ── Fast checks (parallel, no E2E dependency) ──────────────────────────────
@@ -129,11 +130,12 @@ jobs:
       - name: Compute run-scoped workdir
         run: echo "E2E_WORKDIR=$RUNNER_TEMP/git-files-sync-e2e/${{ github.run_id }}/${{ github.run_attempt }}/gitea" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci --ignore-scripts
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Run disposable Gitea E2E
         run: scripts/run-e2e.sh --provider gitea
 
@@ -142,12 +144,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm run lint
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run lint
 
   unit-test:
     name: CI / Unit Test (Node ${{ matrix.node-version }})
@@ -158,15 +161,16 @@ jobs:
         node-version: [22, 24]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
-      - run: npm ci --ignore-scripts
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Build (compatibility check)
-        run: npm run build
+        run: pnpm run build
       - name: Run tests with coverage
-        run: npm run test -- --coverage
+        run: pnpm run test --coverage
       - name: Upload coverage
         if: matrix.node-version == 22
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -180,14 +184,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm run build
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run build
       # Upload the raw built artifacts (main.js/manifest/styles.css) for ad-hoc
-      # PR install testing on non-main branches. `npm run build` already ran
+      # PR install testing on non-main branches. `pnpm run build` already ran
       # above as the validation (tsc -noEmit + Obsidian 1.11.0 compat typecheck +
       # esbuild), so this upload is in the *same* job -- never a separate
       # upload-artifact job that could drift out of sync with the build state.
@@ -307,16 +312,27 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         if: steps.gate.outputs.run == 'true'
 
+      # The self-hosted runners share a persistent pnpm store (/cache/pnpm-store)
+      # across concurrent jobs. The two provider legs run in parallel and race
+      # while pnpm/action-setup self-switches the runner's pnpm 11 to the pinned
+      # 12.14.0 inside that store ("Cannot find module .../@pnpm/exe.linux-x64/
+      # bin/pnpm.mjs"). Give each leg its own store under RUNNER_TEMP instead.
+      - name: Use a job-private pnpm store
+        if: steps.gate.outputs.run == 'true'
+        run: echo "pnpm_config_store_dir=$RUNNER_TEMP/pnpm-store-${{ matrix.provider }}" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        if: steps.gate.outputs.run == 'true'
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         if: steps.gate.outputs.run == 'true'
         with:
-          node-version: '22'
-          cache: npm
+          node-version: '24'
+          cache: pnpm
 
       # --ignore-scripts: this job only needs installed deps to run vitest/the
       # harness, not husky's `prepare` git-hook setup -- skipping lifecycle
       # scripts avoids letting an install-time script run arbitrary code.
-      - run: npm ci --ignore-scripts
+      - run: pnpm install --frozen-lockfile --ignore-scripts
         if: steps.gate.outputs.run == 'true'
 
       # One entry point for the whole real-provider E2E flow: scripts/run-e2e.sh
@@ -399,12 +415,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm run build
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run build
       - name: Create plugin package
         run: |
           VERSION=$(node -p "require('./manifest.json').version")
@@ -451,12 +468,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci
-      - run: npm run build
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
       - name: Attest main.js
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -468,4 +486,4 @@ jobs:
           subject-path: styles.css
       - env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
-        run: npx semantic-release
+        run: pnpm exec semantic-release

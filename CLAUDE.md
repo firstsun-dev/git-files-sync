@@ -6,17 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Startup**: read `feature_list.json` (active/next-up work; GitHub Issues on `firstsun-dev/git-files-sync`, Project #6, is the actual source of truth — re-sync before trusting stale entries) and `progress.md` (what's open right now).
 - **Before editing**: run `./init.sh` (installs deps, then lint + test + build) to confirm you're starting from a green baseline.
-- **Definition of done**: `npx eslint .` has 0 errors, `npm run build` passes (includes the Obsidian 1.11.0 compat typecheck), and `npx vitest run` passes, *and* evidence of that run is recorded (one line: command + result) in `progress.md` or the PR description — not just claimed.
+- **Definition of done**: `pnpm exec eslint .` has 0 errors, `pnpm run build` passes (includes the Obsidian 1.11.0 compat typecheck), and `pnpm exec vitest run` passes, *and* evidence of that run is recorded (one line: command + result) in `progress.md` or the PR description — not just claimed.
 - **Scope**: work one `feature_list.json` entry at a time; don't start the next until the current one's evidence is recorded.
 - **End of session**: move finished items from `progress.md` into `archive/YYYY-MM.md` (current month).
 - Issue/PR conventions (Conventional Commits titles, Project #6 fields, English-only for this public plugin repo) are defined in the `firstsun-pm` skill, not duplicated here.
 
 ## Development Commands
-- Build: `npm run build` (runs type check and esbuild in production mode)
-- Dev: `npm run dev` (builds in watch mode using esbuild)
-- Lint: `npm run lint` (runs eslint check)
-- Test: `npm run test` (runs vitest suite)
-- Version bump: `npm run version` (updates manifest.json and versions.json via script)
+- Build: `pnpm run build` (runs type check and esbuild in production mode)
+- Dev: `pnpm run dev` (builds in watch mode using esbuild)
+- Lint: `pnpm run lint` (runs eslint check)
+- Test: `pnpm run test` (runs vitest suite)
+- Version bump: `pnpm run version` (updates manifest.json and versions.json via script)
 
 ## Architecture Contract
 

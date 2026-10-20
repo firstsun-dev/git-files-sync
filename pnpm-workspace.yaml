@@ -1,0 +1,18 @@
+# Security/compat overrides (moved from package.json "overrides" for pnpm 12).
+overrides:
+  npm: ^11.18.0
+  '@actions/http-client>undici': ^6.28.0
+  undici: ^7.29.0
+  sigstore: ^4.1.1
+  '@sigstore/core': ^3.2.1
+  '@sigstore/verify': ^3.1.1
+  tar: ^7.5.19
+  ip-address: ^10.3.1
+  js-yaml: ^4.2.0
+  brace-expansion: ^2.1.2
+  fast-uri: ^3.1.4
+  postcss: ^8.5.18
+
+# Build scripts: only esbuild needs its postinstall (platform binary check).
+allowBuilds:
+  esbuild: true
