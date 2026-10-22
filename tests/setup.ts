@@ -19,11 +19,11 @@ if (typeof document === 'undefined') {
 }
 if (typeof window === 'undefined') {
   (globalThis as unknown as { window: unknown }).window = {
-    setInterval: vi.fn(),
-    clearInterval: vi.fn(),
     // Delegate to the global timers (not bound methods captured once) so
     // vi.useFakeTimers()/vi.useRealTimers() — which patch globalThis — keep
-    // controlling window.setTimeout/clearTimeout too.
+    // controlling window.setTimeout/clearTimeout/setInterval too.
+    setInterval: (handler: (...args: unknown[]) => void, timeout?: number) => globalThis.setInterval(handler, timeout),
+    clearInterval: (handle?: ReturnType<typeof globalThis.setInterval>) => globalThis.clearInterval(handle),
     setTimeout: (handler: (...args: unknown[]) => void, timeout?: number) => globalThis.setTimeout(handler, timeout),
     clearTimeout: (handle?: ReturnType<typeof globalThis.setTimeout>) => globalThis.clearTimeout(handle),
   };
@@ -66,6 +66,8 @@ class BaseTextComponent<T extends HTMLInputElement | HTMLTextAreaElement> {
 
   onChange(handler: (value: string) => void) {
     this.changeHandler = handler;
+    this.inputEl.addEventListener('input', () => handler(this.inputEl.value));
+    this.inputEl.addEventListener('change', () => handler(this.inputEl.value));
     return this;
   }
 
@@ -78,6 +80,7 @@ class BaseTextComponent<T extends HTMLInputElement | HTMLTextAreaElement> {
 export const TextComponent = class extends BaseTextComponent<HTMLInputElement> {
   constructor(containerEl?: HTMLElement) {
     const inputEl = document.createElement('input');
+    inputEl.type = 'text';
     containerEl?.appendChild(inputEl);
     super(inputEl);
   }
@@ -157,31 +160,103 @@ export const ButtonComponent = class {
 
 export const ExtraButtonComponent = class extends ButtonComponent {};
 
+export const ToggleComponent = class {
+  toggleEl: HTMLInputElement;
+  private changeHandler?: (value: boolean) => void;
+
+  constructor(containerEl?: HTMLElement) {
+    const inputEl = document.createElement('input');
+    inputEl.type = 'checkbox';
+    containerEl?.appendChild(inputEl);
+    this.toggleEl = inputEl;
+  }
+
+  setValue(value: boolean) {
+    this.toggleEl.checked = value;
+    return this;
+  }
+
+  setDisabled(disabled: boolean) {
+    this.toggleEl.disabled = disabled;
+    return this;
+  }
+
+  onChange(handler: (value: boolean) => void) {
+    this.changeHandler = handler;
+    this.toggleEl.addEventListener('change', () => handler(this.toggleEl.checked));
+    return this;
+  }
+
+  triggerChange(value: boolean) {
+    this.toggleEl.checked = value;
+    this.changeHandler?.(value);
+  }
+
+  getValue() {
+    return this.toggleEl.checked;
+  }
+};
+
 export const Setting = class {
   containerEl?: HTMLElement;
+  settingEl?: HTMLElement;
+  private disabled = false;
 
   constructor(containerEl?: HTMLElement) {
     this.containerEl = containerEl;
+    // Build a faithful `.setting-item` row (name/desc/control) so tests can
+    // find a control by its row label, like the real Obsidian DOM.
+    if (containerEl) {
+      const row = document.createElement('div');
+      row.className = 'setting-item';
+      this.settingEl = row;
+      containerEl.appendChild(row);
+    }
   }
 
-  setName() { return this; }
-  setDesc() { return this; }
+  private controlContainer(): HTMLElement | undefined {
+    return this.settingEl ? this.settingEl.appendChild(document.createElement('div')) : this.containerEl;
+  }
+
+  setName(name: string) {
+    if (!this.settingEl) return this;
+    const el = document.createElement('div');
+    el.className = 'setting-item-name';
+    el.textContent = name;
+    this.settingEl.appendChild(el);
+    return this;
+  }
+
+  setDesc(desc: string) {
+    if (!this.settingEl) return this;
+    const el = document.createElement('div');
+    el.className = 'setting-item-description';
+    el.textContent = desc;
+    this.settingEl.appendChild(el);
+    return this;
+  }
+
   setHeading() { return this; }
-  addToggle() { return this; }
+  setDisabled(disabled: boolean) { this.disabled = disabled; return this; }
+  isDisabled() { return this.disabled; }
+  addToggle(callback?: (component: InstanceType<typeof ToggleComponent>) => void) {
+    if (callback) callback(new ToggleComponent(this.controlContainer()));
+    return this;
+  }
   addText(callback?: (component: InstanceType<typeof TextComponent>) => void) {
-    if (callback) callback(new TextComponent(this.containerEl));
+    if (callback) callback(new TextComponent(this.controlContainer()));
     return this;
   }
   addTextArea(callback?: (component: InstanceType<typeof TextAreaComponent>) => void) {
-    if (callback) callback(new TextAreaComponent(this.containerEl));
+    if (callback) callback(new TextAreaComponent(this.controlContainer()));
     return this;
   }
   addButton(callback?: (component: InstanceType<typeof ButtonComponent>) => void) {
-    if (callback) callback(new ButtonComponent(this.containerEl));
+    if (callback) callback(new ButtonComponent(this.controlContainer()));
     return this;
   }
   addExtraButton(callback?: (component: InstanceType<typeof ExtraButtonComponent>) => void) {
-    if (callback) callback(new ExtraButtonComponent(this.containerEl));
+    if (callback) callback(new ExtraButtonComponent(this.controlContainer()));
     return this;
   }
   addDropdown(callback?: (component: InstanceType<typeof DropdownComponent>) => void) {
@@ -399,6 +474,7 @@ vi.mock('obsidian', () => ({
   DropdownComponent,
   ButtonComponent,
   ExtraButtonComponent,
+  ToggleComponent,
   requestUrl,
   setTooltip,
   setIcon,

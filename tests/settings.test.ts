@@ -34,7 +34,52 @@ describe('settings module split', () => {
             bannerDismissedVersion: '',
             language: 'system',
             autoRefreshOnStartup: true,
+            automaticSyncEnabled: false,
+            automaticSyncIntervalMinutes: 5,
+            automaticSyncOnStartup: false,
         });
+    });
+
+    it('defaults automatic sync to OFF, 5 minutes, and startup sync OFF', () => {
+        expect(settingsModel.DEFAULT_SETTINGS.automaticSyncEnabled).toBe(false);
+        expect(settingsModel.DEFAULT_SETTINGS.automaticSyncIntervalMinutes).toBe(5);
+        expect(settingsModel.DEFAULT_SETTINGS.automaticSyncOnStartup).toBe(false);
+    });
+
+    it('merges older stored settings with the new automatic-sync defaults', () => {
+        // A settings object persisted before automatic sync existed.
+        const stored = { gitlabToken: 'abc', branch: 'develop' } as Partial<typeof settingsModel.DEFAULT_SETTINGS>;
+        const merged = { ...settingsModel.DEFAULT_SETTINGS, ...stored };
+        expect(merged.automaticSyncEnabled).toBe(false);
+        expect(merged.automaticSyncIntervalMinutes).toBe(5);
+        expect(merged.automaticSyncOnStartup).toBe(false);
+        expect(merged.branch).toBe('develop');
+    });
+});
+
+describe('normalizeAutomaticSyncIntervalMinutes', () => {
+    const fallback = settingsModel.DEFAULT_SETTINGS.automaticSyncIntervalMinutes;
+
+    it('accepts a finite interval at or above the minimum', () => {
+        expect(settingsHelpers.normalizeAutomaticSyncIntervalMinutes(1, fallback)).toBe(1);
+        expect(settingsHelpers.normalizeAutomaticSyncIntervalMinutes(45, fallback)).toBe(45);
+    });
+
+    it('floors fractional minute values', () => {
+        expect(settingsHelpers.normalizeAutomaticSyncIntervalMinutes(2.9, fallback)).toBe(2);
+    });
+
+    it('rejects zero, negative, NaN, Infinity, and non-numeric input so no rapid timer can be created', () => {
+        expect(settingsHelpers.normalizeAutomaticSyncIntervalMinutes(0, fallback)).toBe(fallback);
+        expect(settingsHelpers.normalizeAutomaticSyncIntervalMinutes(-5, fallback)).toBe(fallback);
+        expect(settingsHelpers.normalizeAutomaticSyncIntervalMinutes(Number.NaN, fallback)).toBe(fallback);
+        expect(settingsHelpers.normalizeAutomaticSyncIntervalMinutes(Number.POSITIVE_INFINITY, fallback)).toBe(fallback);
+        expect(settingsHelpers.normalizeAutomaticSyncIntervalMinutes('nonsense', fallback)).toBe(fallback);
+        expect(settingsHelpers.normalizeAutomaticSyncIntervalMinutes(undefined, fallback)).toBe(fallback);
+    });
+
+    it('parses a numeric string from older storage', () => {
+        expect(settingsHelpers.normalizeAutomaticSyncIntervalMinutes('10', fallback)).toBe(10);
     });
 
     it('getServiceName still maps every GitServiceType to its display name', () => {

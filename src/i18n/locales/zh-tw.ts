@@ -32,6 +32,13 @@ const zhTw: Partial<Record<TranslationKey, string>> = {
 	'settings.autoRefreshOnStartup.name': '啟動時重新整理狀態',
 	'settings.autoRefreshOnStartup.desc': 'Obsidian 載入完成後，自動重新整理同步狀態視窗',
 
+	'settings.automaticSync.name': '自動同步',
+	'settings.automaticSync.desc': '依照排程自動套用待處理變更的預設同步動作，不會開啟原始碼控制視窗',
+	'settings.automaticSyncInterval.name': '同步間隔（分鐘）',
+	'settings.automaticSyncInterval.desc': '自動同步的執行頻率。最短為 {min} 分鐘。',
+	'settings.automaticSyncOnStartup.name': '啟動時同步',
+	'settings.automaticSyncOnStartup.desc': 'Obsidian 載入完成後執行一次自動同步',
+
 	'settings.ignorePatterns.name': '忽略規則',
 	'settings.ignorePatterns.desc': '選填：以 .gitignore 語法（每行一條）排除本機檔案，會與遠端儲存庫的 .gitignore 規則一併套用。',
 

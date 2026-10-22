@@ -51,6 +51,9 @@ function makeSettings(branch: string): GitLabFilesPushSettings {
         bannerDismissedVersion: '',
         language: 'system',
         autoRefreshOnStartup: true,
+        automaticSyncEnabled: false,
+        automaticSyncIntervalMinutes: 5,
+        automaticSyncOnStartup: false,
     };
 }
 
