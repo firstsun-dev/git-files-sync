@@ -83,13 +83,12 @@ describe('CI workflow contracts', () => {
         expect(workflow).not.toContain('needs: e2e-gate');
     });
 
-    it('gates release behind a single required-checks aggregate that runs even on failure', () => {
+    it('gates release on live validation runs and skips superseded run duplicates', () => {
         expect(workflow).toContain('name: CI / Required Checks');
         expect(workflow).toContain('needs: [lint, unit-test, build, gitea-e2e, provider-e2e]');
-        expect(workflow).toContain('if: always()');
-        // Release only starts after the gate; a cancelled matrix leg is a hard
-        // failure here (the surviving run owns the latest-commit gate), not a
-        // silent pass-through that lets downstream CI/release continue.
+        expect(workflow).toContain('if: always() && !cancelled()');
+        // A cancelled whole workflow is superseded by the winning DAG. Live
+        // failures still flow through the aggregate and block downstream jobs.
         expect(workflow).toContain('needs: [required-checks]');
         expect(workflow).not.toContain('run-ci=false');
         expect(workflow).not.toContain('needs.e2e-gate.outputs.run-ci');

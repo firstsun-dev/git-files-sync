@@ -395,16 +395,14 @@ jobs:
 
   # Single required status check. Branch protection only has to reference
   # this one job name (see docs/testing/real-provider-e2e.md's note on the
-  # `CI / gitea` required-status split). `if: always()` so a real validation
-  # failure is caught here and blocks merge/release; a cancelled matrix leg
-  # (a newer run in the same branch/provider concurrency group replaced this
-  # duplicate) is treated as a failure here too -- the surviving run is the
-  # one whose gate result GitHub uses for the latest commit, so blocking the
-  # cancelled duplicate's gate is correct, not a wedged red.
+  # `CI / gitea` required-status split). `if: always()` makes live runs
+  # aggregate failures; `!cancelled()` skips the gate for a superseded whole
+  # workflow so its duplicate check cannot leave the shared commit red. The
+  # surviving branch run owns the required-check result.
   required-checks:
     name: CI / Required Checks
     needs: [lint, unit-test, build, gitea-e2e, provider-e2e]
-    if: always()
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate validation results
