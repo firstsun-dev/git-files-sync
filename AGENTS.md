@@ -10,9 +10,9 @@ Before writing code:
 ## Definition of Done
 
 A feature is done only when all of the following hold, with evidence recorded (command + result) in `progress.md`:
-- `npx eslint .` — 0 errors
-- `npm run build` — passes (tsc + Obsidian 1.11.0 compat typecheck + esbuild)
-- `npx vitest run` — passes
+- `pnpm exec eslint .` — 0 errors
+- `pnpm run build` — passes (tsc + Obsidian 1.11.0 compat typecheck + esbuild)
+- `pnpm exec vitest run` — passes
 - Manual verification in Obsidian, when the change has a runtime UI surface
 
 ## Stay in Scope
@@ -40,7 +40,7 @@ Before ending a session:
 
 ### 1. TDD & Linting (Skill: `obsidian-development`)
 - **Rule**: Write Vitest tests BEFORE implementation.
-- **Execution**: Offload `npx vitest run` and `npm run lint` to Haiku.
+- **Execution**: Offload `pnpm exec vitest run` and `pnpm run lint` to Haiku.
 - **Report Format**: `Success: N items, Failure: X items` (including error logs on failure).
 
 ### 2. Marketplace Readiness (Skill: `obsidian-marketplace-check`)
@@ -52,4 +52,4 @@ Before ending a session:
 - **Failure Protocol**: Fetch and return specific error messages from the CI pipeline.
 
 ### 4. Git Integrity
-- **Pre-commit**: Husky hook running `npm run lint && npm run build`.
+- **Pre-commit**: Husky hook running `pnpm run lint && pnpm run build`.

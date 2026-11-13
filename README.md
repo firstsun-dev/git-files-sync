@@ -176,12 +176,12 @@ A practical multi-device habit is still useful: refresh before editing on anothe
 
 ```bash
 git clone https://github.com/firstsun-dev/git-files-sync.git
-npm install
+pnpm install
 
-npm run dev    # watch build
-npm run build  # type-check + production build
-npm run test   # vitest suite
-npm run lint   # eslint
+pnpm run dev    # watch build
+pnpm run build  # type-check + production build
+pnpm run test   # vitest suite
+pnpm run lint   # eslint
 ```
 
 ## License

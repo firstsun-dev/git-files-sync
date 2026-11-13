@@ -4,13 +4,13 @@ set -euo pipefail
 check="${1:-}"
 case "$check" in
   lint)
-    npm run lint
+    pnpm run lint
     ;;
   test)
-    npm test
+    pnpm test
     ;;
   build)
-    npm run build
+    pnpm run build
     ;;
   *)
     echo "Usage: scripts/run-preflight.sh <lint|test|build>" >&2

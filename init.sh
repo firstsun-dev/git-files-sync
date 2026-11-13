@@ -3,17 +3,17 @@ set -e
 
 echo "=== Harness Initialization ==="
 
-echo "=== npm install ==="
-npm install
+echo "=== pnpm install ==="
+pnpm install --frozen-lockfile
 
-echo "=== npm run lint ==="
-npm run lint
+echo "=== pnpm run lint ==="
+pnpm run lint
 
-echo "=== npm test ==="
-npm test
+echo "=== pnpm test ==="
+pnpm test
 
-echo "=== npm run build ==="
-npm run build
+echo "=== pnpm run build ==="
+pnpm run build
 
 echo "=== Verification Complete ==="
 echo ""
