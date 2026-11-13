@@ -1,6 +1,7 @@
 import { compareVersions } from '../utils/version';
 import { getActiveLocale } from '../i18n';
 import { type ChangelogEntry, type ChangelogEntryText, type ChangelogRelease } from './types';
+import { release as release_1_7_0 } from './1.7.0';
 import { release as release_1_6_0 } from './1.6.0';
 import { release as release_1_5_0 } from './1.5.0';
 import { release as release_1_4_0 } from './1.4.0';
@@ -30,6 +31,7 @@ export {
  * by exact string, so keep them in sync.
  */
 export const CHANGELOG: ChangelogRelease[] = [
+    release_1_7_0,
     release_1_6_0,
     release_1_5_0,
     release_1_4_0,

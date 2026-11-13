@@ -4,26 +4,47 @@ Completed work is archived in [archive/](./archive/), one file per calendar mont
 
 ## Current State
 
-**Last Updated:** 2026-09-01
-**Active Feature:** PR2 responsibility cleanup, item 5 done — provider contract cleanup, partial (no tracked issue number; an ad-hoc follow-up plan on top of `origin/1.6.1`, not in `feature_list.json`).
-**Branch / PR:** `claude/pr2-source-control-boundary`, branched from `origin/1.6.1` (commit `69e5540`). Pushed; opened as [PR #154](https://github.com/firstsun-dev/git-files-sync/pull/154) against `1.6.1` (covers items 1-4; item 5 below lands as a follow-up commit on the same branch/PR).
+**Last Updated:** 2026-09-21
+**Active Feature:** Issue #141 — Automatic Syncing (v1.7.0). Implementation complete; PR #156 reviewed, CI green at `12c213d` (run 35562916807).
+**Branch / PR:** `claude/mobile-source-control-density` / PR #156. #156 is now a combined PR: Mobile Source Control density (CSS + structural tests) **and** Automatic Sync (#141, merged in via #159). It is no longer CSS-only. semantic-release owns the 1.7.0 bump.
 
-**Scope (item 5, per the PR2 plan):** Moved `ConnectionTestResult` out of `git-service-base.ts` into `git-service-interface.ts` — it's a contract type consumed by `GitServiceInterface.testConnection`, so it belongs with the interface, not the base implementation class. `git-service-base.ts` now imports it back for its own `abstract testConnection` signature; `github-service.ts`/`gitlab-service.ts`/`gitea-service.ts`/`main.ts`/`GitLabSyncSettingTab.ts`/`tests/ui/SettingsConnectionStatus.test.ts` updated to import from the new location. Reviewed `updateConfig(...args: unknown[])` on `GitServiceInterface` per the plan's ask, but did **not** convert it to a typed discriminated union: every actual call site (`main.ts` `initializeGitService()`, 3 branches) already calls `updateConfig` on the concrete class (`GitLabService`/`GiteaService`/`GitHubService`), never through the loose interface type, so the untyped signature isn't causing a real type-safety gap today. A discriminated union would mean reshaping the interface, all three services' `updateConfig` bodies, and all three `main.ts` call sites into config-object form for no functional benefit — exactly the "touches too much, leave for later" case the plan calls out, so left as-is.
+**What landed (#141):** persisted `automaticSyncEnabled` / `automaticSyncIntervalMinutes` / `automaticSyncOnStartup` (defaults OFF / 5 / OFF, interval min 1); settings UI rows distinct from the existing `autoRefreshOnStartup`; EN/zh-TW/zh-CN strings; `AutomaticSyncService` (refresh → repository → default intents → background execute → refresh) wired through `createSyncRuntime`; `AutomaticSyncScheduler` in plugin runtime; `SyncExecutionMode` per-execution policy with `PushConflictBehavior = 'skip'` at the `PushCoordinator` planning boundary; `SyncExecutionGuard` serialization; startup sync that never opens Source Control and supersedes the legacy startup refresh; hand-curated 1.7.0 What's New entry.
 
-**Next:** PR2 plan is now fully worked through (items 1-5). Nothing further planned here; watch PR #154 for review feedback.
+**Review fixes (2026-09-21):** background failures now reach `onError` via `SyncExecutionOutcome`; a busy tick is skipped before any refresh/planning via `SourceControlActionService.runBackground` (one shared `SyncExecutionGuard`, held across refresh → execute → refresh); the redundant second refresh on an idle vault is gone (idle/synced+conflict-only = 1 refresh, executed run = 2, busy = 0).
+
+**Next:** merge #156 once CI is green on the final e2e-cleanup fix head. Manual Obsidian verification not performed in this environment (no executable Obsidian runtime) — checklist is in the PR body.
 
 Below that: the previous "Outstanding Items"/"Verification Evidence" entries track separate, still-open work on PR #129 / `claude/source-control-foundation`, Issue #143, and `claude/fix-source-control-explicit-sync-intent` — not superseded by this entry, carried over from the base branch history.
 
-- `npx eslint .` — 0 errors.
-- `npx vitest run` — 76 files / 953 tests passed (unchanged count; pure type-relocation, no new tests needed).
-- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
-
 ## Outstanding Items
 
-1. Run `npm run test:e2e -- --provider github`, `gitlab`, and `gitea` with provisioned credentials; verify mixed-100 remains under 120s (target <30s) and the provider matrix passes.
-2. Commit and push the current working tree, then monitor the CI provider matrix.
+1. Confirm CI is green on the head containing the e2e-harness cleanup fix (no persisted run state ⇒ network-free cleanup), then merge #156.
+2. Manual Obsidian runtime verification (checklist in the PR body) — no executable Obsidian in this environment.
 
 ## Verification Evidence
+
+2026-09-21 e2e cleanup fix (`scripts/e2e-harness.sh cleanup` is network-free when provisioning never wrote `e2e.env`; previously `load_env_file` → `normalize_env` could repeat the GitLab `curl` and mask the original failure):
+
+- Fake-`curl`/`git`/`docker` shell check: gitlab + empty workdir → exit 0, 0 curl/fetch/push calls; state file without branch → exit 0, nothing deleted; github state + branch + clone → reaches `git push origin :refs/heads/<branch>`; gitea cleanup unchanged.
+- Provider E2E (GitHub/GitLab/Gitea) + Required Checks green on `12c213d` (run 35562916807; 82 files / 1035 tests, Node 22 + 24).
+
+2026-09-21 review fixes (manual-mutation serialization via `SourceControlActionService.runManual`, e2e cleanup unbound-var fix):
+
+- `npx eslint .` — 0 errors. `npm run build` — passed. `npx vitest run` — 82 files / 1035 tests passed (new: `tests/logic/source-control/ManualSerialization.test.ts`).
+
+2026-09-21 review fixes (Automatic Sync observability / busy skip / single refresh):
+
+- `npx eslint .` — 0 errors. `npm run build` (tsc + Obsidian 1.11.0 compat + esbuild) — passed. `npx vitest run` — 81 files / 1030 tests passed (new: `tests/logic/source-control/AutomaticSyncIntegration.test.ts`, 14 tests over the real action service).
+- Provider E2E (`npm run test:e2e`) **not run**: no provider credentials in this environment.
+
+Earlier session (Issue #141 — Automatic Syncing; since merged into `claude/mobile-source-control-density` / combined PR #156 via #159):
+
+- `npx eslint .` — 0 errors, 0 warnings.
+- `npm run build` (tsc + Obsidian 1.11.0 compat typecheck + esbuild) — passed.
+- `npx vitest run` — 80 files / 1010 tests passed (baseline from the parent branch was 76 files / 958; +41 new Automatic Sync tests across settings, execution policy, service, guard, scheduler, startup, i18n, settings UI, and changelog, plus settings-literal updates).
+- New coverage: `tests/logic/source-control/AutomaticSyncService.test.ts`, `tests/logic/source-control/SyncExecutionGuard.test.ts`, `tests/runtime/AutomaticSyncScheduler.test.ts`, `tests/ui/SettingsAutomaticSync.test.ts`; extended `tests/logic/sync/PushCoordinator.test.ts` (prompt vs skip), `tests/logic/source-control/SourceControlActionService.test.ts` (background mode, skipped-conflict OperationState edge case, manual-vs-background serialization), `tests/main.test.ts` (startup decision), `tests/runtime/createSyncRuntime.test.ts`, `tests/settings.test.ts`, `tests/i18n/index.test.ts`, `tests/changelog.test.ts`, `tests/ui/SettingsConnectionStatus.test.ts`.
+- **Not verified in this environment:** manual Obsidian runtime verification (no executable Obsidian environment) and the real-provider E2E suite. The manual checklist is included in the #141 PR body.
+- semantic-release owns the actual 1.7.0 version bump; `manifest.json`/`package.json`/`versions.json`/generated `CHANGELOG.md` were intentionally not hand-edited.
 
 This session (explicit per-file sync actions, 7 commits on `claude/fix-source-control-explicit-sync-intent`):
 

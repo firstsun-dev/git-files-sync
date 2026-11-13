@@ -11,8 +11,8 @@ import { RemoteFolderSuggest } from '../RemoteFolderSuggest';
 import { WhatsNewModal } from '../WhatsNewModal';
 import { t, setLanguageOverride, type LanguageSetting } from '../../i18n';
 import { CHANGELOG, entryText } from '../../changelog';
-import type { GitLabFilesPushSettings, GitServiceType, SymlinkHandling } from '../../settings/model';
-import { getServiceName, getEffectiveSymlinkHandling } from '../../settings/helpers';
+import { DEFAULT_SETTINGS, type GitLabFilesPushSettings, type GitServiceType, type SymlinkHandling } from '../../settings/model';
+import { getServiceName, getEffectiveSymlinkHandling, normalizeAutomaticSyncIntervalMinutes, MIN_AUTOMATIC_SYNC_INTERVAL_MINUTES } from '../../settings/helpers';
 
 // Minimal shape of Obsidian >= 1.13's SettingDefinitionItem. Declared locally so
 // the plugin still type-checks against older Obsidian typings (minAppVersion
@@ -278,6 +278,43 @@ export class GitLabSyncSettingTab extends PluginSettingTab {
                     });
                 FolderSuggest.attach(this.app, text.inputEl);
             });
+
+        new Setting(containerEl)
+            .setName(t('settings.automaticSync.name'))
+            .setDesc(t('settings.automaticSync.desc'))
+            .addToggle(toggle => toggle
+                .setValue(this.host.settings.automaticSyncEnabled)
+                .onChange((value) => {
+                    this.host.settings.automaticSyncEnabled = value;
+                    void this.host.saveSettings();
+                    this.refresh();
+                }));
+
+        new Setting(containerEl)
+            .setName(t('settings.automaticSyncInterval.name'))
+            .setDesc(t('settings.automaticSyncInterval.desc', { min: MIN_AUTOMATIC_SYNC_INTERVAL_MINUTES }))
+            .setDisabled(!this.host.settings.automaticSyncEnabled)
+            .addText(text => text
+                .setPlaceholder(String(DEFAULT_SETTINGS.automaticSyncIntervalMinutes))
+                .setValue(String(this.host.settings.automaticSyncIntervalMinutes))
+                .onChange((value) => {
+                    this.host.settings.automaticSyncIntervalMinutes = normalizeAutomaticSyncIntervalMinutes(
+                        value.trim() === '' ? Number.NaN : value,
+                        DEFAULT_SETTINGS.automaticSyncIntervalMinutes,
+                    );
+                    void this.host.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName(t('settings.automaticSyncOnStartup.name'))
+            .setDesc(t('settings.automaticSyncOnStartup.desc'))
+            .setDisabled(!this.host.settings.automaticSyncEnabled)
+            .addToggle(toggle => toggle
+                .setValue(this.host.settings.automaticSyncOnStartup)
+                .onChange((value) => {
+                    this.host.settings.automaticSyncOnStartup = value;
+                    void this.host.saveSettings();
+                }));
 
         new Setting(containerEl)
             .setName(t('settings.autoRefreshOnStartup.name'))

@@ -51,6 +51,12 @@ export interface GitLabFilesPushSettings {
     language: LanguageSetting;
     /** Refresh the sync status automatically after Obsidian finishes loading. */
     autoRefreshOnStartup: boolean;
+    /** Run the default Sync action for pending changes automatically on a schedule. */
+    automaticSyncEnabled: boolean;
+    /** How often scheduled automatic sync runs, in minutes. Minimum enforced by `normalizeAutomaticSyncIntervalMinutes`. */
+    automaticSyncIntervalMinutes: number;
+    /** Run one background automatic sync once Obsidian finishes loading, in addition to the interval. */
+    automaticSyncOnStartup: boolean;
 }
 
 export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
@@ -75,4 +81,7 @@ export const DEFAULT_SETTINGS: GitLabFilesPushSettings = {
     bannerDismissedVersion: '',
     language: 'system',
     autoRefreshOnStartup: true,
+    automaticSyncEnabled: false,
+    automaticSyncIntervalMinutes: 5,
+    automaticSyncOnStartup: false,
 };

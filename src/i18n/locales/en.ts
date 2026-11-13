@@ -30,6 +30,13 @@ const en = {
 	'settings.autoRefreshOnStartup.name': 'Refresh status on startup',
 	'settings.autoRefreshOnStartup.desc': 'Automatically refresh the Sync Status View when Obsidian finishes loading',
 
+	'settings.automaticSync.name': 'Automatic sync',
+	'settings.automaticSync.desc': 'Automatically apply the default Sync action for pending changes on a schedule, without opening the Source Control view',
+	'settings.automaticSyncInterval.name': 'Sync interval (minutes)',
+	'settings.automaticSyncInterval.desc': 'How often automatic sync runs. Minimum {min} minute.',
+	'settings.automaticSyncOnStartup.name': 'Sync on startup',
+	'settings.automaticSyncOnStartup.desc': 'Run one automatic sync after Obsidian finishes loading',
+
 	'settings.ignorePatterns.name': 'Ignore patterns',
 	'settings.ignorePatterns.desc': 'Optional: .gitignore-style patterns (one per line) to exclude local files from sync, in addition to the repository\'s own .gitignore.',
 

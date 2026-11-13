@@ -249,13 +249,31 @@ cmd_cleanup() {
         rm -f "$workdir/e2e.env" "$workdir/e2e.secrets.env"
         return
     fi
+    # write_env_file runs only after provision assigned the branch. Without
+    # that file (and no branch inherited from the caller) this run created
+    # nothing, and load_env_file would re-run normalize_env, whose provider
+    # discovery may hit the network again -- repeating (and masking) the
+    # original provisioning failure. Bail out before any of it.
+    if [ ! -f "$workdir/e2e.env" ] && [ -z "${E2E_TEST_BRANCH:-}" ]; then
+        log "No persisted E2E run state at $workdir/e2e.env — nothing to clean up"
+        return
+    fi
     load_env_file
-    setup_askpass
+    # Never let cleanup throw (`set -u`) on a state file lacking the branch.
+    if [ -z "${E2E_TEST_BRANCH:-}" ]; then
+        log "No E2E_TEST_BRANCH recorded (provisioning did not get that far) — nothing to clean up"
+        return
+    fi
     if [ "$keep_branch" = "1" ]; then
         log "E2E_KEEP_BRANCH set — leaving $E2E_TEST_BRANCH in place"
         return
     fi
     local dir; dir=$(clone_dir)
+    if [ ! -d "$dir/.git" ]; then
+        log "No clone at $dir — remote branch was never created by this run"
+        return
+    fi
+    setup_askpass
     log "Deleting isolated branch $E2E_TEST_BRANCH"
     git_network -C "$dir" push origin ":refs/heads/${E2E_TEST_BRANCH}" || true
 }

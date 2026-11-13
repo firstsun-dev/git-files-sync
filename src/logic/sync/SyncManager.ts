@@ -18,7 +18,7 @@ import { SyncScanner } from './SyncScanner';
 import { ConflictResolver } from './ConflictResolver';
 import { SyncExecutor } from './SyncExecutor';
 import { PullCoordinator } from './PullCoordinator';
-import { PushCoordinator } from './PushCoordinator';
+import { PushCoordinator, type PushConflictBehavior } from './PushCoordinator';
 import {
     HeadlessSyncInteraction,
     type ConflictDiffLoader,
@@ -315,8 +315,9 @@ export class SyncManager {
         files: (TFile | string)[],
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[],
+        conflictBehavior?: PushConflictBehavior,
     ): ReturnType<PushCoordinator['planSyncBatch']> {
-        return this.pushCoordinator.planSyncBatch(files, onProgress, remoteTree);
+        return this.pushCoordinator.planSyncBatch(files, onProgress, remoteTree, conflictBehavior);
     }
 
     /** Commits already-planned pushes/moves/deletions as one provider mutation set. */

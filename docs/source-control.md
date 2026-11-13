@@ -40,6 +40,26 @@ SourceControlItemView
   talks directly to a provider or bypasses the workspace to reach sync-domain
   coordinators/executors.
 
+## Automatic sync
+
+`AutomaticSyncService` is the application-level use case for one automatic run
+(refresh → read `ChangeRepository` → default intents → execute in background →
+refresh). It reuses this same call chain and the same `SyncWorkspace` boundary;
+it never reaches a provider or coordinator directly.
+
+- Manual `sync()` stays `interactive`: one merged plan, one confirmation, batch
+  conflict interaction, and a result notice.
+- Automatic runs pass `background`: the same plan is built and validated, but
+  conflicts are skipped (`PushConflictBehavior = 'skip'`) instead of prompting,
+  the final plan is auto-accepted, and success is silent.
+- `PushCoordinator` stays UI-free: it only receives the small conflict-behavior
+  switch, never Obsidian or an execution mode.
+- Conflicting paths left out of the plan are never marked as operation success;
+  they remain conflicts after the final refresh.
+- `SyncExecutionGuard` serializes provider mutations: manual work waits,
+  automatic work try-acquires and skips when busy. Timer mechanics live in
+  `AutomaticSyncScheduler` (plugin runtime), not in the service.
+
 ## Sync Queue invariant
 
 One Sync click produces one explicit-intent workflow. Requested action
