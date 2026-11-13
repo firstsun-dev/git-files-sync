@@ -76,10 +76,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
         // GitLab's commit response has no per-file blob ids. Hash the committed
         // content locally instead of rescanning every page of the repository tree.
-        return Promise.all(items.map(async item => ({
-            path: item.path,
-            sha: await gitBlobSha(item.content),
-        })));
+        return this.createBatchResults(items);
     }
 
     /**
@@ -120,10 +117,17 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
         await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
 
-        return [
-            ...await Promise.all(writes.map(async item => ({ path: item.path, sha: await gitBlobSha(item.content) }))),
-            ...await Promise.all(moves.map(async item => ({ path: item.newPath, sha: await gitBlobSha(item.content) }))),
-        ];
+        return this.createBatchResults([
+            ...writes.map(item => ({ path: item.path, content: item.content })),
+            ...moves.map(item => ({ path: item.newPath, content: item.content })),
+        ]);
+    }
+
+    private async createBatchResults(items: Array<Pick<BatchPushItem, 'path' | 'content'>>): Promise<BatchPushResult[]> {
+        return Promise.all(items.map(async item => ({
+            path: item.path,
+            sha: await gitBlobSha(item.content),
+        })));
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
