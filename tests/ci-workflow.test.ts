@@ -10,6 +10,15 @@ const eslintConfig = readFileSync('eslint.config.mts', 'utf8');
 const syncManagerE2eSuite = readFileSync('e2e-tests/provider/suites/sync-manager.e2e.test.ts', 'utf8');
 
 describe('CI workflow contracts', () => {
+    it('runs feature-branch CI only through its pull request workflow', () => {
+        const pushTriggerStart = workflow.indexOf('  push:');
+        const pullRequestTriggerStart = workflow.indexOf('  pull_request:', pushTriggerStart);
+        const pushTrigger = workflow.slice(pushTriggerStart, pullRequestTriggerStart);
+
+        expect(pushTrigger).toContain('branches: [main, master]');
+        expect(pushTrigger).not.toContain("'**'");
+    });
+
     it('keeps whole-suite retries on the GitHub leg only', () => {
         const stepStart = workflow.indexOf('- name: Run provider E2E (production TypeScript, real provider)');
         const stepEnd = workflow.indexOf('- name: Run GitLab E2E', stepStart);
@@ -47,10 +56,9 @@ describe('CI workflow contracts', () => {
         expect(workflow.split(independentRunIdentity)).toHaveLength(2);
     });
 
-    it('keeps branch-wide workflow cancellation and queues GitLab jobs across workflows', () => {
-        // A push + pull_request race for the same commit must let ONE whole
-        // run survive; concurrency is keyed by source branch at workflow
-        // level. GitLab's separate job group only serializes its API-heavy
+    it('keeps PR update cancellation whole and queues GitLab jobs across workflows', () => {
+        // A newer pull_request run supersedes the older whole DAG for that
+        // branch. GitLab's separate job group only serializes its API-heavy
         // leg and queues rather than cancelling another run.
         expect(workflow).toMatch(/^concurrency:\n/m);
         expect(workflow).toContain('&& (github.head_ref || github.ref_name)');

@@ -9,7 +9,7 @@ permissions:
 
 on:
   push:
-    branches: [main, master, '**']
+    branches: [main, master]
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
@@ -45,15 +45,15 @@ on:
 # Release shell entry (see its own comment); the actual build/attest/upload
 # happens in release-build.yml, triggered by that release being published.
 #
-# Whole-run concurrency (workflow level, NOT per job): a `push` to a branch
-# with an open PR fires both a `push` and a `pull_request` run for the same
-# commit. Keying concurrency per provider job (an earlier design) let the two
-# runs pick *different* winners per provider -- push cancels the PR run's
-# GitHub/GitLab legs, the PR run cancels the push run's Gitea leg -- so no
-# single run ever had all providers green and the required-checks DAG could
-# wedge. Keying at workflow level by source branch alone
+# Whole-run concurrency (workflow level, NOT per job): feature branches use
+# their `pull_request` event for validation, while `push` CI is limited to
+# main/master. This prevents duplicate runs -- and cancelled duplicate check
+# suites -- for a feature-branch commit. Keying concurrency per provider job
+# (an earlier design) let runs on the same branch pick different winners per
+# provider, so no single run ever had all providers green and the required-
+# checks DAG could wedge. Keying at workflow level by source branch alone
 # (github.head_ref || github.ref_name) means only ONE whole CI DAG per branch
-# survives: the newest run supersedes the older one entirely. Manual
+# survives: a newer PR update supersedes the older run entirely. Manual
 # (workflow_dispatch) and scheduled runs are keyed by event_name+run_id, so
 # they get unique groups and never cancel -- or get cancelled by -- branch CI.
 # ─────────────────────────────────────────────────────────────────────────────
