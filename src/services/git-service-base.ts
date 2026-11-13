@@ -72,6 +72,11 @@ type RequestOutcome =
     | { kind: 'http-error'; response: RequestUrlResponse }
     | { kind: 'network-error'; error: unknown };
 
+interface SafeRequestOptions {
+    silent?: boolean;
+    readOnly?: boolean;
+}
+
 interface RequestContext {
     options: RequestUrlOptions;
     method: string;
@@ -88,7 +93,7 @@ export abstract class BaseGitService {
     /**
      * Safely wraps requestUrl to handle potential throws from Obsidian and provide better error messages.
      */
-    protected async safeRequest(url: string, method: string, body?: unknown, extraHeaders?: Record<string, string>, silent = false): Promise<RequestUrlResponse> {
+    protected async safeRequest(url: string, method: string, body?: unknown, extraHeaders?: Record<string, string>, options: SafeRequestOptions = {}): Promise<RequestUrlResponse> {
         const requestMethod = method.toUpperCase();
         const headers: Record<string, string> = {
             ...extraHeaders,
@@ -106,9 +111,9 @@ export abstract class BaseGitService {
             },
             method: requestMethod,
             target: this.requestTarget(url),
-            safeToRetryNetworkFailure: ['GET', 'HEAD', 'OPTIONS'].includes(requestMethod),
+            safeToRetryNetworkFailure: ['GET', 'HEAD', 'OPTIONS'].includes(requestMethod) || options.readOnly === true,
             startedAt: Date.now(),
-            silent,
+            silent: options.silent ?? false,
         });
     }
 

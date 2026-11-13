@@ -216,7 +216,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         try {
             const encodedBranch = encodeURIComponent(branch);
             const branchUrl = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/branches/${encodedBranch}`;
-            await this.safeRequest(branchUrl, 'GET', undefined, undefined, true);
+            await this.safeRequest(branchUrl, 'GET', undefined, undefined, { silent: true });
             return { repoOk: true, branchOk: true };
         } catch {
             return { repoOk: true, branchOk: false };

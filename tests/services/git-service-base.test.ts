@@ -86,85 +86,51 @@ describe('BaseGitService', () => {
     });
 
     describe('safeRequest transient failures', () => {
-        it('waits for Retry-After before retrying an HTTP 429', async () => {
-            vi.useFakeTimers();
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({
-                    status: 429,
-                    headers: { 'Retry-After': '2' },
-                    json: { message: 'Rate limit exceeded' },
-                } as unknown as RequestUrlResponse)
-                .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
+        const retryCases: Array<{
+            description: string;
+            headers?: Record<string, string>;
+            error?: Error;
+            delayMs: number;
+        }> = [
+            { description: 'Retry-After seconds', headers: { 'Retry-After': '2' }, delayMs: 2000 },
+            {
+                description: 'RateLimit-ResetTime date',
+                headers: { 'RateLimit-ResetTime': new Date('2026-11-13T00:00:02Z').toUTCString() },
+                delayMs: 2000,
+            },
+            {
+                description: 'RateLimit-Reset epoch',
+                headers: { 'RateLimit-Reset': String(Date.parse('2026-11-13T00:00:02Z') / 1000) },
+                delayMs: 2000,
+            },
+            { description: 'jittered backoff without headers', headers: {}, delayMs: 250 },
+            { description: 'transient network failure on a safe read', error: new TypeError('fetch failed'), delayMs: 250 },
+        ];
 
-            const result = service.listFiles('main').then(files => files.length);
-            await Promise.resolve();
-            await vi.advanceTimersByTimeAsync(1999);
-            expect(requestUrl).toHaveBeenCalledTimes(1);
-            await vi.advanceTimersByTimeAsync(1);
-
-            await expect(result).resolves.toBe(0);
-            expect(requestUrl).toHaveBeenCalledTimes(2);
-        });
-
-        it('uses RateLimit-ResetTime when Retry-After is absent', async () => {
+        it.each(retryCases)('recovers after $description', async ({ headers, error, delayMs }) => {
             vi.useFakeTimers();
             vi.setSystemTime(new Date('2026-11-13T00:00:00Z'));
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({
+            vi.spyOn(Math, 'random').mockReturnValue(0);
+
+            const requestMock = vi.mocked(requestUrl);
+            if (error) requestMock.mockRejectedValueOnce(error);
+            else {
+                requestMock.mockResolvedValueOnce({
                     status: 429,
-                    headers: { 'RateLimit-ResetTime': 'Fri, 13 Nov 2026 00:00:02 GMT' },
+                    headers,
                     json: { message: 'Rate limit exceeded' },
-                } as unknown as RequestUrlResponse)
-                .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
+                } as unknown as RequestUrlResponse);
+            }
+            requestMock.mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
 
             const result = service.listFiles('main').then(files => files.length);
             await Promise.resolve();
-            await vi.advanceTimersByTimeAsync(1999);
+            await vi.advanceTimersByTimeAsync(delayMs - 1);
             expect(requestUrl).toHaveBeenCalledTimes(1);
             await vi.advanceTimersByTimeAsync(1);
 
             await expect(result).resolves.toBe(0);
             expect(requestUrl).toHaveBeenCalledTimes(2);
-        });
-
-        it('uses the numeric RateLimit-Reset epoch when date reset headers are absent', async () => {
-            vi.useFakeTimers();
-            const now = new Date('2026-11-13T00:00:00Z');
-            vi.setSystemTime(now);
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({
-                    status: 429,
-                    headers: { 'RateLimit-Reset': String((now.getTime() + 2000) / 1000) },
-                    json: { message: 'Rate limit exceeded' },
-                } as unknown as RequestUrlResponse)
-                .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
-
-            const result = service.listFiles('main').then(files => files.length);
-            await Promise.resolve();
-            await vi.advanceTimersByTimeAsync(1999);
-            expect(requestUrl).toHaveBeenCalledTimes(1);
-            await vi.advanceTimersByTimeAsync(1);
-
-            await expect(result).resolves.toBe(0);
-            expect(requestUrl).toHaveBeenCalledTimes(2);
-        });
-
-        it('uses bounded jittered backoff when a 429 has no wait headers', async () => {
-            vi.useFakeTimers();
-            const random = vi.spyOn(Math, 'random').mockReturnValue(0);
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({ status: 429, json: { message: 'Rate limit exceeded' } } as unknown as RequestUrlResponse)
-                .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
-
-            const result = service.listFiles('main').then(files => files.length);
-            await Promise.resolve();
-            await vi.advanceTimersByTimeAsync(249);
-            expect(requestUrl).toHaveBeenCalledTimes(1);
-            await vi.advanceTimersByTimeAsync(1);
-
-            await expect(result).resolves.toBe(0);
-            expect(requestUrl).toHaveBeenCalledTimes(2);
-            random.mockRestore();
         });
 
         it('stops retrying after the bounded attempt budget', async () => {
@@ -187,21 +153,6 @@ describe('BaseGitService', () => {
 
             await expect(service.listFiles('main')).rejects.toThrow(/120s wait, beyond the 60s retry budget/);
             expect(requestUrl).toHaveBeenCalledTimes(1);
-        });
-
-        it('retries a temporary network failure for a safe read', async () => {
-            vi.useFakeTimers();
-            vi.spyOn(Math, 'random').mockReturnValue(0);
-            vi.mocked(requestUrl)
-                .mockRejectedValueOnce(new TypeError('fetch failed'))
-                .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
-
-            const result = service.listFiles('main').then(files => files.length);
-            await Promise.resolve();
-            await vi.advanceTimersByTimeAsync(250);
-
-            await expect(result).resolves.toBe(0);
-            expect(requestUrl).toHaveBeenCalledTimes(2);
         });
 
         it('does not retry a permanent HTTP error', async () => {
