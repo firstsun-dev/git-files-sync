@@ -2,6 +2,7 @@ import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, Batc
 import { BaseGitService, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
 import { ConnectionTestResult } from './git-service-interface';
 import { isBinaryPath } from '../utils/path';
+import { gitBlobSha } from '../utils/git-blob-sha';
 
 export class GitLabService extends BaseGitService implements GitServiceInterface {
     private baseUrl: string = 'https://gitlab.com';
@@ -73,12 +74,9 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
         await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
 
-        // The Commits API response doesn't include each file's new blob sha, so
-        // read it back via a single follow-up tree fetch (one extra call for the
-        // whole batch, not per file) rather than per-file getFile calls.
-        const freshTree = await this.listFilesDetailed(branch, false);
-        const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
-        return items.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) }));
+        // GitLab's commit response has no per-file blob ids. Hash the committed
+        // content locally instead of rescanning every page of the repository tree.
+        return this.createBatchResults(items);
     }
 
     /**
@@ -119,12 +117,17 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
         await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
 
-        const freshTree = await this.listFilesDetailed(branch, false);
-        const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
-        return [
-            ...writes.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) })),
-            ...moves.map(item => ({ path: item.newPath, sha: shaByPath.get(this.getFullPath(item.newPath)) })),
-        ];
+        return this.createBatchResults([
+            ...writes.map(item => ({ path: item.path, content: item.content })),
+            ...moves.map(item => ({ path: item.newPath, content: item.content })),
+        ]);
+    }
+
+    private async createBatchResults(items: Array<Pick<BatchPushItem, 'path' | 'content'>>): Promise<BatchPushResult[]> {
+        return Promise.all(items.map(async item => ({
+            path: item.path,
+            sha: await gitBlobSha(item.content),
+        })));
     }
 
     async listFilesDetailed(branch: string, useFilter = true): Promise<GitTreeEntry[]> {
@@ -213,7 +216,7 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
         try {
             const encodedBranch = encodeURIComponent(branch);
             const branchUrl = `${this.baseUrl}/api/v4/projects/${encodedProjectId}/repository/branches/${encodedBranch}`;
-            await this.safeRequest(branchUrl, 'GET', undefined, undefined, true);
+            await this.safeRequest(branchUrl, 'GET', undefined, undefined, { silent: true });
             return { repoOk: true, branchOk: true };
         } catch {
             return { repoOk: true, branchOk: false };

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitLabService } from '../../src/services/gitlab-service';
 import { RequestUrlResponse, requestUrl } from 'obsidian';
 import { getLastRequestCall, mockRequest, sharedTestConnection, sharedGetFileErrorHandling, sharedGetRepoGitignores } from './service-test-helpers';
+import { gitBlobSha } from '../../src/utils/git-blob-sha';
 
 describe('GitLabService', () => {
     let service: GitLabService;
@@ -11,6 +12,7 @@ describe('GitLabService', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(requestUrl).mockReset();
         service = new GitLabService();
         service.updateConfig(baseUrl, token, projectId, '');
     });
@@ -77,47 +79,37 @@ describe('GitLabService', () => {
             expect(requestUrl).not.toHaveBeenCalled();
         });
 
-        it('commits via the Commits API actions array, then reads back shas from a follow-up tree fetch', async () => {
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse) // POST commits
-                .mockResolvedValueOnce({ status: 200, json: [
-                    { path: 'a.md', type: 'blob', id: 'new-sha-a' },
-                    { path: 'b.md', type: 'blob', id: 'new-sha-b' },
-                ] } as unknown as RequestUrlResponse); // follow-up listFilesDetailed
+        it('returns content-derived blob shas from the commit response without fetching the tree again', async () => {
+            mockRequest({ status: 201, json: { id: 'commit-sha' } });
 
             const result = await service.pushBatch(
                 [
-                    { path: 'a.md', content: 'hello', existedRemotely: true },
+                    { path: 'a.md', content: 'hello', existedRemotely: true, revision: 'existing-revision' },
                     { path: 'b.md', content: 'world', existedRemotely: false },
                 ],
                 'main',
                 'Push 2 file(s) from Obsidian'
             );
 
-            expect(result).toEqual([{ path: 'a.md', sha: 'new-sha-a' }, { path: 'b.md', sha: 'new-sha-b' }]);
+            expect(result).toEqual([
+                { path: 'a.md', sha: await gitBlobSha('hello') },
+                { path: 'b.md', sha: await gitBlobSha('world') },
+            ]);
 
             const calls = vi.mocked(requestUrl).mock.calls;
-            expect(calls).toHaveLength(2);
+            expect(calls).toHaveLength(1);
             const commitCall = calls[0]?.[0] as { url: string; method: string; body: string };
             expect(commitCall.url).toBe(`${baseUrl}/api/v4/projects/${projectId}/repository/commits`);
             expect(commitCall.method).toBe('POST');
-            const body = JSON.parse(commitCall.body) as { branch: string; commit_message: string; actions: Array<{ action: string; file_path: string; content: string; encoding: string }> };
+            const body = JSON.parse(commitCall.body) as { branch: string; commit_message: string; actions: Array<{ action: string; file_path: string; content: string; encoding: string; last_commit_id?: string }> };
             expect(body.branch).toBe('main');
             expect(body.commit_message).toBe('Push 2 file(s) from Obsidian');
             expect(body.actions).toEqual([
-                { action: 'update', file_path: 'a.md', content: btoa('hello'), encoding: 'base64' },
+                { action: 'update', file_path: 'a.md', content: btoa('hello'), encoding: 'base64', last_commit_id: 'existing-revision' },
                 { action: 'create', file_path: 'b.md', content: btoa('world'), encoding: 'base64' },
             ]);
         });
 
-        it('returns sha: undefined for a pushed path missing from the follow-up tree', async () => {
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse)
-                .mockResolvedValueOnce({ status: 200, json: [] } as unknown as RequestUrlResponse);
-
-            const result = await service.pushBatch([{ path: 'a.md', content: 'hello' }], 'main', 'push');
-            expect(result).toEqual([{ path: 'a.md', sha: undefined }]);
-        });
     });
 
     describe('listFiles', () => {
@@ -279,14 +271,9 @@ describe('GitLabService', () => {
         });
 
         it('sends last_commit_id for existing updates and moves', async () => {
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse)
-                .mockResolvedValueOnce({ status: 200, json: [
-                    { path: 'existing.md', type: 'blob', id: 'updated-blob' },
-                    { path: 'new.md', type: 'blob', id: 'moved-blob' },
-                ] } as unknown as RequestUrlResponse);
+            mockRequest({ status: 201, json: { id: 'commit-sha' } });
 
-            await service.commitBatch(
+            const result = await service.commitBatch(
                 {
                     writes: [{ path: 'existing.md', content: 'new', existedRemotely: true, revision: 'update-revision' }],
                     moves: [{ oldPath: 'old.md', newPath: 'new.md', content: 'moved', oldRevision: 'move-revision' }],
@@ -300,16 +287,15 @@ describe('GitLabService', () => {
                 expect.objectContaining({ action: 'update', last_commit_id: 'update-revision' }),
                 expect.objectContaining({ action: 'move', last_commit_id: 'move-revision' }),
             ]);
+            expect(result).toEqual([
+                { path: 'existing.md', sha: await gitBlobSha('new') },
+                { path: 'new.md', sha: await gitBlobSha('moved') },
+            ]);
+            expect(requestUrl).toHaveBeenCalledTimes(1);
         });
 
         it('uses the Commits API native action: move for renames, alongside create/update for plain additions', async () => {
-            vi.mocked(requestUrl)
-                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse) // POST commits
-                .mockResolvedValueOnce({ status: 200, json: [
-                    { path: 'a.md', type: 'blob', id: 'new-sha-a' },
-                    { path: 'new.md', type: 'blob', id: 'new-sha-move' },
-                ] } as unknown as RequestUrlResponse); // follow-up listFilesDetailed
-
+            mockRequest({ status: 201, json: { id: 'commit-sha' } });
             const result = await service.commitBatch(
                 {
                     writes: [{ path: 'a.md', content: 'hello', existedRemotely: true }],
@@ -321,9 +307,10 @@ describe('GitLabService', () => {
             );
 
             expect(result).toEqual([
-                { path: 'a.md', sha: 'new-sha-a' },
-                { path: 'new.md', sha: 'new-sha-move' },
+                { path: 'a.md', sha: await gitBlobSha('hello') },
+                { path: 'new.md', sha: await gitBlobSha('moved content') },
             ]);
+            expect(requestUrl).toHaveBeenCalledTimes(1);
 
             const commitCall = vi.mocked(requestUrl).mock.calls[0]?.[0] as { body: string };
             const body = JSON.parse(commitCall.body) as { actions: Array<{ action: string; file_path: string; previous_path?: string; content: string; encoding: string }> };
@@ -336,11 +323,7 @@ describe('GitLabService', () => {
         it('commits writes, moves, and plain deletions in one request — the one-Sync-Plan-one-commit contract', async () => {
             vi.mocked(requestUrl)
                 .mockResolvedValueOnce({ status: 200, json: { content: btoa('gone'), blob_id: 'gone-blob', last_commit_id: 'gone-revision' } } as unknown as RequestUrlResponse) // getFile for the deletion's last_commit_id
-                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse) // POST commits
-                .mockResolvedValueOnce({ status: 200, json: [
-                    { path: 'a.md', type: 'blob', id: 'new-sha-a' },
-                    { path: 'new.md', type: 'blob', id: 'new-sha-move' },
-                ] } as unknown as RequestUrlResponse); // follow-up listFilesDetailed
+                .mockResolvedValueOnce({ status: 201, json: { id: 'commit-sha' } } as unknown as RequestUrlResponse); // POST commits
 
             await service.commitBatch(
                 {
@@ -354,6 +337,7 @@ describe('GitLabService', () => {
 
             const postCalls = vi.mocked(requestUrl).mock.calls.filter(call => (call[0] as { method: string }).method === 'POST');
             expect(postCalls).toHaveLength(1);
+            expect(requestUrl).toHaveBeenCalledTimes(2);
             const body = JSON.parse((postCalls[0]?.[0] as { body: string }).body) as { actions: Array<{ action: string; file_path: string }> };
             expect(body.actions).toEqual([
                 { action: 'create', file_path: 'a.md', content: btoa('hello'), encoding: 'base64' },

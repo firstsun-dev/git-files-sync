@@ -95,6 +95,24 @@ describe('GitHubService', () => {
             expect(body.variables.qualifiedName).toBe('refs/heads/main');
         });
 
+        it('retries a transient network failure for the read-only GraphQL query', async () => {
+            vi.useFakeTimers();
+            try {
+                vi.mocked(requestUrl)
+                    .mockRejectedValueOnce(new TypeError('fetch failed'))
+                    .mockResolvedValueOnce(headOidResponse('head-oid'));
+
+                const result = service.getBranchHead('main');
+                await Promise.resolve();
+                await vi.advanceTimersByTimeAsync(750);
+
+                await expect(result).resolves.toBe('head-oid');
+                expect(requestUrl).toHaveBeenCalledTimes(2);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
         it('falls back to the REST ref read when GraphQL reports no such ref', async () => {
             vi.mocked(requestUrl)
                 .mockResolvedValueOnce({ status: 200, json: { data: { repository: { ref: null } } } } as unknown as RequestUrlResponse)
@@ -226,6 +244,20 @@ describe('GitHubService', () => {
                 'main',
                 'Push 1 file(s) from Obsidian'
             )).rejects.toThrow('Resource not accessible by personal access token');
+        });
+
+        it('does not retry an ambiguous GraphQL mutation network failure', async () => {
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce(headOidResponse('commit1'))
+                .mockRejectedValueOnce(new TypeError('fetch failed'));
+
+            await expect(service.pushBatch(
+                [{ path: 'a.md', content: 'hello' }],
+                'main',
+                'Push 1 file(s) from Obsidian'
+            )).rejects.toThrow(/mutation outcome is unknown/i);
+
+            expect(requestUrl).toHaveBeenCalledTimes(2);
         });
 
         it('retries with a freshly re-read HEAD when the mutation reports a stale-expectedHeadOid-shaped error', async () => {
