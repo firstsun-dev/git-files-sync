@@ -10,8 +10,23 @@ const eslintConfig = readFileSync('eslint.config.mts', 'utf8');
 const syncManagerE2eSuite = readFileSync('e2e-tests/provider/suites/sync-manager.e2e.test.ts', 'utf8');
 
 describe('CI workflow contracts', () => {
-    it('retries transient provider failures three times', () => {
-        expect(workflow).toContain('max_attempts: 3');
+    it('keeps whole-suite retries on the GitHub leg only', () => {
+        const stepStart = workflow.indexOf('- name: Run provider E2E (production TypeScript, real provider)');
+        const stepEnd = workflow.indexOf('- name: Run GitLab E2E', stepStart);
+        const retryStep = workflow.slice(stepStart, stepEnd);
+        expect(retryStep).toContain("matrix.provider == 'github'");
+        expect(retryStep).toContain('max_attempts: 3');
+        expect(retryStep).toContain('retry_wait_seconds: 15');
+    });
+
+    it('runs GitLab E2E once and relies on bounded request-level retries', () => {
+        const stepStart = workflow.indexOf('- name: Run GitLab E2E');
+        const stepEnd = workflow.indexOf('- name: Cleanup', stepStart);
+        const gitlabStep = workflow.slice(stepStart, stepEnd);
+        expect(gitlabStep).toContain("matrix.provider == 'gitlab'");
+        expect(gitlabStep).toContain('timeout-minutes: 15');
+        expect(gitlabStep).toContain('run: scripts/run-e2e.sh --provider gitlab');
+        expect(gitlabStep).not.toContain('nick-fields/retry');
     });
 
     it('runs secretless Gitea E2E on an ephemeral GitHub-hosted runner', () => {
@@ -32,19 +47,21 @@ describe('CI workflow contracts', () => {
         expect(workflow.split(independentRunIdentity)).toHaveLength(2);
     });
 
-    it('serializes whole branch CI runs at workflow level (no split provider winners)', () => {
+    it('keeps branch-wide workflow cancellation and queues GitLab jobs across workflows', () => {
         // A push + pull_request race for the same commit must let ONE whole
         // run survive; concurrency is keyed by source branch at workflow
-        // level, and per-provider job groups are gone.
+        // level. GitLab's separate job group only serializes its API-heavy
+        // leg and queues rather than cancelling another run.
         expect(workflow).toMatch(/^concurrency:\n/m);
         expect(workflow).toContain('&& (github.head_ref || github.ref_name)');
         expect(workflow).toContain('cancel-in-progress: true');
-        // No job-level concurrency remains: the workflow-level block is the
-        // single top-level one, keyed by `ci-`.
-        // The top-level workflow block is the only concurrency block, keyed
-        // by `ci-` (folded scalar: "group: >-" followed by the ci- prefix).
         expect(workflow.match(/group: >-\n\s+ci-\$\{\{/)).toBeTruthy();
-        expect(workflow).not.toContain('group: e2e-');
+        const providerJobStart = workflow.indexOf('  provider-e2e:');
+        const providerJobEnd = workflow.indexOf('  # ── Final gate', providerJobStart);
+        const providerJob = workflow.slice(providerJobStart, providerJobEnd);
+        expect(providerJob).toMatch(/concurrency:\n\s+group: >-\n\s+\$\{\{ matrix\.provider == 'gitlab'/);
+        expect(providerJob).toContain("format('gitlab-e2e-{0}', github.repository)");
+        expect(providerJob).toContain('queue: max');
     });
 
     it('does not let workflow_dispatch or schedule cancel branch CI', () => {

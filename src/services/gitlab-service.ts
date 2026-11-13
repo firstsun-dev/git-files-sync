@@ -2,6 +2,7 @@ import { GitServiceInterface, GitTreeEntry, BatchPushItem, BatchPushResult, Batc
 import { BaseGitService, GitFile, GitLabFileResponse, GitLabTreeItem, GIT_SYMLINK_MODE } from './git-service-base';
 import { ConnectionTestResult } from './git-service-interface';
 import { isBinaryPath } from '../utils/path';
+import { gitBlobSha } from '../utils/git-blob-sha';
 
 export class GitLabService extends BaseGitService implements GitServiceInterface {
     private baseUrl: string = 'https://gitlab.com';
@@ -73,12 +74,12 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
         await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
 
-        // The Commits API response doesn't include each file's new blob sha, so
-        // read it back via a single follow-up tree fetch (one extra call for the
-        // whole batch, not per file) rather than per-file getFile calls.
-        const freshTree = await this.listFilesDetailed(branch, false);
-        const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
-        return items.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) }));
+        // GitLab's commit response has no per-file blob ids. Hash the committed
+        // content locally instead of rescanning every page of the repository tree.
+        return Promise.all(items.map(async item => ({
+            path: item.path,
+            sha: await gitBlobSha(item.content),
+        })));
     }
 
     /**
@@ -119,11 +120,9 @@ export class GitLabService extends BaseGitService implements GitServiceInterface
 
         await this.safeRequest(url, 'POST', { branch, commit_message: message, actions });
 
-        const freshTree = await this.listFilesDetailed(branch, false);
-        const shaByPath = new Map(freshTree.map(e => [e.path, e.sha]));
         return [
-            ...writes.map(item => ({ path: item.path, sha: shaByPath.get(this.getFullPath(item.path)) })),
-            ...moves.map(item => ({ path: item.newPath, sha: shaByPath.get(this.getFullPath(item.newPath)) })),
+            ...await Promise.all(writes.map(async item => ({ path: item.path, sha: await gitBlobSha(item.content) }))),
+            ...await Promise.all(moves.map(async item => ({ path: item.newPath, sha: await gitBlobSha(item.content) }))),
         ];
     }
 

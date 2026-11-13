@@ -227,6 +227,16 @@ jobs:
     name: CI / Provider E2E / ${{ matrix.provider }}
     needs: [changes]
     runs-on: [self-hosted, linux, x64, 32gb-ram]
+    # GitLab credentials are shared across branches. Queue only the GitLab leg
+    # across workflows; unique GitHub groups leave its independent leg parallel.
+    # queue:max avoids cancelling pending runs, while the workflow-level group
+    # below remains responsible for same-branch push/PR winner selection.
+    concurrency:
+      group: >-
+        ${{ matrix.provider == 'gitlab'
+          && format('gitlab-e2e-{0}', github.repository)
+          || format('provider-e2e-{0}-{1}', matrix.provider, github.run_id) }}
+      queue: max
     # Runs when sync/provider-relevant paths changed, or unconditionally on
     # workflow_dispatch/schedule/a push to main (main always gets the full
     # tier regardless of path, per the issue's CI wiring). The per-provider
@@ -252,11 +262,10 @@ jobs:
       max-parallel: 2
       matrix:
         provider: [github, gitlab]
-    # Concurrency is handled at WORKFLOW level (see the header comment on the
-    # `concurrency:` block above): one whole CI DAG per source branch, so a
-    # push + pull_request race for the same commit can never split provider
-    # winners across two runs. Per-provider job groups were removed for that
-    # reason -- they let each provider pick a different surviving run.
+    # Workflow-level concurrency (see the header comment above) still selects
+    # one whole CI DAG per source branch, so a push + pull_request race for the
+    # same commit cannot split provider winners across runs. The job-level
+    # GitLab group only queues shared-token work; it never cancels a run.
     # This is NOT a cleanup mechanism (see scripts/e2e-harness.sh's per-run
     # branch naming): a cancelled run's branch can still be mid-delete when
     # the next one starts, which is exactly why every run gets its own unique
@@ -348,18 +357,13 @@ jobs:
       # job `env:` supplies the provider secrets and run identity
       # (E2E_PR_NUMBER/E2E_SOURCE_BRANCH) that run-e2e.sh/e2e-harness.sh consume.
       #
-      # Retried (not just run once): observed failures against the real
-      # providers include transient runner-network blips unrelated to the
-      # suite/product code (e.g. a bare `getaddrinfo ENOTFOUND gitlab.com`
-      # mid-test on 2026-08-14, run 31770197590) that a same-attempt rerun
-      # simply doesn't reproduce. Safe to retry from scratch: run-e2e.sh
-      # re-provisions a fresh isolated branch each attempt and every suite's
-      # runId/branch paths are randomized per vitest process, so a failed
-      # attempt's partial remote state never collides with the retry -- a
-      # genuine product/test bug still fails identically every attempt and
-      # exhausts the retries.
+      # GitHub retains its historical whole-suite retry for runner network
+      # blips. GitLab runs once: safe reads and explicit 429 responses recover
+      # inside BaseGitService, while replaying the suite after a known rate
+      # limit compounds API pressure. An ambiguous write failure remains a
+      # visible error instead of risking a duplicate commit.
       - name: Run provider E2E (production TypeScript, real provider)
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && matrix.provider == 'github'
         uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
         env:
           E2E_PROVIDER: ${{ matrix.provider }}
@@ -368,6 +372,13 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 15
           command: scripts/run-e2e.sh --provider "${{ matrix.provider }}"
+
+      - name: Run GitLab E2E
+        if: steps.gate.outputs.run == 'true' && matrix.provider == 'gitlab'
+        timeout-minutes: 15
+        env:
+          E2E_PROVIDER: gitlab
+        run: scripts/run-e2e.sh --provider gitlab
 
       # `if: always()` -- cleanup is best-effort, never a prerequisite for
       # the next run (see scripts/e2e-harness.sh's cmd_cleanup and

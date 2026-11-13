@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { GitHubService } from '../../src/services/github-service';
+import { GitLabService } from '../../src/services/gitlab-service';
 import { requestUrl, RequestUrlResponse } from 'obsidian';
 import { MAX_BATCH_PUSH_SIZE } from '../../src/services/git-service-base';
 
@@ -9,8 +10,14 @@ describe('BaseGitService', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(requestUrl).mockReset();
         service = new GitHubService();
         service.updateConfig('token', 'owner', 'repo');
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
     });
 
     describe('getFullPath with rootPath ending in /', () => {
@@ -75,6 +82,160 @@ describe('BaseGitService', () => {
             await expect(service.getFile('test.md', 'main')).rejects.toThrow(
                 'Network error or unexpected failure: plain string error'
             );
+        });
+    });
+
+    describe('safeRequest transient failures', () => {
+        it('waits for Retry-After before retrying an HTTP 429', async () => {
+            vi.useFakeTimers();
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({
+                    status: 429,
+                    headers: { 'Retry-After': '2' },
+                    json: { message: 'Rate limit exceeded' },
+                } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
+
+            const result = service.listFiles('main').then(files => files.length);
+            await Promise.resolve();
+            await vi.advanceTimersByTimeAsync(1999);
+            expect(requestUrl).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(1);
+
+            await expect(result).resolves.toBe(0);
+            expect(requestUrl).toHaveBeenCalledTimes(2);
+        });
+
+        it('uses RateLimit-ResetTime when Retry-After is absent', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(new Date('2026-11-13T00:00:00Z'));
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({
+                    status: 429,
+                    headers: { 'RateLimit-ResetTime': 'Fri, 13 Nov 2026 00:00:02 GMT' },
+                    json: { message: 'Rate limit exceeded' },
+                } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
+
+            const result = service.listFiles('main').then(files => files.length);
+            await Promise.resolve();
+            await vi.advanceTimersByTimeAsync(1999);
+            expect(requestUrl).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(1);
+
+            await expect(result).resolves.toBe(0);
+            expect(requestUrl).toHaveBeenCalledTimes(2);
+        });
+
+        it('uses the numeric RateLimit-Reset epoch when date reset headers are absent', async () => {
+            vi.useFakeTimers();
+            const now = new Date('2026-11-13T00:00:00Z');
+            vi.setSystemTime(now);
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({
+                    status: 429,
+                    headers: { 'RateLimit-Reset': String((now.getTime() + 2000) / 1000) },
+                    json: { message: 'Rate limit exceeded' },
+                } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
+
+            const result = service.listFiles('main').then(files => files.length);
+            await Promise.resolve();
+            await vi.advanceTimersByTimeAsync(1999);
+            expect(requestUrl).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(1);
+
+            await expect(result).resolves.toBe(0);
+            expect(requestUrl).toHaveBeenCalledTimes(2);
+        });
+
+        it('uses bounded jittered backoff when a 429 has no wait headers', async () => {
+            vi.useFakeTimers();
+            const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({ status: 429, json: { message: 'Rate limit exceeded' } } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
+
+            const result = service.listFiles('main').then(files => files.length);
+            await Promise.resolve();
+            await vi.advanceTimersByTimeAsync(249);
+            expect(requestUrl).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(1);
+
+            await expect(result).resolves.toBe(0);
+            expect(requestUrl).toHaveBeenCalledTimes(2);
+            random.mockRestore();
+        });
+
+        it('stops retrying after the bounded attempt budget', async () => {
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 429,
+                headers: { 'Retry-After': '0' },
+                json: { message: 'Rate limit exceeded' },
+            } as unknown as RequestUrlResponse);
+
+            await expect(service.listFiles('main')).rejects.toThrow(/429/);
+            expect(requestUrl).toHaveBeenCalledTimes(3);
+        });
+
+        it('does not retry before Retry-After when the wait exceeds the deadline budget', async () => {
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 429,
+                headers: { 'Retry-After': '120' },
+                json: { message: 'Rate limit exceeded' },
+            } as unknown as RequestUrlResponse);
+
+            await expect(service.listFiles('main')).rejects.toThrow(/120s wait, beyond the 60s retry budget/);
+            expect(requestUrl).toHaveBeenCalledTimes(1);
+        });
+
+        it('retries a temporary network failure for a safe read', async () => {
+            vi.useFakeTimers();
+            vi.spyOn(Math, 'random').mockReturnValue(0);
+            vi.mocked(requestUrl)
+                .mockRejectedValueOnce(new TypeError('fetch failed'))
+                .mockResolvedValueOnce({ status: 200, json: { tree: [], truncated: false } } as unknown as RequestUrlResponse);
+
+            const result = service.listFiles('main').then(files => files.length);
+            await Promise.resolve();
+            await vi.advanceTimersByTimeAsync(250);
+
+            await expect(result).resolves.toBe(0);
+            expect(requestUrl).toHaveBeenCalledTimes(2);
+        });
+
+        it('does not retry a permanent HTTP error', async () => {
+            vi.mocked(requestUrl).mockResolvedValue({
+                status: 401,
+                json: { message: 'Unauthorized' },
+            } as unknown as RequestUrlResponse);
+
+            await expect(service.listFiles('main')).rejects.toThrow(/401/);
+            expect(requestUrl).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not retry a mutation when the network outcome is ambiguous', async () => {
+            const gitlab = new GitLabService();
+            gitlab.updateConfig('https://gitlab.com', 'test-token', '123');
+            vi.mocked(requestUrl).mockRejectedValue(new TypeError('fetch failed'));
+
+            await expect(gitlab.pushFile('new.md', 'content', 'main', 'create')).rejects.toThrow(/not retried|outcome is unknown/i);
+            expect(requestUrl).toHaveBeenCalledTimes(1);
+        });
+
+        it('retries a write rejected with HTTP 429 because the response is definitive', async () => {
+            const gitlab = new GitLabService();
+            gitlab.updateConfig('https://gitlab.com', 'test-token', '123');
+            vi.mocked(requestUrl)
+                .mockResolvedValueOnce({
+                    status: 429,
+                    headers: { 'Retry-After': '0' },
+                    json: { message: 'Rate limit exceeded' },
+                } as unknown as RequestUrlResponse)
+                .mockResolvedValueOnce({ status: 201, json: { file_path: 'new.md' } } as unknown as RequestUrlResponse);
+
+            await expect(gitlab.pushFile('new.md', 'content', 'main', 'create')).resolves.toEqual({ path: 'new.md' });
+            expect(requestUrl).toHaveBeenCalledTimes(2);
         });
     });
 
