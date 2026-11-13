@@ -1,5 +1,5 @@
 {
-  "branches": ["main", "master", "feat/use-shared-workflow"],
+  "branches": ["main", "master"],
   "tagFormat": "${version}",
   "plugins": [
     [
@@ -72,13 +72,7 @@
     ],
     [
       "@semantic-release/github",
-      {
-        "assets": [
-          { "path": "main.js" },
-          { "path": "manifest.json" },
-          { "path": "styles.css" }
-        ]
-      }
+      {}
     ]
   ]
 }

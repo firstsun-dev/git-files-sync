@@ -22,16 +22,29 @@ jobs:
         # Gitea has no persistent branches to clean up -- its whole
         # container is torn down per-run by scripts/e2e-harness.sh cleanup.
         provider: [github, gitlab]
-    # Same group naming as the provider-e2e job in ci.yml (e2e-<source-
-    # branch>-<provider>) so this cleanup queues behind, rather than races,
-    # an E2E run still in flight for the same branch/provider.
-    # cancel-in-progress: false -- must never cancel an active E2E run, only
-    # run after it. github.event.ref's prefix isn't consistently documented
-    # across event types, so strip any leading refs/heads/ the same way the
-    # `run:` step below does, to match ci.yml's github.head_ref ||
-    # github.ref_name (always already short).
+    # ci.yml's concurrency group is workflow-level (`ci-<branch>`, shared by
+    # push and pull_request runs for that branch -- see ci.yml's header
+    # comment), not per-job/per-provider. This group must match that exact
+    # string for the same branch so this cleanup genuinely queues behind,
+    # rather than races, a live CI/E2E run -- a prior per-provider group name
+    # here (e2e-<branch>-<provider>) silently stopped matching once ci.yml
+    # moved to the single whole-workflow group.
+    # cancel-in-progress: false -- must never cancel an active CI run, only
+    # run after it.
+    # CAVEAT (unverified): `group:` is evaluated at trigger time from this
+    # workflow-level YAML, so it cannot use the `refs/heads/`-stripping the
+    # `run:` step below does -- it can only reference github.event.ref
+    # directly. ci.yml's push-triggered group uses github.ref_name, which
+    # GitHub guarantees is already the short branch name; whether a `delete`
+    # event's github.event.ref is also already short, or carries a
+    # `refs/heads/` prefix, is not consistently documented and could not be
+    # confirmed against a real `delete` event payload in this review. If it
+    # does carry the prefix, this group will NOT match ci.yml's group for
+    # the same branch, and branch-delete cleanup will not queue behind a
+    # live CI run the way e2e-pr-cleanup.yml's (confirmed-matching) group
+    # does. Verify against a real delete-event run before trusting this.
     concurrency:
-      group: e2e-${{ github.event.ref }}-${{ matrix.provider }}
+      group: ci-${{ github.event.ref }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
