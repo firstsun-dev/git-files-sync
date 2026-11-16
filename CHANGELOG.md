@@ -1,3 +1,9 @@
+## [1.6.5](https://github.com/firstsun-dev/git-files-sync/compare/1.6.4...1.6.5) (2026-11-16)
+
+### Bug Fixes
+
+* **deps:** update tooling, patch vulnerabilities, and preserve popout focus ([78e3598](https://github.com/firstsun-dev/git-files-sync/commit/78e3598b223d7807cfc733cd484861be14ccd347))
+
 ## [1.6.4](https://github.com/firstsun-dev/git-files-sync/compare/1.6.3...1.6.4) (2026-11-16)
 
 ### Bug Fixes
