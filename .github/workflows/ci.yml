@@ -9,7 +9,7 @@ permissions:
 
 on:
   push:
-    branches: [main, master, '**']
+    branches: [main, master]
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
@@ -32,26 +32,28 @@ on:
 #           └─► provider-e2e ───┤
 #   lint ───────────────────────┤
 #   unit-test ──────────────────┤──► required-checks ──► package
-#   build ──────────────────────┤                  └────► publish (main only)
+#   build ──────────────────────┤                  └────► release-metadata (main only)
 #
 # All five validation jobs start in parallel right after the push; only the E2E
 # jobs wait on `changes` for their
 # path gate. No validation waits on E2E any more -- a lint/unit/build error now
 # surfaces in <1-2 min instead of after the real-provider matrix. The single
 # `required-checks` job is the only status branch protection needs to watch.
-# Release (package/publish) runs only after that gate passes, so a real
-# provider regression still blocks the release instead of shipping and being
-# caught after the fact.
+# Release (package/release-metadata) runs only after that gate passes, so a
+# real provider regression still blocks the release instead of shipping and
+# being caught after the fact. release-metadata only tags/publishes a GitHub
+# Release shell entry (see its own comment); the actual build/attest/upload
+# happens in release-build.yml, triggered by that release being published.
 #
-# Whole-run concurrency (workflow level, NOT per job): a `push` to a branch
-# with an open PR fires both a `push` and a `pull_request` run for the same
-# commit. Keying concurrency per provider job (an earlier design) let the two
-# runs pick *different* winners per provider -- push cancels the PR run's
-# GitHub/GitLab legs, the PR run cancels the push run's Gitea leg -- so no
-# single run ever had all providers green and the required-checks DAG could
-# wedge. Keying at workflow level by source branch alone
+# Whole-run concurrency (workflow level, NOT per job): feature branches use
+# their `pull_request` event for validation, while `push` CI is limited to
+# main/master. This prevents duplicate runs -- and cancelled duplicate check
+# suites -- for a feature-branch commit. Keying concurrency per provider job
+# (an earlier design) let runs on the same branch pick different winners per
+# provider, so no single run ever had all providers green and the required-
+# checks DAG could wedge. Keying at workflow level by source branch alone
 # (github.head_ref || github.ref_name) means only ONE whole CI DAG per branch
-# survives: the newest run supersedes the older one entirely. Manual
+# survives: a newer PR update supersedes the older run entirely. Manual
 # (workflow_dispatch) and scheduled runs are keyed by event_name+run_id, so
 # they get unique groups and never cancel -- or get cancelled by -- branch CI.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -98,7 +100,8 @@ jobs:
               - 'scripts/e2e-suites.txt'
               - 'scripts/run-e2e.sh'
               - 'package.json'
-              - 'package-lock.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
               - '.github/workflows/ci.yml'
 
   # ── Fast checks (parallel, no E2E dependency) ──────────────────────────────
@@ -129,11 +132,12 @@ jobs:
       - name: Compute run-scoped workdir
         run: echo "E2E_WORKDIR=$RUNNER_TEMP/git-files-sync-e2e/${{ github.run_id }}/${{ github.run_attempt }}/gitea" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci --ignore-scripts
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Run disposable Gitea E2E
         run: scripts/run-e2e.sh --provider gitea
 
@@ -142,12 +146,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm run lint
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run lint
 
   unit-test:
     name: CI / Unit Test (Node ${{ matrix.node-version }})
@@ -158,15 +163,16 @@ jobs:
         node-version: [22, 24]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
-      - run: npm ci --ignore-scripts
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Build (compatibility check)
-        run: npm run build
+        run: pnpm run build
       - name: Run tests with coverage
-        run: npm run test -- --coverage
+        run: pnpm run test --coverage
       - name: Upload coverage
         if: matrix.node-version == 22
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -180,14 +186,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm run build
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run build
       # Upload the raw built artifacts (main.js/manifest/styles.css) for ad-hoc
-      # PR install testing on non-main branches. `npm run build` already ran
+      # PR install testing on non-main branches. `pnpm run build` already ran
       # above as the validation (tsc -noEmit + Obsidian 1.11.0 compat typecheck +
       # esbuild), so this upload is in the *same* job -- never a separate
       # upload-artifact job that could drift out of sync with the build state.
@@ -220,6 +227,16 @@ jobs:
     name: CI / Provider E2E / ${{ matrix.provider }}
     needs: [changes]
     runs-on: [self-hosted, linux, x64, 32gb-ram]
+    # GitLab credentials are shared across branches. Queue only the GitLab leg
+    # across workflows; unique GitHub groups leave its independent leg parallel.
+    # queue:max avoids cancelling pending runs, while the workflow-level group
+    # below remains responsible for same-branch push/PR winner selection.
+    concurrency:
+      group: >-
+        ${{ matrix.provider == 'gitlab'
+          && format('gitlab-e2e-{0}', github.repository)
+          || format('provider-e2e-{0}-{1}', matrix.provider, github.run_id) }}
+      queue: max
     # Runs when sync/provider-relevant paths changed, or unconditionally on
     # workflow_dispatch/schedule/a push to main (main always gets the full
     # tier regardless of path, per the issue's CI wiring). The per-provider
@@ -245,11 +262,10 @@ jobs:
       max-parallel: 2
       matrix:
         provider: [github, gitlab]
-    # Concurrency is handled at WORKFLOW level (see the header comment on the
-    # `concurrency:` block above): one whole CI DAG per source branch, so a
-    # push + pull_request race for the same commit can never split provider
-    # winners across two runs. Per-provider job groups were removed for that
-    # reason -- they let each provider pick a different surviving run.
+    # Workflow-level concurrency (see the header comment above) still selects
+    # one whole CI DAG per source branch, so a push + pull_request race for the
+    # same commit cannot split provider winners across runs. The job-level
+    # GitLab group only queues shared-token work; it never cancels a run.
     # This is NOT a cleanup mechanism (see scripts/e2e-harness.sh's per-run
     # branch naming): a cancelled run's branch can still be mid-delete when
     # the next one starts, which is exactly why every run gets its own unique
@@ -307,16 +323,27 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         if: steps.gate.outputs.run == 'true'
 
+      # The self-hosted runners share a persistent pnpm store (/cache/pnpm-store)
+      # across concurrent jobs. The two provider legs run in parallel and race
+      # while pnpm/action-setup self-switches the runner's pnpm 11 to the pinned
+      # 12.14.0 inside that store ("Cannot find module .../@pnpm/exe.linux-x64/
+      # bin/pnpm.mjs"). Give each leg its own store under RUNNER_TEMP instead.
+      - name: Use a job-private pnpm store
+        if: steps.gate.outputs.run == 'true'
+        run: echo "pnpm_config_store_dir=$RUNNER_TEMP/pnpm-store-${{ matrix.provider }}" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        if: steps.gate.outputs.run == 'true'
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         if: steps.gate.outputs.run == 'true'
         with:
-          node-version: '22'
-          cache: npm
+          node-version: '24'
+          cache: pnpm
 
       # --ignore-scripts: this job only needs installed deps to run vitest/the
       # harness, not husky's `prepare` git-hook setup -- skipping lifecycle
       # scripts avoids letting an install-time script run arbitrary code.
-      - run: npm ci --ignore-scripts
+      - run: pnpm install --frozen-lockfile --ignore-scripts
         if: steps.gate.outputs.run == 'true'
 
       # One entry point for the whole real-provider E2E flow: scripts/run-e2e.sh
@@ -330,18 +357,13 @@ jobs:
       # job `env:` supplies the provider secrets and run identity
       # (E2E_PR_NUMBER/E2E_SOURCE_BRANCH) that run-e2e.sh/e2e-harness.sh consume.
       #
-      # Retried (not just run once): observed failures against the real
-      # providers include transient runner-network blips unrelated to the
-      # suite/product code (e.g. a bare `getaddrinfo ENOTFOUND gitlab.com`
-      # mid-test on 2026-08-14, run 31770197590) that a same-attempt rerun
-      # simply doesn't reproduce. Safe to retry from scratch: run-e2e.sh
-      # re-provisions a fresh isolated branch each attempt and every suite's
-      # runId/branch paths are randomized per vitest process, so a failed
-      # attempt's partial remote state never collides with the retry -- a
-      # genuine product/test bug still fails identically every attempt and
-      # exhausts the retries.
+      # GitHub retains its historical whole-suite retry for runner network
+      # blips. GitLab runs once: safe reads and explicit 429 responses recover
+      # inside BaseGitService, while replaying the suite after a known rate
+      # limit compounds API pressure. An ambiguous write failure remains a
+      # visible error instead of risking a duplicate commit.
       - name: Run provider E2E (production TypeScript, real provider)
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && matrix.provider == 'github'
         uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
         env:
           E2E_PROVIDER: ${{ matrix.provider }}
@@ -350,6 +372,13 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 15
           command: scripts/run-e2e.sh --provider "${{ matrix.provider }}"
+
+      - name: Run GitLab E2E
+        if: steps.gate.outputs.run == 'true' && matrix.provider == 'gitlab'
+        timeout-minutes: 15
+        env:
+          E2E_PROVIDER: gitlab
+        run: scripts/run-e2e.sh --provider gitlab
 
       # `if: always()` -- cleanup is best-effort, never a prerequisite for
       # the next run (see scripts/e2e-harness.sh's cmd_cleanup and
@@ -366,16 +395,14 @@ jobs:
 
   # Single required status check. Branch protection only has to reference
   # this one job name (see docs/testing/real-provider-e2e.md's note on the
-  # `CI / gitea` required-status split). `if: always()` so a real validation
-  # failure is caught here and blocks merge/release; a cancelled matrix leg
-  # (a newer run in the same branch/provider concurrency group replaced this
-  # duplicate) is treated as a failure here too -- the surviving run is the
-  # one whose gate result GitHub uses for the latest commit, so blocking the
-  # cancelled duplicate's gate is correct, not a wedged red.
+  # `CI / gitea` required-status split). `if: always()` makes live runs
+  # aggregate failures; `!cancelled()` skips the gate for a superseded whole
+  # workflow so its duplicate check cannot leave the shared commit red. The
+  # surviving branch run owns the required-check result.
   required-checks:
     name: CI / Required Checks
     needs: [lint, unit-test, build, gitea-e2e, provider-e2e]
-    if: always()
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate validation results
@@ -399,12 +426,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm run build
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run build
       - name: Create plugin package
         run: |
           VERSION=$(node -p "require('./manifest.json').version")
@@ -430,12 +458,21 @@ jobs:
             echo "- Artifact: \`${{ env.ZIP_NAME }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  publish:
-    name: Release / Publish
+  # Metadata-only: version bump, CHANGELOG.md, the release commit + tag, and
+  # the GitHub Release shell entry (no assets — see .releaserc.json's
+  # `@semantic-release/github` config). It must NOT build/attest/upload
+  # main.js — that happens in `release-build.yml`, triggered by the
+  # `release: published` event this step fires, checking out the exact tag
+  # this step creates. This ordering is required so the attested/uploaded
+  # bytes are built from the tagged commit (the `chore(release):` commit
+  # `@semantic-release/git` creates and tags here), not from this job's
+  # pre-release checkout.
+  release-metadata:
+    name: Release / Metadata
     needs: [required-checks]
     # semantic-release only releases on main/master (see .releaserc.json's
-    # `branches`); gating the whole job on those refs skips the build/attest
-    # work on every PR run.
+    # `branches`); gating the whole job on those refs skips this on every PR
+    # run.
     if: >-
       needs.required-checks.result == 'success' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
@@ -443,29 +480,17 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      attestations: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - name: Attest main.js
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: main.js
-      - name: Attest styles.css
-        if: hashFiles('styles.css') != ''
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: styles.css
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
-        run: npx semantic-release
+        run: pnpm exec semantic-release

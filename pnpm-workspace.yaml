@@ -1,0 +1,21 @@
+# Security/compat overrides (moved from package.json "overrides" for pnpm 12).
+overrides:
+  npm: ^11.18.0
+  '@actions/http-client>undici': ^6.28.0
+  undici: ^7.29.0
+  sigstore: ^4.1.1
+  '@sigstore/core': ^3.2.1
+  '@sigstore/verify': ^3.1.1
+  tar: ^7.5.19
+  ip-address: ^10.3.1
+  js-yaml: ^4.2.0
+  # Keep legacy consumers patched without replacing minimatch 11's v5 API.
+  'brace-expansion@<3.0.0': ^2.1.2
+  fast-uri: ^3.1.4
+  postcss: ^8.5.18
+  # GHSA-g3hv-75wg-m249: patch lint-tool dependencies; preserve minimatch 3's API.
+  'minimatch@>=7.0.0 <11.0.1': 11.0.1
+
+# Build scripts: only esbuild needs its postinstall (platform binary check).
+allowBuilds:
+  esbuild: true

@@ -3,16 +3,15 @@
 ## Startup Workflow
 
 Before writing code:
-- Read `feature_list.json` (active/next-up work — GitHub Issues on `firstsun-dev/git-files-sync`, Project #6, is the real source of truth; re-sync stale entries) and `progress.md` (what's currently open).
-- Read `session-handoff.md` for the previous session's exact stopping point.
+- Read `feature_list.json` (active/next-up work — GitHub Issues on `firstsun-dev/git-files-sync`, Project #6, is the real source of truth; re-sync stale entries).
 - Run `./init.sh` to confirm a clean, green baseline before editing.
 
 ## Definition of Done
 
-A feature is done only when all of the following hold, with evidence recorded (command + result) in `progress.md`:
-- `npx eslint .` — 0 errors
-- `npm run build` — passes (tsc + Obsidian 1.11.0 compat typecheck + esbuild)
-- `npx vitest run` — passes
+A feature is done only when all of the following hold, with evidence recorded (command + result) in `feature_list.json` or the PR description:
+- `pnpm exec eslint .` — 0 errors
+- `pnpm run build` — passes (tsc + Obsidian 1.11.0 compat typecheck + esbuild)
+- `pnpm exec vitest run` — passes
 - Manual verification in Obsidian, when the change has a runtime UI surface
 
 ## Stay in Scope
@@ -22,9 +21,7 @@ A feature is done only when all of the following hold, with evidence recorded (c
 
 ## End of Session
 
-Before ending a session:
-- Overwrite `session-handoff.md` (don't append) with the new stopping point so the repo stays restartable.
-- Move finished items from `progress.md` into `archive/YYYY-MM.md` (current month) — next steps in `progress.md` should read as a short list, not a changelog.
+Before ending a session, record evidence (command + result) on the `feature_list.json` entry or the PR description. `progress.md` and `session-handoff.md` are retired.
 
 ## Agent Tiers
 
@@ -40,7 +37,7 @@ Before ending a session:
 
 ### 1. TDD & Linting (Skill: `obsidian-development`)
 - **Rule**: Write Vitest tests BEFORE implementation.
-- **Execution**: Offload `npx vitest run` and `npm run lint` to Haiku.
+- **Execution**: Offload `pnpm exec vitest run` and `pnpm run lint` to Haiku.
 - **Report Format**: `Success: N items, Failure: X items` (including error logs on failure).
 
 ### 2. Marketplace Readiness (Skill: `obsidian-marketplace-check`)
@@ -52,4 +49,4 @@ Before ending a session:
 - **Failure Protocol**: Fetch and return specific error messages from the CI pipeline.
 
 ### 4. Git Integrity
-- **Pre-commit**: Husky hook running `npm run lint && npm run build`.
+- **Pre-commit**: Husky hook running `pnpm run lint && pnpm run build`.

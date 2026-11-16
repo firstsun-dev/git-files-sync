@@ -60,6 +60,32 @@ export const MAX_BATCH_PUSH_SIZE = 200;
  * bursting past a provider's abuse-detection/secondary rate limits. */
 export const BLOB_CREATE_CONCURRENCY = 8;
 
+const MAX_REQUEST_ATTEMPTS = 3;
+const MAX_RETRY_BUDGET_MS = 60_000;
+const INITIAL_RETRY_DELAY_MS = 500;
+const MAX_RETRY_DELAY_MS = 10_000;
+
+type RequestUrlOptions = Parameters<typeof requestUrl>[0];
+
+type RequestOutcome =
+    | { kind: 'success'; response: RequestUrlResponse }
+    | { kind: 'http-error'; response: RequestUrlResponse }
+    | { kind: 'network-error'; error: unknown };
+
+interface SafeRequestOptions {
+    silent?: boolean;
+    readOnly?: boolean;
+}
+
+interface RequestContext {
+    options: RequestUrlOptions;
+    method: string;
+    target: string;
+    safeToRetryNetworkFailure: boolean;
+    startedAt: number;
+    silent: boolean;
+}
+
 export abstract class BaseGitService {
     protected token: string = '';
     protected rootPath: string = '';
@@ -67,57 +93,247 @@ export abstract class BaseGitService {
     /**
      * Safely wraps requestUrl to handle potential throws from Obsidian and provide better error messages.
      */
-    protected async safeRequest(url: string, method: string, body?: unknown, extraHeaders?: Record<string, string>, silent = false): Promise<RequestUrlResponse> {
-        let response: RequestUrlResponse;
-        try {
-            const headers: Record<string, string> = {
-                ...extraHeaders,
-                'Content-Type': 'application/json',
-            };
-            this.addAuthHeader(headers);
+    protected async safeRequest(url: string, method: string, body?: unknown, extraHeaders?: Record<string, string>, options: SafeRequestOptions = {}): Promise<RequestUrlResponse> {
+        const requestMethod = method.toUpperCase();
+        const headers: Record<string, string> = {
+            ...extraHeaders,
+            'Content-Type': 'application/json',
+        };
+        this.addAuthHeader(headers);
 
-            const options = {
+        return this.requestWithRetries({
+            options: {
                 url,
                 method,
                 headers,
                 body: body ? JSON.stringify(body) : undefined,
-                throw: false
-            };
+                throw: false,
+            },
+            method: requestMethod,
+            target: this.requestTarget(url),
+            safeToRetryNetworkFailure: ['GET', 'HEAD', 'OPTIONS'].includes(requestMethod) || options.readOnly === true,
+            startedAt: Date.now(),
+            silent: options.silent ?? false,
+        });
+    }
 
-            response = await requestUrl(options);
+    private async requestWithRetries(context: RequestContext): Promise<RequestUrlResponse> {
+        for (let attempt = 1; attempt <= MAX_REQUEST_ATTEMPTS; attempt += 1) {
+            const outcome = await this.requestOnce(context.options);
+            if (outcome.kind === 'success') return outcome.response;
+
+            const delayMs = this.retryDelayFor(outcome, context.safeToRetryNetworkFailure, attempt);
+            if (delayMs === undefined) throw this.createRequestError(outcome, context);
+            if (!this.canRetry(attempt, context.startedAt, delayMs)) {
+                throw this.createRetryExhaustionError(outcome, context, attempt, delayMs);
+            }
+
+            this.logRetry(outcome, context, attempt, delayMs);
+            await this.wait(delayMs);
+        }
+
+        throw new Error(`Git Service request retry budget exhausted: ${context.method} ${context.target}`);
+    }
+
+    private async requestOnce(options: RequestUrlOptions): Promise<RequestOutcome> {
+        try {
+            const response = await requestUrl(options);
+            return response.status >= 400
+                ? { kind: 'http-error', response }
+                : { kind: 'success', response };
         } catch (error) {
-            // Network-level failure (DNS, offline, TLS, etc.) — but some Obsidian
-            // versions eagerly parse the response body as JSON inside requestUrl()
-            // itself, before `throw: false` or our own status check ever run. If a
-            // proxy/login page returns HTML instead of JSON, that eager parse
-            // throws here as a raw "Unexpected token '<' ... is not valid JSON"
-            // error rather than surfacing as a normal response we could inspect.
-            if (!silent) logger.error('Git Service Request Failed:', error);
-            if (this.looksLikeJsonParseOfHtmlError(error)) {
-                throw new Error(
-                    'Expected a JSON response from the Git server but received an HTML page ' +
-                    '(likely a login, SSO redirect, or proxy/error page). ' +
-                    'Please check the server URL, your access token, and any network proxy or firewall.'
-                );
-            }
-            if (error instanceof Error) throw error;
-            throw new Error(`Network error or unexpected failure: ${String(error)}`);
+            return { kind: 'network-error', error };
+        }
+    }
+
+    private retryDelayFor(outcome: RequestOutcome, safeToRetryNetworkFailure: boolean, attempt: number): number | undefined {
+        if (outcome.kind === 'http-error') {
+            const isRateLimited = outcome.response.status === 429;
+            const isTransientReadFailure = safeToRetryNetworkFailure && [502, 503, 504].includes(outcome.response.status);
+            // A returned 429 confirms rate-limit rejection; unlike a transport
+            // failure, it is safe to replay even when the method mutates state.
+            return isRateLimited || isTransientReadFailure
+                ? this.retryDelayMs(outcome.response.headers, attempt)
+                : undefined;
         }
 
-        if (response.status >= 400) {
-            const errorMsg = this.parseErrorResponse(response);
-            // 404 is routinely an expected "does not exist" probe (getFile treats
-            // it as an empty file, gitignore lookups ignore it). Log it at debug
-            // level so it doesn't surface as a failure, but still throw so callers
-            // can handle it. Other statuses are genuine errors.
-            if (!silent) {
-                if (response.status === 404) logger.debug(`Git Service 404 (not found): ${url}`);
-                else logger.error(`Git Service Request Failed (${response.status}): ${url}`, errorMsg);
-            }
-            throw new Error(`Git Service Error (${response.status}): ${errorMsg}`);
+        if (outcome.kind !== 'network-error' || !safeToRetryNetworkFailure) return undefined;
+        if (this.looksLikeJsonParseOfHtmlError(outcome.error) || !this.isTransientNetworkError(outcome.error)) return undefined;
+        return this.retryDelayMs(undefined, attempt);
+    }
+
+    private canRetry(attempt: number, startedAt: number, delayMs: number): boolean {
+        return attempt < MAX_REQUEST_ATTEMPTS && this.withinRetryBudget(startedAt, delayMs);
+    }
+
+    private logRetry(outcome: RequestOutcome, context: RequestContext, attempt: number, delayMs: number): void {
+        if (context.silent) return;
+        const reason = outcome.kind === 'http-error'
+            ? `Git service HTTP ${outcome.response.status}`
+            : 'Temporary network failure';
+        logger.warn(`${reason}; retry ${attempt + 1}/${MAX_REQUEST_ATTEMPTS} in ${this.formatDelay(delayMs)}: ${context.method} ${context.target}`);
+    }
+
+    private createRequestError(outcome: RequestOutcome, context: RequestContext): Error {
+        if (outcome.kind === 'http-error') return this.createHttpError(outcome.response, context);
+        if (outcome.kind === 'network-error') return this.createNetworkError(outcome.error, context);
+        return new Error('Git Service request returned an unexpected outcome');
+    }
+
+    private createHttpError(response: RequestUrlResponse, context: RequestContext): Error {
+        const errorMsg = this.safeErrorMessage(this.parseErrorResponse(response));
+        if (!context.silent) {
+            if (response.status === 404) logger.debug(`Git Service 404 (not found): ${context.target}`);
+            else logger.error(`Git Service Request Failed (${response.status}): ${context.target}`, errorMsg);
+        }
+        return new Error(`Git Service Error (${response.status}): ${errorMsg}`);
+    }
+
+    private createNetworkError(error: unknown, context: RequestContext): Error {
+        if (this.isMutationMethod(context.method)) {
+            const message = `Git Service mutation outcome is unknown for ${context.method} ${context.target}; the request was not retried to avoid duplicate changes. Refresh remote state before retrying. Cause: ${this.safeErrorMessage(error)}`;
+            if (!context.silent) logger.error('Git Service mutation outcome is unknown:', message);
+            return new Error(message);
         }
 
-        return response;
+        if (this.looksLikeJsonParseOfHtmlError(error)) {
+            return new Error(
+                'Expected a JSON response from the Git server but received an HTML page ' +
+                '(likely a login, SSO redirect, or proxy/error page). ' +
+                'Please check the server URL, your access token, and any network proxy or firewall.'
+            );
+        }
+
+        const message = this.safeErrorMessage(error);
+        if (!context.silent) logger.error('Git Service Request Failed:', message);
+        return error instanceof Error && error.message === message
+            ? error
+            : new Error(`Network error or unexpected failure: ${message}`);
+    }
+
+    private createRetryExhaustionError(outcome: RequestOutcome, context: RequestContext, attempt: number, delayMs: number): Error {
+        const reason = this.retryStopReason(outcome, attempt, delayMs);
+        if (outcome.kind === 'http-error') {
+            const message = `Git Service Error (${outcome.response.status}): ${this.safeErrorMessage(this.parseErrorResponse(outcome.response))}; ${reason}.`;
+            if (!context.silent) logger.error('Git Service retry stopped:', message);
+            return new Error(message);
+        }
+        if (outcome.kind !== 'network-error') return new Error('Git Service retry stopped unexpectedly');
+
+        const message = `Git Service network error (${context.method} ${context.target}) after ${attempt} attempt(s): ${this.safeErrorMessage(outcome.error)}; ${reason}.`;
+        if (!context.silent) logger.error('Git Service retry stopped:', message);
+        return new Error(message);
+    }
+
+    private retryStopReason(outcome: RequestOutcome, attempt: number, delayMs: number): string {
+        if (attempt >= MAX_REQUEST_ATTEMPTS) return `automatic retries stopped after ${attempt} attempts`;
+        const wait = this.formatDelay(delayMs);
+        if (outcome.kind === 'http-error') {
+            return `the server requested a ${wait} wait, beyond the ${this.formatDelay(MAX_RETRY_BUDGET_MS)} retry budget`;
+        }
+        return `the ${wait} backoff would exceed the ${this.formatDelay(MAX_RETRY_BUDGET_MS)} retry budget`;
+    }
+
+    private retryDelayMs(headers: Record<string, string> | undefined, failedAttempt: number): number {
+        const retryAfter = this.getHeader(headers, 'retry-after');
+        if (retryAfter !== undefined) {
+            const delay = this.parseRetryAfter(retryAfter);
+            if (delay !== undefined) return delay;
+        }
+
+        const resetTime = this.getHeader(headers, 'ratelimit-resettime');
+        if (resetTime !== undefined) {
+            const delay = this.parseRetryAfter(resetTime);
+            if (delay !== undefined) return delay;
+        }
+
+        for (const header of ['ratelimit-reset', 'x-ratelimit-reset']) {
+            const reset = this.getHeader(headers, header);
+            if (reset === undefined) continue;
+            const resetAtSeconds = Number(reset);
+            if (Number.isFinite(resetAtSeconds)) return Math.max(0, resetAtSeconds * 1000 - Date.now());
+        }
+
+        const exponentialDelay = Math.min(INITIAL_RETRY_DELAY_MS * 2 ** (failedAttempt - 1), MAX_RETRY_DELAY_MS);
+        // eslint-disable-next-line sonarjs/pseudo-random -- jitter is not security-sensitive.
+        return Math.round(exponentialDelay * (0.5 + Math.random()));
+    }
+
+    private getHeader(headers: Record<string, string> | undefined, name: string): string | undefined {
+        const normalizedName = name.toLowerCase();
+        for (const [header, value] of Object.entries(headers ?? {})) {
+            if (header.toLowerCase() === normalizedName) return value.trim();
+        }
+        return undefined;
+    }
+
+    private parseRetryAfter(value: string): number | undefined {
+        const seconds = Number(value);
+        if (value.trim() !== '' && Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+
+        const retryAt = Date.parse(value);
+        return Number.isNaN(retryAt) ? undefined : Math.max(0, retryAt - Date.now());
+    }
+
+    private withinRetryBudget(startedAt: number, delayMs: number): boolean {
+        return delayMs <= MAX_RETRY_BUDGET_MS && Date.now() - startedAt + delayMs <= MAX_RETRY_BUDGET_MS;
+    }
+
+    private wait(delayMs: number): Promise<void> {
+        return new Promise(resolve => window.setTimeout(resolve, delayMs));
+    }
+
+    private formatDelay(delayMs: number): string {
+        return `${Math.ceil(delayMs / 1000)}s`;
+    }
+
+    private requestTarget(url: string): string {
+        try {
+            const parsed = new URL(url);
+            return `${parsed.origin}${parsed.pathname}`;
+        } catch {
+            return '[invalid request URL]';
+        }
+    }
+
+    private safeErrorMessage(error: unknown): string {
+        const message = this.errorMessage(error);
+        return this.token ? message.split(this.token).join('[redacted]') : message;
+    }
+
+    private errorMessage(error: unknown): string {
+        if (error instanceof Error) return error.message;
+        if (typeof error === 'string') return error;
+        if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') {
+            return error.message;
+        }
+        return 'Unknown error';
+    }
+
+    private errorCause(error: unknown): unknown {
+        if (error instanceof Error) return (error as Error & { cause?: unknown }).cause;
+        if (typeof error === 'object' && error !== null && 'cause' in error) return error.cause;
+        return undefined;
+    }
+
+    private errorCode(error: unknown): string {
+        if (typeof error !== 'object' || error === null || !('code' in error)) return '';
+        const code = error.code;
+        return typeof code === 'string' || typeof code === 'number' ? `${code}` : '';
+    }
+
+    private isMutationMethod(method: string): boolean {
+        return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+    }
+
+    private isTransientNetworkError(error: unknown): boolean {
+        const parts: string[] = [];
+        let current: unknown = error;
+        for (let depth = 0; depth < 3 && current !== undefined && current !== null; depth += 1) {
+            parts.push(this.safeErrorMessage(current), this.errorCode(current));
+            current = this.errorCause(current);
+        }
+        return /fetch failed|failed to fetch|network|eai_again|enotfound|etimedout|timed? out|econnreset|econnrefused|ehostunreach|socket hang up|connection reset/i.test(parts.join(' '));
     }
 
     protected abstract addAuthHeader(headers: Record<string, string>): void;

@@ -20,7 +20,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 if [ -z "$provider" ]; then
-    echo "Usage: npm run test:e2e -- --provider <github|gitlab|gitea>" >&2
+    echo "Usage: pnpm run test:e2e -- --provider <github|gitlab|gitea>" >&2
     exit 1
 fi
 
@@ -146,4 +146,4 @@ echo "[run-e2e] running suites: ${SUITES[*]}" >&2
 # credentials) if not explicitly limited to this list. source-control-flows
 # gates its Extended scenarios to GitHub only (and 1000-file stress to
 # E2E_STRESS=1) in-file.
-npx vitest run -c vitest.e2e.config.ts "${SUITES[@]}"
+pnpm exec vitest run -c vitest.e2e.config.ts "${SUITES[@]}"

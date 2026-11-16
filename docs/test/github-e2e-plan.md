@@ -21,7 +21,7 @@ The production service is exercised unmodified; every remote assertion goes thro
 
 ## Required secrets / config
 
-Set on `firstsun-dev/git-files-sync` (this repo) for CI, or exported locally for `npm run test:e2e -- --provider github`:
+Set on `firstsun-dev/git-files-sync` (this repo) for CI, or exported locally for `pnpm run test:e2e -- --provider github`:
 
 | Name | Kind | Purpose |
 |---|---|---|
@@ -81,7 +81,7 @@ Both patterns were added to the regex, with regression tests in `tests/services/
 
 ```
 E2E_GITHUB_OWNER=<owner> E2E_GITHUB_REPO=<repo> E2E_GITHUB_TOKEN=<fine-grained PAT> \
-  npm run test:e2e -- --provider github
+  pnpm run test:e2e -- --provider github
 ```
 
 Verified: 3 consecutive clean runs (10/10 tests) against `firstsun-dev/obsidian-sync-test` as of 2026-08-07.

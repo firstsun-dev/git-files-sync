@@ -210,7 +210,7 @@ export class GiteaService extends BaseGitService implements GitServiceInterface 
 
         try {
             const branchUrl = `${this.baseUrl}/api/v1/repos/${this.owner}/${this.repo}/branches/${branch}`;
-            await this.safeRequest(branchUrl, 'GET', undefined, undefined, true);
+            await this.safeRequest(branchUrl, 'GET', undefined, undefined, { silent: true });
             return { repoOk: true, branchOk: true };
         } catch {
             return { repoOk: true, branchOk: false };

@@ -10,8 +10,32 @@ const eslintConfig = readFileSync('eslint.config.mts', 'utf8');
 const syncManagerE2eSuite = readFileSync('e2e-tests/provider/suites/sync-manager.e2e.test.ts', 'utf8');
 
 describe('CI workflow contracts', () => {
-    it('retries transient provider failures three times', () => {
-        expect(workflow).toContain('max_attempts: 3');
+    it('runs feature-branch CI only through its pull request workflow', () => {
+        const pushTriggerStart = workflow.indexOf('  push:');
+        const pullRequestTriggerStart = workflow.indexOf('  pull_request:', pushTriggerStart);
+        const pushTrigger = workflow.slice(pushTriggerStart, pullRequestTriggerStart);
+
+        expect(pushTrigger).toContain('branches: [main, master]');
+        expect(pushTrigger).not.toContain("'**'");
+    });
+
+    it('keeps whole-suite retries on the GitHub leg only', () => {
+        const stepStart = workflow.indexOf('- name: Run provider E2E (production TypeScript, real provider)');
+        const stepEnd = workflow.indexOf('- name: Run GitLab E2E', stepStart);
+        const retryStep = workflow.slice(stepStart, stepEnd);
+        expect(retryStep).toContain("matrix.provider == 'github'");
+        expect(retryStep).toContain('max_attempts: 3');
+        expect(retryStep).toContain('retry_wait_seconds: 15');
+    });
+
+    it('runs GitLab E2E once and relies on bounded request-level retries', () => {
+        const stepStart = workflow.indexOf('- name: Run GitLab E2E');
+        const stepEnd = workflow.indexOf('- name: Cleanup', stepStart);
+        const gitlabStep = workflow.slice(stepStart, stepEnd);
+        expect(gitlabStep).toContain("matrix.provider == 'gitlab'");
+        expect(gitlabStep).toContain('timeout-minutes: 15');
+        expect(gitlabStep).toContain('run: scripts/run-e2e.sh --provider gitlab');
+        expect(gitlabStep).not.toContain('nick-fields/retry');
     });
 
     it('runs secretless Gitea E2E on an ephemeral GitHub-hosted runner', () => {
@@ -32,19 +56,20 @@ describe('CI workflow contracts', () => {
         expect(workflow.split(independentRunIdentity)).toHaveLength(2);
     });
 
-    it('serializes whole branch CI runs at workflow level (no split provider winners)', () => {
-        // A push + pull_request race for the same commit must let ONE whole
-        // run survive; concurrency is keyed by source branch at workflow
-        // level, and per-provider job groups are gone.
+    it('keeps PR update cancellation whole and queues GitLab jobs across workflows', () => {
+        // A newer pull_request run supersedes the older whole DAG for that
+        // branch. GitLab's separate job group only serializes its API-heavy
+        // leg and queues rather than cancelling another run.
         expect(workflow).toMatch(/^concurrency:\n/m);
         expect(workflow).toContain('&& (github.head_ref || github.ref_name)');
         expect(workflow).toContain('cancel-in-progress: true');
-        // No job-level concurrency remains: the workflow-level block is the
-        // single top-level one, keyed by `ci-`.
-        // The top-level workflow block is the only concurrency block, keyed
-        // by `ci-` (folded scalar: "group: >-" followed by the ci- prefix).
         expect(workflow.match(/group: >-\n\s+ci-\$\{\{/)).toBeTruthy();
-        expect(workflow).not.toContain('group: e2e-');
+        const providerJobStart = workflow.indexOf('  provider-e2e:');
+        const providerJobEnd = workflow.indexOf('  # ── Final gate', providerJobStart);
+        const providerJob = workflow.slice(providerJobStart, providerJobEnd);
+        expect(providerJob).toMatch(/concurrency:\n\s+group: >-\n\s+\$\{\{ matrix\.provider == 'gitlab'/);
+        expect(providerJob).toContain("format('gitlab-e2e-{0}', github.repository)");
+        expect(providerJob).toContain('queue: max');
     });
 
     it('does not let workflow_dispatch or schedule cancel branch CI', () => {
@@ -66,13 +91,12 @@ describe('CI workflow contracts', () => {
         expect(workflow).not.toContain('needs: e2e-gate');
     });
 
-    it('gates release behind a single required-checks aggregate that runs even on failure', () => {
+    it('gates release on live validation runs and skips superseded run duplicates', () => {
         expect(workflow).toContain('name: CI / Required Checks');
         expect(workflow).toContain('needs: [lint, unit-test, build, gitea-e2e, provider-e2e]');
-        expect(workflow).toContain('if: always()');
-        // Release only starts after the gate; a cancelled matrix leg is a hard
-        // failure here (the surviving run owns the latest-commit gate), not a
-        // silent pass-through that lets downstream CI/release continue.
+        expect(workflow).toContain('if: always() && !cancelled()');
+        // A cancelled whole workflow is superseded by the winning DAG. Live
+        // failures still flow through the aggregate and block downstream jobs.
         expect(workflow).toContain('needs: [required-checks]');
         expect(workflow).not.toContain('run-ci=false');
         expect(workflow).not.toContain('needs.e2e-gate.outputs.run-ci');

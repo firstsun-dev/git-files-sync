@@ -25,14 +25,18 @@ jobs:
         # Gitea has no persistent branches to clean up -- its whole
         # container is torn down per-run by scripts/e2e-harness.sh cleanup.
         provider: [github, gitlab]
-    # Same group naming as the provider-e2e job in ci.yml (e2e-<branch>-
-    # <provider>, keyed by the PR's source branch, not its number -- see
-    # that job's concurrency comment for why) so this cleanup queues behind,
-    # rather than races, an E2E run still in flight for the same branch/
-    # provider. cancel-in-progress: false -- this must never cancel an
-    # active E2E run; it only needs to run after it.
+    # ci.yml's concurrency group is workflow-level (`ci-<branch>`, shared by
+    # push and pull_request runs for that branch -- see ci.yml's header
+    # comment), not per-job/per-provider. This group must match that exact
+    # string for the same branch so this cleanup genuinely queues behind,
+    # rather than races, a live CI/E2E run -- a prior per-provider group name
+    # here (e2e-<branch>-<provider>) silently stopped matching once ci.yml
+    # moved to the single whole-workflow group, which let cleanup delete an
+    # e2e/pr/<n>/** namespace while provider-e2e was still using it.
+    # cancel-in-progress: false -- this must never cancel an active CI run;
+    # it only needs to run after it.
     concurrency:
-      group: e2e-${{ github.event.pull_request.head.ref }}-${{ matrix.provider }}
+      group: ci-${{ github.event.pull_request.head.ref }}
       cancel-in-progress: false
     steps:
       # No `ref:` -- actions/checkout defaults to the commit that triggered

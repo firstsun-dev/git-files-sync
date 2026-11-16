@@ -442,8 +442,9 @@ export class SourceControlView {
 
     private applySearch(value: string): void {
         if (value === this.searchQuery) return;
-        const focused = document.activeElement === this.container?.querySelector('.scv-search-input');
-        const cursor = focused ? (this.container?.querySelector<HTMLInputElement>('.scv-search-input')?.selectionStart ?? null) : null;
+        const input = this.container?.querySelector<HTMLInputElement>('.scv-search-input');
+        const focused = input != null && input.ownerDocument.activeElement === input;
+        const cursor = focused ? input.selectionStart : null;
         this.searchQuery = value;
         this.rerender();
         if (!focused) return;
