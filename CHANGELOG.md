@@ -1,3 +1,16 @@
+## [1.6.4](https://github.com/firstsun-dev/git-files-sync/compare/1.6.3...1.6.4) (2026-11-16)
+
+### Bug Fixes
+
+* **ci:** avoid duplicate feature-branch workflows ([e436b1d](https://github.com/firstsun-dev/git-files-sync/commit/e436b1dc7ec77ff0df780892dc5789b8d493923c))
+* **ci:** skip gates for superseded workflows ([cef40a5](https://github.com/firstsun-dev/git-files-sync/commit/cef40a5200204b17a6c6b2f9ae2b30b18dbbea3b))
+* **gitlab:** recover safely from rate limiting ([470c602](https://github.com/firstsun-dev/git-files-sync/commit/470c6023ba2b4079e647c5d97a772843bfedad9c))
+* **git:** retry network failures by operation safety ([5bd1580](https://github.com/firstsun-dev/git-files-sync/commit/5bd1580d5fdcbbe91b1568f09533570440fd9e68))
+
+### Code Refactoring
+
+* **gitlab:** share batch result hashing ([3612c52](https://github.com/firstsun-dev/git-files-sync/commit/3612c5201ea7d1fb7475fa84a6ab7f6d743d2975))
+
 ## [1.6.3](https://github.com/firstsun-dev/git-files-sync/compare/1.6.2...1.6.3) (2026-10-20)
 
 ### Bug Fixes
