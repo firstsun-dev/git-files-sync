@@ -139,16 +139,26 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
     }
 
     /**
-     * Calls a GitHub GraphQL mutation. GraphQL reports mutation-level failures
-     * (e.g. a stale expectedHeadOid) as a 200 response with an `errors` array
-     * rather than an HTTP error status, so this checks for that on top of
-     * safeRequest's status-code check.
+     * Sends GraphQL queries and mutations through the same request path. Queries
+     * are explicitly marked read-only so transient transport failures can retry;
+     * mutation transport failures remain ambiguous. GraphQL mutation failures
+     * (e.g. a stale expectedHeadOid) arrive as HTTP 200 with an `errors` array.
      */
-    private async githubGraphQL<T>(query: string, variables: Record<string, unknown>, timing?: PushTimingCollector): Promise<T> {
-        const request = () => this.safeRequest('https://api.github.com/graphql', 'POST', { query, variables });
-        const response = timing ? await timing.measureRequest(request) : await request();
+    private async githubGraphQL<T>(
+        query: string,
+        variables: Record<string, unknown>,
+        options: { operation: 'query' | 'mutation'; timing?: PushTimingCollector },
+    ): Promise<T> {
+        const request = () => this.safeRequest(
+            'https://api.github.com/graphql',
+            'POST',
+            { query, variables },
+            undefined,
+            { readOnly: options.operation === 'query' },
+        );
+        const response = options.timing ? await options.timing.measureRequest(request) : await request();
         const parse = () => this.parseJson<{ data?: T; errors?: Array<{ message: string }> }>(response);
-        const body = timing ? timing.measureParsing(parse) : parse();
+        const body = options.timing ? options.timing.measureParsing(parse) : parse();
         if (body.errors && body.errors.length > 0) {
             throw new Error(`GitHub GraphQL error: ${body.errors.map(e => e.message).join('; ')}`);
         }
@@ -172,6 +182,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
         const data = await this.githubGraphQL<{ repository?: { ref?: { target?: { oid?: string } | null } | null } | null }>(
             BRANCH_HEAD_QUERY,
             { owner: this.owner, name: this.repo, qualifiedName: `refs/heads/${branch}` },
+            { operation: 'query' },
         );
         return data.repository?.ref?.target?.oid ?? await this.getLatestCommitSha(branch);
     }
@@ -197,7 +208,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
                         expectedHeadOid,
                         fileChanges,
                     },
-                }, timing);
+                }, { operation: 'mutation', timing });
                 return data.createCommitOnBranch.commit.oid;
             } catch (e) {
                 const errorMessage = e instanceof Error ? e.message : String(e);
@@ -376,7 +387,7 @@ export class GitHubService extends BaseGitService implements GitServiceInterface
 
         try {
             const branchUrl = `https://api.github.com/repos/${this.owner}/${this.repo}/branches/${branch}`;
-            await this.safeRequest(branchUrl, 'GET', undefined, undefined, true);
+            await this.safeRequest(branchUrl, 'GET', undefined, undefined, { silent: true });
             return { repoOk: true, branchOk: true };
         } catch {
             return { repoOk: true, branchOk: false };

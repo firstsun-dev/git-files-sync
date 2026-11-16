@@ -1,38 +1,22 @@
 {
-  "_note": "GitHub Issues (firstsun-dev/git-files-sync, Project #6) is the source of truth for the full backlog and priority/estimate fields. This file mirrors only the active feature and the next few candidates so an agent session has a local, offline checkpoint — sync it against `gh issue list --repo firstsun-dev/git-files-sync --state open` at the start of a session rather than treating it as authoritative.",
-  "_lastSync": "2026-08-31: Synced against open GitHub issues; issue #143 is active locally, while #139 awaits review on PR #140.",
+  "_note": "GitHub Issues (firstsun-dev/git-files-sync, Project #6) are the source of truth. This file mirrors only the active feature and the next candidate; re-sync it against GitHub at session start.",
+  "_lastSync": "2026-11-13: Synced against open GitHub issues and Project #6; Issue #166 is active and #143 remains in Backlog.",
   "features": [
     {
-      "id": "feat-027",
-      "name": "test(e2e): run disposable Gitea safely in local and CI environments (issue #139)",
-      "description": "Keep local Gitea runs parallel-safe, move the secretless Gitea PR gate to GitHub-hosted runners, and prevent fork code from reaching credentialed self-hosted runners.",
+      "id": "feat-029",
+      "name": "fix(gitlab): recover safely from E2E rate limiting (issue #166)",
+      "description": "Reduce redundant GitLab API calls, recover safely from throttling, and serialize the GitLab E2E leg without weakening test coverage.",
       "dependencies": [],
-      "status": "in-review",
-      "evidence": "Commits 920adee/18de6e0/b5884fc on PR #140: local serial/parallel Gitea and targeted real CI run 33048613679 are green; awaiting review/merge."
+      "status": "in-progress",
+      "evidence": "Issue #166 (P1, 12h) added to Project #6 from CI run 43357414594; implementation active on codex/gitlab-e2e-rate-limiting."
     },
     {
       "id": "feat-028",
       "name": "test(e2e): reduce real-provider API pressure (issue #143)",
-      "description": "Remove redundant E2E baseline commits and verifier fetches without changing production sync behavior.",
-      "dependencies": [],
-      "status": "in-progress",
-      "evidence": "Working tree: provider identity, baseline batching, fetch-once verifier snapshots, and GitHub batch assertions implemented; real-provider matrix pending."
-    },
-    {
-      "id": "feat-004",
-      "name": "fix: resolve sonarqube issues (issue #45)",
-      "description": "Review current SonarQube findings and fix code smells/bugs/security hotspots where applicable",
+      "description": "Finish CI retry tiering and the core/full smoke split for the real-provider E2E suites.",
       "dependencies": [],
       "status": "not-started",
-      "evidence": ""
-    },
-    {
-      "id": "feat-010",
-      "name": "feat: add bitbucket support (issue #37)",
-      "description": "Add Bitbucket as a fourth GitServiceInterface provider; Bitbucket's API has no native blob SHA concept and is PR-based rather than direct-commit, so GitFile.sha semantics may need adjusting",
-      "dependencies": [],
-      "status": "not-started",
-      "evidence": ""
+      "evidence": "Issue #143 remains open in Project #6 Backlog; earlier API-pressure reductions are in main, while CI retry tiering and smoke/full selection remain outstanding."
     }
   ],
   "_evidenceStyle": "Keep evidence to one line: commit hash + short pointer (e.g. 'Commit abc1234 - added X, tests pass'). Debugging narrative and design discussion belong in the commit message, not this file."
