@@ -187,6 +187,120 @@ describe('PushCoordinator', () => {
         });
     });
 
+    describe('unattended (background) data-loss protection', () => {
+        it('treats differing local/remote content with no baseline as a conflict in background mode', async () => {
+            const harness = createHarness();
+            harness.listFilesDetailed.mockResolvedValue([{ path: 'untracked.md', symlink: false, sha: 'remote-sha' }]);
+
+            const plan = await harness.coordinator.planSyncBatch(['untracked.md'], undefined, undefined, 'skip');
+
+            expect(plan.pushes).toEqual([]);
+            expect(plan.conflictedPaths).toEqual(['untracked.md']);
+        });
+
+        it('keeps the interactive behavior: no baseline still pushes after confirmation', async () => {
+            const harness = createHarness();
+            harness.listFilesDetailed.mockResolvedValue([{ path: 'untracked.md', symlink: false, sha: 'remote-sha' }]);
+
+            const plan = await harness.coordinator.planSyncBatch(['untracked.md'], undefined, undefined, 'prompt');
+
+            expect(plan.pushes.map(entry => entry.path)).toEqual(['untracked.md']);
+        });
+
+        function commitHarness(remote: Record<string, { sha: string; revision?: string }>) {
+            const harness = createHarness();
+            const getFile = vi.fn(async (path: string) => ({ content: '', sha: remote[path]?.sha ?? '', revision: remote[path]?.revision }));
+            const provider = { listFilesDetailed: harness.listFilesDetailed, getFile } as unknown as GitServiceInterface;
+            const coordinator = new PushCoordinator({
+                ...(harness.coordinator as unknown as { dependencies: ConstructorParameters<typeof PushCoordinator>[0] }).dependencies,
+                gitService: () => provider,
+            });
+            const results = (): PushResults => ({ success: 0, added: 0, updated: 0, failed: 0, conflicts: 0, resolvedConflicts: 0, skippedConflicts: 0, errors: [], syncedPaths: [] });
+            return { coordinator, harness, results: results() };
+        }
+
+        it('does not overwrite a remote file that changed after planning', async () => {
+            const { coordinator, harness, results } = commitHarness({ 'a.md': { sha: 'changed' } });
+            const push = { path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'x', existingSha: 'planned' };
+
+            await coordinator.commitResolvedBatch([push], [], [], [], [], results, { revalidateRemote: true });
+
+            expect(harness.commitBatch).not.toHaveBeenCalled();
+            expect(results.failed).toBe(1);
+            expect(results.errors[0]?.file).toBe('a.md');
+        });
+
+        it('does not create over a remote file that appeared after planning', async () => {
+            const { coordinator, harness, results } = commitHarness({ 'new.md': { sha: 'appeared' } });
+            const push = { path: 'new.md', name: 'new.md', repoPath: 'new.md', content: 'x' };
+
+            await coordinator.commitResolvedBatch([push], [], [], [], [], results, { revalidateRemote: true });
+
+            expect(harness.commitBatch).not.toHaveBeenCalledWith([push], expect.anything(), expect.anything(), expect.anything());
+            expect(results.failed).toBe(1);
+        });
+
+        it('pushes entries whose remote still matches the plan', async () => {
+            const { coordinator, harness, results } = commitHarness({ 'a.md': { sha: 'planned' } });
+            const push = { path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'x', existingSha: 'planned' };
+
+            await coordinator.commitResolvedBatch([push], [], [], [], [], results, { revalidateRemote: true });
+
+            expect(harness.commitBatch).toHaveBeenCalledWith([push], [], [], results);
+            expect(results.failed).toBe(0);
+        });
+
+        it('does not delete a remote file that changed since the last sync', async () => {
+            const { coordinator, harness, results } = commitHarness({ 'gone.md': { sha: 'remote-edited' } });
+            harness.settings.syncMetadata['gone.md'] = { lastSyncedSha: 'base', lastSyncedAt: 0, lastKnownPath: 'gone.md' };
+            const del = { path: 'gone.md', name: 'gone.md', repoPath: 'gone.md' };
+
+            await coordinator.commitResolvedBatch([], [], [del], [], [], results, { revalidateRemote: true });
+
+            expect(harness.commitBatch).not.toHaveBeenCalled();
+            expect(results.errors[0]?.file).toBe('gone.md');
+        });
+
+        it('refuses a remote delete that has no baseline to verify against', async () => {
+            const { coordinator, harness, results } = commitHarness({ 'gone.md': { sha: 'anything' } });
+            const del = { path: 'gone.md', name: 'gone.md', repoPath: 'gone.md' };
+
+            await coordinator.commitResolvedBatch([], [], [del], [], [], results, { revalidateRemote: true });
+
+            expect(harness.commitBatch).not.toHaveBeenCalled();
+            expect(results.failed).toBe(1);
+        });
+
+        it('deletes when the remote still equals the baseline', async () => {
+            const { coordinator, harness, results } = commitHarness({ 'gone.md': { sha: 'base' } });
+            harness.settings.syncMetadata['gone.md'] = { lastSyncedSha: 'base', lastSyncedAt: 0, lastKnownPath: 'gone.md' };
+            const del = { path: 'gone.md', name: 'gone.md', repoPath: 'gone.md' };
+
+            await coordinator.commitResolvedBatch([], [], [del], [], [], results, { revalidateRemote: true });
+
+            expect(harness.commitBatch).toHaveBeenCalledWith([], [], [del], results);
+        });
+
+        it('does not remove a move source that changed after planning', async () => {
+            const { coordinator, harness, results } = commitHarness({ 'old.md': { sha: 'edited' } });
+            const move = { path: 'new.md', name: 'new.md', repoPath: 'new.md', oldPath: 'old.md', oldRepoPath: 'old.md', content: 'x', oldSha: 'planned' };
+
+            await coordinator.commitResolvedBatch([], [move], [], [], [], results, { revalidateRemote: true });
+
+            expect(harness.commitBatch).not.toHaveBeenCalled();
+            expect(results.failed).toBe(1);
+        });
+
+        it('does not revalidate (no extra provider reads) for interactive commits', async () => {
+            const { coordinator, harness, results } = commitHarness({});
+            const del = { path: 'gone.md', name: 'gone.md', repoPath: 'gone.md' };
+
+            await coordinator.commitResolvedBatch([], [], [del], [], [], results);
+
+            expect(harness.commitBatch).toHaveBeenCalledWith([], [], [del], results);
+        });
+    });
+
     it('plans an edited tracked rename as a move when the destination is free', async () => {
         const harness = createHarness();
         harness.settings.syncMetadata['notes/new.md'] = {

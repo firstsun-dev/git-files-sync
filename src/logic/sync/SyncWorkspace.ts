@@ -14,7 +14,7 @@ import {
     SyncStatusRefreshProgress,
     SyncStatusRefreshResult,
 } from './SyncStatusRefreshService';
-import type { BatchPushConflict, DeleteQueueEntry, FileDiff, MoveQueueEntry, PullExecutionOptions, PushQueueEntry, PushResults, SyncPlan, SyncResult } from './types';
+import type { BatchPushConflict, CommitResolvedOptions, DeleteQueueEntry, FileDiff, MoveQueueEntry, PullExecutionOptions, PushQueueEntry, PushResults, SyncPlan, SyncResult } from './types';
 import { ensureParentDirs } from '../../utils/vault-path';
 import { buildRemoteFileUrl } from '../../utils/remote-url';
 
@@ -64,6 +64,7 @@ export interface SyncWorkspace {
         keepRemote: BatchPushConflict[],
         keepLocal: BatchPushConflict[],
         results: PushResults,
+        options?: CommitResolvedOptions,
     ): Promise<void>;
     /** Shows one review/confirm modal for a merged Sync Plan. */
     confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean>;
@@ -210,8 +211,9 @@ export class SyncManagerWorkspace implements SyncWorkspace {
         keepRemote: BatchPushConflict[],
         keepLocal: BatchPushConflict[],
         results: PushResults,
+        options?: CommitResolvedOptions,
     ): Promise<void> {
-        return this.dependencies.manager().commitResolvedBatch(pushes, moves, deletions, keepRemote, keepLocal, results);
+        return this.dependencies.manager().commitResolvedBatch(pushes, moves, deletions, keepRemote, keepLocal, results, options);
     }
 
     confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean> {
@@ -269,8 +271,9 @@ export class BoundarySyncWorkspace implements SyncWorkspace {
         keepRemote: BatchPushConflict[],
         keepLocal: BatchPushConflict[],
         results: PushResults,
+        options?: CommitResolvedOptions,
     ): Promise<void> {
-        return this.getManager().commitResolvedBatch(pushes, moves, deletions, keepRemote, keepLocal, results);
+        return this.getManager().commitResolvedBatch(pushes, moves, deletions, keepRemote, keepLocal, results, options);
     }
     confirmPlan(plan: SyncPlan, direction: SyncPlanDirection): Promise<boolean> { return this.getManager().confirmPlan(plan, direction); }
 }

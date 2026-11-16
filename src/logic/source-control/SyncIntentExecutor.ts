@@ -145,10 +145,10 @@ export class SyncIntentExecutor {
         const failures: unknown[] = [];
 
         if (hasRemoteMutations(plan.plannedPush, buckets.deleteRemote)) {
-            await this.commitRemoteBucket(plan.plannedPush, buckets.push, buckets.deleteRemote, summary, skippedPaths, failures);
+            await this.commitRemoteBucket(plan.plannedPush, buckets.push, buckets.deleteRemote, summary, skippedPaths, failures, mode);
         }
         if (buckets.pull.length > 0) {
-            await this.applyPullBucket(buckets.pull, summary, skippedPaths, failures);
+            await this.applyPullBucket(buckets.pull, summary, skippedPaths, failures, mode);
         }
 
         // Any skipped/conflicted target that a commit or pull may have marked
@@ -235,6 +235,7 @@ export class SyncIntentExecutor {
         summary: SyncExecutionResult,
         skippedPaths: ReadonlySet<string>,
         failures: unknown[],
+        mode: SyncExecutionMode,
     ): Promise<void> {
         const targets = [...pushTargets, ...deleteTargets].filter(target => !skippedPaths.has(target.path));
         try {
@@ -262,6 +263,8 @@ export class SyncIntentExecutor {
                 plannedPush.keepRemote,
                 plannedPush.keepLocal,
                 results,
+                // Unattended runs re-read the remote right before mutating.
+                ...(mode === 'background' ? [{ revalidateRemote: true }] : []),
             );
 
             const failed = new Set(results.errors.map(error => error.file));
@@ -279,13 +282,16 @@ export class SyncIntentExecutor {
         summary: SyncExecutionResult,
         skippedPaths: ReadonlySet<string>,
         failures: unknown[],
+        mode: SyncExecutionMode,
     ): Promise<void> {
         const targets = pullTargets.filter(target => !skippedPaths.has(target.path));
         try {
             if (targets.length === 0) return;
             const results = await this.workspace.applyPull(
                 targets.map(change => change.path),
-                { notify: false },
+                // Unattended pulls never overwrite local content that has no
+                // trustworthy baseline or changed after the last refresh.
+                mode === 'background' ? { notify: false, requireBaseline: true } : { notify: false },
             );
             const failed = new Set(results.errors.map(error => error.file));
             this.finishAll(targets, path => failed.has(path) ? 'failed' : 'success');

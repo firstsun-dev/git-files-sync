@@ -134,3 +134,87 @@ describe('PullCoordinator.planSingleFile', () => {
         expect(decision.action).toBe('resolve-conflict');
     });
 });
+
+describe('PullCoordinator.applyPullBatch requireBaseline (unattended pulls)', () => {
+    async function setup(options: { local: string[]; remote: string; baseline?: string; treeSha?: string }) {
+        const remoteSha = await gitBlobSha(options.remote);
+        const reads = [...options.local];
+        const pull = vi.fn().mockResolvedValue(undefined);
+        const deps = buildDependencies({
+            gitService: () => ({ getFile: vi.fn().mockResolvedValue({ content: options.remote, sha: remoteSha }) }) as never,
+            settings: {
+                serviceType: 'github',
+                syncMetadata: options.baseline === undefined ? {} : { 'a.md': { lastSyncedSha: options.baseline, lastSyncedAt: 0 } },
+                branch: 'main',
+                vaultFolder: '',
+                rootPath: '',
+            } as unknown as GitLabFilesPushSettings,
+            scanner: {
+                fileInfo: (path: string) => ({ path, name: path, isString: true }),
+                toRepoPath: (path: string) => path,
+                toTreePath: (path: string) => path,
+                pathExists: vi.fn().mockResolvedValue(true),
+                indexedFileExists: vi.fn().mockReturnValue(true),
+                // Each read pops the next local snapshot (last one repeats), so a test can
+                // model the file being edited between the tree check and the write.
+                readContent: vi.fn().mockImplementation(async () => (reads.length > 1 ? reads.shift() : reads[0])),
+            } as unknown as PullCoordinatorDependencies['scanner'],
+            executor: { pull } as unknown as PullCoordinatorDependencies['executor'],
+        });
+        const tree = [{ path: 'a.md', symlink: false, sha: options.treeSha ?? remoteSha }];
+        return { coordinator: new PullCoordinator(deps), pull, tree };
+    }
+
+    it('does not overwrite differing local content that has no baseline', async () => {
+        const { coordinator, pull, tree } = await setup({ local: ['my unsynced edit'], remote: 'remote text' });
+
+        const result = await coordinator.applyPullBatch(['a.md'], undefined, tree, { notify: false, requireBaseline: true });
+
+        expect(pull).not.toHaveBeenCalled();
+        expect(result.conflicts).toBe(1);
+    });
+
+    it('does not overwrite a local file edited after the refresh classified it as remote-modified', async () => {
+        const baseline = await gitBlobSha('baseline text');
+        const { coordinator, pull, tree } = await setup({ local: ['edited after refresh'], remote: 'baseline text', baseline });
+
+        const result = await coordinator.applyPullBatch(['a.md'], undefined, tree, { notify: false, requireBaseline: true });
+
+        expect(pull).not.toHaveBeenCalled();
+        expect(result.conflicts).toBe(1);
+    });
+
+    it('re-checks the local file after fetching remote content, catching an edit made in between', async () => {
+        const baseline = await gitBlobSha('baseline text');
+        // First read (tree check): still the baseline. Second read (after remote fetch): edited.
+        const { coordinator, pull, tree } = await setup({
+            local: ['baseline text', 'edited while fetching'],
+            remote: 'remote update',
+            baseline,
+        });
+
+        const result = await coordinator.applyPullBatch(['a.md'], undefined, tree, { notify: false, requireBaseline: true });
+
+        expect(pull).not.toHaveBeenCalled();
+        expect(result.conflicts).toBe(1);
+    });
+
+    it('still pulls a genuine remote change over an unmodified local file', async () => {
+        const baseline = await gitBlobSha('baseline text');
+        const { coordinator, pull, tree } = await setup({ local: ['baseline text'], remote: 'remote update', baseline });
+
+        const result = await coordinator.applyPullBatch(['a.md'], undefined, tree, { notify: false, requireBaseline: true });
+
+        expect(pull).toHaveBeenCalledOnce();
+        expect(result.updated).toBe(1);
+    });
+
+    it('keeps the interactive/manual behavior: no baseline still overwrites after confirmation', async () => {
+        const { coordinator, pull, tree } = await setup({ local: ['my unsynced edit'], remote: 'remote text' });
+
+        const result = await coordinator.applyPullBatch(['a.md'], undefined, tree, { notify: false });
+
+        expect(pull).toHaveBeenCalledOnce();
+        expect(result.updated).toBe(1);
+    });
+});

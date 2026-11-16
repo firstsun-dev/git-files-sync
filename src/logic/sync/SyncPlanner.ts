@@ -48,8 +48,16 @@ export class SyncPlanner {
         };
     }
 
-    planFor(operation: SyncOperation, facts: SyncFacts): PlannedFileAction {
-        const classification = this.classifyForOperation(operation, facts);
+    /**
+     * `requireBaseline` is for unattended runs: without a trustworthy baseline
+     * differing content stays a conflict (instead of defaulting to the
+     * operation's direction), and a pull never overwrites a local file that has
+     * changed since the baseline.
+     */
+    planFor(operation: SyncOperation, facts: SyncFacts, options: { requireBaseline?: boolean } = {}): PlannedFileAction {
+        const classification = options.requireBaseline
+            ? this.classifyStrictForOperation(operation, facts)
+            : this.classifyForOperation(operation, facts);
         return {
             path: facts.local.path || facts.remote.path,
             repoPath: facts.remote.repoPath,
@@ -82,6 +90,11 @@ export class SyncPlanner {
         const classification = this.classify(facts);
         if (classification !== 'conflict' || facts.base.blobSha) return classification;
         return operation === 'push' ? 'local-modified' : 'remote-modified';
+    }
+
+    private classifyStrictForOperation(operation: SyncOperation, facts: SyncFacts): SyncClassification {
+        const classification = this.classify(facts);
+        return operation === 'pull' && classification === 'local-modified' ? 'conflict' : classification;
     }
 
     private actionForOperation(operation: SyncOperation, classification: SyncClassification): SyncAction {
