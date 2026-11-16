@@ -5,11 +5,23 @@ import type { OperationState } from './OperationState';
 import type { SourceControlItem } from './SourceControlViewModel';
 import type { SyncSelectionStore } from './SyncSelectionStore';
 import { defaultSyncAction, type SyncAction } from './ChangeActionPolicy';
-import { SyncIntentExecutor } from './SyncIntentExecutor';
+import { SyncIntentExecutor, type SyncExecutionMode, type SyncExecutionOutcome } from './SyncIntentExecutor';
+import { SyncExecutionGuard } from './SyncExecutionGuard';
 import type { SyncIntentRequest } from './SyncIntent';
 import type { ChangeId, SyncChange } from './types';
 
 export type { SyncIntentRequest } from './SyncIntent';
+export type { SyncExecutionOutcome } from './SyncIntentExecutor';
+
+/** Handle given to a background transaction that already owns the execution guard. */
+export interface BackgroundSyncSession {
+    /** Executes intents in background mode without re-acquiring the (non-reentrant) guard. */
+    sync(intents: readonly SyncIntentRequest[]): Promise<SyncExecutionOutcome>;
+}
+
+export type BackgroundRunOutcome<T> =
+    | { status: 'skipped-busy' }
+    | { status: 'completed'; value: T };
 
 /** Which side wins when resolving a change in the 'conflict' state. */
 export type ConflictResolution = 'local' | 'remote';
@@ -39,6 +51,12 @@ export interface SourceControlDiffContent {
  */
 export class SourceControlActionService {
     private readonly syncIntentExecutor: SyncIntentExecutor;
+    /**
+     * Serializes every provider-mutating operation (the Sync Queue workflow and
+     * the immediate row actions) against automatic sync. User-triggered work
+     * waits for the lock; automatic work try-acquires and skips when busy.
+     */
+    private readonly guard = new SyncExecutionGuard();
 
     constructor(
         private readonly changes: ChangeRepository,
@@ -52,7 +70,58 @@ export class SourceControlActionService {
             operations,
             workspace,
             syncResultNotifier,
+            this.guard,
         );
+    }
+
+    /** Runs `operation` while holding the shared execution guard (manual semantics: waits, never discards). */
+    private async serialized<T>(operation: () => Promise<T>): Promise<T> {
+        const release = await this.guard.acquire();
+        try {
+            return await operation();
+        } finally {
+            release();
+        }
+    }
+
+    /**
+     * Runs `operation` against the targets re-resolved after the guard is
+     * held. Rows show as running immediately for the user's feedback while
+     * waiting, but what is actually acted on is the live snapshot: a change
+     * that a background run removed or settled meanwhile is released, never
+     * pushed/pulled/deleted from a stale row.
+     */
+    private async serializedTargets(
+        changeIds: readonly ChangeId[],
+        operation: (targets: SyncChange[]) => Promise<void>,
+    ): Promise<void> {
+        const queued = this.resolve(changeIds);
+        if (queued.length === 0) return;
+        this.startAll(queued);
+        await this.serialized(async () => {
+            const targets = this.resolve(changeIds);
+            const live = new Set(targets.map(target => target.id));
+            for (const target of queued) {
+                if (!live.has(target.id)) this.operations.reset(target.id);
+            }
+            if (targets.length === 0) return;
+            this.startAll(targets);
+            await operation(targets);
+        });
+    }
+
+    /**
+     * Serialization boundary for legacy/manual entry points that still call
+     * SyncManager directly (ribbon, commands, file context menu, Push/Pull All).
+     * Uses the SAME guard as every other operation here (manual semantics:
+     * waits, never discards).
+     *
+     * The guard is non-reentrant: never wrap sync()/push()/pull()/deleteRemote()/
+     * deleteLocal()/resolveConflict()/runBackground() in this — they already
+     * acquire it, so doing so would deadlock.
+     */
+    async runManual<T>(operation: () => Promise<T>): Promise<T> {
+        return this.serialized(operation);
     }
 
     /** Adds one change to the Sync Queue. */
@@ -99,70 +168,89 @@ export class SourceControlActionService {
 
     /** Pushes one or more changes (single push and batch push share this path). */
     async push(changeIds: readonly ChangeId[]): Promise<void> {
-        const targets = this.resolve(changeIds);
-        if (targets.length === 0) return;
-
-        this.startAll(targets);
-        try {
-            const results = await this.workspace.push(targets.map(target => target.path));
-            const failed = new Set(results.errors.map(error => error.file));
-            this.finishAll(targets, path => failed.has(path) ? 'failed' : 'success');
-        } catch {
-            this.failAll(targets);
-        }
+        await this.serializedTargets(changeIds, async targets => {
+            try {
+                const results = await this.workspace.push(targets.map(target => target.path));
+                const failed = new Set(results.errors.map(error => error.file));
+                this.finishAll(targets, path => failed.has(path) ? 'failed' : 'success');
+            } catch {
+                this.failAll(targets);
+            }
+        });
     }
 
     /** Pulls one or more changes. */
     async pull(changeIds: readonly ChangeId[]): Promise<void> {
-        const targets = this.resolve(changeIds);
-        if (targets.length === 0) return;
-
-        this.startAll(targets);
-        try {
-            const results = await this.workspace.pull(targets.map(target => target.path));
-            const failed = new Set(results.errors.map(error => error.file));
-            this.finishAll(targets, path => failed.has(path) ? 'failed' : 'success');
-        } catch {
-            this.failAll(targets);
-        }
+        await this.serializedTargets(changeIds, async targets => {
+            try {
+                const results = await this.workspace.pull(targets.map(target => target.path));
+                const failed = new Set(results.errors.map(error => error.file));
+                this.finishAll(targets, path => failed.has(path) ? 'failed' : 'success');
+            } catch {
+                this.failAll(targets);
+            }
+        });
     }
 
     /** Deletes one or more changes from the remote only. */
     async deleteRemote(changeIds: readonly ChangeId[]): Promise<void> {
-        const targets = this.resolve(changeIds);
-        if (targets.length === 0) return;
-
-        this.startAll(targets);
-        try {
-            const result = await this.workspace.deleteRemote(targets.map(target => target.path));
-            const failed = new Set(result.errors.map(error => error.path));
-            this.finishAll(targets, path => failed.has(path) ? 'failed' : 'success');
-        } catch {
-            this.failAll(targets);
-        }
+        await this.serializedTargets(changeIds, async targets => {
+            try {
+                const result = await this.workspace.deleteRemote(targets.map(target => target.path));
+                const failed = new Set(result.errors.map(error => error.path));
+                this.finishAll(targets, path => failed.has(path) ? 'failed' : 'success');
+            } catch {
+                this.failAll(targets);
+            }
+        });
     }
 
     /**
      * Executes the whole Sync Queue as one explicit-intent workflow.
      * Kept as the stable UI-facing facade; orchestration lives in
-     * SyncIntentExecutor.
+     * SyncIntentExecutor. `mode` is per-execution: manual Sync stays
+     * interactive, Automatic Sync passes `background`.
      */
-    async sync(intents: readonly SyncIntentRequest[]): Promise<void> {
-        await this.syncIntentExecutor.execute(intents);
+    async sync(
+        intents: readonly SyncIntentRequest[],
+        mode: SyncExecutionMode = 'interactive',
+    ): Promise<SyncExecutionOutcome> {
+        return this.syncIntentExecutor.execute(intents, mode);
+    }
+
+    /**
+     * Runs a whole background transaction (refresh -> execute -> refresh)
+     * under one hold of the shared guard. If the guard is busy the task is
+     * never invoked and nothing is queued, so a busy tick costs zero provider
+     * work. Because the guard hands its lock straight to the next waiter, a
+     * waiting manual operation still wins over a later automatic tick.
+     */
+    async runBackground<T>(task: (session: BackgroundSyncSession) => Promise<T>): Promise<BackgroundRunOutcome<T>> {
+        const release = this.guard.tryAcquire();
+        if (!release) return { status: 'skipped-busy' };
+        try {
+            const value = await task({
+                sync: intents => this.syncIntentExecutor.executeHeld(intents, 'background'),
+            });
+            return { status: 'completed', value };
+        } finally {
+            release();
+        }
     }
 
     /** Deletes one or more changes from the local vault only. */
     async deleteLocal(changeIds: readonly ChangeId[]): Promise<void> {
-        const targets = this.resolve(changeIds);
-        for (const target of targets) {
-            this.operations.start(target.id);
-            try {
-                await this.workspace.deleteLocal(target.path);
-                this.operations.succeed(target.id);
-            } catch {
-                this.operations.fail(target.id);
+        await this.serialized(async () => {
+            for (const target of this.resolve(changeIds)) {
+                this.operations.start(target.id);
+                try {
+                    await this.workspace.deleteLocal(target.path);
+                    this.operations.succeed(target.id);
+                } catch {
+                    this.operations.fail(target.id);
+                }
             }
-        }
+        });
     }
 
     /**
@@ -171,9 +259,16 @@ export class SourceControlActionService {
      * boundary so it does not re-enter planning and show a second modal.
      */
     async resolveConflict(changeId: ChangeId, resolution: ConflictResolution): Promise<void> {
-        const change = this.changes.getById(changeId);
-        if (!change) return;
+        // Resolve inside the guard: a run that held it first may have changed
+        // or removed this change, and a stale snapshot must never drive a push.
+        await this.serialized(async () => {
+            const change = this.changes.getById(changeId);
+            if (change) await this.resolveConflictLocked(change, resolution);
+        });
+    }
 
+    private async resolveConflictLocked(change: SyncChange, resolution: ConflictResolution): Promise<void> {
+        const changeId = change.id;
         this.operations.start(changeId);
         try {
             if (resolution === 'local') {
@@ -201,7 +296,7 @@ export class SourceControlActionService {
         return { remote: diff.remoteContent, local: diff.localContent };
     }
 
-    /** Resolves ChangeIds against the repository's current snapshot, dropping stale ids. */
+    /** Resolves ChangeIds against the repository's current snapshot, dropping stale ids. Call only while holding the guard. */
     private resolve(changeIds: readonly ChangeId[]): SyncChange[] {
         const targets: SyncChange[] = [];
         for (const id of changeIds) {

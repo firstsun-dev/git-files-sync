@@ -3,13 +3,12 @@
 ## Startup Workflow
 
 Before writing code:
-- Read `feature_list.json` (active/next-up work — GitHub Issues on `firstsun-dev/git-files-sync`, Project #6, is the real source of truth; re-sync stale entries) and `progress.md` (what's currently open).
-- Read `session-handoff.md` for the previous session's exact stopping point.
+- Read `feature_list.json` (active/next-up work — GitHub Issues on `firstsun-dev/git-files-sync`, Project #6, is the real source of truth; re-sync stale entries).
 - Run `./init.sh` to confirm a clean, green baseline before editing.
 
 ## Definition of Done
 
-A feature is done only when all of the following hold, with evidence recorded (command + result) in `progress.md`:
+A feature is done only when all of the following hold, with evidence recorded (command + result) in `feature_list.json` or the PR description:
 - `pnpm exec eslint .` — 0 errors
 - `pnpm run build` — passes (tsc + Obsidian 1.11.0 compat typecheck + esbuild)
 - `pnpm exec vitest run` — passes
@@ -22,9 +21,7 @@ A feature is done only when all of the following hold, with evidence recorded (c
 
 ## End of Session
 
-Before ending a session:
-- Overwrite `session-handoff.md` (don't append) with the new stopping point so the repo stays restartable.
-- Move finished items from `progress.md` into `archive/YYYY-MM.md` (current month) — next steps in `progress.md` should read as a short list, not a changelog.
+Before ending a session, record evidence (command + result) on the `feature_list.json` entry or the PR description. `progress.md` and `session-handoff.md` are retired.
 
 ## Agent Tiers
 

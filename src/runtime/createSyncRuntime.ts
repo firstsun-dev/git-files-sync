@@ -12,9 +12,11 @@ import { RefreshState } from '../logic/source-control/RefreshState';
 import { SyncSelectionStore } from '../logic/source-control/SyncSelectionStore';
 import { SourceControlViewModel } from '../logic/source-control/SourceControlViewModel';
 import { SourceControlActionService } from '../logic/source-control/SourceControlActionService';
+import { AutomaticSyncService } from '../logic/source-control/AutomaticSyncService';
 import { SyncResultNotifier } from '../logic/source-control/SyncResultNotifier';
 import { toSyncChanges } from '../logic/source-control/FileStatusAdapter';
 import { ObsidianSyncInteraction } from '../ui/ObsidianSyncInteraction';
+import { logger } from '../utils/logger';
 
 export interface SyncRuntimeDependencies {
     app: App;
@@ -45,6 +47,7 @@ export interface SyncRuntime {
     refreshState: RefreshState;
     sourceControlViewModel: SourceControlViewModel;
     sourceControlActions: SourceControlActionService;
+    automaticSync: AutomaticSyncService;
     /** Tears down cross-object wiring (the ChangeRepository subscription) that Obsidian does not manage. */
     dispose(): void;
 }
@@ -115,6 +118,12 @@ export function createSyncRuntime(deps: SyncRuntimeDependencies): SyncRuntime {
         syncWorkspace,
         new SyncResultNotifier(deps.notify),
     );
+    const automaticSync = new AutomaticSyncService({
+        workspace: syncWorkspace,
+        changes: changeRepository,
+        actions: sourceControlActions,
+        onError: error => logger.error('Automatic sync failed', error),
+    });
 
     // Selection-intent reconciliation is wired here, at the composition
     // root, rather than inside SourceControlViewModel: it is a write-side
@@ -144,6 +153,7 @@ export function createSyncRuntime(deps: SyncRuntimeDependencies): SyncRuntime {
         refreshState,
         sourceControlViewModel,
         sourceControlActions,
+        automaticSync,
         dispose: () => {
             unsubscribeChangeRepository();
             unsubscribeSelectionReconciliation();

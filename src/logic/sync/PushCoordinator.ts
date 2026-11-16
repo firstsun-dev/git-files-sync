@@ -6,12 +6,14 @@ import { logger } from '../../utils/logger';
 import { contentsEqual, isBinaryPath } from '../../utils/path';
 import { readLocalSymlinkTarget } from '../../utils/symlink';
 import { t } from '../../i18n';
+import type { GitFile } from '../../services/git-service-interface';
 import type { ConflictResolver } from './ConflictResolver';
 import type { PushExecutor } from './PushExecutor';
 import type { SyncScanner } from './SyncScanner';
 import { SyncPlanner } from './SyncPlanner';
 import {
     type BatchPushConflict,
+    type CommitResolvedOptions,
     type DeleteQueueEntry,
     type MoveQueueEntry,
     type PushQueueEntry,
@@ -22,6 +24,19 @@ import {
 } from './types';
 
 type BatchOutcome = 'done' | 'unchanged' | 'conflict';
+
+/**
+ * How push planning reacts when a candidate conflicts with the remote.
+ *
+ * - `prompt` (interactive/manual): ask the user to resolve the batch through
+ *   the interaction port; cancelling aborts the whole batch.
+ * - `skip` (background/automatic): do not touch UI, leave each conflicting
+ *   path out of the plan, and continue with the safe paths.
+ *
+ * Deliberately UI-independent: `PushCoordinator` never learns about ExecutionMode
+ * or Obsidian, only this small behavior switch supplied by the caller.
+ */
+export type PushConflictBehavior = 'prompt' | 'skip';
 
 interface BatchPushPlan {
     pushes: PushQueueEntry[];
@@ -123,6 +138,7 @@ export class PushCoordinator {
         files: Array<TFile | string>,
         onProgress?: (current: number, total: number, fileName: string) => void,
         remoteTree?: GitTreeEntry[],
+        conflictBehavior: PushConflictBehavior = 'prompt',
     ): Promise<PlannedPushBatch> {
         const syncableFiles = files.filter(file => file && !this.dependencies.isPathIgnored(this.fileInfo(file).path));
         if (syncableFiles.length === 0) {
@@ -140,7 +156,7 @@ export class PushCoordinator {
         }
 
         const tree = remoteTree ?? await this.dependencies.gitService().listFilesDetailed(this.dependencies.settings.branch, false);
-        const { plan, immediate } = await this.buildPlan(syncableFiles, onProgress, tree);
+        const { plan, immediate } = await this.buildPlan(syncableFiles, onProgress, tree, conflictBehavior === 'skip');
         const results: PushResults = {
             ...this.emptyResults(),
             success: immediate.success,
@@ -150,6 +166,26 @@ export class PushCoordinator {
             errors: immediate.errors,
             syncedPaths: immediate.syncedPaths,
         };
+
+        // Background planning skips the interaction port entirely: every
+        // conflicting path is left out of the plan (safe paths continue), and
+        // the batch is never cancelled. Interactive planning keeps the existing
+        // prompt-and-maybe-cancel behavior untouched.
+        if (conflictBehavior === 'skip') {
+            const skippedConflicts = plan.conflicts.length + plan.autoSkipped.length;
+            return {
+                reviewPlan: this.buildReviewPlan(plan, plan.conflicts, []),
+                pushes: plan.pushes,
+                moves: plan.moves,
+                keepRemote: [],
+                keepLocal: [],
+                skippedConflicts,
+                conflictedPaths: this.conflictedPaths(plan),
+                cancelled: false,
+                immediate,
+            };
+        }
+
         const skipped: BatchPushConflict[] = [];
         const keepRemote: BatchPushConflict[] = [];
         const keepLocal: BatchPushConflict[] = [];
@@ -248,7 +284,11 @@ export class PushCoordinator {
         keepRemote: BatchPushConflict[],
         keepLocal: BatchPushConflict[],
         results: PushResults,
+        options: CommitResolvedOptions = {},
     ): Promise<void> {
+        if (options.revalidateRemote) {
+            ({ pushes, moves, deletions } = await this.dropChangedRemote(pushes, moves, deletions, results));
+        }
         const stale = keepLocal.length > 0 ? await this.dependencies.conflicts.findStale(keepLocal) : [];
         if (stale.length > 0) {
             this.recordStaleFailure(pushes, moves, deletions, stale, results);
@@ -263,6 +303,61 @@ export class PushCoordinator {
         const keepLocalPaths = new Set(keepLocal.map(conflict => conflict.path));
         results.resolvedConflicts += results.syncedPaths.filter(path => keepLocalPaths.has(path.path)).length;
         await this.dependencies.conflicts.applyRemote(keepRemote, results);
+    }
+
+    /**
+     * Unattended commits re-read the remote right before mutating: anything
+     * that changed since planning (or cannot be verified against a baseline)
+     * is dropped and reported rather than overwritten or deleted.
+     */
+    private async dropChangedRemote(
+        pushes: PushQueueEntry[],
+        moves: MoveQueueEntry[],
+        deletions: DeleteQueueEntry[],
+        results: PushResults,
+    ): Promise<{ pushes: PushQueueEntry[]; moves: MoveQueueEntry[]; deletions: DeleteQueueEntry[] }> {
+        const reject = (path: string, reason: string): false => {
+            results.failed += 1;
+            results.errors.push({ file: path, error: `Skipped: ${reason}. Nothing was changed on the remote.` });
+            return false;
+        };
+        const keep = async <T extends { path: string }>(
+            entries: T[],
+            check: (entry: T) => Promise<string | null>,
+        ): Promise<T[]> => {
+            const kept: T[] = [];
+            for (const entry of entries) {
+                try {
+                    const problem = await check(entry);
+                    if (problem === null) kept.push(entry);
+                    else reject(entry.path, problem);
+                } catch (error) {
+                    reject(entry.path, `could not verify remote state (${this.errorMessage(error)})`);
+                }
+            }
+            return kept;
+        };
+        const current = (repoPath: string): Promise<GitFile> =>
+            this.dependencies.gitService().getFile(repoPath, this.dependencies.settings.branch);
+
+        return {
+            pushes: await keep(pushes, async entry => {
+                const remote = await current(entry.repoPath);
+                return (remote.sha || undefined) === entry.existingSha ? null : 'remote changed since it was planned';
+            }),
+            moves: await keep(moves, async entry => {
+                const [source, destination] = await Promise.all([current(entry.oldRepoPath), current(entry.repoPath)]);
+                if (destination.sha) return 'move destination now exists on the remote';
+                return entry.oldSha !== undefined && source.sha === entry.oldSha ? null : 'move source changed on the remote';
+            }),
+            deletions: await keep(deletions, async entry => {
+                const baseline = this.dependencies.settings.syncMetadata[entry.path]?.lastSyncedSha;
+                if (!baseline) return 'no sync baseline to verify the remote delete against';
+                const remote = await current(entry.repoPath);
+                if (!remote.sha) return 'file is already gone from the remote';
+                return remote.sha === baseline || remote.revision === baseline ? null : 'remote changed since the last sync';
+            }),
+        };
     }
 
     private recordStaleFailure(
@@ -283,6 +378,7 @@ export class PushCoordinator {
         files: Array<TFile | string>,
         onProgress: ((current: number, total: number, fileName: string) => void) | undefined,
         remoteTree: GitTreeEntry[],
+        requireBaseline = false,
     ): Promise<{
         plan: BatchPushPlan;
         immediate: { success: number; updated: number; failed: number; errors: Array<{ file: string; error: string }>; syncedPaths: Array<{ path: string; sha?: string }> };
@@ -298,7 +394,7 @@ export class PushCoordinator {
             const info = this.fileInfo(file);
             onProgress?.(index + 1, files.length, info.name);
             try {
-                const outcome = await this.classifyCandidate(file, info, tree, plan, hasOrphans);
+                const outcome = await this.classifyCandidate(file, info, tree, plan, hasOrphans, requireBaseline);
                 if (outcome === 'done') {
                     immediate.success += 1;
                     immediate.updated += 1;
@@ -327,6 +423,7 @@ export class PushCoordinator {
         tree: Map<string, GitTreeEntry>,
         plan: BatchPushPlan,
         hasOrphans: boolean,
+        requireBaseline: boolean,
     ): Promise<BatchOutcome | 'queued'> {
         if (!await this.fileExists(file)) throw new Error('File no longer exists');
         const symlinkTarget = readLocalSymlinkTarget(this.dependencies.app, info.path);
@@ -349,7 +446,7 @@ export class PushCoordinator {
         await this.dependencies.migrateBaseline(info.path, repoPath, entry);
         const revision = await this.refreshGitLabRevision(repoPath, entry);
         if (revision) entry = { ...entry!, sha: revision.sha };
-        const outcome = await this.classifyAgainstTree(info.path, content, entry);
+        const outcome = await this.classifyAgainstTree(info.path, content, entry, requireBaseline);
         if (outcome === 'conflict') {
             plan.conflicts.push({
                 path: info.path,
@@ -460,7 +557,7 @@ export class PushCoordinator {
         });
         if (decision.action === 'resolve-conflict') return 'conflict';
 
-        moves.push({ path, name, repoPath, oldPath, oldRepoPath, content, oldRevision: revision?.revision });
+        moves.push({ path, name, repoPath, oldPath, oldRepoPath, content, oldRevision: revision?.revision, oldSha: oldEntry?.sha });
         return 'queued';
     }
 
@@ -477,6 +574,7 @@ export class PushCoordinator {
         path: string,
         content: string | ArrayBuffer,
         entry: GitTreeEntry | undefined,
+        requireBaseline: boolean,
     ): Promise<BatchOutcome | 'queued'> {
         if (entry?.symlink) return 'unchanged';
         const localKind = isBinaryPath(path) ? 'binary' : 'text';
@@ -491,7 +589,7 @@ export class PushCoordinator {
                 kind: localKind,
             },
             base: { blobSha: lastSynced?.lastSyncedSha },
-        });
+        }, { requireBaseline });
         if (decision.action === 'none' && entry?.sha) {
             await this.dependencies.updateMetadata(path, entry.sha);
             return 'unchanged';

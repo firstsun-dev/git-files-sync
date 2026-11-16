@@ -145,6 +145,7 @@ export default tseslint.config(
 		files: [
 			"tests/ui/SettingsConnectionStatus.test.ts",
 			"tests/ui/SettingsObsidian113Compatibility.test.ts",
+			"tests/ui/SettingsAutomaticSync.test.ts",
 		],
 		rules: {
 			"@typescript-eslint/no-deprecated": "off",

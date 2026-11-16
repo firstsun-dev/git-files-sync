@@ -97,6 +97,21 @@ export interface SyncResult {
 /** Controls presentation owned by a caller that composes pull into a larger transaction. */
 export interface PullExecutionOptions {
     notify?: boolean;
+    /**
+     * Unattended (background) pull: differing local/remote content without a
+     * trustworthy baseline, or a local file changed since the baseline, is a
+     * conflict and is never overwritten.
+     */
+    requireBaseline?: boolean;
+}
+
+/** Extra safety for a commit whose remote state may have changed since it was planned. */
+export interface CommitResolvedOptions {
+    /**
+     * Re-read each target's remote state right before mutating and drop any
+     * entry whose remote no longer matches what was planned (unattended runs).
+     */
+    revalidateRemote?: boolean;
 }
 
 export interface FileDiff {
@@ -149,6 +164,8 @@ export interface MoveQueueEntry {
     oldRepoPath: string;
     content: string | ArrayBuffer;
     oldRevision?: string;
+    /** Blob sha of the source at planning time; lets unattended commits detect a changed source. */
+    oldSha?: string;
 }
 
 export interface DeleteQueueEntry {

@@ -120,7 +120,7 @@ export class PullCoordinator {
             const { path, name, isString } = this.dependencies.scanner.fileInfo(file);
             onProgress?.(index + 1, files.length, name);
             try {
-                const outcome = await this.processFile(file, path, name, isString, tree);
+                const outcome = await this.processFile(file, path, name, isString, tree, options.requireBaseline);
                 if (outcome === 'added') { results.success += 1; results.added += 1; }
                 else if (outcome === 'updated') { results.success += 1; results.updated += 1; }
                 else if (outcome === 'conflict') results.conflicts += 1;
@@ -155,17 +155,20 @@ export class PullCoordinator {
         name: string,
         isString: boolean,
         tree?: Map<string, GitTreeEntry>,
+        requireBaseline = false,
     ): Promise<BatchOutcome> {
         const repoPath = this.dependencies.scanner.toRepoPath(path);
         if (tree) {
             const entry = tree.get(this.dependencies.scanner.toTreePath(repoPath));
             if (!entry) throw new Error('File not found in remote');
-            const outcome = await this.classifyFromTree(file, path, isString, entry);
+            const outcome = await this.classifyFromTree(file, path, isString, entry, requireBaseline);
             if (outcome) return outcome;
         }
         const remote = await this.dependencies.gitService().getFile(repoPath, this.dependencies.settings.branch);
         if (!remote.sha) throw new Error('File not found in remote');
-        const decision = await this.planFromRemote(file, path, isString, remote);
+        // Re-plans against the content just fetched, so an unattended pull
+        // re-checks the local file immediately before it would overwrite it.
+        const decision = await this.planFromRemote(file, path, isString, remote, requireBaseline);
         if (decision.action === 'none') {
             await this.dependencies.updateMetadata(path, remote.sha);
             return 'unchanged';
@@ -181,9 +184,10 @@ export class PullCoordinator {
         path: string,
         isString: boolean,
         entry: GitTreeEntry,
+        requireBaseline = false,
     ): Promise<BatchOutcome | null> {
         if (entry.symlink || !entry.sha) return null;
-        const decision = await this.planFromTree(file, path, isString, entry);
+        const decision = await this.planFromTree(file, path, isString, entry, requireBaseline);
         if (decision.action === 'none') {
             await this.dependencies.updateMetadata(path, entry.sha);
             return 'unchanged';
@@ -196,6 +200,7 @@ export class PullCoordinator {
         path: string,
         isString: boolean,
         entry: GitTreeEntry,
+        requireBaseline = false,
     ): Promise<PlannedFileAction> {
         const repoPath = this.dependencies.scanner.toRepoPath(path);
         await this.dependencies.migrateBaseline(path, repoPath, entry);
@@ -206,7 +211,7 @@ export class PullCoordinator {
             local: { path, exists, blobSha: localSha, kind },
             remote: { path, repoPath, exists: true, blobSha: entry.sha, kind },
             base: { blobSha: this.dependencies.settings.syncMetadata[path]?.lastSyncedSha },
-        });
+        }, { requireBaseline });
     }
 
     private async planFromRemote(
@@ -214,6 +219,7 @@ export class PullCoordinator {
         path: string,
         isString: boolean,
         remote: GitFile,
+        requireBaseline = false,
     ): Promise<PlannedFileAction> {
         const exists = await this.fileExists(file);
         const kind = isBinaryPath(path) ? 'binary' : 'text';
@@ -228,7 +234,7 @@ export class PullCoordinator {
             local: { path, exists, blobSha: localSha, kind },
             remote: { path, repoPath: this.dependencies.scanner.toRepoPath(path), exists: true, blobSha: remote.sha, kind },
             base: { blobSha: blobBaseline },
-        });
+        }, { requireBaseline });
     }
 
     private planKindFor(decision: PlannedFileAction): PlanKind {

@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Agent Workflow
 
-- **Startup**: read `feature_list.json` (active/next-up work; GitHub Issues on `firstsun-dev/git-files-sync`, Project #6, is the actual source of truth — re-sync before trusting stale entries) and `progress.md` (what's open right now).
+- **Startup**: read `feature_list.json` (active/next-up work; GitHub Issues on `firstsun-dev/git-files-sync`, Project #6, is the actual source of truth — re-sync before trusting stale entries).
 - **Before editing**: run `./init.sh` (installs deps, then lint + test + build) to confirm you're starting from a green baseline.
-- **Definition of done**: `pnpm exec eslint .` has 0 errors, `pnpm run build` passes (includes the Obsidian 1.11.0 compat typecheck), and `pnpm exec vitest run` passes, *and* evidence of that run is recorded (one line: command + result) in `progress.md` or the PR description — not just claimed.
+- **Definition of done**: `pnpm exec eslint .` has 0 errors, `pnpm run build` passes (includes the Obsidian 1.11.0 compat typecheck), and `pnpm exec vitest run` passes, *and* evidence of that run is recorded (one line: command + result) in `feature_list.json` or the PR description — not just claimed.
 - **Scope**: work one `feature_list.json` entry at a time; don't start the next until the current one's evidence is recorded.
-- **End of session**: move finished items from `progress.md` into `archive/YYYY-MM.md` (current month).
+- **End of session**: `progress.md` and `session-handoff.md` are retired; leave evidence on the `feature_list.json` entry or PR description.
 - Issue/PR conventions (Conventional Commits titles, Project #6 fields, English-only for this public plugin repo) are defined in the `firstsun-pm` skill, not duplicated here.
 
 ## Development Commands

@@ -85,4 +85,14 @@ describe('SyncPlanner', () => {
     ] as const)('plans %s operations through one decision matrix', (direction, input, classification, action) => {
         expect(planner.planFor(direction, input)).toMatchObject({ classification, action });
     });
+
+    it.each([
+        ['push', facts('local', 'remote'), 'conflict', 'resolve-conflict'],
+        ['pull', facts('local', 'remote'), 'conflict', 'resolve-conflict'],
+        ['pull', facts('local', 'base', 'base'), 'conflict', 'resolve-conflict'],
+        ['pull', facts('base', 'remote', 'base'), 'remote-modified', 'pull-overwrite'],
+        ['push', facts('local', 'base', 'base'), 'local-modified', 'push-update'],
+    ] as const)('requireBaseline: %s never resolves an unverifiable difference in a direction', (direction, input, classification, action) => {
+        expect(planner.planFor(direction, input, { requireBaseline: true })).toMatchObject({ classification, action });
+    });
 });

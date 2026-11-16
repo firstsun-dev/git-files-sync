@@ -285,7 +285,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await expect(service.sync(intents(toChangeId('c-1')))).resolves.toBeUndefined();
+            await expect(service.sync(intents(toChangeId('c-1')))).resolves.toMatchObject({ status: 'completed', failures: [expect.any(Error)] });
 
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
             expect(notify).toHaveBeenCalledTimes(1);
@@ -305,7 +305,7 @@ describe('SourceControlActionService', () => {
                 { notify },
             );
 
-            await expect(service.sync(intents(toChangeId('c-1')))).resolves.toBeUndefined();
+            await expect(service.sync(intents(toChangeId('c-1')))).resolves.toMatchObject({ status: 'completed', failures: [expect.any(Error)] });
 
             expect(operations.get(toChangeId('c-1'))).toBe('failed');
             expect(notify).toHaveBeenCalledTimes(1);
@@ -372,6 +372,138 @@ describe('SourceControlActionService', () => {
             expect(confirmPlan).not.toHaveBeenCalled();
             expect(commitResolvedBatch).not.toHaveBeenCalled();
             expect(operations.get(toChangeId('c-1'))).toBe('idle');
+        });
+
+        describe('background execution mode', () => {
+            it('does not show the final confirmation modal and auto-accepts the merged plan', async () => {
+                const confirmPlan = vi.fn().mockResolvedValue(true);
+                const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+                const notify = vi.fn();
+                const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                    reviewPlan: emptySyncPlan({ modifications: [{ path: 'a.md', name: 'a.md' }] }),
+                    pushes: [{ path: 'a.md', name: 'a.md', repoPath: 'a.md', content: 'updated', existingSha: 'sha-a' }],
+                }));
+                const { service, operations } = buildService(
+                    [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                    fakeWorkspace({ planPush, commitResolvedBatch, confirmPlan }),
+                    { notify },
+                );
+
+                await service.sync(intents(toChangeId('c-1')), 'background');
+
+                expect(confirmPlan).not.toHaveBeenCalled();
+                expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
+                expect(operations.get(toChangeId('c-1'))).toBe('success');
+                // Background runs stay silent on success.
+                expect(notify).not.toHaveBeenCalled();
+            });
+
+            it('requests skip conflict behavior from the planner, not the interactive prompt', async () => {
+                const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch());
+                const { service } = buildService(
+                    [{ id: toChangeId('c-1'), path: 'a.md', kind: 'local-modified' }],
+                    fakeWorkspace({ planPush }),
+                );
+
+                await service.sync(intents(toChangeId('c-1')), 'background');
+
+                expect(planPush).toHaveBeenCalledWith(['a.md'], 'skip');
+            });
+
+            it('never marks a path that became a conflict as operation success, even when it was in the target set', async () => {
+                const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+                const notify = vi.fn();
+                // `safe.md` commits fine; `clash.md` was requested but the
+                // background planner skipped it as a conflict and left it out
+                // of `pushes`.
+                const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                    reviewPlan: emptySyncPlan({
+                        modifications: [{ path: 'safe.md', name: 'safe.md' }],
+                        skippedConflicts: [{ path: 'clash.md', name: 'clash.md' }],
+                    }),
+                    pushes: [{ path: 'safe.md', name: 'safe.md', repoPath: 'safe.md', content: 'x', existingSha: 'sha-safe' }],
+                    conflictedPaths: ['clash.md'],
+                }));
+                const { service, operations } = buildService(
+                    [
+                        { id: toChangeId('safe'), path: 'safe.md', kind: 'local-modified' },
+                        { id: toChangeId('clash'), path: 'clash.md', kind: 'conflict' },
+                    ],
+                    fakeWorkspace({ planPush, commitResolvedBatch }),
+                    { notify },
+                );
+
+                await service.sync(intents(toChangeId('safe'), toChangeId('clash')), 'background');
+
+                expect(operations.get(toChangeId('safe'))).toBe('success');
+                // The skipped conflict must not be reported as a successful operation.
+                expect(operations.get(toChangeId('clash'))).not.toBe('success');
+                expect(operations.get(toChangeId('clash'))).toBe('idle');
+            });
+
+            it('keeps syncing unrelated safe files when another push path conflicts', async () => {
+                const commitResolvedBatch = vi.fn().mockResolvedValue(undefined);
+                const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                    reviewPlan: emptySyncPlan({ modifications: [{ path: 'safe.md', name: 'safe.md' }] }),
+                    pushes: [{ path: 'safe.md', name: 'safe.md', repoPath: 'safe.md', content: 'x' }],
+                    conflictedPaths: ['clash.md'],
+                }));
+                const { service, operations } = buildService(
+                    [
+                        { id: toChangeId('safe'), path: 'safe.md', kind: 'local-modified' },
+                        { id: toChangeId('clash'), path: 'clash.md', kind: 'conflict' },
+                    ],
+                    fakeWorkspace({ planPush, commitResolvedBatch }),
+                );
+
+                await service.sync(intents(toChangeId('safe'), toChangeId('clash')), 'background');
+
+                expect(commitResolvedBatch).toHaveBeenCalledTimes(1);
+                expect(operations.get(toChangeId('safe'))).toBe('success');
+            });
+        });
+
+        it('serializes a manual push behind an in-flight background run instead of discarding or racing it', async () => {
+            // Background sync holds the execution guard while its provider
+            // commit is pending; the manual push must wait for it.
+            let releaseBackground: (() => void) | undefined;
+            const backgroundCommit = new Promise<void>(resolve => { releaseBackground = resolve; });
+            const order: string[] = [];
+
+            const planPush = vi.fn().mockResolvedValue(emptyPlannedBatch({
+                reviewPlan: emptySyncPlan({ modifications: [{ path: 'bg.md', name: 'bg.md' }] }),
+                pushes: [{ path: 'bg.md', name: 'bg.md', repoPath: 'bg.md', content: 'x' }],
+            }));
+            const commitResolvedBatch = vi.fn().mockImplementation(async () => {
+                order.push('background-commit-start');
+                await backgroundCommit;
+                order.push('background-commit-end');
+            });
+            const push = vi.fn().mockImplementation(async () => {
+                order.push('manual-push');
+                return emptyPushResults({ syncedPaths: [{ path: 'manual.md' }] });
+            });
+
+            const { service } = buildService(
+                [
+                    { id: toChangeId('bg'), path: 'bg.md', kind: 'local-modified' },
+                    { id: toChangeId('manual'), path: 'manual.md', kind: 'local-only' },
+                ],
+                fakeWorkspace({ planPush, commitResolvedBatch, push }),
+            );
+
+            const background = service.sync(intents(toChangeId('bg')), 'background');
+            const manual = service.push([toChangeId('manual')]);
+
+            // Let the background planning/commit reach its pending provider
+            // call; the manual push must not have started yet.
+            await vi.waitFor(() => expect(order).toEqual(['background-commit-start']));
+
+            releaseBackground?.();
+            await background;
+            await manual;
+
+            expect(order).toEqual(['background-commit-start', 'background-commit-end', 'manual-push']);
         });
 
         it('counts keep-remote conflict resolutions as acceptedRemote in the single sync notification (full success)', async () => {
