@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { Platform } from 'obsidian';
+import { JSDOM } from 'jsdom';
 import { SourceControlView, type SourceControlViewCallbacks } from '../../../src/ui/source-control/SourceControlView';
 import { ChangeRepository } from '../../../src/logic/source-control/ChangeRepository';
 import { OperationState } from '../../../src/logic/source-control/OperationState';
@@ -78,6 +79,40 @@ describe('SourceControlView', () => {
 
     beforeEach(() => {
         container = createContainer();
+    });
+
+    describe('search focus', () => {
+        it.each(['main', 'popout'])('preserves focus and caret when filtering in the %s window', async (host) => {
+            const popout = host === 'popout' ? new JSDOM('<!DOCTYPE html>', { url: 'https://popout.test' }) : undefined;
+            const ownerDocument = popout?.window.document ?? document;
+            ownerDocument.body.appendChild(container);
+            vi.useFakeTimers();
+            try {
+                const { view } = buildView([
+                    { id: toChangeId('c-1'), path: 'note.md', kind: 'local-only' },
+                ]);
+                view.render(container);
+                const input = container.querySelector<HTMLInputElement>('.scv-search-input')!;
+                input.focus();
+                input.value = 'note';
+                input.setSelectionRange(2, 2);
+                expect(ownerDocument.activeElement).toBe(input);
+                input.dispatchEvent(new Event('input'));
+
+                await vi.advanceTimersByTimeAsync(200);
+
+                const newInput = container.querySelector<HTMLInputElement>('.scv-search-input')!;
+                expect(newInput).not.toBe(input);
+                expect(ownerDocument.activeElement === newInput).toBe(true);
+                expect(newInput.value).toBe('note');
+                expect(newInput.selectionStart).toBe(2);
+                expect(newInput.selectionEnd).toBe(2);
+            } finally {
+                vi.useRealTimers();
+                container.remove();
+                popout?.window.close();
+            }
+        });
     });
 
     describe('filter switching', () => {
