@@ -1,6 +1,6 @@
 {
   "_note": "GitHub Issues (firstsun-dev/git-files-sync, Project #6) are the source of truth. This file mirrors only the active feature and the next candidate; re-sync it against GitHub at session start.",
-  "_lastSync": "2026-11-16: GitHub confirms #166 closed and #143 open; dependency maintenance is the active user request.",
+  "_lastSync": "2026-11-25: #168 merged; manual Obsidian popout acceptance still pending; #143 follow-up remains open per prior tracker.",
   "features": [
     {
       "id": "fix-popout-search-focus",
@@ -8,31 +8,7 @@
       "description": "Use the search input owning document for focus detection and preserve caret through debounce rerenders.",
       "dependencies": [],
       "status": "in-progress",
-      "evidence": "2026-11-16: RED\u2192GREEN main/popout tests; lint0warnings, build+compat,968tests,audit0 passed; manual Obsidian check pending."
-    },
-    {
-      "id": "chore-obsidian-eslint-060",
-      "name": "chore(deps): upgrade eslint-plugin-obsidianmd to latest",
-      "description": "User-requested upgrade from 0.4.2 to npm latest0.6.0; remove obsolete Obsidian peer constraint.",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "2026-11-16: 0.6.0 installed; lint0errors/1warning, build,966tests,audit0vulnerabilities,no peer issues; see progress.md."
-    },
-    {
-      "id": "chore-dependencies-2026-11",
-      "name": "chore(deps): update supported dependencies and patch audit findings",
-      "description": "User-requested dependency updates and remediation of minimatch advisory GHSA-g3hv-75wg-m249.",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "2026-11-16: audit 0 vulnerabilities; frozen install, lint, build + Obsidian compat, 966 tests and 10 glob assertions passed."
-    },
-    {
-      "id": "feat-029",
-      "name": "fix(gitlab): recover safely from E2E rate limiting (issue #166)",
-      "description": "Reduce redundant GitLab API calls, recover safely from throttling, and serialize the GitLab E2E leg without weakening test coverage.",
-      "dependencies": [],
-      "status": "done",
-      "evidence": "GitHub issue #166 is closed (confirmed 2026-11-16)."
+      "evidence": "#168/3c4d85ed merged; main/popout RED→GREEN, lint/build, 968 tests and audit passed; manual Obsidian check pending."
     },
     {
       "id": "feat-028",
